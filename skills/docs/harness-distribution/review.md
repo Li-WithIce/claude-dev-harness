@@ -23,10 +23,10 @@
 
 ## Summary
 
-当前 diff 已补上本轮发现的 `skills/docs` 额外陈旧文件漏检问题：`tests/verify-installation.ps1` 里的 `Assert-PreservedDirectoryMatchesRepo` 现在除了统计 repo->host 的 `missing/changed` 外，也会统计 host->repo 的 `extra` 文件，因此热切换保留目录里残留的旧 docs 也会触发 `WARN`。结合 `config-boundary` sandbox `STATUS: PASS`、`docs-drift` sandbox `STATUS: WARN`、`docs-extra` sandbox `STATUS: WARN` 与最新真实宿主 `install -> verify` `STATUS: PASS`，未再发现会阻断 TEST / HANDOFF 的实现缺陷。
+当前实现已把 `skills/docs` 的热切换漂移问题从“只能人工处理的宿主状态”收敛成可验证、可恢复的显式路径：`tests/verify-installation.ps1` 会在 preserved docs 漂移或存在陈旧文件时返回 `WARN`，并指向 `scripts/sync-preserved-docs.ps1`；该脚本已在 sandbox 中验证 `WARN -> sync -> PASS`，并在真实宿主上验证了先因 docs 变更出现 `changed=3`、再同步两侧 preserved docs 后恢复 `STATUS: PASS`。结合 `config-boundary` sandbox `STATUS: PASS`、`docs-drift` sandbox `STATUS: WARN`、`docs-extra` sandbox `STATUS: WARN`、`docs-sync` sandbox `STATUS: PASS` 与最新真实宿主 `verify` `STATUS: PASS`，本轮未再发现会阻断 TEST / HANDOFF 的实现缺陷。
 
 ## Watchouts
 
-- live session 下若宿主 `skills/docs` 已按热切换策略保留为普通目录，后续 repo canonical docs 再变更时仍可能产生漂移；此时需要手动刷新保留目录或在冷态下重装，否则 `tests/verify-installation.ps1` 会返回 `WARN`。
-- 本轮已手动刷新 `%USERPROFILE%\.claude\skills\docs` 与 `%USERPROFILE%\.codex\skills\docs`，使真实宿主重新回到 `STATUS: PASS`；后续再修改 `skills/docs` 时应重复该动作或改走冷态切换。
+- live session 下若宿主 `skills/docs` 已按热切换策略保留为普通目录，后续 repo canonical docs 再变更时仍会产生漂移；此时需要运行 `scripts/sync-preserved-docs.ps1` 或在冷态下重装，否则 `tests/verify-installation.ps1` 会返回 `WARN`。
+- 本轮再次验证了这一点：仅修改 repo 内 `skills/docs` 任务文档后，真实宿主立即出现 `changed=3` 的 `WARN`；运行 `scripts/sync-preserved-docs.ps1` 后恢复 `STATUS: PASS`。因此 docs-only 变更后的同步步骤仍是当前分发模型的一部分。
 - TODO-11 仍未完成：仓库尚未配置 git remote，当前只能本地 commit，不能直接 push。
