@@ -28,5 +28,5 @@
 ## Watchouts
 
 - `skills/docs` 在 live session 热切换场景下会保留为宿主普通目录以避免锁冲突；这意味着该目录在当前宿主上可能暂时不是 repo Junction。
-- 真实宿主尚未执行正式 uninstall 回滚演练；当前回滚证据来自 sandbox uninstall 与 recovery manifest smoke。
 - `plan.md` 中的 TODO-11（首次 commit / push）尚未完成，当前仓库也未配置 remote。
+- `uninstall.ps1` 针对 repeated install/uninstall 的 `.system` 引用问题已修复，但完整证据仍主要集中在本轮真实宿主演练与 sandbox smoke。

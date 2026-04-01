@@ -50,18 +50,20 @@
   - `backups/active-install.json -> install-manifest.json` 已落盘。
   - `tests/verify-installation.ps1` 返回 `STATUS: PASS`。
   - `uninstall.ps1 -ManifestPath ...` 正常执行。
+- 真实宿主 uninstall / reinstall：
+  - `uninstall.ps1 -ManifestPath {REPO_ROOT}\backups\install-20260401-180107\install-manifest.json` 正常执行。
+  - 暴露出 repeated uninstall 导致 `.system` 断链的问题，修复后重新安装并通过验证。
 - 真实宿主：
   - `install.ps1 -WorkspaceRoot {WORKSPACE_ROOT}` 返回成功。
   - `tests/verify-installation.ps1 -WorkspaceRoot {WORKSPACE_ROOT}` 返回 `STATUS: PASS`。
   - `%USERPROFILE%\.claude\skills\.assistant` / `.claude` / `.qoder` 保留。
   - `%USERPROFILE%\.claude\skills\orchestrator` / `using-superpowers` 已切换为 repo Junction。
-  - 当前 active install manifest 为 `{REPO_ROOT}\backups\install-20260401-180107\install-manifest.json`。
+  - 当前 active install manifest 为 `{REPO_ROOT}\backups\install-20260401-181430\install-manifest.json`。
 
 ## Risks / Gaps
 
-- 真实宿主尚未执行正式 uninstall 回滚演练。
 - `skills/docs` 在当前 Claude 宿主上按热切换策略保留为普通目录，尚未在冷态下验证完全收敛为 Junction。
-- TODO-11 依赖 git remote；当前仓库没有 remote，未执行首次 commit / push。
+- TODO-11 依赖 git remote；当前仓库没有 remote，未执行首次 push。
 
 ## Conclusion
 

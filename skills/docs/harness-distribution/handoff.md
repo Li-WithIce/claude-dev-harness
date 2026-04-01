@@ -38,7 +38,7 @@
 - 当前工作分支：`codex/harness-distribution`
 - 真实宿主已安装完成。
 - 当前 active install manifest：
-  - `{REPO_ROOT}\backups\install-20260401-180107\install-manifest.json`
+  - `{REPO_ROOT}\backups\install-20260401-181430\install-manifest.json`
 - 真实宿主验证结果：
   - `tests/verify-installation.ps1 -WorkspaceRoot {WORKSPACE_ROOT}` -> `STATUS: PASS`
 - 首次真实安装失败前的原始基线备份仍保留：
@@ -50,7 +50,7 @@
 - 标准 sandbox `install -> verify -> uninstall` -> 通过
 - sidecar / Junction 回归 sandbox -> 通过
 - recovery manifest smoke sandbox -> 通过
-- 真实宿主 `install -> verify` -> `STATUS: PASS`
+- 真实宿主 `uninstall -> install -> verify` -> `STATUS: PASS`
 
 ## Watchouts
 
@@ -58,11 +58,10 @@
 - `uninstall.ps1` 不会清理 `{VAULT_PATH}\运行时\*`，这是有意保守策略。
 - install 若中途失败，需使用 backup 目录中的 `install-manifest.json` 显式调用 `uninstall.ps1 -ManifestPath ...`。
 - 当前仓库尚未配置 remote，因此 TODO-11 只能先完成本地 commit，不能直接 push。
+- `.system` 当前通过 repo-local `skills/.system` 维持宿主可见性；相关 repeated uninstall 断链问题已修复。
 
 ## Next Actions
 
 - 若要补齐回滚证据，执行一次真实宿主 uninstall 演练，再重新安装：
-  - `.\uninstall.ps1`
-  - `.\install.ps1 -WorkspaceRoot {WORKSPACE_ROOT}`
-  - `.\tests\verify-installation.ps1 -WorkspaceRoot {WORKSPACE_ROOT}`
+  - 已完成，可复用当前步骤重新验证。
 - 若要完成 TODO-11，配置 git remote 后 push 当前分支。

@@ -44,6 +44,7 @@
   - 合并 Claude/Codex 现有 `.system` 到 repo-local `skills/.system`
   - 备份并恢复已有 skill Junction 的链接元数据，而不是平铺成普通目录
   - 在 install 中途失败时持续写出 recovery manifest snapshot，避免只剩 backup 目录而没有可消费 manifest
+  - 对断链 `.system` Junction 降级跳过，避免 repeated uninstall 后的空路径错误
   - 生成 install manifest 与 active-install 指针
 - `tests/verify-installation.ps1` 当前已覆盖：
   - `skills` 根目录保持为普通目录检查
@@ -59,6 +60,7 @@
   - 恢复原始 skill 条目、settings、`config.toml`
   - 删除 install 生成但安装前不存在的宿主文件
   - 恢复安装前已存在的 skill Junction 目标
+  - 若宿主 `.system` 仍指向 repo-local `skills/.system`，则保留该生成目录，避免 repeated install/uninstall 后留下断链
   - 删除 repo-local 生成的 `skills/.system`
 - 更新 `.gitignore`，忽略本机生成的 `skills/.system/`
 - 更新 `.gitignore`，忽略 repo 根 `.obsidian/` 本地状态
@@ -67,7 +69,6 @@
 
 ## What Did Not Change
 
-- 尚未在真实宿主目录执行一次正式 uninstall 回滚演练
 - 尚未配置 remote，也未完成首次 push
 
 ## Risks
@@ -78,6 +79,7 @@
 - `uninstall.ps1` 当前不会清理 `.assistant/` 运行时数据，这是有意保守策略；若后续需要“彻底卸载”，应单独定义更强约束的清理模式
 - 为避免 live session 自己锁住 `skills/docs`，当前安装在宿主已存在 `skills/docs` 普通目录时会保留它；这意味着 `docs` 在热切换场景下可能暂时不是 Junction
 - install 若中途失败，虽然现在会写出 recovery manifest snapshot，但仍需要操作者用该 manifest 显式调用 `uninstall.ps1`
+- repo-local `skills/.system` 当前仍属于安装生成物，不进 Git；若宿主继续依赖它，重复 uninstall 只会回退到“上一轮已安装状态”，而不是强制清空 `.system`
 
 ## Reviewer Watchouts
 
@@ -134,6 +136,12 @@
     - 原始 `.system` 内容恢复
     - 原始 `settings.local.json` 恢复
     - repo-local `skills/.system` 已移除
+- 真实宿主 uninstall / reinstall 演练：
+  - `uninstall.ps1 -ManifestPath {REPO_ROOT}\backups\install-20260401-180107\install-manifest.json`
+  - 演练中发现 repeated uninstall 会把仍被宿主 `.system` Junction 引用的 repo-local `skills/.system` 删掉，已修复脚本并从 `install-20260401-174218` 备份恢复 `.system`
+  - 修复后重新执行 `install.ps1 -WorkspaceRoot {WORKSPACE_ROOT}`
+  - `tests/verify-installation.ps1 -WorkspaceRoot {WORKSPACE_ROOT}`
+  - 结果：`STATUS: PASS`
 - 真实宿主安装演练：
   - `install.ps1 -WorkspaceRoot {WORKSPACE_ROOT}`
   - `tests/verify-installation.ps1 -WorkspaceRoot {WORKSPACE_ROOT}`
@@ -142,6 +150,6 @@
     - `%USERPROFILE%\.claude\skills\.assistant` / `.claude` / `.qoder` 保留
     - `%USERPROFILE%\.claude\skills\orchestrator` / `using-superpowers` 已切换为指向 repo 的 Junction
     - `%USERPROFILE%\.claude\skills\docs` 按热切换策略保留为普通目录
-    - `backups/active-install.json` 当前指向 `install-20260401-180107\install-manifest.json`
+    - `backups/active-install.json` 当前指向 `install-20260401-181430\install-manifest.json`
   - 额外说明：
     - 首次真实安装失败前的原始基线备份仍保留在 `{REPO_ROOT}\backups\install-20260401-174218`

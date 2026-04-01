@@ -27,6 +27,26 @@ function Read-FileUtf8 {
     return Get-Content -LiteralPath $Path -Raw -Encoding utf8
 }
 
+function Get-JunctionTarget {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $null
+    }
+
+    $item = Get-Item -LiteralPath $Path -Force
+    $target = $item.Target
+    if ($target -is [System.Array]) {
+        $target = $target[0]
+    }
+
+    if ([string]::IsNullOrWhiteSpace($target)) {
+        return $null
+    }
+
+    return Get-NormalizedPath -Path $target
+}
+
 function Ensure-Directory {
     param([string]$Path)
 
@@ -172,6 +192,7 @@ if ([string]::IsNullOrWhiteSpace($manifestRaw)) {
 $manifest = ConvertTo-NormalizedObject -Value ($manifestRaw | ConvertFrom-Json)
 $restored = @()
 $removed = @()
+$keptGenerated = @()
 
 $backupRecords = @($manifest['backups'])
 [array]::Reverse($backupRecords)
@@ -187,7 +208,17 @@ foreach ($record in $backupRecords) {
 
 $generatedSystemPath = $manifest['generated_repo_system_path']
 if (-not [string]::IsNullOrWhiteSpace($generatedSystemPath)) {
-    Remove-PathIfExists -Path $generatedSystemPath
+    $generatedSystemPath = Get-NormalizedPath -Path $generatedSystemPath
+    $dependentSystemLinks = @(
+        Join-Path $manifest['claude_home'] 'skills\.system'
+        Join-Path $manifest['codex_home'] 'skills\.system'
+    ) | Where-Object { (Get-JunctionTarget -Path $_) -eq $generatedSystemPath }
+
+    if ($dependentSystemLinks.Count -gt 0) {
+        $keptGenerated += $generatedSystemPath
+    } else {
+        Remove-PathIfExists -Path $generatedSystemPath
+    }
 }
 
 $activeInstallPath = Join-Path (Join-Path $RepoRoot 'backups') 'active-install.json'
@@ -205,6 +236,7 @@ Write-Output 'Uninstall summary:'
 Write-Output ('- manifest: {0}' -f $ManifestPath)
 Write-Output ('- restored_count: {0}' -f $restored.Count)
 Write-Output ('- removed_generated_count: {0}' -f $removed.Count)
+Write-Output ('- kept_generated_count: {0}' -f $keptGenerated.Count)
 if ($restored.Count -gt 0) {
     Write-Output '- restored paths:'
     foreach ($path in $restored) {
@@ -214,6 +246,12 @@ if ($restored.Count -gt 0) {
 if ($removed.Count -gt 0) {
     Write-Output '- removed generated paths:'
     foreach ($path in $removed) {
+        Write-Output ('  {0}' -f $path)
+    }
+}
+if ($keptGenerated.Count -gt 0) {
+    Write-Output '- kept generated paths still referenced by host links:'
+    foreach ($path in $keptGenerated) {
         Write-Output ('  {0}' -f $path)
     }
 }

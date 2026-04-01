@@ -599,7 +599,8 @@ function Get-PreservedSkillEntryNames {
     }
 
     foreach ($entry in Get-ChildItem -LiteralPath $SkillsRoot -Force) {
-        if ($entry.Name.StartsWith('.') -and -not $managedSet.Contains($entry.Name)) {
+        $isReparsePoint = [bool]($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
+        if ($entry.Name.StartsWith('.') -and -not $managedSet.Contains($entry.Name) -and -not $isReparsePoint) {
             [void]$preserved.Add($entry.Name)
         }
     }
@@ -757,7 +758,13 @@ function Merge-SystemSkills {
             continue
         }
 
-        foreach ($child in Get-ChildItem -LiteralPath $sourcePath -Force) {
+        try {
+            $children = Get-ChildItem -LiteralPath $sourcePath -Force -ErrorAction Stop
+        } catch {
+            continue
+        }
+
+        foreach ($child in $children) {
             $destination = Join-Path $stagingPath $child.Name
             Copy-Item -LiteralPath $child.FullName -Destination $destination -Recurse -Force
         }
@@ -937,10 +944,11 @@ try {
     Write-Output ('- Run: {0}' -f (Join-Path $RepoRoot 'tests\verify-installation.ps1'))
 } catch {
     Save-InstallManifestSnapshot
+    $rootCause = if ($_.Exception) { $_.Exception.Message } else { 'unknown error' }
     $recoveryMessage = if (Test-Path -LiteralPath $script:ManifestPath -PathType Leaf) {
-        "Install failed after writing recovery manifest: $($script:ManifestPath)"
+        "Install failed after writing recovery manifest: $($script:ManifestPath)`nRoot cause: $rootCause"
     } else {
-        "Install failed before recovery manifest snapshot could be written."
+        "Install failed before recovery manifest snapshot could be written.`nRoot cause: $rootCause"
     }
     Write-Error $recoveryMessage
     throw
