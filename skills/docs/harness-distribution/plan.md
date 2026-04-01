@@ -7,6 +7,7 @@
 > 状态：已确认
 > review_status：已收敛
 > delta-spec：无
+> execution_status：TODO-1 ~ TODO-10 已完成；TODO-11 因未配置 git remote 暂未完成
 
 ## 1. 背景与目标
 
@@ -190,7 +191,7 @@ claude-dev-harness/
 
 ### Phase 1：资产建模与仓库骨架
 
-- [ ] **TODO-1: 创建仓库骨架、迁移清单与 `.gitignore` 基线**
+- [x] **TODO-1: 创建仓库骨架、迁移清单与 `.gitignore` 基线**
   - **描述**：初始化 `{REPO_ROOT}`，创建顶层目录，并产出一份迁移清单，逐项标注 shared assets / host-specific assets / user-local runtime 的归属、目标位置以及“源机器绝对路径前缀”黑名单。
   - **涉及目录**：
     - 新建：`{REPO_ROOT}\skills\`
@@ -212,7 +213,7 @@ claude-dev-harness/
     git status
     ```
 
-- [ ] **TODO-2: 搬迁 shared assets**
+- [x] **TODO-2: 搬迁 shared assets**
   - **描述**：将当前可共享的 skills、canonical docs 与共享 PowerShell 脚本搬入仓库；保持 `skills/docs/*` 为可追踪文档，不与运行态混淆。
   - **涉及文件/目录**：
     - 源：`%USERPROFILE%\.claude\skills\*`（排除 `.system/`、`.assistant/`、`.claude/`）
@@ -230,7 +231,7 @@ claude-dev-harness/
     Get-ChildItem {REPO_ROOT}\scripts\*.ps1 | Select-Object Name
     ```
 
-- [ ] **TODO-3: 搬迁 hooks 与 Claude/Codex 宿主配置模板**
+- [x] **TODO-3: 搬迁 hooks 与 Claude/Codex 宿主配置模板**
   - **描述**：把当前 hooks 链、Claude 宿主入口配置和 Codex 宿主入口配置显式建模进仓库。共享部分进入模板，用户本地敏感部分改为 overlay 示例或 managed block。
   - **涉及文件/目录**：
     - 源：`%USERPROFILE%\.claude\hooks-memory\*.js`
@@ -262,7 +263,7 @@ claude-dev-harness/
     Get-ChildItem {REPO_ROOT}\agent-configs\workspace | Select-Object Name
     ```
 
-- [ ] **TODO-4: 构建 `vault-template/`**
+- [x] **TODO-4: 构建 `vault-template/`**
   - **描述**：从当前 `.assistant/` 提取可共享的协议、模板和骨架；运行态目录只保留空骨架与 `.template` 文件，不把真实运行态数据带入仓库。`配置/` 中任何包含机器信息、用户偏好或工具路径的文件必须模板化、脱敏化或改为 `.template`，不得直接复制当前实例。
   - **涉及目录**：
     - 源：当前 `{VAULT_PATH}` 下的 `工作流/`、`模板/`、`配置/`、`.obsidian/`、`首页.md`、`MEMORY.md`
@@ -280,7 +281,7 @@ claude-dev-harness/
 
 ### Phase 2：统一参数化与路径收敛
 
-- [ ] **TODO-5: 对共享资产和宿主资产做统一参数化**
+- [x] **TODO-5: 对共享资产和宿主资产做统一参数化**
   - **描述**：对 `skills/`、`scripts/`、`runtime-hooks/`、`agent-configs/`、`vault-template/` 做 repo-wide 路径与占位符收敛。扫描范围必须覆盖 `.md`、`.ps1`、`.json`、`.js`、`.mjs`、`.toml`，其中 `agent-configs/codex/config.shared.toml.template` 与 `config.user.example.toml` 也视为 operational assets。
   - **目标替换**：
     - 当前机器的 workspace 根路径 → `{WORKSPACE_ROOT}`
@@ -302,7 +303,7 @@ claude-dev-harness/
 
 ### Phase 3：安装、卸载与验证
 
-- [ ] **TODO-6: 编写 `install.ps1`**
+- [x] **TODO-6: 编写 `install.ps1`**
   - **描述**：实现一键安装脚本，至少接受 `-WorkspaceRoot` 参数，并据此推导 `{VAULT_PATH}`。脚本步骤包括：
     1. 备份现有 `%USERPROFILE%\.claude\skills`、`%USERPROFILE%\.codex\skills`、`%USERPROFILE%\.claude\hooks-memory`、`%USERPROFILE%\.claude\CLAUDE.md`、`%USERPROFILE%\.claude\.claude\settings.local.json`、`%USERPROFILE%\.codex\AGENTS.md`、`%USERPROFILE%\.codex\.claude\settings.local.json`、`%USERPROFILE%\.codex\config.toml`
     2. 初始化或补齐 `{VAULT_PATH}`
@@ -329,7 +330,7 @@ claude-dev-harness/
     .\install.ps1 -WorkspaceRoot {WORKSPACE_ROOT}
     ```
 
-- [ ] **TODO-7: 编写 `uninstall.ps1`**
+- [x] **TODO-7: 编写 `uninstall.ps1`**
   - **描述**：实现安全回滚，移除 Junction、恢复备份的 Claude/Codex hooks 与宿主配置，并明确哪些用户本地文件不自动删除。
   - **涉及文件**：
     - 新建：`{REPO_ROOT}\uninstall.ps1`
@@ -339,7 +340,7 @@ claude-dev-harness/
     - hooks、Claude/Codex `settings.local.json`、Codex `config.toml` 可恢复到安装前
     - 不误删 `{VAULT_PATH}\运行时\` 用户数据
 
-- [ ] **TODO-8: 编写安装验证脚本**
+- [x] **TODO-8: 编写安装验证脚本**
   - **描述**：补齐 `tests/verify-installation.ps1`，覆盖目录链接、模板渲染、hooks 部署、Claude/Codex settings 合成、Codex `config.toml` managed block、仓库内 `.toml` 模板路径检查、共享记忆健康检查和关键行为的静态/轻量验证。
   - **涉及文件**：
     - 新建：`{REPO_ROOT}\tests\verify-installation.ps1`
@@ -361,7 +362,7 @@ claude-dev-harness/
 
 ### Phase 4：文档、切换与收尾
 
-- [ ] **TODO-9: 编写 `README.md`**
+- [x] **TODO-9: 编写 `README.md`**
   - **描述**：补齐安装、升级、回滚、自定义和故障排查文档，重点解释三层资产边界、hooks 链、Claude/Codex `settings.local` 模板与用户 overlay 的关系，以及 Codex `config.toml` 的托管边界。
   - **涉及文件**：
     - 修改：`{REPO_ROOT}\README.md`
@@ -371,7 +372,7 @@ claude-dev-harness/
     - README 明确哪些文件进 Git，哪些文件只保留在本地
     - README 说明 `AGENTS.md` / `GEMINI.md` / `CLAUDE.md` / Codex `AGENTS.md` / Codex `config.toml` 的实际部署位置与托管边界
 
-- [ ] **TODO-10: 将自身环境切换到仓库模式**
+- [x] **TODO-10: 将自身环境切换到仓库模式**
   - **描述**：在当前机器执行安装脚本，把现有散布资产切换到“仓库单源 + 宿主模板 + hooks 部署 + workspace 入口”的目标形态。
   - **依赖**：TODO-8、TODO-9
   - **验收标准**：
@@ -386,7 +387,7 @@ claude-dev-harness/
     .\tests\verify-installation.ps1 -WorkspaceRoot {WORKSPACE_ROOT}
     ```
 
-- [ ] **TODO-11: 首次提交并推送**
+- [ ] **TODO-11: 首次提交并推送（待配置 git remote）**
   - **描述**：确认仓库内仅包含 shared assets 与 host-specific templates，不含用户本地运行态和敏感信息后，完成首次提交与推送。
   - **依赖**：TODO-10
   - **验收标准**：
