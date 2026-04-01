@@ -1,0 +1,16 @@
+---
+tags: [运行时, 恢复索引]
+created: __RENDER_AT_INSTALL__
+updated: __RENDER_AT_INSTALL__
+---
+
+# 恢复索引
+
+继续任务时先读本文件；只有在信息不足时再回读详细运行时文件。
+
+## 当前主任务
+
+- task_id: `none`
+- 任务: 无
+- 状态: 空闲
+- 下一步: 等待新任务

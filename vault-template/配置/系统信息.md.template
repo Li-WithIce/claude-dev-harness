@@ -1,0 +1,25 @@
+---
+tags: [配置, 系统]
+created: __RENDER_AT_INSTALL__
+updated: __RENDER_AT_INSTALL__
+---
+
+# 系统信息
+
+| 项目 | 值 |
+|------|-----|
+| 项目名称 | Claude Dev Harness Workspace |
+| 平台 | Claude Code / Codex / Gemini |
+| 定位 | 长期个人助理增强工作区 |
+| 初始化日期 | __RENDER_AT_INSTALL__ |
+| 初始化来源 | claude-dev-harness |
+| 原则 | 轻量、可审计、渐进增强 |
+
+## 真相源
+
+| 类别 | 文件 | 说明 |
+|------|------|------|
+| 快速恢复视图 | `运行时/恢复索引.md` | 由运行时文件派生的低 token 摘要 |
+| 当前任务 | `运行时/当前任务.md` | 当前会话主锚点 |
+| 中断任务 | `运行时/中断任务.md` | 暂停但未完成的任务 |
+| 最近会话 | `运行时/上次会话.md` | 已收尾会话摘要 |

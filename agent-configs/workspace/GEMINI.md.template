@@ -1,0 +1,9 @@
+# Shared Project Memory
+
+Use the shared Obsidian memory vault for project context:
+`{VAULT_PATH}`
+
+## Use First
+
+- If the task needs recovery, long-term context, user preferences, tool paths, or runtime state, use the local `obsidian-memory` skill first.
+- Do not create parallel runtime notes outside the shared vault.

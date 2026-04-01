@@ -1,0 +1,25 @@
+# Sensitive local config
+*.env
+*.secret
+*.local.json
+*.local.toml
+agent-configs/claude/settings.json
+agent-configs/claude/settings.local.user.json
+agent-configs/codex/settings.local.user.json
+agent-configs/codex/config.user.toml
+
+# Generated backups and temp files
+backups/
+tmp/
+tmp-*/
+*.bak
+*.rendered
+skills/.system/
+
+# Local workspace state
+.obsidian/
+vault-template/.obsidian/workspace.json
+
+# OS noise
+Thumbs.db
+.DS_Store

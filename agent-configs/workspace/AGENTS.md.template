@@ -1,0 +1,11 @@
+# Shared Memory
+
+- Shared memory vault: `{VAULT_PATH}`
+- Default language: 中文
+- If a task needs recovery, runtime state, long-term preferences, or tool paths, use the shared memory docs first
+- Do not keep parallel runtime notes outside `.assistant`
+
+## Read Order
+
+- Orientation: `.assistant\首页.md` -> `.assistant\配置\系统信息.md` -> `.assistant\配置\用户偏好.md` -> `.assistant\配置\工具与组件.md`
+- Resume: `.assistant\运行时\恢复索引.md` -> `.assistant\运行时\当前任务.md` -> `.assistant\运行时\tasks\<task-id>.md` -> `.assistant\运行时\中断任务.md` -> `.assistant\运行时\上次会话.md`

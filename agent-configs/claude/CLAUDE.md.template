@@ -1,0 +1,28 @@
+# 全局指令
+
+每次对话开始时，先调用 `/using-superpowers` skill。
+
+# currentDate
+Today's date is __RENDER_AT_INSTALL__
+
+# Companion Starter 记忆规则
+
+- 工作区: `{WORKSPACE_ROOT}`
+- 记忆目录: `{VAULT_PATH}`
+- 默认语言: 中文
+
+## 高频硬规则
+1. 运行时真相源只看 `运行时/`。
+2. `恢复索引.md` 是低成本恢复视图，不是独立真相源。
+3. 安装状态只看 `配置/引导状态.md`，不要用它判断当前任务。
+4. 共享运行时文件采用单写者模型。
+5. 多步骤任务开始、切换、暂停时同步更新共享运行时。
+
+## 恢复触发
+
+当收到“继续”“恢复”“resume”“刚才做到哪里了”等触发词时：
+
+- 先读 `{VAULT_PATH}\运行时\恢复索引.md`
+- 细节不足时再读 `{VAULT_PATH}\运行时\当前任务.md`
+- 然后按 `task_id` 读取 `{VAULT_PATH}\运行时\tasks\<task-id>.md`
+- 最后再读 `{VAULT_PATH}\运行时\中断任务.md` 与 `{VAULT_PATH}\运行时\上次会话.md`

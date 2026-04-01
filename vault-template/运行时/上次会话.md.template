@@ -1,0 +1,14 @@
+---
+tags: [运行时, 会话]
+created: __RENDER_AT_INSTALL__
+updated: __RENDER_AT_INSTALL__
+---
+
+# 上次会话
+
+| 项目 | 值 |
+|------|-----|
+| 日期 | __RENDER_AT_INSTALL__ |
+| 任务 | 初始化 |
+| 状态 | 未开始 |
+| 摘要 | 尚无会话记录 |

@@ -1,0 +1,19 @@
+---
+tags: [运行时, 任务, 共享指针]
+created: __RENDER_AT_INSTALL__
+updated: __RENDER_AT_INSTALL__
+task_id: none
+writer: Claude Code
+---
+
+# 当前任务
+
+> 当前文件只保存共享指针；详细状态请读取 `运行时/tasks/<task-id>.md`。
+
+| 项目 | 值 |
+|------|-----|
+| task_id | `none` |
+| 任务 | 无 |
+| 状态 | 空闲 |
+| 详细状态 | `运行时/tasks/` |
+| 下一步 | 等待新任务 |
