@@ -23,7 +23,7 @@
 
 ## Summary
 
-当前实现已把 `skills/docs` 的热切换漂移问题从“只能人工处理的宿主状态”收敛成可验证、可恢复的显式路径：`tests/verify-installation.ps1` 会在 preserved docs 漂移或存在陈旧文件时返回 `WARN`，并指向 `scripts/sync-preserved-docs.ps1`；该脚本已在 sandbox 中验证 `WARN -> sync -> PASS`，并在真实宿主上验证了先因 docs 变更出现 `changed=3`、再同步两侧 preserved docs 后恢复 `STATUS: PASS`。结合 `config-boundary` sandbox `STATUS: PASS`、`docs-drift` sandbox `STATUS: WARN`、`docs-extra` sandbox `STATUS: WARN`、`docs-sync` sandbox `STATUS: PASS` 与最新真实宿主 `verify` `STATUS: PASS`，本轮未再发现会阻断 TEST / HANDOFF 的实现缺陷。
+本轮全量复审重新对照了 `plan.md`、`implementation-notes.md`、`test.md`、`handoff.md` 与当前实现，并复跑了关键验证：PowerShell parser、真实宿主 `verify-installation.ps1`，以及 `skills/docs` 的 `WARN -> sync-preserved-docs -> PASS` 路径。当前实现已把 `skills/docs` 的热切换漂移问题收敛成可验证、可恢复的显式流程：`tests/verify-installation.ps1` 会在 preserved docs 漂移或存在陈旧文件时返回 `WARN`，并指向 `scripts/sync-preserved-docs.ps1`；该脚本已在 sandbox 中验证闭环，也在真实宿主上验证了 repo docs 再次变更后先出现 `changed=3`、同步两侧 preserved docs 后恢复 `STATUS: PASS`。结合 `config-boundary` sandbox `STATUS: PASS`、`docs-drift` sandbox `STATUS: WARN`、`docs-extra` sandbox `STATUS: WARN`、`docs-sync` sandbox `STATUS: PASS` 与最新真实宿主 `verify` `STATUS: PASS`，本轮未再发现会阻断 TEST / HANDOFF 的实现缺陷。
 
 ## Watchouts
 
