@@ -164,7 +164,8 @@ function Assert-PreservedDirectoryMatchesRepo {
     }
 
     if ($missingCount -gt 0 -or $changedCount -gt 0 -or $extraCount -gt 0) {
-        Add-Warning ("{0} 保留为普通目录，但与 repo 内容不一致: missing={1}, changed={2}, extra={3}" -f $Label, $missingCount, $changedCount, $extraCount)
+        $syncScriptPath = Join-Path $RepoRoot 'scripts\sync-preserved-docs.ps1'
+        Add-Warning ("{0} 保留为普通目录，但与 repo 内容不一致: missing={1}, changed={2}, extra={3}。可运行: {4}" -f $Label, $missingCount, $changedCount, $extraCount, $syncScriptPath)
     } else {
         Add-Check ("{0} 保留为普通目录，且内容与 repo 一致" -f $Label)
     }

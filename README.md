@@ -21,6 +21,7 @@ Windows 优先的单仓库 Harness 分发仓库。
 
 - `skills/`: Claude / Codex 共用 skills 单源
 - `scripts/`: 共享记忆维护/体检脚本入口
+- `scripts/sync-preserved-docs.ps1`: 将热切换保留的宿主 `skills/docs` 目录重新同步到 repo canonical docs
 - `runtime-hooks/claude/`: Claude hooks 源文件，安装时渲染到宿主目录
 - `vault-template/`: `.assistant` 初始化/补齐模板
 - `agent-configs/`: Claude / Codex / workspace 模板
@@ -68,6 +69,15 @@ Set-Location <repo-root>
 - `agent-configs/codex/*.toml` forbidden prefix 检查
 - `scripts/memory-health.ps1 -VaultRoot <workspace>\\.assistant` 返回 `STATUS: PASS`
 
+若 `skills/docs` 因热切换保留为普通目录且产生漂移，可执行：
+
+```powershell
+Set-Location <repo-root>
+.\scripts\sync-preserved-docs.ps1
+```
+
+默认会同时同步 `%USERPROFILE%\.claude\skills\docs` 与 `%USERPROFILE%\.codex\skills\docs`；若只想处理单侧，可改用 `-TargetHost Claude` 或 `-TargetHost Codex`。该脚本会把宿主 preserved docs 镜像为 repo 当前内容，并删除 repo 中已不存在的陈旧文件。
+
 ## Uninstall
 
 ```powershell
@@ -112,5 +122,5 @@ Set-Location <repo-root>
 - 首轮只支持 Windows
 - `settings.local.json` 合并阶段依赖 `node`
 - `vault-template/` 当前采用“缺失即补齐、存在则保留”的保守策略，不主动刷新已存在文档
-- 为避免 live session 自己锁住 `skills/docs`，若宿主上已存在 `skills/docs` 普通目录，安装阶段会保留它而不是强制替换为 Junction；若其内容已与 repo 漂移，`tests/verify-installation.ps1` 会返回 `WARN`
+- 为避免 live session 自己锁住 `skills/docs`，若宿主上已存在 `skills/docs` 普通目录，安装阶段会保留它而不是强制替换为 Junction；若其内容已与 repo 漂移，`tests/verify-installation.ps1` 会返回 `WARN`，此时可运行 `.\scripts\sync-preserved-docs.ps1`
 - 历史设计文档目录仍保留部分源机器绝对路径，当前不阻塞安装链路

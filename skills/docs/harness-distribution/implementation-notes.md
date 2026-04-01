@@ -25,6 +25,7 @@
   - `scripts/memory-health-report.ps1`
   - `scripts/memory-maintain.ps1`
   - `scripts/resolve-obsidian-memory-script.ps1`
+  - `scripts/sync-preserved-docs.ps1`
 - Claude hooks 改为安装期渲染 `{VAULT_PATH}`：
   - `runtime-hooks/claude/posttooluse.js`
   - `runtime-hooks/claude/stop.js`
@@ -51,6 +52,7 @@
   - `skills` 根目录保持为普通目录检查
   - repo `skills/` managed 条目逐项链接检查
   - 热切换保留的 `skills/docs` 内容一致性检查（漂移或额外陈旧文件时返回 `WARN`）
+  - `skills/docs` 漂移告警中的同步修复指引
   - `.system` 可见性检查
   - hooks 文件存在与占位符渲染检查
   - Claude / Codex `settings.local.json` 结构检查
@@ -58,6 +60,10 @@
   - Harness 托管 skill path 不在 managed block 外泄露
   - `agent-configs/codex/*.toml` forbidden prefix 检查
   - `scripts/memory-health.ps1 -VaultRoot ...` 返回 `STATUS: PASS`
+- 新增 `scripts/sync-preserved-docs.ps1`：
+  - 镜像 repo `skills/docs` 到宿主保留的 `%USERPROFILE%\.claude\skills\docs` / `%USERPROFILE%\.codex\skills\docs`
+  - 自动覆盖漂移文件并移除 repo 中已不存在的陈旧 docs
+  - 成功执行后显式重置 `LASTEXITCODE=0`，避免同一 PowerShell 会话中继承前一条 `verify` 的 `WARN` 退出码
 - `uninstall.ps1` 当前已覆盖：
   - 按 install manifest 回滚
   - 恢复原始 skill 条目、settings、`config.toml`
@@ -80,7 +86,7 @@
 - `vault-template/` 当前采取“缺失即补齐、存在则保留”的策略，适合首次安装与保守升级，但不会主动刷新已存在的工作流/配置文档
 - `.system` 当前策略是本机合并到 repo-local `skills/.system`；在真实双宿主环境下仍需要实机确认不会引入额外宿主副作用
 - `uninstall.ps1` 当前不会清理 `.assistant/` 运行时数据，这是有意保守策略；若后续需要“彻底卸载”，应单独定义更强约束的清理模式
-- 为避免 live session 自己锁住 `skills/docs`，当前安装在宿主已存在 `skills/docs` 普通目录时会保留它；这意味着 `docs` 在热切换场景下可能暂时不是 Junction，且一旦内容漂移，`tests/verify-installation.ps1` 会返回 `WARN`
+- 为避免 live session 自己锁住 `skills/docs`，当前安装在宿主已存在 `skills/docs` 普通目录时会保留它；这意味着 `docs` 在热切换场景下可能暂时不是 Junction，且一旦内容漂移，`tests/verify-installation.ps1` 会返回 `WARN`；当前已补上 `scripts/sync-preserved-docs.ps1` 作为显式收敛路径
 - install 若中途失败，虽然现在会写出 recovery manifest snapshot，但仍需要操作者用该 manifest 显式调用 `uninstall.ps1`
 - repo-local `skills/.system` 当前仍属于安装生成物，不进 Git；若宿主继续依赖它，重复 uninstall 只会回退到“上一轮已安装状态”，而不是强制清空 `.system`
 
@@ -108,6 +114,8 @@
   - 结果：未命中 `%USERPROFILE%` / `{WORKSPACE_ROOT}` / `{REPO_ROOT}`
 - `{REPO_ROOT}\scripts\memory-health.ps1 -VaultRoot {VAULT_PATH}`
   - 结果：`STATUS: PASS`
+- `powershell -File {REPO_ROOT}\scripts\sync-preserved-docs.ps1`
+  - 结果：PowerShell parser 通过；成功路径显式返回 `LASTEXITCODE=0`
 - `node --check {REPO_ROOT}\runtime-hooks\claude\posttooluse.js`
   - 结果：通过
 - `node --check {REPO_ROOT}\runtime-hooks\claude\stop.js`
@@ -156,6 +164,12 @@
     - `backups/active-install.json` 当前指向 `install-20260401-185834\install-manifest.json`
   - 额外说明：
     - 首次真实安装失败前的原始基线备份仍保留在 `{REPO_ROOT}\backups\install-20260401-174218`
+- 真实宿主 preserved docs 同步：
+  - `scripts\sync-preserved-docs.ps1 -RepoRoot {REPO_ROOT}`
+  - `tests/verify-installation.ps1 -WorkspaceRoot {WORKSPACE_ROOT}`
+  - 结果：
+    - sync 脚本输出 `Claude updated=4`、`Codex updated=4`
+    - verify 返回 `STATUS: PASS`
 - Codex config 托管边界 sandbox：
   - 预置用户自有 `[[skills.config]]` 到 sandbox `config.toml`
   - `install.ps1 -WorkspaceRoot {REPO_ROOT}\tmp\config-boundary-sandbox\workspace`
@@ -179,3 +193,13 @@
   - 结果：
     - verify 返回 `STATUS: WARN`
     - 告警内容包含 `extra=1`
+- `skills/docs` 自动同步 sandbox：
+  - 预置 `.claude\skills\docs` 漂移文件与 `.codex\skills\docs` 额外陈旧文件
+  - `install.ps1 -WorkspaceRoot {REPO_ROOT}\tmp\docs-sync-sandbox\workspace`
+  - `tests/verify-installation.ps1 -WorkspaceRoot {REPO_ROOT}\tmp\docs-sync-sandbox\workspace`
+  - `scripts\sync-preserved-docs.ps1 -RepoRoot {REPO_ROOT}`
+  - 再次执行 `tests/verify-installation.ps1 -WorkspaceRoot {REPO_ROOT}\tmp\docs-sync-sandbox\workspace`
+  - 结果：
+    - 首次 verify 返回 `STATUS: WARN`
+    - sync 脚本输出 `Claude updated=1`、`Codex removed=2`
+    - 二次 verify 返回 `STATUS: PASS`
