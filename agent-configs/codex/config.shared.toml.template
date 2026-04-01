@@ -1,31 +1,32 @@
 # Managed by install.ps1
-# Only the shared skills/path block should be rendered into the user's config.toml.
+# Only Harness-managed skills/path metadata belong in this block.
+# Keep user-owned [[skills.config]] entries outside this block.
 
 [managed.shared_paths]
 workspace_root = "{WORKSPACE_ROOT}"
 vault_path = "{VAULT_PATH}"
 skills_root = "{CODEX_HOME}\\skills"
 
-[[managed.skills]]
+[[skills.config]]
 path = "{CODEX_HOME}\\skills\\using-superpowers\\SKILL.md"
 enabled = false
 
-[[managed.skills]]
+[[skills.config]]
 path = "{CODEX_HOME}\\skills\\orchestrator\\SKILL.md"
 enabled = false
 
-[[managed.skills]]
+[[skills.config]]
 path = "{CODEX_HOME}\\skills\\plan\\SKILL.md"
 enabled = false
 
-[[managed.skills]]
+[[skills.config]]
 path = "{CODEX_HOME}\\skills\\implement\\SKILL.md"
 enabled = false
 
-[[managed.skills]]
+[[skills.config]]
 path = "{CODEX_HOME}\\skills\\review\\SKILL.md"
 enabled = false
 
-[[managed.skills]]
+[[skills.config]]
 path = "{CODEX_HOME}\\skills\\test\\SKILL.md"
 enabled = false

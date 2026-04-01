@@ -10,6 +10,6 @@
 
 边界：
 
-- `install.ps1` 只补丁共享 managed block，不覆盖用户本地 model/provider/auth/project trust
+- `install.ps1` 只补丁 Harness 自己托管的 managed block，不覆盖用户本地 model/provider/auth/project trust，也不删除用户已有的其他 `[[skills.config]]`
 - `.toml` 模板必须通过 `tests/forbidden-path-prefixes.txt` 检查
 - 用户私有 provider / auth 留在本地

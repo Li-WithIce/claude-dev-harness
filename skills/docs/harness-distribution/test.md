@@ -10,7 +10,7 @@
 
 ## Summary
 
-当前实现已通过 repo-wide 路径残留扫描、PowerShell 脚本语法检查、多个 sandbox 安装链路，以及真实宿主安装验证。基于已有证据，可以判定本轮交付满足 `plan.md` 中 TODO-1 至 TODO-10 的主要验收目标，并可进入 HANDOFF。
+当前实现已通过 repo-wide 路径残留扫描、PowerShell 脚本语法检查、多个 sandbox 安装链路，以及最新真实宿主 `install -> verify` 验证。针对 Codex `config.toml` 托管边界、`skills/docs` 内容漂移和保留目录中的额外陈旧文件，本轮都已补上定向 sandbox 证据；结合最新真实宿主 `STATUS: PASS`，可以判定本轮交付满足 `plan.md` 中 TODO-1 至 TODO-10 的主要验收目标，并可进入 HANDOFF。
 
 ## Scope
 
@@ -35,7 +35,10 @@
 3. 在 sandbox 中执行标准 `install -> verify -> uninstall`。
 4. 在 sandbox 中构造 `.assistant/.claude/.qoder`、宿主 `.system`、已有 managed / unmanaged skill Junction，验证 sidecar 保留与 Junction 回滚。
 5. 在 sandbox 中验证 recovery manifest snapshot 已落盘，且可用于 `uninstall.ps1 -ManifestPath ...`。
-6. 在真实宿主执行 `install.ps1 -WorkspaceRoot {WORKSPACE_ROOT}` 与 `tests/verify-installation.ps1 -WorkspaceRoot {WORKSPACE_ROOT}`，并做 spot-check。
+6. 在 `config-boundary` sandbox 预置用户自有 `[[skills.config]]`，验证 install 不会删除非 Harness 托管条目。
+7. 在 `docs-drift` sandbox 预置保留为普通目录的 `skills/docs` 并制造内容漂移，验证 `tests/verify-installation.ps1` 返回 `WARN`。
+8. 在 `docs-extra` sandbox 预置与 repo 一致的保留 `skills/docs`，再额外注入 repo 已不存在的旧文件，验证 `tests/verify-installation.ps1` 返回 `WARN`。
+9. 在真实宿主先执行 `tests/verify-installation.ps1 -WorkspaceRoot {WORKSPACE_ROOT}` 识别 stale 安装状态，再执行 `install.ps1 -WorkspaceRoot {WORKSPACE_ROOT}`、同步保留的 `skills/docs` 目录，并重新运行 `tests/verify-installation.ps1 -WorkspaceRoot {WORKSPACE_ROOT}`。
 
 ## Findings
 
@@ -50,19 +53,30 @@
   - `backups/active-install.json -> install-manifest.json` 已落盘。
   - `tests/verify-installation.ps1` 返回 `STATUS: PASS`。
   - `uninstall.ps1 -ManifestPath ...` 正常执行。
+- Codex config 托管边界 sandbox：
+  - 预置用户自有 `[[skills.config]]` 后执行 `install -> verify -> uninstall`。
+  - install 后 `config.toml` 同时保留用户自有条目与 Harness managed block。
+  - `tests/verify-installation.ps1` 返回 `STATUS: PASS`。
+- `skills/docs` 漂移告警 sandbox：
+  - 预置宿主 `skills/docs` 为普通目录，并人为修改 `review.md`。
+  - `tests/verify-installation.ps1` 返回 `STATUS: WARN`，告警内容包含“保留为普通目录，但与 repo 内容不一致”。
+- `skills/docs` 额外陈旧文件告警 sandbox：
+  - 预置宿主 `skills/docs` 为与 repo 一致的普通目录，再额外加入 `obsolete-task\review.md`。
+  - `tests/verify-installation.ps1` 返回 `STATUS: WARN`，告警内容包含 `extra=1`。
 - 真实宿主 uninstall / reinstall：
   - `uninstall.ps1 -ManifestPath {REPO_ROOT}\backups\install-20260401-180107\install-manifest.json` 正常执行。
   - 暴露出 repeated uninstall 导致 `.system` 断链的问题，修复后重新安装并通过验证。
 - 真实宿主：
-  - `install.ps1 -WorkspaceRoot {WORKSPACE_ROOT}` 返回成功。
-  - `tests/verify-installation.ps1 -WorkspaceRoot {WORKSPACE_ROOT}` 返回 `STATUS: PASS`。
+  - 初次直接执行 `tests/verify-installation.ps1 -WorkspaceRoot {WORKSPACE_ROOT}` 时，识别出旧 managed block 与保留 `skills/docs` 漂移导致的 stale 状态。
+  - 重新执行 `install.ps1 -WorkspaceRoot {WORKSPACE_ROOT}` 后，Codex `config.toml` managed block 已与最新模板一致。
+  - 手动刷新 `%USERPROFILE%\.claude\skills\docs` 与 `%USERPROFILE%\.codex\skills\docs` 到 repo 当前 canonical docs 后，`tests/verify-installation.ps1 -WorkspaceRoot {WORKSPACE_ROOT}` 返回 `STATUS: PASS`。
   - `%USERPROFILE%\.claude\skills\.assistant` / `.claude` / `.qoder` 保留。
   - `%USERPROFILE%\.claude\skills\orchestrator` / `using-superpowers` 已切换为 repo Junction。
-  - 当前 active install manifest 为 `{REPO_ROOT}\backups\install-20260401-181430\install-manifest.json`。
+  - 当前 active install manifest 为 `{REPO_ROOT}\backups\install-20260401-185834\install-manifest.json`。
 
 ## Risks / Gaps
 
-- `skills/docs` 在当前 Claude 宿主上按热切换策略保留为普通目录，尚未在冷态下验证完全收敛为 Junction。
+- `skills/docs` 在 live session 热切换模式下仍保留为普通目录；本轮已验证内容可手动刷新到与 repo 一致，但未来 canonical docs 再变更时仍需要手动刷新或在冷态下重装。
 - TODO-11 依赖 git remote；当前仓库没有 remote，未执行首次 push。
 
 ## Conclusion

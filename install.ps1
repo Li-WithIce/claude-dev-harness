@@ -663,32 +663,106 @@ function Sync-SkillsDirectory {
     }
 }
 
-function Remove-SkillsConfigBlocks {
+function Get-TomlQuotedPathValue {
+    param([string]$Line)
+
+    if ([string]::IsNullOrWhiteSpace($Line)) {
+        return $null
+    }
+
+    if ($Line -notmatch '^\s*path\s*=') {
+        return $null
+    }
+
+    $rawValue = ($Line -replace '^\s*path\s*=\s*', '').Trim()
+    if ($rawValue.Length -lt 2) {
+        return $null
+    }
+
+    $quote = $rawValue[0]
+    $doubleQuote = [char]34
+    $singleQuote = [char]39
+    if (($quote -ne $doubleQuote -and $quote -ne $singleQuote) -or ($rawValue[$rawValue.Length - 1] -ne $quote)) {
+        return $null
+    }
+
+    return Get-NormalizedPath -Path $rawValue.Substring(1, $rawValue.Length - 2)
+}
+
+function Get-ManagedSkillPathsFromTomlContent {
     param([string]$Content)
+
+    $paths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if ([string]::IsNullOrWhiteSpace($Content)) {
+        return @()
+    }
+
+    foreach ($line in ($Content -split "`r?`n")) {
+        $path = Get-TomlQuotedPathValue -Line $line
+        if (-not [string]::IsNullOrWhiteSpace($path)) {
+            [void]$paths.Add($path)
+        }
+    }
+
+    return @($paths)
+}
+
+function Remove-ManagedSkillsConfigBlocks {
+    param(
+        [string]$Content,
+        [string[]]$ManagedSkillPaths
+    )
 
     if ([string]::IsNullOrWhiteSpace($Content)) {
         return ""
     }
 
+    $managedSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($path in @($ManagedSkillPaths)) {
+        if (-not [string]::IsNullOrWhiteSpace($path)) {
+            [void]$managedSet.Add((Get-NormalizedPath -Path $path))
+        }
+    }
+
+    if ($managedSet.Count -eq 0) {
+        return $Content.Trim()
+    }
+
     $lines = $Content -split "`r?`n"
     $result = New-Object System.Collections.Generic.List[string]
-    $skip = $false
 
-    foreach ($line in $lines) {
-        if ($line -match '^\[\[skills\.config\]\]\s*$') {
-            $skip = $true
+    for ($index = 0; $index -lt $lines.Count;) {
+        $line = $lines[$index]
+        if ($line -notmatch '^\[\[skills\.config\]\]\s*$') {
+            $result.Add($line)
+            $index += 1
             continue
         }
 
-        if ($skip) {
-            if ($line -match '^\[') {
-                $skip = $false
-                $result.Add($line)
+        $block = New-Object System.Collections.Generic.List[string]
+        $block.Add($line)
+        $index += 1
+
+        while ($index -lt $lines.Count -and $lines[$index] -notmatch '^\[') {
+            $block.Add($lines[$index])
+            $index += 1
+        }
+
+        $blockPath = $null
+        foreach ($blockLine in $block) {
+            $blockPath = Get-TomlQuotedPathValue -Line $blockLine
+            if (-not [string]::IsNullOrWhiteSpace($blockPath)) {
+                break
             }
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($blockPath) -and $managedSet.Contains($blockPath)) {
             continue
         }
 
-        $result.Add($line)
+        foreach ($blockLine in $block) {
+            $result.Add($blockLine)
+        }
     }
 
     return ($result -join "`r`n").Trim()
@@ -713,6 +787,7 @@ function Update-CodexConfig {
 
     $existing = Read-FileUtf8 -Path $TargetPath
     $renderedManaged = Render-Content -Content (Read-FileUtf8 -Path $TemplatePath) -TargetPath $TargetPath
+    $managedSkillPaths = Get-ManagedSkillPathsFromTomlContent -Content $renderedManaged
     $managedBlock = @(
         '# >>> claude-dev-harness managed block >>>'
         $renderedManaged.Trim()
@@ -720,7 +795,7 @@ function Update-CodexConfig {
     ) -join "`r`n"
 
     $sanitized = Remove-ManagedTomlBlock -Content $existing
-    $sanitized = Remove-SkillsConfigBlocks -Content $sanitized
+    $sanitized = Remove-ManagedSkillsConfigBlocks -Content $sanitized -ManagedSkillPaths $managedSkillPaths
 
     $newContent = if ([string]::IsNullOrWhiteSpace($sanitized)) {
         $managedBlock + "`r`n"

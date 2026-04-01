@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [string]$WorkspaceRoot,
@@ -43,6 +43,50 @@ function Add-Error {
     $script:Errors += $Message
 }
 
+function Render-TemplateContent {
+    param(
+        [string]$Content,
+        [switch]$EscapeForCode
+    )
+
+    $rendered = $Content
+    foreach ($key in $script:RenderTokens.Keys) {
+        $value = $script:RenderTokens[$key]
+        if ($EscapeForCode) {
+            $value = $value.Replace('\', '\\')
+        }
+        $rendered = $rendered.Replace($key, $value)
+    }
+
+    return $rendered
+}
+
+function Get-TomlQuotedPathValue {
+    param([string]$Line)
+
+    if ([string]::IsNullOrWhiteSpace($Line)) {
+        return $null
+    }
+
+    if ($Line -notmatch '^\s*path\s*=') {
+        return $null
+    }
+
+    $rawValue = ($Line -replace '^\s*path\s*=\s*', '').Trim()
+    if ($rawValue.Length -lt 2) {
+        return $null
+    }
+
+    $quote = $rawValue[0]
+    $doubleQuote = [char]34
+    $singleQuote = [char]39
+    if (($quote -ne $doubleQuote -and $quote -ne $singleQuote) -or ($rawValue[$rawValue.Length - 1] -ne $quote)) {
+        return $null
+    }
+
+    return Get-NormalizedPath -Path $rawValue.Substring(1, $rawValue.Length - 2)
+}
+
 function Get-JunctionTarget {
     param([string]$Path)
 
@@ -84,6 +128,98 @@ function Assert-RenderedFile {
     }
 }
 
+function Assert-PreservedDirectoryMatchesRepo {
+    param(
+        [string]$HostPath,
+        [string]$RepoPath,
+        [string]$Label
+    )
+
+    $missingCount = 0
+    $changedCount = 0
+    $extraCount = 0
+    $repoRelativeFiles = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($repoFile in Get-ChildItem -LiteralPath $RepoPath -Recurse -File) {
+        $relative = $repoFile.FullName.Substring($RepoPath.Length).TrimStart('\')
+        [void]$repoRelativeFiles.Add($relative)
+        $hostFile = Join-Path $HostPath $relative
+        if (-not (Test-Path -LiteralPath $hostFile -PathType Leaf)) {
+            $missingCount += 1
+            continue
+        }
+
+        $repoHash = (Get-FileHash -LiteralPath $repoFile.FullName -Algorithm SHA256).Hash
+        $hostHash = (Get-FileHash -LiteralPath $hostFile -Algorithm SHA256).Hash
+        if ($repoHash -ne $hostHash) {
+            $changedCount += 1
+        }
+    }
+
+    foreach ($hostFile in Get-ChildItem -LiteralPath $HostPath -Recurse -File) {
+        $relative = $hostFile.FullName.Substring($HostPath.Length).TrimStart('\')
+        if (-not $repoRelativeFiles.Contains($relative)) {
+            $extraCount += 1
+        }
+    }
+
+    if ($missingCount -gt 0 -or $changedCount -gt 0 -or $extraCount -gt 0) {
+        Add-Warning ("{0} 保留为普通目录，但与 repo 内容不一致: missing={1}, changed={2}, extra={3}" -f $Label, $missingCount, $changedCount, $extraCount)
+    } else {
+        Add-Check ("{0} 保留为普通目录，且内容与 repo 一致" -f $Label)
+    }
+}
+
+function Get-ManagedTomlBlockContent {
+    param([string]$Content)
+
+    if ([string]::IsNullOrWhiteSpace($Content)) {
+        return $null
+    }
+
+    $match = [regex]::Match(
+        $Content,
+        '(?ms)^\# >>> claude-dev-harness managed block >>>\r?\n(.*?)^\# <<< claude-dev-harness managed block <<<\r?\n?'
+    )
+    if (-not $match.Success) {
+        return $null
+    }
+
+    return $match.Groups[1].Value.Trim()
+}
+
+function Get-TomlSkillConfigPaths {
+    param([string]$Content)
+
+    $paths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if ([string]::IsNullOrWhiteSpace($Content)) {
+        return @()
+    }
+
+    $inSkillsConfig = $false
+    foreach ($line in ([regex]::Split($Content, '\r?\n'))) {
+        if ($line -match '^\[\[skills\.config\]\]\s*$') {
+            $inSkillsConfig = $true
+            continue
+        }
+
+        if ($inSkillsConfig -and $line -match '^\[') {
+            $inSkillsConfig = $false
+        }
+
+        if (-not $inSkillsConfig) {
+            continue
+        }
+
+        $path = Get-TomlQuotedPathValue -Line $line
+        if (-not [string]::IsNullOrWhiteSpace($path)) {
+            [void]$paths.Add($path)
+        }
+    }
+
+    return @($paths)
+}
+
 function Assert-ManagedSkillLinks {
     param(
         [string]$HostLabel,
@@ -117,6 +253,7 @@ function Assert-ManagedSkillLinks {
         $actualTarget = Get-JunctionTarget -Path $hostEntryPath
         if ($hotSwapPreservedNames.Contains($entry.Name) -and ($null -eq $actualTarget)) {
             $checkedCount += 1
+            Assert-PreservedDirectoryMatchesRepo -HostPath $hostEntryPath -RepoPath $entry.FullName -Label ("{0} skills/{1}" -f $HostLabel, $entry.Name)
             continue
         }
 
@@ -157,6 +294,14 @@ $CodexAgentsPath = Join-Path $CodexHome 'AGENTS.md'
 $WorkspaceAgentsPath = Join-Path $WorkspaceRoot 'AGENTS.md'
 $WorkspaceGeminiPath = Join-Path $WorkspaceRoot 'GEMINI.md'
 $ForbiddenTokens = @('{REPO_ROOT}', '{WORKSPACE_ROOT}', '{VAULT_PATH}', '{CLAUDE_HOME}', '{CODEX_HOME}', '{GEMINI_HOME}')
+$script:RenderTokens = [ordered]@{
+    '{REPO_ROOT}' = $RepoRoot
+    '{WORKSPACE_ROOT}' = $WorkspaceRoot
+    '{VAULT_PATH}' = $VaultPath
+    '{CLAUDE_HOME}' = $ClaudeHome
+    '{CODEX_HOME}' = $CodexHome
+    '{GEMINI_HOME}' = (Join-Path $env:USERPROFILE '.gemini')
+}
 
 $script:Checks = @()
 $script:Warnings = @()
@@ -209,10 +354,25 @@ if (Test-Path -LiteralPath $CodexSettingsPath -PathType Leaf) {
 
 if (Test-Path -LiteralPath $CodexConfigPath -PathType Leaf) {
     $codexConfig = Read-FileUtf8 -Path $CodexConfigPath
-    if ($codexConfig -match '# >>> claude-dev-harness managed block >>>' -and $codexConfig -match '# <<< claude-dev-harness managed block <<<') {
+    $managedBlockContent = Get-ManagedTomlBlockContent -Content $codexConfig
+    if ($null -ne $managedBlockContent) {
         Add-Check 'Codex config.toml 已写入 managed block'
     } else {
         Add-Error 'Codex config.toml 缺少 managed block'
+    }
+
+    $renderedManagedTemplate = Render-TemplateContent -Content (Read-FileUtf8 -Path (Join-Path $RepoRoot 'agent-configs\codex\config.shared.toml.template')) -EscapeForCode
+    if ($null -ne $managedBlockContent) {
+        $expectedManagedLines = [regex]::Split($renderedManagedTemplate, '\r?\n') |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            ForEach-Object { $_.TrimEnd() }
+        $managedBlockLines = [regex]::Split($managedBlockContent, '\r?\n') | ForEach-Object { $_.TrimEnd() }
+        $missingManagedLine = $expectedManagedLines | Where-Object { $managedBlockLines -notcontains $_ } | Select-Object -First 1
+        if ($null -eq $missingManagedLine) {
+            Add-Check 'Codex config.toml managed block 内容与模板一致'
+        } else {
+            Add-Error ("Codex config.toml managed block 缺少预期内容: {0}" -f $missingManagedLine)
+        }
     }
 
     $configWithoutManagedBlock = [regex]::Replace(
@@ -220,10 +380,14 @@ if (Test-Path -LiteralPath $CodexConfigPath -PathType Leaf) {
         '(?ms)^\# >>> claude-dev-harness managed block >>>\r?\n.*?^\# <<< claude-dev-harness managed block <<<\r?\n?',
         ''
     )
-    if ($configWithoutManagedBlock -match '^\[\[skills\.config\]\]' ) {
-        Add-Error 'Codex config.toml 在 managed block 外仍残留 [[skills.config]]'
+    $managedSkillPaths = Get-TomlSkillConfigPaths -Content $renderedManagedTemplate
+    $leakedManagedPath = $managedSkillPaths |
+        Where-Object { $configWithoutManagedBlock -match [regex]::Escape($_) } |
+        Select-Object -First 1
+    if ($null -ne $leakedManagedPath) {
+        Add-Error ("Codex config.toml 在 managed block 外仍残留 Harness 托管 skill path: {0}" -f $leakedManagedPath)
     } else {
-        Add-Check 'Codex config.toml 已清理旧的 [[skills.config]]'
+        Add-Check 'Codex config.toml 未在 managed block 外泄露 Harness 托管 skill path'
     }
 } else {
     Add-Error ("缺少 Codex config.toml: {0}" -f $CodexConfigPath)
@@ -240,7 +404,7 @@ if ($null -eq $tomlHits) {
 
 if (Test-Path -LiteralPath (Join-Path $RepoRoot 'scripts\memory-health.ps1') -PathType Leaf) {
     $healthOutput = @(& (Join-Path $RepoRoot 'scripts\memory-health.ps1') -VaultRoot $VaultPath 2>&1)
-    if ($LASTEXITCODE -eq 0 -and ($healthOutput -join "`n") -match 'STATUS:\s+PASS') {
+    if ($LASTEXITCODE -eq 0 -and ($healthOutput -join [Environment]::NewLine) -match 'STATUS:\s+PASS') {
         Add-Check '共享记忆健康检查返回 STATUS: PASS'
     } else {
         Add-Error ("共享记忆健康检查失败: exit={0}" -f $LASTEXITCODE)

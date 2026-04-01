@@ -39,6 +39,7 @@
   - 部署 Claude hooks
   - 生成 Claude / Codex `settings.local.json`
   - 以 managed block 写入 Codex `config.toml`
+  - 只清理 Harness 自己托管的 `[[skills.config]]` 条目，保留用户已有的其他 Codex skill 配置
   - 保留 Claude / Codex `skills` 根目录为普通目录，并按子项创建 managed Junction
   - 保留宿主 `skills/` 下的 `.assistant`、`.claude`、`.qoder` 等隐藏 sidecar
   - 合并 Claude/Codex 现有 `.system` 到 repo-local `skills/.system`
@@ -49,10 +50,12 @@
 - `tests/verify-installation.ps1` 当前已覆盖：
   - `skills` 根目录保持为普通目录检查
   - repo `skills/` managed 条目逐项链接检查
+  - 热切换保留的 `skills/docs` 内容一致性检查（漂移或额外陈旧文件时返回 `WARN`）
   - `.system` 可见性检查
   - hooks 文件存在与占位符渲染检查
   - Claude / Codex `settings.local.json` 结构检查
-  - Codex `config.toml` managed block 与旧 `[[skills.config]]` 清理检查
+  - Codex `config.toml` managed block 内容一致性检查
+  - Harness 托管 skill path 不在 managed block 外泄露
   - `agent-configs/codex/*.toml` forbidden prefix 检查
   - `scripts/memory-health.ps1 -VaultRoot ...` 返回 `STATUS: PASS`
 - `uninstall.ps1` 当前已覆盖：
@@ -77,7 +80,7 @@
 - `vault-template/` 当前采取“缺失即补齐、存在则保留”的策略，适合首次安装与保守升级，但不会主动刷新已存在的工作流/配置文档
 - `.system` 当前策略是本机合并到 repo-local `skills/.system`；在真实双宿主环境下仍需要实机确认不会引入额外宿主副作用
 - `uninstall.ps1` 当前不会清理 `.assistant/` 运行时数据，这是有意保守策略；若后续需要“彻底卸载”，应单独定义更强约束的清理模式
-- 为避免 live session 自己锁住 `skills/docs`，当前安装在宿主已存在 `skills/docs` 普通目录时会保留它；这意味着 `docs` 在热切换场景下可能暂时不是 Junction
+- 为避免 live session 自己锁住 `skills/docs`，当前安装在宿主已存在 `skills/docs` 普通目录时会保留它；这意味着 `docs` 在热切换场景下可能暂时不是 Junction，且一旦内容漂移，`tests/verify-installation.ps1` 会返回 `WARN`
 - install 若中途失败，虽然现在会写出 recovery manifest snapshot，但仍需要操作者用该 manifest 显式调用 `uninstall.ps1`
 - repo-local `skills/.system` 当前仍属于安装生成物，不进 Git；若宿主继续依赖它，重复 uninstall 只会回退到“上一轮已安装状态”，而不是强制清空 `.system`
 
@@ -150,6 +153,29 @@
     - `%USERPROFILE%\.claude\skills\.assistant` / `.claude` / `.qoder` 保留
     - `%USERPROFILE%\.claude\skills\orchestrator` / `using-superpowers` 已切换为指向 repo 的 Junction
     - `%USERPROFILE%\.claude\skills\docs` 按热切换策略保留为普通目录
-    - `backups/active-install.json` 当前指向 `install-20260401-181430\install-manifest.json`
+    - `backups/active-install.json` 当前指向 `install-20260401-185834\install-manifest.json`
   - 额外说明：
     - 首次真实安装失败前的原始基线备份仍保留在 `{REPO_ROOT}\backups\install-20260401-174218`
+- Codex config 托管边界 sandbox：
+  - 预置用户自有 `[[skills.config]]` 到 sandbox `config.toml`
+  - `install.ps1 -WorkspaceRoot {REPO_ROOT}\tmp\config-boundary-sandbox\workspace`
+  - `tests/verify-installation.ps1 -WorkspaceRoot {REPO_ROOT}\tmp\config-boundary-sandbox\workspace`
+  - `uninstall.ps1 -ManifestPath {REPO_ROOT}\backups\install-20260401-184853\install-manifest.json`
+  - 结果：
+    - install 后 `config.toml` 同时保留用户自有条目与 Harness managed block
+    - verify 返回 `STATUS: PASS`
+    - uninstall 后用户自有 `[[skills.config]]` 恢复，managed block 已移除
+- `skills/docs` 漂移告警 sandbox：
+  - 预置宿主 `.claude\skills\docs` 为普通目录，并人为修改 `review.md`
+  - `install.ps1 -WorkspaceRoot {REPO_ROOT}\tmp\docs-drift-sandbox\workspace`
+  - `tests/verify-installation.ps1 -WorkspaceRoot {REPO_ROOT}\tmp\docs-drift-sandbox\workspace`
+  - 结果：
+    - verify 返回 `STATUS: WARN`
+    - 告警内容包含“保留为普通目录，但与 repo 内容不一致”
+- `skills/docs` 额外陈旧文件告警 sandbox：
+  - 预置宿主 `.claude\skills\docs` / `.codex\skills\docs` 为与 repo 一致的普通目录，再额外加入 `obsolete-task\review.md`
+  - `install.ps1 -WorkspaceRoot {REPO_ROOT}\tmp\docs-extra-sandbox\workspace`
+  - `tests/verify-installation.ps1 -WorkspaceRoot {REPO_ROOT}\tmp\docs-extra-sandbox\workspace`
+  - 结果：
+    - verify 返回 `STATUS: WARN`
+    - 告警内容包含 `extra=1`

@@ -8,7 +8,7 @@
 
 ## Summary
 
-`harness-distribution` 已完成从单机散布资产向可分发单仓库模式的改造。当前仓库已包含 shared assets、宿主模板、`vault-template/`、安装/回滚/验证脚本，以及 canonical 文档；真实宿主已经切换到该仓库驱动的安装形态，并通过 `tests/verify-installation.ps1` 验证。
+`harness-distribution` 已完成从单机散布资产向可分发单仓库模式的改造。当前仓库已包含 shared assets、宿主模板、`vault-template/`、安装/回滚/验证脚本，以及 canonical 文档；真实宿主已经刷新到当前代码对应的安装形态，并在同步保留的 `skills/docs` 后通过 `tests/verify-installation.ps1` 验证。
 
 ## Completed
 
@@ -20,6 +20,7 @@
   - `.system` 合并
   - `settings.local.json` merge-render
   - Codex `config.toml` managed block
+  - 只清理 Harness 自己托管的 `[[skills.config]]` 条目，保留用户已有的其他 Codex skill 配置
   - install 中途失败时的 recovery manifest snapshot
 - `uninstall.ps1` 已支持：
   - 按 manifest 回滚
@@ -29,7 +30,9 @@
   - managed skill 链接
   - hooks 渲染
   - Claude / Codex `settings.local.json`
-  - Codex `config.toml`
+  - Codex `config.toml` managed block 内容一致性与托管 skill path 外泄检查
+  - `skills/docs` 保留目录内容一致性告警
+  - `skills/docs` 保留目录额外陈旧文件告警
   - forbidden prefix 检查
   - 共享记忆健康检查
 
@@ -37,8 +40,9 @@
 
 - 当前工作分支：`codex/harness-distribution`
 - 真实宿主已安装完成。
+- 真实宿主保留的 `%USERPROFILE%\.claude\skills\docs` 与 `%USERPROFILE%\.codex\skills\docs` 已在本轮同步到 repo 当前 canonical docs。
 - 当前 active install manifest：
-  - `{REPO_ROOT}\backups\install-20260401-181430\install-manifest.json`
+  - `{REPO_ROOT}\backups\install-20260401-185834\install-manifest.json`
 - 真实宿主验证结果：
   - `tests/verify-installation.ps1 -WorkspaceRoot {WORKSPACE_ROOT}` -> `STATUS: PASS`
 - 首次真实安装失败前的原始基线备份仍保留：
@@ -50,11 +54,14 @@
 - 标准 sandbox `install -> verify -> uninstall` -> 通过
 - sidecar / Junction 回归 sandbox -> 通过
 - recovery manifest smoke sandbox -> 通过
-- 真实宿主 `uninstall -> install -> verify` -> `STATUS: PASS`
+- Codex config 托管边界 sandbox -> install 保留用户自有 `[[skills.config]]`，`verify` 返回 `STATUS: PASS`
+- `skills/docs` 漂移告警 sandbox -> 保留目录发生漂移时，`verify` 返回 `STATUS: WARN`
+- `skills/docs` 额外陈旧文件 sandbox -> 保留目录存在 repo 已删除的旧文件时，`verify` 返回 `STATUS: WARN`
+- 真实宿主 `install -> verify` -> 先识别 stale 安装，再在刷新 managed block 与同步 `skills/docs` 后返回 `STATUS: PASS`
 
 ## Watchouts
 
-- `skills/docs` 在当前 Claude 宿主上按热切换策略保留为普通目录，避免 live session 锁冲突；如需完全收敛为 repo single-source，可在冷态下补一轮切换。
+- `skills/docs` 在 live session 下仍会按热切换策略保留为普通目录，避免锁冲突；本轮已手动同步到 repo 当前版本，但后续 canonical docs 再变更时仍需要重复刷新，或在冷态下补一轮切换。
 - `uninstall.ps1` 不会清理 `{VAULT_PATH}\运行时\*`，这是有意保守策略。
 - install 若中途失败，需使用 backup 目录中的 `install-manifest.json` 显式调用 `uninstall.ps1 -ManifestPath ...`。
 - 当前仓库尚未配置 remote，因此 TODO-11 只能先完成本地 commit，不能直接 push。
@@ -64,4 +71,5 @@
 
 - 若要补齐回滚证据，执行一次真实宿主 uninstall 演练，再重新安装：
   - 已完成，可复用当前步骤重新验证。
+- 若后续继续改动 `skills/docs` canonical 文档，记得同步刷新 `%USERPROFILE%\.claude\skills\docs` 与 `%USERPROFILE%\.codex\skills\docs`，或改走冷态切换以避免 verify 再次返回 `WARN`。
 - 若要完成 TODO-11，配置 git remote 后 push 当前分支。
