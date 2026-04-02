@@ -4,6 +4,8 @@
 
 `memory-health.ps1 -OrchestratorFlowPath ...` resolves current-task docs from `current-flow.md`, so all artifact paths must continue to point at real current-task documents.
 
+`current-flow.md` is the canonical orchestration state. If another view disagrees with it, prefer `current-flow.md`.
+
 ```yaml
 task_id: <task-id>
 task_name: <task-name>
@@ -60,6 +62,8 @@ runtime_health_command: ..\..\scripts\memory-health.ps1 -VaultRoot {VAULT_PATH} 
 
 ## handoff.md
 
+`handoff.md` is a derived user-facing snapshot. Refresh it on bootstrap, real stage transitions, artifact-scan recovery, explicit transfer points, and terminal `HANDOFF`; it does not need to change for every same-stage micro-update.
+
 ```markdown
 # Handoff
 
@@ -106,6 +110,8 @@ runtime_health_command: ..\..\scripts\memory-health.ps1 -VaultRoot {VAULT_PATH} 
 ```
 
 ## stage-history.md
+
+`stage-history.md` is an append-only audit view. Append only when the stage actually changes.
 
 ```markdown
 # Stage History

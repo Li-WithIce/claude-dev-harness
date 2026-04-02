@@ -151,6 +151,22 @@ Windows 优先的单仓库 Harness 分发仓库。
 
 如果有多个 profile 都可能成立，应该停下来选清楚，而不是让 orchestrator 临时猜。
 
+### 轻量化状态规则
+
+为了避免 workflow 越跑越重，当前 orchestration 状态采用：
+
+- `current-flow.md` 作为唯一真相源
+- `handoff.md` 作为派生的用户可见快照
+- `stage-history.md` 作为派生的阶段审计日志
+
+这意味着：
+
+- 同一 stage 内的小变更，优先只更新 `current-flow.md`
+- 只有真实 stage 变化、恢复锚点重建、对外交接或终态 `HANDOFF` 时，才强制刷新 `handoff.md`
+- `stage-history.md` 只在 stage 真正切换时追加，不为每次微调都记一笔
+
+这样保留了 gate 纪律，但把多点写回的负担压低了。
+
 ## 你的开发流程
 
 日常开发真正跑的是下面这条主线：
@@ -190,7 +206,7 @@ Windows 优先的单仓库 Harness 分发仓库。
 
 - `using-superpowers` 判断这是 bug fix，导向 `orchestrator`
 - `orchestrator` 创建或恢复当前流转状态
-- 更新共享运行时：
+- 先更新 `current-flow.md` 与共享运行时：
   - `<workspace-root>/.assistant/运行时/当前任务.md`
   - `<workspace-root>/.assistant/运行时/tasks/fix-preserved-docs-extra-warning.md`
 - 如果输入已经足够，就不生成 `spec.md`，直接进入 `PLAN`
@@ -287,6 +303,8 @@ review 会重点检查：
 
 - `.assistant/运行时/上次会话.md`
 - `.assistant/运行时/恢复索引.md`
+
+而在这之前，同一 stage 内的局部实现或小回修，并不要求每次都刷新 `handoff.md`。
 
 #### 7. 这套示例在本仓库里怎么对应
 

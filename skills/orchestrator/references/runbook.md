@@ -2,7 +2,7 @@
 
 This runbook describes how orchestrator bootstraps, advances, recovers, and closes a development-harness task.
 
-`handoff.md` 在这套流程中不是只在末尾生成一次的交付文档，而是从 bootstrap 开始持续刷新的滚动状态文档；当 stage 进入 `HANDOFF` 时，它同时成为最终交付快照。
+`current-flow.md` 是 orchestration 的 canonical state。`handoff.md` 与 `stage-history.md` 是派生视图：前者服务于用户可见交接与终态快照，后者服务于阶段审计。它们不再要求在每一次同阶段小变更后都同步刷新；当 stage 进入 `HANDOFF` 时，`handoff.md` 成为最终交付快照。
 
 ## 1. Bootstrap a New Task
 
@@ -24,7 +24,7 @@ Bootstrap steps:
 3. Read repo context and summarize affected modules, dependencies, and risks
 4. Initialize `current-flow.md` with `mode: fast-track` or `mode: full`
 5. Record approved inputs and whether `DELTA_SPEC` is required
-6. Initialize or refresh `handoff.md` as the current-stage snapshot
+6. If this is a fresh bootstrap or a user-visible recovery point, initialize or refresh `handoff.md` as the current-stage snapshot
 7. Mirror the task into shared runtime
 8. Run the health gate
 
@@ -87,7 +87,7 @@ Do not claim pass without explicit evidence in `test.md`.
 
 ## 7. HANDOFF
 
-HANDOFF is the terminal state of the development harness, but `handoff.md` should already exist as a rolling status document before this stage.
+HANDOFF is the terminal state of the development harness. `handoff.md` should already exist by this stage, but before terminal delivery it is treated as a derived snapshot rather than an independent truth source.
 
 Required content:
 
@@ -130,8 +130,8 @@ Compatibility rules for in-flight legacy tasks:
 Every advance, loop-back, fallback, or recovery must end with:
 
 1. Refresh `.assistant/orchestration/current-flow.md`
-2. Append `.assistant/orchestration/stage-history.md`
-3. Refresh `.assistant/orchestration/handoff.md` as the latest rolling snapshot
+2. If and only if the stage changed, append `.assistant/orchestration/stage-history.md`
+3. Refresh `.assistant/orchestration/handoff.md` only when this is a stage transition, artifact-scan recovery, user-visible transfer point, or terminal `HANDOFF`
 4. Update the shared runtime mirror
 5. Run `..\..\scripts\memory-health.ps1 -VaultRoot {VAULT_PATH} -OrchestratorFlowPath <absolute-path-to-current-flow.md>`
 6. Confirm `STATUS: PASS`

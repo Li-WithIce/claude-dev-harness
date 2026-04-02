@@ -99,7 +99,9 @@ docs/<task-id>/spec.md        # 仅当 DELTA_SPEC 被触发时存在
 
 - `plan.md` 是开发阶段主文档
 - `spec.md` 在新流程里只承担可选 `delta-spec / 开发边界说明` 角色
-- `handoff.md` 是跨阶段滚动状态文档；进入 `HANDOFF` 后，它同时承担最终交付快照
+- `.assistant/orchestration/current-flow.md` 是 orchestration 的唯一真相源
+- `handoff.md` 与 `stage-history.md` 是从 `current-flow.md` + 当前任务 artifacts 派生出来的视图，不是并列真相源
+- `handoff.md` 是跨阶段滚动状态快照；进入 `HANDOFF` 后，它同时承担最终交付快照
 - `P0 / P1` 阻塞 TEST；仅 `P2` 时可以进入 TEST，但风险必须保留到 `handoff.md`
 - `test.md` 结论必须且只能是 `pass`、`fail`、`blocked`
 - `HANDOFF` 是当前流程终态；新写入不再使用 `DONE`
@@ -150,7 +152,8 @@ Orchestrator not only updates `.assistant/orchestration/*`，也必须同步 Obs
 - **INTAKE 只消费输入，不重演上游评审**：需求评审是默认必需输入；若任务涉及用户可见 UI 变更，则 UI 评审也必须存在；非 UI 任务必须显式记录 `ui review: not-applicable`；技术方案评审若存在则直接消费，不存在时也不默认阻塞
 - **DELTA_SPEC 按需触发**：只有输入不足以支撑开发计划时，才生成 `spec.md`
 - **PLAN 先收敛，再进入 DEV**：`plan.md` 必须成为开发主文档，并由用户确认
-- **每次阶段迁移都要刷新 handoff**：`handoff.md` 必须持续反映当前 stage、gate basis、最新变更摘要和下一步
+- **先写 current-flow，再决定是否派生其他视图**：任何 orchestration 变化先落到 `current-flow.md`
+- **handoff 只在必要时刷新**：bootstrap、真实 stage 迁移、artifact-scan recovery、用户可见交接、终态 `HANDOFF` 时必须刷新；同一 stage 内的小变更默认不强制刷新
 - **DEV 必须留下实现证据**：每次实现或回修后都要刷新 `implementation-notes.md`
 - **P0 / P1 阻塞 TEST**：implementation review 有 `P0 / P1` 时必须回 DEV
 - **REVIEW 必须声明 verdict**：`review.md` 需要显式写出 `review_verdict: pass | revise`
@@ -176,9 +179,10 @@ Orchestrator not only updates `.assistant/orchestration/*`，也必须同步 Obs
 写回规则：
 
 - 每次 advance、loop-back、fallback、recovery 都要更新 `current-flow.md`
-- 每次 stage 变化都要追加 `stage-history.md`
+- 只有真实 stage 变化时才追加 `stage-history.md`
 - `current-flow.md` 必须记录 `entry_tool`、`tool_profile_id`、`tool_profile_source`、`runner_tool`、`runner`、`tool_bindings`、`fallback_policy`
-- 只要输入摘要、`DELTA_SPEC` 判定、stage、runner、artifact 路径、gate basis 或 fallback policy 变化，就要刷新 `handoff.md`
+- `handoff.md` 只在 bootstrap、真实 stage 迁移、artifact-scan recovery、用户可见交接、终态 `HANDOFF` 时刷新
+- 同一 stage 内若只是局部实现、验证细节或 runner 内部尝试变化，只更新 `current-flow.md`；除非下游风险图景已经变化，否则不强制刷新 `handoff.md`
 - 只要无法安全自动推进，就写 `decision-needed.md`
 
 每次 orchestrator 响应必须先输出：
@@ -201,7 +205,8 @@ next: <next action>
 - 当前 stage binding 缺失
 - 尝试 advance 时所需的下一个 stage binding 缺失
 - 上游 approved inputs 不足，且无法判断是否应触发 `DELTA_SPEC`
-- `plan.md` / `review.md` / `test.md` / `handoff.md` 不满足 contract
+- `plan.md` / `review.md` / `test.md` 不满足 contract
+- 在要求刷新或消费 `handoff.md` 的时点上，`handoff.md` 不满足 contract
 - 共享运行时镜像缺失、过期或指向其他 `task_id`
 - 共享运行时 health gate 不返回 `STATUS: PASS`
 - 新写文档存在疑似 mojibake

@@ -12,8 +12,9 @@ orchestrator gates depend on usable current-task artifacts, not just file existe
   1. The current-task artifact exists when that artifact is required by the current stage
   2. The artifact belongs to the current task
   3. The artifact satisfies its minimum contract
+- `current-flow.md` is the canonical orchestration state; `handoff.md` must not override it
 - In the development harness, `plan.md` is the main document; `spec.md` is optional and only exists when `DELTA_SPEC` is triggered
-- `handoff.md` is the rolling stage-status artifact for the current task; when stage = `HANDOFF`, it also becomes the final development-delivery snapshot consumed by downstream roles
+- `handoff.md` is the derived stage-status snapshot for the current task; when stage = `HANDOFF`, it also becomes the final development-delivery snapshot consumed by downstream roles
 
 ## Optional delta-spec (`spec.md`)
 
@@ -100,7 +101,7 @@ Gate mapping:
 
 ## handoff
 
-Current-task `handoff.md` is the rolling stage-status and delivery artifact and must contain at least:
+Current-task `handoff.md` is the derived stage-status snapshot and delivery artifact and must contain at least:
 
 - `task_id` and `task_name`
 - Current `stage`, `next_stage`, and `handoff_reason`
@@ -117,11 +118,11 @@ Output path: `docs/<task-id>/handoff.md`
 
 ### Handoff Quality Rules
 
-- Refresh `handoff.md` on every advance, loop-back, fallback, and recovery, not only at terminal delivery
+- Refresh `handoff.md` on bootstrap, real stage transitions, artifact-scan recovery, explicit transfer points, and terminal delivery
 - Do not claim `HANDOFF` without explicit `test.md` evidence
 - Preserve all open `P2` items and known gaps
 - Keep the latest change summary aligned with `implementation-notes.md`, `review.md`, and `test.md`
-- Refresh `handoff.md` whenever stage, runner, fallback tier, reviewed diff scope, or downstream risk picture changes
+- Refresh `handoff.md` whenever the downstream-visible risk picture changes; same-stage local churn may remain only in `current-flow.md`
 
 ## Legacy document-review artifacts
 
