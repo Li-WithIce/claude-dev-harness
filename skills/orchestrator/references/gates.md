@@ -3,6 +3,10 @@
 Each stage transition checks current-task artifacts, not fixed filenames.
 Minimum structure rules are defined in [artifact-contracts.md](artifact-contracts.md).
 
+Recommended automation:
+
+- Run `scripts/validate-harness-artifacts.ps1 -CurrentFlowPath <absolute-path-to-current-flow.md>` before claiming an artifact gate is satisfied.
+
 ## Canonical Path Quick Reference
 
 | Artifact | Canonical path |

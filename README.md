@@ -167,6 +167,23 @@ Windows 优先的单仓库 Harness 分发仓库。
 
 这样保留了 gate 纪律，但把多点写回的负担压低了。
 
+### Artifact 自动校验
+
+为了减少“看起来写了文档，但其实 contract 不完整”的人工判断，仓库现在提供：
+
+```powershell
+.\scripts\validate-harness-artifacts.ps1 -CurrentFlowPath <absolute-path-to-current-flow.md>
+```
+
+它会做几类检查：
+
+- `current-flow.md` 的基础字段是否完整
+- 当前任务 artifact 的 `task_id` 是否和 `current-flow.md` 一致
+- `plan.md` / `implementation-notes.md` / `review.md` / `test.md` / `handoff.md` 是否满足最小 contract
+- 当 `stage = HANDOFF` 时，是否真的具备 `test.md` 等交付前置证据
+
+它不是安装校验的一部分，而是开发阶段的 gate 辅助脚本。
+
 ## 你的开发流程
 
 日常开发真正跑的是下面这条主线：
@@ -627,6 +644,9 @@ Set-Location <repo-root>
 
 # 同步保留的 docs
 .\scripts\sync-preserved-docs.ps1
+
+# 校验当前任务 artifacts
+.\scripts\validate-harness-artifacts.ps1 -CurrentFlowPath <absolute-path-to-current-flow.md>
 
 # 指定只同步 Claude 或 Codex
 .\scripts\sync-preserved-docs.ps1 -TargetHost Claude

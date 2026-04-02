@@ -39,6 +39,7 @@
 - 在 `README.md` 中补充运行组合矩阵，明确区分 Claude+Codex(+Gemini)、仅 Codex、Codex+Gemini、仅 Gemini 的支持边界，避免把“理论可绑定”误读成“当前已完整宿主化支持”
 - 为 orchestrator 新增 `references/default-tool-profiles.md`，把 `claude-codex-gemini-default`、`codex-only`、`codex-gemini` 固化成预置档案，并同步更新 `tool-profile-template`、`model-invocation`、`state-templates`、`runbook`、`examples` 与 README，降低不同机器组合下的绑定心智负担
 - 继续做 workflow 轻量化：将 `.assistant/orchestration/current-flow.md` 明确为 orchestration 唯一真相源，把 `handoff.md` 与 `stage-history.md` 降级为派生视图；同一 stage 内的小变更优先只更新 `current-flow.md`，仅在真实 stage 迁移、恢复锚点重建、用户可见交接和终态 `HANDOFF` 时刷新 `handoff.md`
+- 新增 `scripts/validate-harness-artifacts.ps1`，把 artifact contract 校验脚本化：可从 `current-flow.md` 解析当前任务，自动检查 `plan.md` / `implementation-notes.md` / `review.md` / `test.md` / `handoff.md` 的最小结构与 `task_id` 一致性，并在 README / gates / troubleshooting 中补充用法
 - `install.ps1` 当前已覆盖：
   - 渲染 Claude / Codex / workspace 模板
   - 初始化/补齐 `vault-template/`
@@ -208,3 +209,11 @@
     - 首次 verify 返回 `STATUS: WARN`
     - sync 脚本输出 `Claude updated=1`、`Codex removed=2`
     - 二次 verify 返回 `STATUS: PASS`
+- artifact validator smoke：
+  - `scripts\validate-harness-artifacts.ps1 -CurrentFlowPath {REPO_ROOT}\tmp\artifact-validator-smoke\workspace\.assistant\orchestration\current-flow.md`
+  - 结果：`STATUS: PASS`
+- validator/docs 更新后的真实宿主同步：
+  - `scripts\sync-preserved-docs.ps1 -RepoRoot {REPO_ROOT}`
+  - 输出：`Claude updated=1`、`Codex updated=1`
+  - `tests\verify-installation.ps1 -WorkspaceRoot {WORKSPACE_ROOT}`
+  - 结果：`STATUS: PASS`

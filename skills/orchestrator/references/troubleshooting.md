@@ -81,3 +81,16 @@ Actions:
 1. Re-read the source with explicit UTF-8
 2. Repair the damaged markdown before any further handoff
 3. Re-run the health gate
+
+## 7. Artifact Contract Drift
+
+Symptoms:
+
+- gate check says an artifact should be usable, but the markdown is missing required meta or sections
+- `handoff.md` or `test.md` exists, but downstream cannot safely consume it
+
+Actions:
+
+1. Run `scripts/validate-harness-artifacts.ps1 -CurrentFlowPath <absolute-path-to-current-flow.md>`
+2. Repair the artifact named in the validator output
+3. Re-run the validator until it returns `STATUS: PASS`
