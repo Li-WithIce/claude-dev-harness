@@ -70,6 +70,133 @@ Windows 优先的单仓库 Harness 分发仓库。
 | `TEST` | `docs/<task-id>/test.md` | 给出 `pass` / `fail` / `blocked` 结论 |
 | `HANDOFF` | `docs/<task-id>/handoff.md` | 汇总当前交付状态、风险、后续动作 |
 
+### 一个完整示例
+
+下面用一个真实类型的任务举例：
+
+> 用户请求：`verify-installation.ps1` 没有检查宿主 `skills/docs` 中 repo 已不存在的额外陈旧文件，请修复并验证。
+
+#### 1. INTAKE
+
+入口层先把它识别为开发任务，而不是普通问答：
+
+- `using-superpowers` 判断这是 bug fix，导向 `orchestrator`
+- `orchestrator` 创建或恢复当前流转状态
+- 更新共享运行时：
+  - `<workspace-root>/.assistant/运行时/当前任务.md`
+  - `<workspace-root>/.assistant/运行时/tasks/fix-preserved-docs-extra-warning.md`
+- 如果输入已经足够，就不生成 `spec.md`，直接进入 `PLAN`
+
+这一步的核心不是写代码，而是先把“当前任务是谁、当前在哪个 stage、谁负责写共享状态”钉住。
+
+#### 2. PLAN
+
+然后生成开发主文档：
+
+- `docs/fix-preserved-docs-extra-warning/plan.md`
+
+里面至少会写清楚：
+
+- 问题是什么：当前 verify 只从 repo 侧枚举，没有检查宿主多余文件
+- 预期行为是什么：宿主存在 `obsolete-task/review.md` 之类的额外文件时，应返回 `WARN`
+- 实现思路是什么：在 `Assert-PreservedDirectoryMatchesRepo` 中增加宿主侧枚举与 `extraCount`
+- 风险是什么：不能把 sidecar 或非 docs 范围误报进去
+- 怎么验证：构造 sandbox，预置 extra docs，验证 `WARN`；再运行同步脚本，验证恢复为 `PASS`
+
+这份 `plan.md` 经过确认后，才进入 `DEV`。
+
+#### 3. DEV
+
+实现阶段会做两类事情：
+
+- 改代码：
+  - 修改 `tests/verify-installation.ps1`
+- 写实现证据：
+  - 更新 `docs/fix-preserved-docs-extra-warning/implementation-notes.md`
+
+这里的实现动作通常是：
+
+- 增加宿主目录扫描
+- 用 repo 相对路径集合对比宿主文件
+- 统计 `extraCount`
+- 当 `missingCount`、`changedCount`、`extraCount` 任一大于 0 时返回 `WARN`
+- 告警里明确提示可运行 `scripts/sync-preserved-docs.ps1`
+
+如果实现过程中用户打断，说一句“继续”，恢复逻辑会从 `.assistant/运行时/恢复索引.md` 往下读，不需要重新靠人工解释上下文。
+
+#### 4. REVIEW(implementation)
+
+实现完成后，不直接结束，而是进入实现 review：
+
+- 产物：`docs/fix-preserved-docs-extra-warning/review.md`
+
+review 会重点检查：
+
+- 是否真的覆盖了宿主额外文件场景
+- 是否只检查 `skills/docs`，没有误伤别的保留目录
+- warning 文案是否给出正确修复路径
+- 有没有引入新的误报或漏报
+
+如果 review 发现 `P0` 或 `P1`，流程会回到 `DEV` 修正；不是“review 走个形式”。
+
+#### 5. TEST
+
+测试阶段再把结论写成独立证据：
+
+- 产物：`docs/fix-preserved-docs-extra-warning/test.md`
+
+一个典型测试脚本流程会是：
+
+```powershell
+# 1. 准备 sandbox，并预置与 repo 一致的 skills/docs
+# 2. 额外加入 obsolete-task/review.md
+# 3. 执行 install
+# 4. 执行 verify，预期 STATUS: WARN，且告警包含 extra=1
+# 5. 执行 sync-preserved-docs.ps1
+# 6. 再次执行 verify，预期 STATUS: PASS
+```
+
+`test.md` 的结论只能写三种之一：
+
+- `pass`
+- `fail`
+- `blocked`
+
+#### 6. HANDOFF
+
+最后才进入交付阶段：
+
+- 产物：`docs/fix-preserved-docs-extra-warning/handoff.md`
+
+这里会汇总：
+
+- 改了什么
+- 现在行为是什么
+- 用户需要知道的操作，比如 docs-only 变更后如何同步
+- 还有没有残余风险
+
+如果这是一次完整收尾，Claude 还会更新：
+
+- `.assistant/运行时/上次会话.md`
+- `.assistant/运行时/恢复索引.md`
+
+#### 7. 这套示例在本仓库里怎么对应
+
+对消费 Harness 的普通工作区，上述 artifact 默认落在：
+
+- `<workspace-root>/docs/<task-id>/`
+
+而这个分发仓库在改造自己时，历史上把任务 artifact 放在：
+
+- `skills/docs/<task-id>/`
+
+这两者不要混淆：
+
+- 前者是你日常开发时的工作流落点
+- 后者是这个仓库自己作为被开发对象时留下的 canonical docs 证据
+
+换句话说，工作流本身没有问题；之前让人困惑的，是 README 没先把这两个上下文拆开讲。
+
 恢复与状态管理走的是共享运行时协议：
 
 - 新任务 / 切换任务 / 恢复任务：更新 `<workspace-root>/.assistant/运行时/当前任务.md` 与 `运行时/tasks/<task-id>.md`

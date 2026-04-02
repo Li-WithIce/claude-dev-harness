@@ -35,6 +35,7 @@
   - `tests/verify-installation.ps1`
 - 重写 `README.md`，补齐安装、验证、回滚、边界与当前 caveats
 - 重写 `README.md`，明确区分“你的开发流程”和“仓库安装/维护流程”，补齐 Harness 架构、stage machine、共享运行时、首次安装、日常更新、docs-only 同步、回滚、验证状态与常见问题
+- 在 `README.md` 中补充“修复 verify-installation 漏检 extra docs”示例，串起 INTAKE -> PLAN -> DEV -> REVIEW -> TEST -> HANDOFF 的完整使用方式，并解释工作区 `docs/<task-id>/` 与本仓库 `skills/docs/<task-id>/` 的区别
 - `install.ps1` 当前已覆盖：
   - 渲染 Claude / Codex / workspace 模板
   - 初始化/补齐 `vault-template/`
