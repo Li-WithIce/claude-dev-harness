@@ -41,6 +41,7 @@
 - 继续做 workflow 轻量化：将 `.assistant/orchestration/current-flow.md` 明确为 orchestration 唯一真相源，把 `handoff.md` 与 `stage-history.md` 降级为派生视图；同一 stage 内的小变更优先只更新 `current-flow.md`，仅在真实 stage 迁移、恢复锚点重建、用户可见交接和终态 `HANDOFF` 时刷新 `handoff.md`
 - 新增 `scripts/validate-harness-artifacts.ps1`，把 artifact contract 校验脚本化：可从 `current-flow.md` 解析当前任务，自动检查 `plan.md` / `implementation-notes.md` / `review.md` / `test.md` / `handoff.md` 的最小结构与 `task_id` 一致性，并在 README / gates / troubleshooting 中补充用法
 - 收紧 `scripts/validate-harness-artifacts.ps1` 的 gate 语义，避免 `stage=TEST` 但缺少 `test.md`、或 `review_verdict=pass` 但仍残留 `P0/P1` 时误报 `PASS`
+- 收紧 `tests/verify-installation.ps1` 对 Codex `config.toml` managed block 的比对，避免 block 内被误塞入额外 `[[skills.config]]` 时仍误报“与模板一致”
 - `install.ps1` 当前已覆盖：
   - 渲染 Claude / Codex / workspace 模板
   - 初始化/补齐 `vault-template/`
@@ -236,3 +237,8 @@
     - `skills\.system\dup-skill\dup-skill` 不存在
     - `skills\.system\dup-skill\SKILL.md` 与 `extra.txt` 均保留
     - `tests\verify-installation.ps1 -WorkspaceRoot <sandbox-workspace> -RepoRoot <sandbox-repo>` 返回 `STATUS: PASS`
+- managed block extra-line 回归 sandbox：
+  - 先执行 `install.ps1 -WorkspaceRoot <sandbox-workspace>`
+  - 再向 `%USERPROFILE%\.codex\config.toml` 的 Harness managed block 内手工注入额外 `[[skills.config]]`
+  - 执行 `tests\verify-installation.ps1 -WorkspaceRoot <sandbox-workspace>`
+  - 结果：应返回 `STATUS: FAIL`，并提示 managed block 与模板不一致

@@ -364,15 +364,24 @@ if (Test-Path -LiteralPath $CodexConfigPath -PathType Leaf) {
 
     $renderedManagedTemplate = Render-TemplateContent -Content (Read-FileUtf8 -Path (Join-Path $RepoRoot 'agent-configs\codex\config.shared.toml.template')) -EscapeForCode
     if ($null -ne $managedBlockContent) {
-        $expectedManagedLines = [regex]::Split($renderedManagedTemplate, '\r?\n') |
-            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        $expectedManagedLines = [regex]::Split($renderedManagedTemplate.TrimEnd(), '\r?\n') |
             ForEach-Object { $_.TrimEnd() }
-        $managedBlockLines = [regex]::Split($managedBlockContent, '\r?\n') | ForEach-Object { $_.TrimEnd() }
-        $missingManagedLine = $expectedManagedLines | Where-Object { $managedBlockLines -notcontains $_ } | Select-Object -First 1
-        if ($null -eq $missingManagedLine) {
+        $managedBlockLines = [regex]::Split($managedBlockContent.TrimEnd(), '\r?\n') | ForEach-Object { $_.TrimEnd() }
+
+        $blockMatchesTemplate = $expectedManagedLines.Count -eq $managedBlockLines.Count
+        if ($blockMatchesTemplate) {
+            for ($index = 0; $index -lt $expectedManagedLines.Count; $index += 1) {
+                if ($expectedManagedLines[$index] -ne $managedBlockLines[$index]) {
+                    $blockMatchesTemplate = $false
+                    break
+                }
+            }
+        }
+
+        if ($blockMatchesTemplate) {
             Add-Check 'Codex config.toml managed block 内容与模板一致'
         } else {
-            Add-Error ("Codex config.toml managed block 缺少预期内容: {0}" -f $missingManagedLine)
+            Add-Error 'Codex config.toml managed block 与模板不一致（可能缺少、变更或多出额外行）'
         }
     }
 
