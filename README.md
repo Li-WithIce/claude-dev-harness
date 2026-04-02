@@ -43,6 +43,74 @@ Windows 优先的单仓库 Harness 分发仓库。
 - 安装脚本只是把工作流入口、状态协议、skills、hooks 和模板落到宿主
 - 你的日常开发，主要发生在工作区 `docs/<task-id>/` 和 `.assistant/运行时/`，不是这个仓库根目录
 
+## 运行组合
+
+当前仓库对不同本机组合的支持边界可以直接理解为：
+
+| 本机组合 | 能否跑完整工作流 | 当前结论 |
+|---|---|---|
+| Claude + Codex + 可选 Gemini | 可以 | 推荐组合，支持最好 |
+| 只有 Codex | 可以，但有约束 | 可用，需改用 Codex 作为主入口/主 runner |
+| Codex + Gemini | 可以，但有约束 | 可用，推荐 Codex 主流程 + Gemini 测试 |
+| 只有 Gemini | 不建议，当前不算完整支持 | 只能作为 TEST runner，不是完整 workflow host |
+
+### 1. 只有 Codex
+
+可以跑，但不要把它理解成“当前默认配置原封不动照搬”。
+
+可用的原因：
+
+- repo 会把核心 skills 同步到 `%USERPROFILE%\.codex\skills`
+- workspace 会有 `AGENTS.md`、`.assistant/` 等共享入口
+- `plan` / `implement` / `review` / `test` / `orchestrator` 这些核心 skill 本身并不要求必须由 Claude 执行
+
+约束在于：
+
+- 当前默认示例仍是 Claude-first，不是 Codex-first
+- 如果你只有 Codex，应该显式采用 Codex 作为 `entry_tool`，并给出 Codex 绑定的 stage profile
+- 当前仓库仍会创建并维护 `%USERPROFILE%\.claude` 兼容目录；即便机器上不装 Claude，也不要把它当作“完全无用”手动删掉
+- 某些兼容性例外路径仍保留了对 `.claude` 目录的依赖，因此“没有 Claude 应用”可以，“完全不存在 `.claude` 兼容目录”不建议
+
+实操上，只有 Codex 时更稳妥的理解是：
+
+- `INTAKE/PLAN/DEV/REVIEW/HANDOFF` 由 Codex 主跑
+- `TEST` 也可以先用本地 `test` skill 跑
+- 如果没有 Gemini，就不要把 TEST binding 设成 Gemini-first
+
+### 2. 只有 Gemini
+
+当前不建议把它当成完整 workflow host。
+
+原因不是 stage machine 理论上不能绑定 Gemini，而是这套分发仓库目前没有把 Gemini 做成和 Claude/Codex 对等的宿主层：
+
+- 没有 `agent-configs/gemini/`
+- 安装脚本不会像处理 `.claude` / `.codex` 那样去托管 `.gemini` 的 skills、settings、全局入口
+- 当前 `GEMINI.md` 是 workspace 入口补充，不等于完整的 Gemini 宿主分发
+- `gemini-designer-main` 的定位是 TEST runner，不是整个 workflow 的 governor
+
+所以，只有 Gemini 时你最多能做的是：
+
+- 把 Gemini 当 TEST 阶段的只读审证 runner
+- 或手工消费 `GEMINI.md` 和工作区 artifacts
+
+但要让它单独承担 `using-superpowers -> orchestrator -> PLAN -> DEV -> REVIEW -> TEST -> HANDOFF` 的完整宿主职责，当前仓库还没做到开箱即用。
+
+### 3. Codex + Gemini
+
+这是当前不依赖 Claude 应用时最现实的一种组合，但仍建议你把 Codex 视为主入口，而不是 Gemini。
+
+推荐分工是：
+
+- `INTAKE/PLAN/DEV/REVIEW/HANDOFF`：Codex
+- `TEST`：Gemini 优先，必要时回退本地 `test` / Codex
+
+原因是：
+
+- Codex 这边已经有宿主模板、skills 同步、`config.toml` managed block
+- Gemini 在当前架构里更像“专职测试 runner”，而不是“全流程 orchestrator 宿主”
+
+也就是说，`Codex + Gemini` 是能工作的，但模式应当是“Codex 驱动主流程，Gemini 负责 TEST”，而不是双主入口对等治理。
+
 ## 你的开发流程
 
 日常开发真正跑的是下面这条主线：
