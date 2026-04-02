@@ -57,6 +57,7 @@
   - 合并 Claude/Codex 现有 `.system` 到 repo-local `skills/.system`
   - 避免 repeated install 或 Claude/Codex 具有同名 `.system` skill 时，把目录错误嵌套成 `foo\\foo\\...`
   - 若 repo-local `skills/.system` 已被旧 bug 污染为自套娃结构，即使宿主 `.system` 全部指回该目标，后续 install 也会主动修复该历史污染
+  - `.system` 合并时，repo-local 当前版本优先；Claude/Codex 宿主只补充 repo 中不存在的 `.system` skill，不再用同名宿主副本覆盖 repo 当前版本
   - 备份并恢复已有 skill Junction 的链接元数据，而不是平铺成普通目录
   - 在 install 中途失败时持续写出 recovery manifest snapshot，避免只剩 backup 目录而没有可消费 manifest
   - 对断链 `.system` Junction 降级跳过，避免 repeated uninstall 后的空路径错误
@@ -262,3 +263,11 @@
     - `skills\.system\dup-skill\dup-skill` 不再存在
     - `skills\.system\dup-skill\extra.txt` 被正确提升回父目录
     - `tests\verify-installation.ps1 -WorkspaceRoot <sandbox-workspace> -RepoRoot <sandbox-repo>` 返回 `STATUS: PASS`
+- `.system` precedence 回归：
+  - 预置宿主 `%USERPROFILE%\.claude\skills\.system\openai-docs\SKILL.md = HOST_OVERRIDE_VERSION`
+  - 执行 `install.ps1 -WorkspaceRoot <sandbox-workspace> -RepoRoot <sandbox-repo>`
+  - 结果：repo-local `skills\.system\openai-docs\SKILL.md` 仍保持 repo 当前版本，不会被宿主同名 skill 覆盖
+- `.system` host-only merge 回归：
+  - 预置宿主 `%USERPROFILE%\.claude\skills\.system\host-only-skill\SKILL.md`
+  - 执行 `install.ps1 -WorkspaceRoot <sandbox-workspace> -RepoRoot <sandbox-repo>`
+  - 结果：repo-local `skills\.system\host-only-skill\SKILL.md` 被吸收保留

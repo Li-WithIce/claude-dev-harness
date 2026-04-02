@@ -874,9 +874,19 @@ function Merge-SystemSkills {
 
     $existingTarget = if (Test-Path -LiteralPath $TargetPath) { Get-NormalizedPath -Path $TargetPath } else { $null }
     $stagingPath = Join-Path $script:BackupRoot '_merged-system'
+    $canonicalSystemPath = $null
+    if ($SourceRoots.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($SourceRoots[0])) {
+        $canonicalSystemPath = Get-NormalizedPath -Path (Join-Path $SourceRoots[0] '.system')
+    }
 
     Remove-PathIfExists -Path $stagingPath
     Ensure-Directory -Path $stagingPath
+
+    if (Test-Path -LiteralPath $TargetPath -PathType Container) {
+        foreach ($child in Get-ChildItem -LiteralPath $TargetPath -Force) {
+            Copy-ItemMerged -SourcePath $child.FullName -DestinationPath (Join-Path $stagingPath $child.Name)
+        }
+    }
 
     foreach ($sourceRoot in $SourceRoots) {
         if ([string]::IsNullOrWhiteSpace($sourceRoot)) {
@@ -902,6 +912,13 @@ function Merge-SystemSkills {
 
         foreach ($child in $children) {
             $destination = Join-Path $stagingPath $child.Name
+            $shouldPreserveCanonicalChild = -not [string]::IsNullOrWhiteSpace($canonicalSystemPath) -and
+                ($sourceNormalizedPath -ne $canonicalSystemPath) -and
+                (Test-Path -LiteralPath $destination)
+            if ($shouldPreserveCanonicalChild) {
+                continue
+            }
+
             Copy-ItemMerged -SourcePath $child.FullName -DestinationPath $destination
         }
     }

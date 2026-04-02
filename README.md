@@ -475,6 +475,7 @@ Set-Location <repo-root>
 - 保留宿主 `skills/` 下不与 repo managed 条目同名的本地自有 skills，避免安装后把用户原有技能从活跃目录里移走
 - 若宿主中残留指向 repo `skills/` 的旧 Harness skill 链接，而该 skill 已不在当前 repo 托管集合中，install 会将其视为陈旧条目并清理
 - 将现有 Claude / Codex `.system` 内容合并到 repo-local `skills/.system`
+- `.system` 合并时，repo-local 当前版本优先；宿主只补充 repo 中不存在的 `.system` skill，不再用同名宿主副本覆盖 repo 当前版本
 - 写入 install manifest 到 `backups/install-*/install-manifest.json`
 
 ### 5. 执行验证
