@@ -34,11 +34,14 @@ INTAKE -> PLAN -> DEV -> REVIEW(implementation) -> TEST -> HANDOFF
 4. 新任务 bootstrap 时，至少要拿到：
    - `entry_tool`
    - `tool_profile_id`
+   - `tool_profile_source`
    - 当前 stage binding
    - `fallback_policy`
+   - 可选 `fallback_bindings`
   - 上游输入摘要（需求评审是否存在、UI 评审是 `present|missing|not-applicable`、技术方案评审是否存在）
-5. 如果 tool profile 缺失、当前 stage binding 缺失、用户指定 binding 与恢复状态冲突、或入口工具未指定，立即停止自动推进并写 `.assistant/orchestration/decision-needed.md`
-6. bootstrap 时先判定是否满足 fast-track；满足则设置 `mode: fast-track`，否则设置 `mode: full`
+5. `tool_profile_id` 可以来自恢复状态、repo preset 或用户显式指定；如果无法唯一确定，立即停止自动推进并写 `.assistant/orchestration/decision-needed.md`
+6. 如果 tool profile 缺失、当前 stage binding 缺失、用户指定 binding 与恢复状态冲突、或入口工具未指定，立即停止自动推进并写 `.assistant/orchestration/decision-needed.md`
+7. bootstrap 时先判定是否满足 fast-track；满足则设置 `mode: fast-track`，否则设置 `mode: full`
 
 ## Repo Context Warmup
 
@@ -81,7 +84,7 @@ INTAKE(compact) -> PLAN(compact) -> DEV -> REVIEW(implementation) -> TEST -> HAN
 ## Core Rules
 
 - Stage machine fixed；runner binding dynamic
-- 不存在默认工具组合。Claude / Codex / Gemini 都只是可选 profile 示例
+- repo 可以提供命名 preset profiles，但只有在恢复状态命中、用户显式选择、或当前环境唯一匹配时才允许启用；禁止临时猜测 binding
 - 所有 gate 只看当前任务 artifacts，不看模糊的固定文件名存在感
 - 当前任务 canonical artifact 路径为：
 
@@ -220,6 +223,7 @@ next: <next action>
 - State templates: [references/state-templates.md](references/state-templates.md)
 - Tool profile template: [references/tool-profile-template.md](references/tool-profile-template.md)
 - Model invocation: [references/model-invocation.md](references/model-invocation.md)
+- Default tool profiles: [references/default-tool-profiles.md](references/default-tool-profiles.md)
 - Execution runbook: [references/runbook.md](references/runbook.md)
 - Review templates: [references/review-templates.md](references/review-templates.md)
 - Troubleshooting: [references/troubleshooting.md](references/troubleshooting.md)

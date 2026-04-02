@@ -37,6 +37,7 @@
 - 重写 `README.md`，明确区分“你的开发流程”和“仓库安装/维护流程”，补齐 Harness 架构、stage machine、共享运行时、首次安装、日常更新、docs-only 同步、回滚、验证状态与常见问题
 - 在 `README.md` 中补充“修复 verify-installation 漏检 extra docs”示例，串起 INTAKE -> PLAN -> DEV -> REVIEW -> TEST -> HANDOFF 的完整使用方式，并解释工作区 `docs/<task-id>/` 与本仓库 `skills/docs/<task-id>/` 的区别
 - 在 `README.md` 中补充运行组合矩阵，明确区分 Claude+Codex(+Gemini)、仅 Codex、Codex+Gemini、仅 Gemini 的支持边界，避免把“理论可绑定”误读成“当前已完整宿主化支持”
+- 为 orchestrator 新增 `references/default-tool-profiles.md`，把 `claude-codex-gemini-default`、`codex-only`、`codex-gemini` 固化成预置档案，并同步更新 `tool-profile-template`、`model-invocation`、`state-templates`、`runbook`、`examples` 与 README，降低不同机器组合下的绑定心智负担
 - `install.ps1` 当前已覆盖：
   - 渲染 Claude / Codex / workspace 模板
   - 初始化/补齐 `vault-template/`

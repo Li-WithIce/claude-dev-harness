@@ -15,11 +15,12 @@ Before any automatic progression, confirm:
   - UI review (`present` / `missing` / `not-applicable`)
   - technical review (`present` / `absent`)
 - A tool profile exists for the current stage
+- If a repo preset is used, the preset is explicitly recorded as `tool_profile_source: repo-preset`
 
 Bootstrap steps:
 
 1. Resolve task identity
-2. Resolve `entry_tool`, `tool_profile_id`, current stage binding, `fallback_policy`
+2. Resolve `entry_tool`, `tool_profile_id`, `tool_profile_source`, current stage binding, `fallback_policy`, and any declared `fallback_bindings`
 3. Read repo context and summarize affected modules, dependencies, and risks
 4. Initialize `current-flow.md` with `mode: fast-track` or `mode: full`
 5. Record approved inputs and whether `DELTA_SPEC` is required
@@ -112,6 +113,8 @@ If `current-flow.md` is missing or invalid, recover in this order:
 4. `implementation-notes.md` + diff
 5. `plan.md`
 6. optional `spec.md`
+
+If artifacts recover cleanly but `tool_profile_id` is missing, first check whether exactly one repo preset matches the declared tool availability. If not, stop and write `decision-needed.md`.
 
 ## 9. Legacy Compatibility
 

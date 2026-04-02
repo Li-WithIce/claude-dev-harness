@@ -10,7 +10,8 @@ task_name: 登录鉴权重构
 mode: full
 stage: INTAKE
 entry_tool: Claude
-tool_profile_id: dev-harness-default
+tool_profile_id: claude-codex-gemini-default
+tool_profile_source: repo-preset
 runner_tool: Claude
 runner: /orchestrator
 tool_bindings:
@@ -18,8 +19,14 @@ tool_bindings:
   PLAN: Claude /plan
   DEV: Claude /implement
   REVIEW(implementation): Claude /review
-  TEST: Claude /test
+  TEST: Gemini /gemini-designer-main
   HANDOFF: Claude /orchestrator
+fallback_bindings:
+  DEV:
+    - Codex task runner
+  TEST:
+    - Claude /test
+    - Codex local test runner
 approved_inputs:
   requirement_review: present
   ui_review: present
@@ -137,4 +144,32 @@ next: Use the optional spec binding to produce docs/auth-login-v2/spec.md as a d
 
 - 验收重点：登录失败文案、token 续签、会话恢复
 - 不再将本阶段终态写为 DONE
+```
+
+## 5. current-flow.md Fragment When `codex-gemini` Is Selected
+
+```yaml
+task_id: verify-install-extra-docs
+task_name: 校验 preserved docs 额外陈旧文件
+mode: fast-track
+stage: TEST
+entry_tool: Codex
+tool_profile_id: codex-gemini
+tool_profile_source: repo-preset
+runner_tool: Gemini
+runner: /gemini-designer-main
+tool_bindings:
+  INTAKE: Codex task runner (orchestrator bootstrap)
+  PLAN: Codex task runner (plan artifact)
+  DEV: Codex task runner (implementation)
+  REVIEW(implementation): Codex task runner (implementation review)
+  TEST: Gemini /gemini-designer-main
+  HANDOFF: Codex task runner (handoff)
+fallback_bindings:
+  TEST:
+    - Codex local test runner
+gate:
+  status: passed
+  basis: implementation review passed; proceed with Gemini-first validation
+next: Run Gemini validation. If Gemini is unavailable, fall back to Codex local test runner and keep the same artifact set.
 ```

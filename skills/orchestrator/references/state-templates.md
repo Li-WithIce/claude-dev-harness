@@ -8,11 +8,11 @@
 task_id: <task-id>
 task_name: <task-name>
 mode: <full|fast-track>
-stage: <INTAKE|PLAN|DEV|REVIEW|TEST|HANDOFF>
+stage: <INTAKE|PLAN|DEV|REVIEW(implementation)|TEST|HANDOFF>
 review_scope: <implementation|none>
 entry_tool: <tool>
 tool_profile_id: <profile-id>
-tool_profile_source: <user-confirmed|restored|manual>
+tool_profile_source: <repo-preset|user-confirmed|restored|manual>
 runner_tool: <tool>
 runner: <skill/script/command>
 fallback_policy: <policy>
@@ -44,6 +44,11 @@ tool_bindings:
   REVIEW(implementation): <tool + invocation>
   TEST: <tool + invocation>
   HANDOFF: <tool + invocation>
+
+fallback_bindings:
+  <STAGE>:
+    - <fallback tool + invocation>
+    - <fallback tool + invocation>
 
 gate:
   status: <passed|not passed|blocked>

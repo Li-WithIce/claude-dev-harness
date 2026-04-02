@@ -54,6 +54,26 @@ Windows 优先的单仓库 Harness 分发仓库。
 | Codex + Gemini | 可以，但有约束 | 可用，推荐 Codex 主流程 + Gemini 测试 |
 | 只有 Gemini | 不建议，当前不算完整支持 | 只能作为 TEST runner，不是完整 workflow host |
 
+### 推荐预置 Profile
+
+为了避免每次手工脑补 stage bindings，当前建议直接选仓库预置档案：
+
+| 场景 | 推荐 `tool_profile_id` |
+|---|---|
+| Claude + Codex + Gemini | `claude-codex-gemini-default` |
+| 只有 Codex | `codex-only` |
+| Codex + Gemini | `codex-gemini` |
+
+这些 profile 的正式定义在：
+
+- `skills/orchestrator/references/default-tool-profiles.md`
+
+它们的意义不是“偷偷存在的默认值”，而是：
+
+- 先把常用组合显式固化
+- 让 `current-flow.md`、`handoff.md`、恢复逻辑和 runner 选择都引用同一个名字
+- 减少“这台机器现在到底该怎么绑 stage”这种重复决策
+
 ### 1. 只有 Codex
 
 可以跑，但不要把它理解成“当前默认配置原封不动照搬”。
@@ -67,7 +87,7 @@ Windows 优先的单仓库 Harness 分发仓库。
 约束在于：
 
 - 当前默认示例仍是 Claude-first，不是 Codex-first
-- 如果你只有 Codex，应该显式采用 Codex 作为 `entry_tool`，并给出 Codex 绑定的 stage profile
+- 如果你只有 Codex，应该显式采用 Codex 作为 `entry_tool`，并优先使用 `codex-only`
 - 当前仓库仍会创建并维护 `%USERPROFILE%\.claude` 兼容目录；即便机器上不装 Claude，也不要把它当作“完全无用”手动删掉
 - 某些兼容性例外路径仍保留了对 `.claude` 目录的依赖，因此“没有 Claude 应用”可以，“完全不存在 `.claude` 兼容目录”不建议
 
@@ -110,6 +130,26 @@ Windows 优先的单仓库 Harness 分发仓库。
 - Gemini 在当前架构里更像“专职测试 runner”，而不是“全流程 orchestrator 宿主”
 
 也就是说，`Codex + Gemini` 是能工作的，但模式应当是“Codex 驱动主流程，Gemini 负责 TEST”，而不是双主入口对等治理。
+
+### 如何实际选择 Profile
+
+一个新任务开始时，最稳妥的做法是先把 profile 定下来，再推进 stage：
+
+1. 确认本机组合
+2. 选择对应的 `tool_profile_id`
+3. 在 `current-flow.md` 中记录：
+   - `entry_tool`
+   - `tool_profile_id`
+   - `tool_profile_source`
+   - `tool_bindings`
+   - `fallback_bindings`
+4. 再进入 `PLAN` 或恢复现有 stage
+
+如果当前环境只匹配一个 repo 预置 profile，可以直接记录为：
+
+- `tool_profile_source: repo-preset`
+
+如果有多个 profile 都可能成立，应该停下来选清楚，而不是让 orchestrator 临时猜。
 
 ## 你的开发流程
 
