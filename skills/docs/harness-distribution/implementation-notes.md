@@ -52,6 +52,7 @@
   - 保留宿主 `skills/` 下的 `.assistant`、`.claude`、`.qoder` 等隐藏 sidecar
   - 保留宿主 `skills/` 下不与 repo managed 条目同名的本地自有 skills，避免安装后从活跃技能目录中消失
   - 合并 Claude/Codex 现有 `.system` 到 repo-local `skills/.system`
+  - 避免 repeated install 或 Claude/Codex 具有同名 `.system` skill 时，把目录错误嵌套成 `foo\\foo\\...`
   - 备份并恢复已有 skill Junction 的链接元数据，而不是平铺成普通目录
   - 在 install 中途失败时持续写出 recovery manifest snapshot，避免只剩 backup 目录而没有可消费 manifest
   - 对断链 `.system` Junction 降级跳过，避免 repeated uninstall 后的空路径错误
@@ -228,3 +229,10 @@
   - 结果：应返回 `STATUS: FAIL`
   - 将 `review.md` 中示例 finding 从 `[P2]` 改成 `[P1]` 且保留 `review_verdict: pass`
   - 结果：应返回 `STATUS: FAIL`
+- `.system` merge 回归 sandbox：
+  - 创建干净 repo 副本，并预置 `%USERPROFILE%\.claude\skills\.system\dup-skill` 与 `%USERPROFILE%\.codex\skills\.system\dup-skill`
+  - 连续执行两次 `install.ps1 -WorkspaceRoot <sandbox-workspace> -RepoRoot <sandbox-repo>`
+  - 结果：
+    - `skills\.system\dup-skill\dup-skill` 不存在
+    - `skills\.system\dup-skill\SKILL.md` 与 `extra.txt` 均保留
+    - `tests\verify-installation.ps1 -WorkspaceRoot <sandbox-workspace> -RepoRoot <sandbox-repo>` 返回 `STATUS: PASS`

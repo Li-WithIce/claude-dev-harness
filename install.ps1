@@ -49,6 +49,25 @@ function Remove-PathIfExists {
     Remove-Item -LiteralPath $Path -Force
 }
 
+function Copy-ItemMerged {
+    param(
+        [string]$SourcePath,
+        [string]$DestinationPath
+    )
+
+    $item = Get-Item -LiteralPath $SourcePath -Force
+    if ($item.PSIsContainer) {
+        Ensure-Directory -Path $DestinationPath
+        foreach ($child in Get-ChildItem -LiteralPath $SourcePath -Force) {
+            Copy-ItemMerged -SourcePath $child.FullName -DestinationPath (Join-Path $DestinationPath $child.Name)
+        }
+        return
+    }
+
+    Ensure-Directory -Path (Split-Path -Parent $DestinationPath)
+    Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force
+}
+
 function Write-Utf8NoBom {
     param(
         [string]$Path,
@@ -828,7 +847,9 @@ function Merge-SystemSkills {
             continue
         }
 
-        if ($existingTarget -and ((Get-NormalizedPath -Path $sourcePath) -eq $existingTarget)) {
+        $sourceNormalizedPath = Get-NormalizedPath -Path $sourcePath
+        $sourceTarget = Get-JunctionTarget -Path $sourcePath
+        if ($existingTarget -and (($sourceNormalizedPath -eq $existingTarget) -or ($sourceTarget -eq $existingTarget))) {
             continue
         }
 
@@ -840,7 +861,7 @@ function Merge-SystemSkills {
 
         foreach ($child in $children) {
             $destination = Join-Path $stagingPath $child.Name
-            Copy-Item -LiteralPath $child.FullName -Destination $destination -Recurse -Force
+            Copy-ItemMerged -SourcePath $child.FullName -DestinationPath $destination
         }
     }
 
