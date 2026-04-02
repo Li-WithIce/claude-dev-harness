@@ -473,6 +473,7 @@ Set-Location <repo-root>
 - 保留 `%USERPROFILE%\.claude\skills` 与 `%USERPROFILE%\.codex\skills` 根目录为普通目录，并将 repo `skills/` 下的 managed 条目逐项链接进去
 - 保留宿主 `skills/` 下的隐藏 sidecar 目录，例如 `.assistant`、`.claude`、`.qoder`
 - 保留宿主 `skills/` 下不与 repo managed 条目同名的本地自有 skills，避免安装后把用户原有技能从活跃目录里移走
+- 若宿主中残留指向 repo `skills/` 的旧 Harness skill 链接，而该 skill 已不在当前 repo 托管集合中，install 会将其视为陈旧条目并清理
 - 将现有 Claude / Codex `.system` 内容合并到 repo-local `skills/.system`
 - 写入 install manifest 到 `backups/install-*/install-manifest.json`
 

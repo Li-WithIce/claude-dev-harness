@@ -243,7 +243,9 @@ function Assert-ManagedSkillLinks {
     }
 
     $checkedCount = 0
+    $managedEntryNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($entry in Get-ChildItem -LiteralPath $RepoSkillsPath -Force) {
+        [void]$managedEntryNames.Add($entry.Name)
         $hostEntryPath = Join-Path $HostSkillsPath $entry.Name
         if (-not (Test-Path -LiteralPath $hostEntryPath)) {
             Add-Error ("{0} skills 缺少 managed 条目: {1}" -f $HostLabel, $hostEntryPath)
@@ -264,6 +266,20 @@ function Assert-ManagedSkillLinks {
         }
 
         Add-Error ("{0} skills 条目未正确链接到 repo: {1}" -f $HostLabel, $hostEntryPath)
+    }
+
+    $normalizedRepoSkillsPath = Get-NormalizedPath -Path $RepoSkillsPath
+    foreach ($entry in Get-ChildItem -LiteralPath $HostSkillsPath -Force) {
+        if ($managedEntryNames.Contains($entry.Name)) {
+            continue
+        }
+
+        $actualTarget = Get-JunctionTarget -Path $entry.FullName
+        if (-not [string]::IsNullOrWhiteSpace($actualTarget) -and
+            ($actualTarget.Equals($normalizedRepoSkillsPath, [System.StringComparison]::OrdinalIgnoreCase) -or
+                $actualTarget.StartsWith($normalizedRepoSkillsPath + '\', [System.StringComparison]::OrdinalIgnoreCase))) {
+            Add-Error ("{0} skills 存在 repo 已不再托管的陈旧 Harness 链接: {1} -> {2}" -f $HostLabel, $entry.FullName, $actualTarget)
+        }
     }
 
     Add-Check ("{0} skills 根目录保留为普通目录，managed 条目检查数: {1}" -f $HostLabel, $checkedCount)

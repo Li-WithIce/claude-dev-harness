@@ -42,6 +42,7 @@
 - 新增 `scripts/validate-harness-artifacts.ps1`，把 artifact contract 校验脚本化：可从 `current-flow.md` 解析当前任务，自动检查 `plan.md` / `implementation-notes.md` / `review.md` / `test.md` / `handoff.md` 的最小结构与 `task_id` 一致性，并在 README / gates / troubleshooting 中补充用法
 - 收紧 `scripts/validate-harness-artifacts.ps1` 的 gate 语义，避免 `stage=TEST` 但缺少 `test.md`、或 `review_verdict=pass` 但仍残留 `P0/P1` 时误报 `PASS`
 - 收紧 `tests/verify-installation.ps1` 对 Codex `config.toml` managed block 的比对，避免 block 内被误塞入额外 `[[skills.config]]` 时仍误报“与模板一致”
+- 修正 `install.ps1` 对非 managed 宿名 skill 的保留策略：用户本地自有 skill 保留，但若是指向 repo `skills/` 的旧 Harness 链接且 repo 已不再托管，则视为陈旧条目并清理；`tests/verify-installation.ps1` 也会将这类残留识别为错误
 - `install.ps1` 当前已覆盖：
   - 渲染 Claude / Codex / workspace 模板
   - 初始化/补齐 `vault-template/`
@@ -52,6 +53,7 @@
   - 保留 Claude / Codex `skills` 根目录为普通目录，并按子项创建 managed Junction
   - 保留宿主 `skills/` 下的 `.assistant`、`.claude`、`.qoder` 等隐藏 sidecar
   - 保留宿主 `skills/` 下不与 repo managed 条目同名的本地自有 skills，避免安装后从活跃技能目录中消失
+  - 清理 repo 已不再托管、但仍残留在宿主 `skills/` 下并指向 repo `skills/` 的旧 Harness skill 链接
   - 合并 Claude/Codex 现有 `.system` 到 repo-local `skills/.system`
   - 避免 repeated install 或 Claude/Codex 具有同名 `.system` skill 时，把目录错误嵌套成 `foo\\foo\\...`
   - 备份并恢复已有 skill Junction 的链接元数据，而不是平铺成普通目录
@@ -242,3 +244,13 @@
   - 再向 `%USERPROFILE%\.codex\config.toml` 的 Harness managed block 内手工注入额外 `[[skills.config]]`
   - 执行 `tests\verify-installation.ps1 -WorkspaceRoot <sandbox-workspace>`
   - 结果：应返回 `STATUS: FAIL`，并提示 managed block 与模板不一致
+- stale managed skill 回归 sandbox：
+  - 预置 `%USERPROFILE%\.claude\skills\stale-harness-skill` / `%USERPROFILE%\.codex\skills\stale-harness-skill` 为指向 repo `skills\stale-harness-skill` 的旧 Junction
+  - 再删除 repo 中该 `stale-harness-skill`，模拟 repo 已移除该 skill
+  - 执行 `install.ps1 -WorkspaceRoot <sandbox-workspace> -RepoRoot <sandbox-repo>`
+  - 结果：install 后宿主 `skills/` 中不再保留该陈旧 Harness 链接
+- stale managed skill verify 回归：
+  - 先执行一次正常 `install.ps1 -WorkspaceRoot <sandbox-workspace>`
+  - 再手工向宿主 `skills/` 注入一个指向 repo `skills\ghost-managed-skill` 的旧 Harness Junction，并删除其目标目录
+  - 执行 `tests\verify-installation.ps1 -WorkspaceRoot <sandbox-workspace>`
+  - 结果：返回 `STATUS: FAIL`，并明确报出“repo 已不再托管的陈旧 Harness 链接”

@@ -604,7 +604,8 @@ function Ensure-Junction {
 function Get-PreservedSkillEntryNames {
     param(
         [string]$SkillsRoot,
-        [string[]]$ManagedEntryNames
+        [string[]]$ManagedEntryNames,
+        [string]$RepoSkillsPath
     )
 
     $managedSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -612,13 +613,25 @@ function Get-PreservedSkillEntryNames {
         [void]$managedSet.Add($name)
     }
 
+    $normalizedRepoSkillsPath = Get-NormalizedPath -Path $RepoSkillsPath
     $preserved = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     if (-not (Test-Path -LiteralPath $SkillsRoot -PathType Container)) {
         return ,$preserved
     }
 
     foreach ($entry in Get-ChildItem -LiteralPath $SkillsRoot -Force) {
-        if (-not $managedSet.Contains($entry.Name)) {
+        if ($managedSet.Contains($entry.Name)) {
+            continue
+        }
+
+        $entryTarget = Get-JunctionTarget -Path $entry.FullName
+        $isStaleHarnessLink = $false
+        if (-not [string]::IsNullOrWhiteSpace($entryTarget) -and -not [string]::IsNullOrWhiteSpace($normalizedRepoSkillsPath)) {
+            $isStaleHarnessLink = $entryTarget.Equals($normalizedRepoSkillsPath, [System.StringComparison]::OrdinalIgnoreCase) -or
+                $entryTarget.StartsWith($normalizedRepoSkillsPath + '\', [System.StringComparison]::OrdinalIgnoreCase)
+        }
+
+        if (-not $isStaleHarnessLink) {
             [void]$preserved.Add($entry.Name)
         }
     }
@@ -648,7 +661,7 @@ function Sync-SkillsDirectory {
         $managedEntries[$entry.Name] = $entry.FullName
     }
 
-    $preservedNames = Get-PreservedSkillEntryNames -SkillsRoot $HostSkillsPath -ManagedEntryNames $managedEntries.Keys
+    $preservedNames = Get-PreservedSkillEntryNames -SkillsRoot $HostSkillsPath -ManagedEntryNames $managedEntries.Keys -RepoSkillsPath $RepoSkillsPath
 
     foreach ($entry in Get-ChildItem -LiteralPath $HostSkillsPath -Force) {
         $currentTarget = Get-JunctionTarget -Path $entry.FullName
