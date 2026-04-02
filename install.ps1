@@ -599,8 +599,7 @@ function Get-PreservedSkillEntryNames {
     }
 
     foreach ($entry in Get-ChildItem -LiteralPath $SkillsRoot -Force) {
-        $isReparsePoint = [bool]($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
-        if ($entry.Name.StartsWith('.') -and -not $managedSet.Contains($entry.Name) -and -not $isReparsePoint) {
+        if (-not $managedSet.Contains($entry.Name)) {
             [void]$preserved.Add($entry.Name)
         }
     }

@@ -40,6 +40,7 @@
 - 为 orchestrator 新增 `references/default-tool-profiles.md`，把 `claude-codex-gemini-default`、`codex-only`、`codex-gemini` 固化成预置档案，并同步更新 `tool-profile-template`、`model-invocation`、`state-templates`、`runbook`、`examples` 与 README，降低不同机器组合下的绑定心智负担
 - 继续做 workflow 轻量化：将 `.assistant/orchestration/current-flow.md` 明确为 orchestration 唯一真相源，把 `handoff.md` 与 `stage-history.md` 降级为派生视图；同一 stage 内的小变更优先只更新 `current-flow.md`，仅在真实 stage 迁移、恢复锚点重建、用户可见交接和终态 `HANDOFF` 时刷新 `handoff.md`
 - 新增 `scripts/validate-harness-artifacts.ps1`，把 artifact contract 校验脚本化：可从 `current-flow.md` 解析当前任务，自动检查 `plan.md` / `implementation-notes.md` / `review.md` / `test.md` / `handoff.md` 的最小结构与 `task_id` 一致性，并在 README / gates / troubleshooting 中补充用法
+- 收紧 `scripts/validate-harness-artifacts.ps1` 的 gate 语义，避免 `stage=TEST` 但缺少 `test.md`、或 `review_verdict=pass` 但仍残留 `P0/P1` 时误报 `PASS`
 - `install.ps1` 当前已覆盖：
   - 渲染 Claude / Codex / workspace 模板
   - 初始化/补齐 `vault-template/`
@@ -49,6 +50,7 @@
   - 只清理 Harness 自己托管的 `[[skills.config]]` 条目，保留用户已有的其他 Codex skill 配置
   - 保留 Claude / Codex `skills` 根目录为普通目录，并按子项创建 managed Junction
   - 保留宿主 `skills/` 下的 `.assistant`、`.claude`、`.qoder` 等隐藏 sidecar
+  - 保留宿主 `skills/` 下不与 repo managed 条目同名的本地自有 skills，避免安装后从活跃技能目录中消失
   - 合并 Claude/Codex 现有 `.system` 到 repo-local `skills/.system`
   - 备份并恢复已有 skill Junction 的链接元数据，而不是平铺成普通目录
   - 在 install 中途失败时持续写出 recovery manifest snapshot，避免只剩 backup 目录而没有可消费 manifest
@@ -217,3 +219,12 @@
   - 输出：`Claude updated=1`、`Codex updated=1`
   - `tests\verify-installation.ps1 -WorkspaceRoot {WORKSPACE_ROOT}`
   - 结果：`STATUS: PASS`
+- 本地自有 skill 保留 sandbox：
+  - 在 sandbox `%USERPROFILE%\.claude\skills\custom-skill` / `%USERPROFILE%\.codex\skills\custom-skill` 预置非隐藏本地 skill
+  - 执行 `install.ps1 -WorkspaceRoot {REPO_ROOT}\tmp\review-nonhidden-skill\workspace`
+  - 结果：install 后 `custom-skill` 仍保留在活跃 `skills/` 目录中
+- artifact validator gate 语义回归：
+  - `stage=TEST` 且删除 `test.md` 时，执行 `scripts\validate-harness-artifacts.ps1 -CurrentFlowPath ...`
+  - 结果：应返回 `STATUS: FAIL`
+  - 将 `review.md` 中示例 finding 从 `[P2]` 改成 `[P1]` 且保留 `review_verdict: pass`
+  - 结果：应返回 `STATUS: FAIL`

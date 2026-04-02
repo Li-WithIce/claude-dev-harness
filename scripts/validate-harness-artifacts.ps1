@@ -244,7 +244,7 @@ function Test-TestConclusion {
     )
     if (-not $sectionMatch.Success) {
         Add-Error "test.md is missing a usable ## Conclusion section"
-        return
+        return $null
     }
 
     $verdictMatches = [regex]::Matches(
@@ -258,7 +258,19 @@ function Test-TestConclusion {
 
     if ($uniqueVerdicts.Count -ne 1) {
         Add-Error "test.md must contain exactly one conclusion verdict: pass | fail | blocked"
+        return $null
     }
+
+    return $uniqueVerdicts[0]
+}
+
+function Get-ReviewSeverities {
+    param([string]$Content)
+
+    $matches = [regex]::Matches($Content, '(?im)\b(P0|P1|P2)\b')
+    return @($matches | ForEach-Object {
+            $_.Groups[1].Value.ToUpperInvariant()
+        } | Select-Object -Unique)
 }
 
 function Assert-MarkdownArtifact {
@@ -590,7 +602,7 @@ $specKeywordGroups = @(
 $stageRequiresPlan = $stage -in @("PLAN", "DEV", "REVIEW(implementation)", "TEST", "HANDOFF")
 $stageRequiresImplementationNotes = $stage -in @("REVIEW(implementation)", "TEST", "HANDOFF")
 $stageRequiresReview = $stage -in @("REVIEW(implementation)", "TEST", "HANDOFF")
-$stageRequiresTest = $stage -eq "HANDOFF"
+$stageRequiresTest = $stage -in @("TEST", "HANDOFF")
 $stageRequiresHandoff = $stage -eq "HANDOFF"
 
 Assert-MarkdownArtifact `
@@ -628,6 +640,15 @@ Assert-MarkdownArtifact `
         if ($reviewVerdictValue -notin @("pass", "revise")) {
             Add-Error ('{0} review_verdict must be ''pass'' or ''revise'': {1}' -f $label, $path)
         }
+
+        $reviewSeverities = Get-ReviewSeverities -Content $content
+        if ($reviewVerdictValue -eq "pass" -and ($reviewSeverities -contains "P0" -or $reviewSeverities -contains "P1")) {
+            Add-Error ("{0} cannot declare review_verdict=pass while P0/P1 findings remain: {1}" -f $label, $path)
+        }
+
+        if ($stage -in @("TEST", "HANDOFF") -and $reviewVerdictValue -ne "pass") {
+            Add-Error ("{0} must declare review_verdict=pass before stage {1}: {2}" -f $label, $stage, $path)
+        }
     }
 
 Assert-MarkdownArtifact `
@@ -646,7 +667,10 @@ Assert-MarkdownArtifact `
             }
         }
 
-        Test-TestConclusion -Content $content
+        $testVerdict = Test-TestConclusion -Content $content
+        if ($stage -in @("TEST", "HANDOFF") -and $testVerdict -ne "pass") {
+            Add-Error ("test.md must conclude with pass before stage {0}" -f $stage)
+        }
     }
 
 Assert-MarkdownArtifact `
