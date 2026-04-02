@@ -2,9 +2,18 @@
 
 Windows 优先的单仓库 Harness 分发仓库。
 
+## 先说结论
+
+这个仓库最重要的不是 `install.ps1` 本身，而是把同一套 Harness 开发工作流稳定地安装到 Claude / Codex / workspace 上。
+
+- `install.ps1` / `uninstall.ps1` / `tests/verify-installation.ps1` 是分发与收敛机制
+- `skills/using-superpowers/`、`skills/orchestrator/`、workspace 入口模板、`.assistant` 工作流协议，才是你真正日常在用的开发流程
+
+如果只把它理解成“统一放几个脚本和配置文件的仓库”，那是不完整的。更准确地说，它是在统一管理一套可恢复、可阶段推进、可 review、可 test、可 handoff 的开发执行流。
+
 ## 这是什么
 
-这个仓库不是业务应用，也不是单个 skill。它的职责是把一套可运行的 Claude / Codex 开发 Harness 收敛成一个可安装、可验证、可回滚的分发仓库。
+这个仓库不是业务应用，也不是单个 skill。它的职责是把一套可运行的 Claude / Codex 开发 Harness 收敛成一个可安装、可验证、可回滚的工作流分发仓库。
 
 安装完成后，它会把以下能力接到宿主环境上：
 
@@ -15,6 +24,66 @@ Windows 优先的单仓库 Harness 分发仓库。
 - `install.ps1` / `uninstall.ps1` / `tests/verify-installation.ps1` 形成安装、验证、回滚闭环
 
 如果你要解决的是“如何在一台新机器上把整套 Harness 装起来，并让 Claude / Codex 共用同一份 skills、同一套工作区入口和共享记忆骨架”，这个仓库就是为此准备的。
+
+## Harness 架构
+
+可以把这套 Harness 理解成 5 层：
+
+| 层 | 作用 | 仓库落点 |
+|---|---|---|
+| 入口路由层 | 对话开始先判断任务类型，开发任务优先进入主流程 | `skills/using-superpowers/` |
+| 阶段治理层 | 用固定 stage machine 推进开发任务 | `skills/orchestrator/` |
+| 任务制品层 | 为每个任务沉淀 plan / review / test / handoff 等 artifact | `<workspace-root>/docs/<task-id>/` |
+| 共享运行时层 | 记录当前任务、恢复索引、中断任务、上次会话 | `<workspace-root>/.assistant/运行时/` |
+| 分发收敛层 | 把上述能力安装到宿主，并验证安装结果 | `install.ps1` / `uninstall.ps1` / `tests/verify-installation.ps1` |
+
+这里最关键的边界是：
+
+- 工作流本体不等于安装脚本
+- 安装脚本只是把工作流入口、状态协议、skills、hooks 和模板落到宿主
+- 你的日常开发，主要发生在工作区 `docs/<task-id>/` 和 `.assistant/运行时/`，不是这个仓库根目录
+
+## 你的开发流程
+
+日常开发真正跑的是下面这条主线：
+
+```text
+用户请求
+  -> using-superpowers 路由
+  -> 开发任务进入 orchestrator
+  -> INTAKE
+  -> PLAN
+  -> DEV
+  -> REVIEW(implementation)
+  -> TEST
+  -> HANDOFF
+```
+
+各阶段的职责是：
+
+| 阶段 | 产物 | 含义 |
+|---|---|---|
+| `INTAKE` | `.assistant/orchestration/current-flow.md`，必要时 `spec.md` | 确认任务身份、输入是否足够、是否要补 delta-spec |
+| `PLAN` | `docs/<task-id>/plan.md` | 形成开发主文档，并等用户确认 |
+| `DEV` | 代码 diff + `docs/<task-id>/implementation-notes.md` | 真正实现改动并留下实现证据 |
+| `REVIEW(implementation)` | `docs/<task-id>/review.md` | 发现 P0/P1/P2 风险，决定是否回修 |
+| `TEST` | `docs/<task-id>/test.md` | 给出 `pass` / `fail` / `blocked` 结论 |
+| `HANDOFF` | `docs/<task-id>/handoff.md` | 汇总当前交付状态、风险、后续动作 |
+
+恢复与状态管理走的是共享运行时协议：
+
+- 新任务 / 切换任务 / 恢复任务：更新 `<workspace-root>/.assistant/运行时/当前任务.md` 与 `运行时/tasks/<task-id>.md`
+- 任务暂停或待续：同步更新 `中断任务.md`
+- 阶段收尾：更新 `上次会话.md` 并刷新 `恢复索引.md`
+- 用户说“继续”“恢复”时，按 `恢复索引 -> 当前任务 -> tasks/<task-id> -> 中断任务 -> 上次会话` 的顺序恢复
+
+多 agent 分工边界是：
+
+- Claude Code 是共享运行时单写者
+- Codex / Gemini 只写任务 artifact 和 `运行时/tasks/<task-id>.md`
+- specialist skill 只能在某个 stage 内被调用，不能绕过主流程直接替代 orchestrator
+
+所以，你平时真正使用的不是“安装命令”，而是“路由 + stage machine + artifact contract + shared runtime”这整套纪律。
 
 ## 解决什么问题
 
@@ -43,6 +112,7 @@ Windows 优先的单仓库 Harness 分发仓库。
 - repo 负责共享资产与宿主模板
 - 安装脚本负责把模板渲染到宿主
 - 用户本地敏感配置和运行态不进入 Git
+- 开发过程本身由 `using-superpowers` + `orchestrator` + `.assistant` 协议统一，不靠人工记忆维持
 
 ## 适合谁用
 
@@ -62,7 +132,7 @@ Windows 优先的单仓库 Harness 分发仓库。
 | 路径 | 作用 |
 |---|---|
 | `skills/` | Claude / Codex 共用 skills 单源 |
-| `skills/docs/` | 任务级 canonical docs，属于 repo 证据，不是本地运行态 |
+| `skills/docs/` | 这个仓库自身开发任务的 canonical docs 证据目录；不是你日常开发时的运行态 artifact |
 | `scripts/` | 共享记忆维护脚本与辅助同步脚本 |
 | `scripts/sync-preserved-docs.ps1` | 把热切换保留的宿主 `skills/docs` 重同步到 repo 当前版本 |
 | `runtime-hooks/claude/` | Claude hooks 源文件，安装时渲染到宿主 |
@@ -162,7 +232,7 @@ Set-Location <repo-root>
 - `agent-configs/codex/*.toml` forbidden prefix 检查
 - `scripts/memory-health.ps1 -VaultRoot <workspace-root>\.assistant` 返回 `STATUS: PASS`
 
-## 日常使用流程
+## 仓库运维流程
 
 ### 场景 1：首次安装
 

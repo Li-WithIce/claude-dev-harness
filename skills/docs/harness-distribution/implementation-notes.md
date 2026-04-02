@@ -34,7 +34,7 @@
   - `uninstall.ps1`
   - `tests/verify-installation.ps1`
 - 重写 `README.md`，补齐安装、验证、回滚、边界与当前 caveats
-- 重写 `README.md`，补齐“项目是什么、解决什么问题、适合谁、首次安装、日常更新、docs-only 同步、回滚、验证状态与常见问题”的完整使用流程
+- 重写 `README.md`，明确区分“你的开发流程”和“仓库安装/维护流程”，补齐 Harness 架构、stage machine、共享运行时、首次安装、日常更新、docs-only 同步、回滚、验证状态与常见问题
 - `install.ps1` 当前已覆盖：
   - 渲染 Claude / Codex / workspace 模板
   - 初始化/补齐 `vault-template/`
