@@ -53,9 +53,10 @@
   - 保留 Claude / Codex `skills` 根目录为普通目录，并按子项创建 managed Junction
   - 保留宿主 `skills/` 下的 `.assistant`、`.claude`、`.qoder` 等隐藏 sidecar
   - 保留宿主 `skills/` 下不与 repo managed 条目同名的本地自有 skills，避免安装后从活跃技能目录中消失
-  - 清理 repo 已不再托管、但仍残留在宿主 `skills/` 下并指向 repo `skills/` 的旧 Harness skill 链接
+- 清理 repo 已不再托管、但仍残留在宿主 `skills/` 下并指向 repo `skills/` 的旧 Harness skill 链接
   - 合并 Claude/Codex 现有 `.system` 到 repo-local `skills/.system`
   - 避免 repeated install 或 Claude/Codex 具有同名 `.system` skill 时，把目录错误嵌套成 `foo\\foo\\...`
+  - 若 repo-local `skills/.system` 已被旧 bug 污染为自套娃结构，即使宿主 `.system` 全部指回该目标，后续 install 也会主动修复该历史污染
   - 备份并恢复已有 skill Junction 的链接元数据，而不是平铺成普通目录
   - 在 install 中途失败时持续写出 recovery manifest snapshot，避免只剩 backup 目录而没有可消费 manifest
   - 对断链 `.system` Junction 降级跳过，避免 repeated uninstall 后的空路径错误
@@ -254,3 +255,10 @@
   - 再手工向宿主 `skills/` 注入一个指向 repo `skills\ghost-managed-skill` 的旧 Harness Junction，并删除其目标目录
   - 执行 `tests\verify-installation.ps1 -WorkspaceRoot <sandbox-workspace>`
   - 结果：返回 `STATUS: FAIL`，并明确报出“repo 已不再托管的陈旧 Harness 链接”
+- polluted repo-local `.system` 自修复回归：
+  - 预置 repo-local `skills\.system\dup-skill\dup-skill\...` 的历史套娃结构，并让宿主 `%USERPROFILE%\.claude\skills\.system` / `%USERPROFILE%\.codex\skills\.system` 都指回该目标
+  - 执行 `install.ps1 -WorkspaceRoot <sandbox-workspace> -RepoRoot <sandbox-repo>`
+  - 结果：
+    - `skills\.system\dup-skill\dup-skill` 不再存在
+    - `skills\.system\dup-skill\extra.txt` 被正确提升回父目录
+    - `tests\verify-installation.ps1 -WorkspaceRoot <sandbox-workspace> -RepoRoot <sandbox-repo>` 返回 `STATUS: PASS`

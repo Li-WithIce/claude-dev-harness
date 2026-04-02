@@ -68,6 +68,34 @@ function Copy-ItemMerged {
     Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force
 }
 
+function Repair-NestedSelfNamedDirectories {
+    param([string]$RootPath)
+
+    if (-not (Test-Path -LiteralPath $RootPath -PathType Container)) {
+        return
+    }
+
+    foreach ($childDir in Get-ChildItem -LiteralPath $RootPath -Directory -Force) {
+        Repair-NestedSelfNamedDirectories -RootPath $childDir.FullName
+    }
+
+    $selfName = Split-Path -Leaf $RootPath
+    if ([string]::IsNullOrWhiteSpace($selfName)) {
+        return
+    }
+
+    $duplicatePath = Join-Path $RootPath $selfName
+    if (-not (Test-Path -LiteralPath $duplicatePath -PathType Container)) {
+        return
+    }
+
+    foreach ($child in Get-ChildItem -LiteralPath $duplicatePath -Force) {
+        Copy-ItemMerged -SourcePath $child.FullName -DestinationPath (Join-Path $RootPath $child.Name)
+    }
+
+    Remove-PathIfExists -Path $duplicatePath
+}
+
 function Write-Utf8NoBom {
     param(
         [string]$Path,
@@ -879,10 +907,14 @@ function Merge-SystemSkills {
     }
 
     if ((Get-ChildItem -LiteralPath $stagingPath -Force | Measure-Object).Count -eq 0) {
+        if (Test-Path -LiteralPath $TargetPath -PathType Container) {
+            Repair-NestedSelfNamedDirectories -RootPath $TargetPath
+        }
         Remove-PathIfExists -Path $stagingPath
         return
     }
 
+    Repair-NestedSelfNamedDirectories -RootPath $stagingPath
     Remove-PathIfExists -Path $TargetPath
     Ensure-Directory -Path (Split-Path -Parent $TargetPath)
     Move-Item -LiteralPath $stagingPath -Destination $TargetPath
