@@ -57,19 +57,23 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 
 ## 开发任务优先路由
 
-当检测到**开发意图**时（开发、修 bug、重构、代码 review、测试验证、写 spec、写 plan、实现功能），**优先导向 orchestrator**：
+当检测到**开发意图**时（开发、修 bug、重构、代码 review、测试验证、写 spec、写 plan、实现功能），**必须重新导向 orchestrator**：
 
-1. 先检查 `.assistant/orchestration/current-flow.md` 是否存在
-2. **存在**：仍先导向 `/orchestrator`，由 orchestrator 读取 `current-flow.md` 与共享运行时后恢复当前阶段
-3. **不存在**：导向 `/orchestrator` 启动新的开发流程
+在导向之前，先判断请求类型：`resume-current` / `switch-existing` / `new-task`。不要把“分析结束后的继续聊天”当成开发任务入口。
 
-### 当前开发流程定位
+- **resume-current**：读 `运行时\当前任务.md` → 找 `docs/<task-id>/plan.md` frontmatter stage → 由 orchestrator 恢复
+- **switch-existing**：读 `运行时\中断任务.md` → 选定 task → 由 orchestrator 恢复
+- **new-task**：导向 `/orchestrator` 启动新任务，由 orchestrator 建 `docs/<task-id>/plan.md`
 
-- 该 workflow 只覆盖**开发阶段执行 harness**，不是全生命周期研发流程
-- 默认输入至少包括**已批准的需求评审结果**；若任务涉及用户可见 UI 变更，则还需要已批准的 UI 评审；不涉及 UI 的任务要显式记录 `ui review: not-applicable`
-- 技术方案评审如果存在则一并消费；如果不存在，不默认阻塞进入主路径
-- workflow 的责任是：`INTAKE -> PLAN -> DEV -> REVIEW(implementation) -> TEST -> HANDOFF`
-- 若输入不足，由 orchestrator 决定是否生成可选 `DELTA_SPEC` 作为差量边界说明，而不是回退到全量需求流程
+### 当前开发流程（Harness Lite v2）
+
+5 个阶段：`PLAN → PLAN_REVIEW → IMPLEMENT → CODE_REVIEW → TEST`
+
+- 唯一真相源：`docs/<task-id>/plan.md` frontmatter（`stage`、`profile`、`task_id`）
+- 阶段推进：`scripts/advance-stage.ps1 -TaskId <id>`
+- 3 套 runner profile：`claude-codex-gemini`、`codex-gemini`、`codex-only`
+- CODE_REVIEW revise → 回 IMPLEMENT；TEST fail/blocked → 停止报告，不触发 IMPLEMENT 循环
+- spec.md 只作为可选附件，不是默认入口
 
 ### 开发任务判定标准
 
