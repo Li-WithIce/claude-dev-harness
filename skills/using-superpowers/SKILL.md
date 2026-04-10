@@ -61,17 +61,19 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 
 在导向之前，先判断请求类型：`resume-current` / `switch-existing` / `new-task`。不要把“分析结束后的继续聊天”当成开发任务入口。
 
-- **resume-current**：读 `运行时\当前任务.md` → 找 `docs/<task-id>/plan.md` frontmatter stage → 由 orchestrator 恢复
+- **resume-current**：读 `运行时\当前任务.md` → 找 `docs/tasks/<task-id>/plan.md` frontmatter stage → 由 orchestrator 恢复
 - **switch-existing**：读 `运行时\中断任务.md` → 选定 task → 由 orchestrator 恢复
-- **new-task**：导向 `/orchestrator` 启动新任务，由 orchestrator 建 `docs/<task-id>/plan.md`
+- **new-task**：导向 `/orchestrator` 启动新任务，由 orchestrator 建 `docs/tasks/<task-id>/plan.md`
 
 ### 当前开发流程（Harness Lite v2）
 
-5 个阶段：`PLAN → PLAN_REVIEW → IMPLEMENT → CODE_REVIEW → TEST`
+5 个可执行阶段：`PLAN → PLAN_REVIEW → IMPLEMENT → CODE_REVIEW → TEST`
 
-- 唯一真相源：`docs/<task-id>/plan.md` frontmatter（`stage`、`profile`、`task_id`）
-- 阶段推进：`scripts/advance-stage.ps1 -TaskId <id>`
-- 3 套 runner profile：`claude-codex-gemini`、`codex-gemini`、`codex-only`
+- 唯一真相源：`docs/tasks/<task-id>/plan.md` frontmatter（`stage`、`tool`、`task_id`）
+- 终态标记：`DONE`，只写回 `plan.md` frontmatter，不是独立 stage
+- 阶段推进：`.assistant\entry\advance-stage.ps1 -TaskId <id> -Tool <claudecode|codex|gemini>`
+- 非 `DONE` 推进必须由用户显式指定下一阶段 `tool`
+- 用户可以在任意 stage 边界切换不同工具继续同一个 task
 - CODE_REVIEW revise → 回 IMPLEMENT；TEST fail/blocked → 停止报告，不触发 IMPLEMENT 循环
 - spec.md 只作为可选附件，不是默认入口
 
@@ -85,7 +87,7 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 - 需求分析（delta-spec / 开发边界说明）
 - 方案设计（开发计划）
 
-非开发任务（文档查阅、IM 配置、PPT/Excel 创建等）按常规 skill 路由处理。
+非开发任务不进入 harness-lite workflow，由宿主自身能力或外部 skill 处理。
 
 ## 调用层级
 
@@ -94,13 +96,10 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 | 1 | 开发主流程 | orchestrator → plan / implement / review / test |
 | 2 | 可选补充分支 | spec（仅在输入不足时生成 delta-spec） |
 | 3 | 可选委派 | codex（用户显式要求时）、gemini-designer-main（TEST 阶段） |
-| 4 | Specialist（二级能力） | frontend-design、webapp-testing、claude-api 等 |
 
 规则：
-- 开发主流程 skill 高于 specialist skill
 - `spec` 在新流程中是**可选 delta-spec 分支**，不是默认入口
-- Specialist skill **仅在具体 stage 内**作为二级能力调用，不作为开发主流程入口
-- 用户说“帮我做一个前端页面”时，仍先进 orchestrator，再在 DEV 阶段内调用 `frontend-design`
+- 开发任务只走上面 3 层，不再依赖 repo 内置 specialist skill
 
 ## Red Flags
 
@@ -138,9 +137,9 @@ When multiple skills could apply, use this order:
 
 1. **开发主流程 skill 最优先**：开发任务先进入 orchestrator
 2. **流程型分支 skill 其次**：例如仅在输入不足时进入 `spec`
-3. **实现型 skill 再其次**：如 `frontend-design`、`webapp-testing`
+3. **委派型 skill 再其次**：如 `codex`、`gemini-designer-main`
 
-"做一个新功能" → orchestrator first, then PLAN / DEV 阶段内按需调用其他 skill。
+"做一个新功能" → orchestrator first, then PLAN / IMPLEMENT 阶段内按需调用其他 skill。
 "Fix this bug" → orchestrator first，再进入开发阶段 harness。
 
 ## Skill Types

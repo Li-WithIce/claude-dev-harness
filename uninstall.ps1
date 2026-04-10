@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$ManifestPath = "",
     [string]$RepoRoot = ""
@@ -209,10 +209,10 @@ foreach ($record in $backupRecords) {
 $generatedSystemPath = $manifest['generated_repo_system_path']
 if (-not [string]::IsNullOrWhiteSpace($generatedSystemPath)) {
     $generatedSystemPath = Get-NormalizedPath -Path $generatedSystemPath
-    $dependentSystemLinks = @(
+    $dependentSystemLinks = @(@(
         Join-Path $manifest['claude_home'] 'skills\.system'
         Join-Path $manifest['codex_home'] 'skills\.system'
-    ) | Where-Object { (Get-JunctionTarget -Path $_) -eq $generatedSystemPath }
+    ) | Where-Object { (Get-JunctionTarget -Path $_) -eq $generatedSystemPath })
 
     if ($dependentSystemLinks.Count -gt 0) {
         $keptGenerated += $generatedSystemPath
@@ -234,22 +234,22 @@ if (Test-Path -LiteralPath $activeInstallPath -PathType Leaf) {
 
 Write-Output 'Uninstall summary:'
 Write-Output ('- manifest: {0}' -f $ManifestPath)
-Write-Output ('- restored_count: {0}' -f $restored.Count)
-Write-Output ('- removed_generated_count: {0}' -f $removed.Count)
-Write-Output ('- kept_generated_count: {0}' -f $keptGenerated.Count)
-if ($restored.Count -gt 0) {
+Write-Output ('- restored_count: {0}' -f @($restored).Count)
+Write-Output ('- removed_generated_count: {0}' -f @($removed).Count)
+Write-Output ('- kept_generated_count: {0}' -f @($keptGenerated).Count)
+if (@($restored).Count -gt 0) {
     Write-Output '- restored paths:'
     foreach ($path in $restored) {
         Write-Output ('  {0}' -f $path)
     }
 }
-if ($removed.Count -gt 0) {
+if (@($removed).Count -gt 0) {
     Write-Output '- removed generated paths:'
     foreach ($path in $removed) {
         Write-Output ('  {0}' -f $path)
     }
 }
-if ($keptGenerated.Count -gt 0) {
+if (@($keptGenerated).Count -gt 0) {
     Write-Output '- kept generated paths still referenced by host links:'
     foreach ($path in $keptGenerated) {
         Write-Output ('  {0}' -f $path)

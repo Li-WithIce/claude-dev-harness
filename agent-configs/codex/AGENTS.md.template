@@ -7,11 +7,12 @@
 
 ## Read Order
 
-- Orientation: `首页.md` -> `配置\系统信息.md` -> `配置\用户偏好.md` -> `配置\工具与组件.md`
+- Orientation: `首页.md` -> `工作流\项目约定.md` -> `配置\系统信息.md` -> `配置\用户偏好.md` -> `配置\工具与组件.md`
 - Resume: `运行时\恢复索引.md` -> `运行时\当前任务.md` -> `运行时\tasks\<task-id>.md` -> `运行时\中断任务.md` -> `运行时\上次会话.md`
 
 ## Writeback
 
 - Single-writer model: only the entry agent writes shared pointer files
-- Codex writes only `docs/<task-id>/*` and `运行时\tasks\<task-id>.md`
+- Codex writes only `docs/tasks/<task-id>/*` and `运行时\tasks\<task-id>.md`
+- If Codex is the active entry host for the task, it must also update shared pointer files and refresh `运行时\恢复索引.md` according to the shared memory protocol
 - New items go to `运行时\收件箱.md` first

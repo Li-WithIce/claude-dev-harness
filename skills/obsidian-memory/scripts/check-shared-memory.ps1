@@ -89,6 +89,25 @@ function Get-TableValue {
     return $match.Matches[0].Groups[1].Value.Trim()
 }
 
+function Get-BulletValue {
+    param(
+        [string]$Path,
+        [string]$Key
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $null
+    }
+
+    $pattern = '^\-\s*{0}\s*:\s*(.+)$' -f [regex]::Escape($Key)
+    $match = Select-String -Path $Path -Pattern $pattern -Encoding utf8 | Select-Object -First 1
+    if ($null -eq $match) {
+        return $null
+    }
+
+    return $match.Matches[0].Groups[1].Value.Trim()
+}
+
 function Get-CurrentTaskId {
     param([string]$Path)
 
@@ -220,7 +239,7 @@ function Get-CurrentTaskArtifactResolution {
     $artifactRootProvided = -not [string]::IsNullOrWhiteSpace($artifactRootValue)
     $artifactRootPath = Resolve-WorkspacePath -PathValue $artifactRootValue -WorkspaceRoot $workspaceRoot
     if ([string]::IsNullOrWhiteSpace($artifactRootPath) -and -not [string]::IsNullOrWhiteSpace($TaskId) -and -not [string]::IsNullOrWhiteSpace($workspaceRoot)) {
-        $artifactRootPath = [System.IO.Path]::GetFullPath((Join-Path (Join-Path $workspaceRoot 'docs') $TaskId))
+        $artifactRootPath = [System.IO.Path]::GetFullPath((Join-Path (Join-Path $workspaceRoot 'docs/tasks') $TaskId))
     }
 
     $artifactNames = @(
@@ -295,7 +314,22 @@ $currentUpdated = Get-UpdatedTime -Path $currentPath
 $interruptedUpdated = Get-UpdatedTime -Path $interruptedPath
 $lastUpdated = Get-UpdatedTime -Path $lastSessionPath
 
-$sourceTimes = @($currentUpdated, $interruptedUpdated, $lastUpdated) | Where-Object { $null -ne $_ }
+$currentTaskValue = Get-TableValue -Path $currentPath -Key '任务'
+$hasActiveCurrentTask = -not [string]::IsNullOrWhiteSpace($currentTaskValue) -and $currentTaskValue -notlike '无*'
+$interruptedContent = if (Test-Path -LiteralPath $interruptedPath -PathType Leaf) {
+    Get-Content -LiteralPath $interruptedPath -Raw -Encoding utf8
+} else {
+    ''
+}
+$hasInterruptedTasks = $interruptedContent -match '(?m)^\|\s*P\d+\s*\|'
+$sourceTimes = @($currentUpdated)
+if ($hasInterruptedTasks) {
+    $sourceTimes += $interruptedUpdated
+}
+if (-not $hasActiveCurrentTask) {
+    $sourceTimes += $lastUpdated
+}
+$sourceTimes = @($sourceTimes | Where-Object { $null -ne $_ })
 if ($null -ne $indexUpdated -and $sourceTimes.Count -gt 0) {
     $latestSource = $sourceTimes | Sort-Object -Descending | Select-Object -First 1
     if ($indexUpdated -lt $latestSource) {
@@ -304,8 +338,19 @@ if ($null -ne $indexUpdated -and $sourceTimes.Count -gt 0) {
         Add-Check '恢复索引更新时间不早于当前任务/中断任务/上次会话'
     }
 }
+if (-not [string]::IsNullOrWhiteSpace($OrchestratorFlowPath) -and (Test-Path -LiteralPath $OrchestratorFlowPath -PathType Leaf) -and (Test-Path -LiteralPath $indexPath -PathType Leaf)) {
+    $flowNext = (Get-YamlField -Path $OrchestratorFlowPath -Field 'next')
+    $indexNext = (Get-BulletValue -Path $indexPath -Key '下一步')
+    if (
+        -not [string]::IsNullOrWhiteSpace($flowNext) -and
+        -not [string]::IsNullOrWhiteSpace($indexNext) -and
+        $flowNext.Trim() -ne $indexNext.Trim()
+    ) {
+        Add-Warning ('恢复索引下一步与 current-flow.next 不一致: recovery-index={0}, current-flow={1}' -f $indexNext, $flowNext)
+    }
+}
 
-$taskValue = Get-TableValue -Path $currentPath -Key '任务'
+$taskValue = $currentTaskValue
 $statusValue = Get-TableValue -Path $currentPath -Key '状态'
 if ($null -ne $taskValue -and $null -ne $statusValue) {
     if ($taskValue -like '无*' -and $statusValue -ne '空闲') {
@@ -322,6 +367,42 @@ if (Test-Path -LiteralPath $candidatePath) {
         Add-Check '记忆候选.md 含标准表头'
     } else {
         Add-Warning '记忆候选.md 缺少标准表头'
+    }
+}
+$inboxPath = Join-Path $runtimeDir '收件箱.md'
+if (Test-Path -LiteralPath $inboxPath -PathType Leaf) {
+    $inboxContent = Get-Content -LiteralPath $inboxPath -Raw -Encoding utf8
+    if ($inboxContent -match [regex]::Escape('| created_at | source | task_id | type | status | summary | payload |')) {
+        $activeInboxCount = 0
+        $lockBlockedCount = 0
+        foreach ($line in ($inboxContent -split "`r?`n")) {
+            if (-not $line.TrimStart().StartsWith('|')) {
+                continue
+            }
+
+            $cells = $line.Trim().Trim('|').Split('|') | ForEach-Object { $_.Trim() }
+            if ($cells.Count -ne 7) {
+                continue
+            }
+
+            $type = $cells[3]
+            $status = $cells[4]
+            if ($type -eq 'type' -or $type -eq '------' -or $type -eq '-') {
+                continue
+            }
+            if ($status -match '^(?i:resolved|closed|done|cleared)$') {
+                continue
+            }
+
+            $activeInboxCount += 1
+            if ($type -eq 'lock-blocked') {
+                $lockBlockedCount += 1
+            }
+        }
+
+        if ($activeInboxCount -gt 0) {
+            Add-Error ('收件箱存在未处理项: active={0}, lock_blocked={1}' -f $activeInboxCount, $lockBlockedCount)
+        }
     }
 }
 
@@ -425,6 +506,27 @@ if ($null -ne $taskValue -and $taskValue -notlike '无*' -and (Test-Path -Litera
         $taskStatePath = Join-Path $tasksDir "$taskIdFromCurrent.md"
         if (Test-Path -LiteralPath $taskStatePath) {
             Add-Check ('共享指针 task_id={0} 对应任务状态文件存在' -f $taskIdFromCurrent)
+            if (-not [string]::IsNullOrWhiteSpace($OrchestratorFlowPath) -and (Test-Path -LiteralPath $OrchestratorFlowPath -PathType Leaf)) {
+                $flowStage = Get-YamlField -Path $OrchestratorFlowPath -Field 'stage'
+                $runtimeStage = Get-BulletValue -Path $taskStatePath -Key 'stage'
+                if (
+                    -not [string]::IsNullOrWhiteSpace($flowStage) -and
+                    -not [string]::IsNullOrWhiteSpace($runtimeStage) -and
+                    $flowStage -ne $runtimeStage
+                ) {
+                    Add-Error ('任务状态 stage 与 current-flow 不一致: runtime={0}, flow={1}' -f $runtimeStage, $flowStage)
+                }
+
+                $flowCurrentDoc = Normalize-StatePathValue -Value (Get-YamlField -Path $OrchestratorFlowPath -Field 'current_doc')
+                $runtimePrimaryArtifact = Normalize-StatePathValue -Value (Get-YamlField -Path $taskStatePath -Field 'primary_artifact')
+                if (
+                    -not [string]::IsNullOrWhiteSpace($flowCurrentDoc) -and
+                    -not [string]::IsNullOrWhiteSpace($runtimePrimaryArtifact) -and
+                    $flowCurrentDoc -ne $runtimePrimaryArtifact
+                ) {
+                    Add-Error ('任务状态 primary_artifact 与 current-flow current_doc 不一致: runtime={0}, flow={1}' -f $runtimePrimaryArtifact, $flowCurrentDoc)
+                }
+            }
         } else {
             Add-Error ('共享指针 task_id={0} 但无对应 运行时/tasks/{0}.md' -f $taskIdFromCurrent)
         }

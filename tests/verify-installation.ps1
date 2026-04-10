@@ -2,7 +2,10 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$WorkspaceRoot,
-    [string]$RepoRoot = ""
+    [string]$RepoRoot = "",
+    [string]$Scope = "All",
+    [string]$CurrentFlowPath = "",
+    [string]$UserProfileRoot = ""
 )
 
 Set-StrictMode -Version Latest
@@ -132,7 +135,8 @@ function Assert-PreservedDirectoryMatchesRepo {
     param(
         [string]$HostPath,
         [string]$RepoPath,
-        [string]$Label
+        [string]$Label,
+        [switch]$AllowExtraEntries
     )
 
     $missingCount = 0
@@ -163,9 +167,10 @@ function Assert-PreservedDirectoryMatchesRepo {
         }
     }
 
-    if ($missingCount -gt 0 -or $changedCount -gt 0 -or $extraCount -gt 0) {
-        $syncScriptPath = Join-Path $RepoRoot 'scripts\sync-preserved-docs.ps1'
-        Add-Warning ("{0} 保留为普通目录，但与 repo 内容不一致: missing={1}, changed={2}, extra={3}。可运行: {4}" -f $Label, $missingCount, $changedCount, $extraCount, $syncScriptPath)
+    $hasDrift = $missingCount -gt 0 -or $changedCount -gt 0 -or ((-not $AllowExtraEntries.IsPresent) -and $extraCount -gt 0)
+    if ($hasDrift) {
+        $installScriptPath = Join-Path $RepoRoot 'install.ps1'
+        Add-Warning ("{0} 保留为普通目录，但与 repo 内容不一致: missing={1}, changed={2}, extra={3}。可重新运行: {4}" -f $Label, $missingCount, $changedCount, $extraCount, $installScriptPath)
     } else {
         Add-Check ("{0} 保留为普通目录，且内容与 repo 一致" -f $Label)
     }
@@ -229,7 +234,7 @@ function Assert-ManagedSkillLinks {
     )
 
     $hotSwapPreservedNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    [void]$hotSwapPreservedNames.Add('docs')
+    [void]$hotSwapPreservedNames.Add('.system')
 
     if (-not (Test-Path -LiteralPath $HostSkillsPath -PathType Container)) {
         Add-Error ("缺少 {0} skills 目录: {1}" -f $HostLabel, $HostSkillsPath)
@@ -256,7 +261,8 @@ function Assert-ManagedSkillLinks {
         $actualTarget = Get-JunctionTarget -Path $hostEntryPath
         if ($hotSwapPreservedNames.Contains($entry.Name) -and ($null -eq $actualTarget)) {
             $checkedCount += 1
-            Assert-PreservedDirectoryMatchesRepo -HostPath $hostEntryPath -RepoPath $entry.FullName -Label ("{0} skills/{1}" -f $HostLabel, $entry.Name)
+            $allowExtraEntries = $entry.Name -eq '.system'
+            Assert-PreservedDirectoryMatchesRepo -HostPath $hostEntryPath -RepoPath $entry.FullName -Label ("{0} skills/{1}" -f $HostLabel, $entry.Name) -AllowExtraEntries:$allowExtraEntries
             continue
         }
 
@@ -282,11 +288,12 @@ function Assert-ManagedSkillLinks {
         }
     }
 
-    Add-Check ("{0} skills 根目录保留为普通目录，managed 条目检查数: {1}" -f $HostLabel, $checkedCount)
-}
+    $legacyDocsPath = Join-Path $HostSkillsPath 'docs'
+    if (-not $managedEntryNames.Contains('docs') -and (Test-Path -LiteralPath $legacyDocsPath)) {
+        Add-Error ("{0} skills 存在 legacy docs 目录，应删除: {1}" -f $HostLabel, $legacyDocsPath)
+    }
 
-if ([string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
-    throw 'USERPROFILE is required for verify-installation.ps1'
+    Add-Check ("{0} skills 根目录保留为普通目录，managed 条目检查数: {1}" -f $HostLabel, $checkedCount)
 }
 
 $RepoRoot = if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
@@ -295,11 +302,22 @@ $RepoRoot = if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot
 }
 
+$effectiveUserProfile = if ([string]::IsNullOrWhiteSpace($UserProfileRoot)) {
+    $env:USERPROFILE
+} else {
+    $UserProfileRoot
+}
+
+if ([string]::IsNullOrWhiteSpace($effectiveUserProfile)) {
+    throw 'USERPROFILE is required for verify-installation.ps1'
+}
+
 $RepoRoot = Get-NormalizedPath -Path $RepoRoot
 $WorkspaceRoot = Get-NormalizedPath -Path $WorkspaceRoot
+$effectiveUserProfile = Get-NormalizedPath -Path $effectiveUserProfile
 $VaultPath = Join-Path $WorkspaceRoot '.assistant'
-$ClaudeHome = Join-Path $env:USERPROFILE '.claude'
-$CodexHome = Join-Path $env:USERPROFILE '.codex'
+$ClaudeHome = Join-Path $effectiveUserProfile '.claude'
+$CodexHome = Join-Path $effectiveUserProfile '.codex'
 $RepoSkillsPath = Join-Path $RepoRoot 'skills'
 $ClaudeSkillsPath = Join-Path $ClaudeHome 'skills'
 $CodexSkillsPath = Join-Path $CodexHome 'skills'
@@ -310,6 +328,10 @@ $CodexConfigPath = Join-Path $CodexHome 'config.toml'
 $CodexAgentsPath = Join-Path $CodexHome 'AGENTS.md'
 $WorkspaceAgentsPath = Join-Path $WorkspaceRoot 'AGENTS.md'
 $WorkspaceGeminiPath = Join-Path $WorkspaceRoot 'GEMINI.md'
+$WorkspaceEntryAgentsPath = Join-Path $VaultPath 'entry\AGENTS.md'
+$WorkspaceEntryGeminiPath = Join-Path $VaultPath 'entry\GEMINI.md'
+$WorkspaceAdvanceStageShimPath = Join-Path $VaultPath 'entry\advance-stage.ps1'
+$WorkspaceValidateArtifactsShimPath = Join-Path $VaultPath 'entry\validate-lite-artifacts.ps1'
 $ForbiddenTokens = @('{REPO_ROOT}', '{WORKSPACE_ROOT}', '{VAULT_PATH}', '{CLAUDE_HOME}', '{CODEX_HOME}', '{GEMINI_HOME}')
 $script:RenderTokens = [ordered]@{
     '{REPO_ROOT}' = $RepoRoot
@@ -317,7 +339,7 @@ $script:RenderTokens = [ordered]@{
     '{VAULT_PATH}' = $VaultPath
     '{CLAUDE_HOME}' = $ClaudeHome
     '{CODEX_HOME}' = $CodexHome
-    '{GEMINI_HOME}' = (Join-Path $env:USERPROFILE '.gemini')
+    '{GEMINI_HOME}' = (Join-Path $effectiveUserProfile '.gemini')
 }
 
 $script:Checks = @()
@@ -334,6 +356,10 @@ foreach ($hookName in @('userpromptsubmit.js', 'posttooluse.js', 'stop.js')) {
 Assert-RenderedFile -Path $CodexAgentsPath -ForbiddenTokens $ForbiddenTokens
 Assert-RenderedFile -Path $WorkspaceAgentsPath -ForbiddenTokens $ForbiddenTokens
 Assert-RenderedFile -Path $WorkspaceGeminiPath -ForbiddenTokens $ForbiddenTokens
+Assert-RenderedFile -Path $WorkspaceEntryAgentsPath -ForbiddenTokens $ForbiddenTokens
+Assert-RenderedFile -Path $WorkspaceEntryGeminiPath -ForbiddenTokens $ForbiddenTokens
+Assert-RenderedFile -Path $WorkspaceAdvanceStageShimPath -ForbiddenTokens $ForbiddenTokens
+Assert-RenderedFile -Path $WorkspaceValidateArtifactsShimPath -ForbiddenTokens $ForbiddenTokens
 
 if (Test-Path -LiteralPath $ClaudeSettingsPath -PathType Leaf) {
     try {
@@ -428,8 +454,16 @@ if ($null -eq $tomlHits) {
     Add-Error ("agent-configs/codex/*.toml 命中 forbidden prefix: {0}:{1}" -f $firstHit.Path, $firstHit.LineNumber)
 }
 
-if (Test-Path -LiteralPath (Join-Path $RepoRoot 'scripts\memory-health.ps1') -PathType Leaf) {
-    $healthOutput = @(& (Join-Path $RepoRoot 'scripts\memory-health.ps1') -VaultRoot $VaultPath 2>&1)
+if ($Scope -eq 'WorkflowStatus') {
+    Add-Check 'WorkflowStatus scope skips shared-memory health because harness-status runs that gate separately'
+} elseif (Test-Path -LiteralPath (Join-Path $RepoRoot 'scripts\memory-health.ps1') -PathType Leaf) {
+    $healthArguments = @{
+        VaultRoot = $VaultPath
+    }
+    if (-not [string]::IsNullOrWhiteSpace($CurrentFlowPath)) {
+        $healthArguments.OrchestratorFlowPath = $CurrentFlowPath
+    }
+    $healthOutput = @(& (Join-Path $RepoRoot 'scripts\memory-health.ps1') @healthArguments 2>&1)
     if ($LASTEXITCODE -eq 0 -and ($healthOutput -join [Environment]::NewLine) -match 'STATUS:\s+PASS') {
         Add-Check '共享记忆健康检查返回 STATUS: PASS'
     } else {

@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [string]$WorkspaceRoot,
@@ -49,6 +49,27 @@ function Remove-PathIfExists {
     Remove-Item -LiteralPath $Path -Force
 }
 
+function Get-RelativePath {
+    <#
+    .SYNOPSIS
+    计算 FullPath 相对于 RootPath 的相对路径。
+    .PARAMETER RootPath
+    根目录。
+    .PARAMETER FullPath
+    完整路径。
+    .OUTPUTS
+    System.String。
+    #>
+    param(
+        [string]$RootPath,
+        [string]$FullPath
+    )
+
+    $normalizedRoot = (Get-NormalizedPath -Path $RootPath).TrimEnd('\')
+    $normalizedFullPath = Get-NormalizedPath -Path $FullPath
+    return $normalizedFullPath.Substring($normalizedRoot.Length).TrimStart('\')
+}
+
 function Copy-ItemMerged {
     param(
         [string]$SourcePath,
@@ -66,6 +87,55 @@ function Copy-ItemMerged {
 
     Ensure-Directory -Path (Split-Path -Parent $DestinationPath)
     Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force
+}
+
+function Sync-DirectoryMirror {
+    <#
+    .SYNOPSIS
+    将源目录内容镜像到目标目录。
+    .PARAMETER SourcePath
+    源目录。
+    .PARAMETER TargetPath
+    目标目录。
+    .PARAMETER RemoveExtras
+    是否删除目标目录中源目录不存在的额外条目。
+    .OUTPUTS
+    None。
+    #>
+    param(
+        [string]$SourcePath,
+        [string]$TargetPath,
+        [bool]$RemoveExtras = $true
+    )
+
+    Ensure-Directory -Path $TargetPath
+
+    foreach ($sourceDir in Get-ChildItem -LiteralPath $SourcePath -Recurse -Directory -Force) {
+        $relative = Get-RelativePath -RootPath $SourcePath -FullPath $sourceDir.FullName
+        Ensure-Directory -Path (Join-Path $TargetPath $relative)
+    }
+
+    foreach ($sourceFile in Get-ChildItem -LiteralPath $SourcePath -Recurse -File -Force) {
+        $relative = Get-RelativePath -RootPath $SourcePath -FullPath $sourceFile.FullName
+        $targetFile = Join-Path $TargetPath $relative
+        Ensure-Directory -Path (Split-Path -Parent $targetFile)
+        Copy-Item -LiteralPath $sourceFile.FullName -Destination $targetFile -Force
+    }
+
+    if (-not $RemoveExtras) {
+        return
+    }
+
+    $targetItems = Get-ChildItem -LiteralPath $TargetPath -Recurse -Force | Sort-Object FullName -Descending
+    foreach ($targetItem in $targetItems) {
+        $relative = Get-RelativePath -RootPath $TargetPath -FullPath $targetItem.FullName
+        $sourceItem = Join-Path $SourcePath $relative
+        if (Test-Path -LiteralPath $sourceItem) {
+            continue
+        }
+
+        Remove-PathIfExists -Path $targetItem.FullName
+    }
 }
 
 function Repair-NestedSelfNamedDirectories {
@@ -643,12 +713,18 @@ function Get-PreservedSkillEntryNames {
 
     $normalizedRepoSkillsPath = Get-NormalizedPath -Path $RepoSkillsPath
     $preserved = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $legacyRemovedNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    [void]$legacyRemovedNames.Add('docs')
     if (-not (Test-Path -LiteralPath $SkillsRoot -PathType Container)) {
         return ,$preserved
     }
 
     foreach ($entry in Get-ChildItem -LiteralPath $SkillsRoot -Force) {
         if ($managedSet.Contains($entry.Name)) {
+            continue
+        }
+
+        if ($legacyRemovedNames.Contains($entry.Name)) {
             continue
         }
 
@@ -674,7 +750,7 @@ function Sync-SkillsDirectory {
     )
 
     $hotSwapPreservedNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    [void]$hotSwapPreservedNames.Add('docs')
+    [void]$hotSwapPreservedNames.Add('.system')
 
     $rootTarget = Get-JunctionTarget -Path $HostSkillsPath
     if ($null -ne $rootTarget) {
@@ -715,6 +791,9 @@ function Sync-SkillsDirectory {
     foreach ($name in $managedEntries.Keys) {
         $linkPath = Join-Path $HostSkillsPath $name
         if ($hotSwapPreservedNames.Contains($name) -and (Test-Path -LiteralPath $linkPath) -and ($null -eq (Get-JunctionTarget -Path $linkPath))) {
+            if ($name -eq '.system') {
+                Sync-DirectoryMirror -SourcePath $managedEntries[$name] -TargetPath $linkPath -RemoveExtras:$false
+            }
             continue
         }
 
@@ -945,6 +1024,24 @@ function Install-VaultTemplate {
         [string]$TargetRoot
     )
 
+    function Test-IsManagedVaultStaticPath {
+        param([string]$RelativePath)
+
+        if ([string]::IsNullOrWhiteSpace($RelativePath)) {
+            return $false
+        }
+
+        if ($RelativePath -like '运行时\*') {
+            return $false
+        }
+
+        if ($RelativePath -ieq '.obsidian\workspace.json') {
+            return $false
+        }
+
+        return $true
+    }
+
     foreach ($source in Get-ChildItem -LiteralPath $TemplateRoot -Recurse -File) {
         $relative = $source.FullName.Substring($TemplateRoot.Length).TrimStart('\')
         $targetRelative = if ($relative.EndsWith('.template')) {
@@ -953,17 +1050,21 @@ function Install-VaultTemplate {
             $relative
         }
         $targetPath = Join-Path $TargetRoot $targetRelative
+        $shouldOverwrite = (Test-Path -LiteralPath $targetPath) -and (Test-IsManagedVaultStaticPath -RelativePath $targetRelative)
 
-        if (Test-Path -LiteralPath $targetPath) {
+        if ((Test-Path -LiteralPath $targetPath) -and -not $shouldOverwrite) {
             continue
         }
 
         $extension = [System.IO.Path]::GetExtension($source.FullName).ToLowerInvariant()
         if ($extension -in @('.template', '.md', '.json', '.js', '.mjs', '.toml', '.txt') -or $relative.EndsWith('.template')) {
-            Install-RenderedFile -SourcePath $source.FullName -TargetPath $targetPath -SkipIfExists
+            Install-RenderedFile -SourcePath $source.FullName -TargetPath $targetPath -SkipIfExists:(-not $shouldOverwrite)
             continue
         }
 
+        if ($shouldOverwrite) {
+            Remove-PathIfExists -Path $targetPath
+        }
         Ensure-Directory -Path (Split-Path -Parent $targetPath)
         Copy-Item -LiteralPath $source.FullName -Destination $targetPath -Force
     }
@@ -986,7 +1087,7 @@ $ClaudeHome = Join-Path $env:USERPROFILE '.claude'
 $CodexHome = Join-Path $env:USERPROFILE '.codex'
 $GeminiHome = Join-Path $env:USERPROFILE '.gemini'
 $RepoSkillsPath = Join-Path $RepoRoot 'skills'
-$BackupRoot = Join-Path $RepoRoot ('backups\install-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+$BackupRoot = Join-Path $RepoRoot ('backups\install-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + "-$PID")
 
 Ensure-Directory -Path $BackupRoot
 
@@ -1040,7 +1141,7 @@ try {
 
     Save-InstallManifestSnapshot
 
-    Merge-SystemSkills -SourceRoots @($RepoSkillsPath, $claudeSkillsPath, $codexSkillsPath) -TargetPath (Join-Path $RepoSkillsPath '.system')
+    Ensure-Directory -Path (Join-Path $RepoSkillsPath '.system')
 
     Install-VaultTemplate -TemplateRoot (Join-Path $RepoRoot 'vault-template') -TargetRoot $VaultPath
 

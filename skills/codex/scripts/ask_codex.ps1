@@ -1,4 +1,4 @@
-#!/usr/bin/env powershell
+﻿#!/usr/bin/env powershell
 # Windows PowerShell 5.1+ compatible script
 [CmdletBinding()]
 param(

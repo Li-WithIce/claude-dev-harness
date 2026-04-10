@@ -20,10 +20,10 @@ Output (on success):
 Examples:
   ask_gemini.sh "Review the current task and produce a test report."
   ask_gemini.sh "Validate the auth changes and conclude pass/fail/blocked." \
-    --file docs/task-123/spec.md \
-    --file docs/task-123/plan.md \
-    --file docs/task-123/review.md \
-    -o docs/task-123/test.md
+    --file docs/tasks/task-123/spec.md \
+    --file docs/tasks/task-123/plan.md \
+    --file docs/tasks/task-123/logs/test-run.log \
+    -o docs/tasks/task-123/test.md
 USAGE
 }
 
@@ -169,6 +169,7 @@ Instructions:
   ## Findings
   ## Risks / Gaps
   ## Conclusion
+  ## Handoff
 - Under "## Conclusion", output exactly one lowercase word on the first non-empty line: pass, fail, or blocked.
 - Choose blocked when evidence is insufficient, inputs conflict, or execution cannot be validated confidently.
 - Respond in the same language as the task text when practical.

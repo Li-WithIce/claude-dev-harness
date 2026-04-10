@@ -1,47 +1,49 @@
 ---
 name: implement
-description: Use when the current workflow is in DEV and code must be implemented from the confirmed plan or fixed after review/test feedback.
+description: Use when the task is in IMPLEMENT and code plus fresh implementation evidence must be appended to `plan.md`.
 ---
 
-# Implement - 代码实现技能
+# Implement
 
-根据已确认的 `plan.md` 进行实现，或根据 `review.md` / `test.md` 的反馈回修。
+IMPLEMENT 负责两件事：改代码，以及把本轮实现证据追加到 `docs/tasks/<task-id>/plan.md` 的 `## Implementation Notes`。
 
-## 核心原则
+## 何时使用
 
-1. **严格遵循 plan**：实现以 `plan.md` 的 TODO 为准
-2. **spec 可选**：只有当 `spec.md` 存在且被明确当作 delta-spec 使用时才读取
-3. **最小变更**：只做 plan 要求的开发阶段改动
-4. **TDD 铁律**：先写失败测试，再写最小实现，再验证通过
-5. **handoff 必填**：每轮 DEV 都要刷新 `implementation-notes.md`
-6. **尊重 tool_profile**：只在当前 stage binding 指向 DEV 时继续
+- `plan.md` frontmatter 的 `stage` 是 `IMPLEMENT`
+- 需要按已确认计划实现代码
+- CODE_REVIEW 给出 `revise` 后，需要补新实现并追加新证据
 
-## 前置条件
+## 硬约束
 
-- `plan.md` 已存在且状态为 `已确认`
-- `spec.md` 若存在，应作为开发边界补充而非完整需求主文档
-- 如为回修轮次，可访问 `review.md` 或 `test.md`
+- 不写独立 `implementation-notes.md`
+- 只追加新的 `### Run N`，不改旧 run
+- 回修轮必须追加一条比最近一次 `Code Review` 更晚的 Implementation Notes run
+- 不手改 frontmatter 的 `stage`
+
+## Run 格式
+
+```markdown
+## Implementation Notes
+
+### Run 2 · 2026-04-09 11:00 · runner: Codex
+- changed: 修改的文件和行为
+- tests: 实际跑过的命令；没跑就写 none
+- risks: 本轮残留风险；没有就写 none
+- next: 交给 CODE_REVIEW 关注什么
+```
 
 ## 工作流程
 
-1. 阅读 `plan.md`，必要时读取 optional `spec.md`
-2. 确认本轮要实现哪些 TODO
-3. 按依赖顺序逐项实现
-4. 每完成一个 TODO 就运行验证命令
-5. 刷新 `docs/<task-id>/implementation-notes.md`
-6. 把结果交回 `REVIEW(implementation)`
+1. 读取 `plan.md` 和可选 `spec.md`
+2. 只实现当前计划要求的内容
+3. 跑最小必要验证
+4. 在 `## Implementation Notes` 末尾追加新 run
+5. 推进到 `CODE_REVIEW` 前，必须让用户指定下一阶段 `tool`
+6. 调用 `.assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <next-tool>` 进入 `CODE_REVIEW`
+7. 如需单独排查文档问题，再手动运行 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
 
-## implementation-notes.md 至少包含
+## 不要做的事
 
-- 改了什么
-- 没改什么
-- 风险点
-- reviewer watchouts
-- 本轮已执行的验证
-
-## 关键约束
-
-- 不跳过 plan 中的依赖顺序
-- 不把开发阶段工作扩展成上游评审工作
-- 不因为 `spec.md` 缺失就回退到全量需求流程
-- 不在没有证据的情况下声称实现完成
+- 不要重写旧 run
+- 不要把 CODE_REVIEW 的结论写进 Implementation Notes
+- 不要把 TEST 结论提前写进 `test.md`

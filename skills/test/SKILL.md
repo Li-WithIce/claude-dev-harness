@@ -1,59 +1,73 @@
 ---
 name: test
-description: Use when the current workflow is in TEST and the selected binding needs local validation, evidence collection, or a task-scoped `test.md` report.
+description: Use when the task is in TEST and you need to produce `docs/tasks/<task-id>/test.md` with a legal conclusion and handoff section.
 ---
 
 # Test
 
-面向当前开发阶段任务的本地测试协议。目标是验证实现是否满足 `plan.md` 和可选 delta-spec 的要求，并把结论写入 `docs/<task-id>/test.md`。
+TEST 的唯一产物是 `docs/tasks/<task-id>/test.md`。只有 `pass` 才能由 `advance-stage.ps1` 把任务推进到 `DONE`。
 
 ## 何时使用
 
-- 当前 stage 是 `TEST`
-- 需要生成或更新 `test.md`
-- 需要为 HANDOFF 收集明确证据
+- `plan.md` frontmatter 的 `stage` 是 `TEST`
+- 需要生成或更新当前任务的 `test.md`
+- 需要把验证结论和 handoff 摘要写成可推进格式
 
-不要用于修改业务实现或重写 `plan.md` / `spec.md`。
+## 硬约束
 
-## 关键规则
+- 不修改业务实现代码
+- `## Conclusion` 下第一行必须且只能是：`pass`、`fail`、`blocked`
+- `## Handoff` 必须存在
+- `DONE` 由 `advance-stage.ps1` 写回 frontmatter，不在 `test.md` 里手写
 
-- 严禁修改非测试业务代码
-- 结论必须且只能是：`pass`、`fail`、`blocked`
-- `pass` -> HANDOFF
-- `fail` -> DEV
-- `blocked` -> REVIEW(implementation) 或 DEV
-- `spec.md` 是可选输入；存在时按 delta-spec 补充验证
+## 最小模板
 
-## 推荐输入
+```markdown
+# Test Report
 
-- `docs/<task-id>/plan.md`
-- optional `docs/<task-id>/spec.md`
-- `docs/<task-id>/review.md`
-- 当前代码改动和测试输出
+## Summary
+- 一句话结论摘要。
 
-## 执行流程
+## Scope
+- 本轮覆盖范围。
 
-1. 读取 `plan.md`、optional `spec.md`、`review.md`
-2. 提取验证点
-3. 运行测试 / 手工验证
-4. 保存原始证据
-5. 逐项判定 `pass` / `fail` / `blocked`
-6. 产出 `test.md`
+## Inputs Reviewed
+- `docs/tasks/<task-id>/plan.md`
+- `docs/tasks/<task-id>/spec.md`（如存在）
 
-## `test.md` 至少包含
+## Test Approach
+- 实际执行的命令、手工检查或日志来源。
 
-- `# Test Report`
-- `## Meta`
-- `## Summary`
-- `## Scope`
-- `## Inputs Reviewed`
-- `## Test Approach`
-- `## Findings`
-- `## Risks / Gaps`
-- `## Conclusion`
+## Findings
+- 关键发现；无则写 none。
 
-## 关键约束
+## Risks / Gaps
+- 残留风险或证据缺口；无则写 none。
 
-- 没有证据就不能写 `pass`
-- 不把 `pass` 直接等价成 `DONE`
-- TEST 的输出必须可被 `handoff.md` 直接消费
+## Conclusion
+pass
+
+## Handoff
+- delivery: 交付摘要
+- follow_up: 后续动作；无则写 none
+```
+
+## 工作流程
+
+1. 读取 `plan.md` 和可选 `spec.md`
+2. 收集真实测试证据
+3. 按证据写 `test.md`
+4. 确认 `Conclusion` 和 `Handoff` 合法
+5. 只有结论为 `pass` 时再执行 `.assistant\entry\advance-stage.ps1 -TaskId <task-id>` 进入 `DONE`
+6. `TEST -> DONE` 不需要再指定下一阶段 `tool`
+7. 如需单独排查文档问题，再手动运行 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
+
+## 不要做的事
+
+- 没有证据时写 `pass`
+- 省略 `## Handoff`
+- 把 review 发现写成独立 `review.md`
+
+## Reference
+
+- 写作规范: [../orchestrator/references/lite-writing-guide.md](../orchestrator/references/lite-writing-guide.md)

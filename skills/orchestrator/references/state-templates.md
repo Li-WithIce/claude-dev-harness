@@ -1,121 +1,118 @@
 # State Templates
 
-## current-flow.md
-
-`memory-health.ps1 -OrchestratorFlowPath ...` resolves current-task docs from `current-flow.md`, so all artifact paths must continue to point at real current-task documents.
-
-`current-flow.md` is the canonical orchestration state. If another view disagrees with it, prefer `current-flow.md`.
+## plan.md frontmatter
 
 ```yaml
+---
 task_id: <task-id>
-task_name: <task-name>
-mode: <full|fast-track>
-stage: <INTAKE|PLAN|DEV|REVIEW(implementation)|TEST|HANDOFF>
-review_scope: <implementation|none>
-entry_tool: <tool>
-tool_profile_id: <profile-id>
-tool_profile_source: <repo-preset|user-confirmed|restored|manual>
-runner_tool: <tool>
-runner: <skill/script/command>
-fallback_policy: <policy>
-recovery_source: <current-flow|artifact-scan|manual-bootstrap>
-
-approved_inputs:
-  requirement_review: <present|missing>
-  ui_review: <present|missing|not-applicable>
-  technical_review: <present|absent|unknown>
-
-delta_spec:
-  required: <true|false>
-  reason: <text|none>
-  status: <missing|draft|confirmed|not-needed>
-  path: <workspace-relative spec.md path|none>
-
-artifact_root: <workspace-relative docs/<task-id>>
-current_doc: <current artifact path>
-plan_path: <workspace-relative or absolute path to plan.md>
-implementation_notes_path: <workspace-relative or absolute path to implementation-notes.md|none>
-review_path: <workspace-relative or absolute path to review.md|none>
-test_path: <workspace-relative or absolute path to test.md|none>
-handoff_path: <workspace-relative or absolute path to handoff.md|none>
-
-tool_bindings:
-  INTAKE: <tool + invocation>
-  PLAN: <tool + invocation>
-  DEV: <tool + invocation>
-  REVIEW(implementation): <tool + invocation>
-  TEST: <tool + invocation>
-  HANDOFF: <tool + invocation>
-
-fallback_bindings:
-  <STAGE>:
-    - <fallback tool + invocation>
-    - <fallback tool + invocation>
-
-gate:
-  status: <passed|not passed|blocked>
-  basis: <why>
-
-next: <next action>
-runtime_health_command: ..\..\scripts\memory-health.ps1 -VaultRoot {VAULT_PATH} -OrchestratorFlowPath <absolute-path>
+stage: PLAN | PLAN_REVIEW | IMPLEMENT | CODE_REVIEW | TEST | DONE
+tool: claudecode | codex | gemini | none
+updated: YYYY-MM-DD
+---
 ```
 
-## handoff.md
-
-`handoff.md` is a derived user-facing snapshot. Refresh it on bootstrap, real stage transitions, artifact-scan recovery, explicit transfer points, and terminal `HANDOFF`; it does not need to change for every same-stage micro-update.
+## plan.md skeleton
 
 ```markdown
-# Handoff
+# <Task Title>
 
-> task_id: <task-id>
-> task_name: <task-name>
-> stage: <INTAKE|PLAN|DEV|REVIEW(implementation)|TEST|HANDOFF>
-> next_stage: <PLAN|DEV|REVIEW(implementation)|TEST|HANDOFF|none>
-> handoff_reason: <advance|loopback|fallback|resume|terminal>
+## Clarification
+- 验收标准: ...
+- 非目标: ...
+- 受影响目录: ...
+- 回滚策略: ...
+- ui: not-applicable
 
-## Consumed Inputs
+## User Confirmation
+- status: draft
 
-- requirement review: <present|missing>
-- ui review: <present|missing|not-applicable>
-- technical review: <present|absent|unknown>
-- delta-spec: <not-needed|draft|confirmed>
+## Plan
+- TODO 1: ...
 
-## Gate Basis
+## Verification
+- `pwsh -File tests/...`
 
-- current gate status: <passed|not passed|blocked>
-- why: <text>
+## Risks
+- ...
 
-## Current Status
+## Plan Review
 
-- latest_change_summary: <text|none>
-- review_verdict: <not-run|pass|revise>
-- test_conclusion: <not-run|pass|fail|blocked>
-- next_focus: <text|none>
+## Implementation Notes
 
-## Artifacts
-
-- plan: <path>
-- implementation-notes: <path|none>
-- review: <path|none>
-- test: <path|none>
-- handoff: <path|none>
-
-## Risks / Watchouts
-
-- <risk item>
-
-## Downstream Notes
-
-- <delivery note>
+## Code Review
 ```
 
-## stage-history.md
-
-`stage-history.md` is an append-only audit view. Append only when the stage actually changes.
+## append-only run block
 
 ```markdown
-# Stage History
+### Run 2 · 2026-04-09 11:00 · runner: Codex
+- verdict: pass
+- findings:
+  - none
+- next: none
+```
 
-- 2026-04-01T10:00:00+08:00 | INTAKE -> PLAN | gate=passed | reason=approved inputs sufficient
-- 2026-04-01T11:30:00+08:00 | TEST -> HANDOFF | gate=passed | reason=test.md verdict = pass
+`Plan Review` 和 `Code Review` 读取 `verdict`；`Implementation Notes` 记录 `changed/tests/risks/next`。
+
+## spec.md skeleton
+
+```markdown
+# <Task Title> Spec
+
+## Gap
+- 当前输入缺什么。
+
+## Constraint
+- 开发边界。
+
+## Verification Delta
+- 需要额外验证什么。
+```
+
+## test.md skeleton
+
+```markdown
+# Test Report
+
+## Summary
+- ...
+
+## Scope
+- ...
+
+## Inputs Reviewed
+- `docs/tasks/<task-id>/plan.md`
+
+## Test Approach
+- ...
+
+## Findings
+- ...
+
+## Risks / Gaps
+- ...
+
+## Conclusion
+pass
+
+## Handoff
+- delivery: ...
+- follow_up: none
+```
+
+## task mirror skeleton
+
+```markdown
+---
+task_id: <task-id>
+stage: <stage>
+tool: <tool>
+updated: YYYY-MM-DD
+---
+# Task Mirror
+
+- pointer: docs/tasks/<task-id>/plan.md
+- assigned_tool: <tool>
+- latest_plan_review: <pass|revise|none>
+- latest_code_review: <pass|revise|none>
 ```

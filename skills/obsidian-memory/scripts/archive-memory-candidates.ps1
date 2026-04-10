@@ -11,7 +11,9 @@ $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $VaultRoot = Resolve-SharedMemoryVaultRoot -VaultRoot $VaultRoot
 
 function Update-FrontmatterDate {
-    param(
+# 归档记忆候选中的终态条目。
+# 兼容旧版“仅占位提示”格式，并在归档前升级为标准表格。
+param(
         [string[]]$Lines,
         [string]$Timestamp
     )
@@ -66,6 +68,61 @@ function Parse-TableRows {
     }
 }
 
+function Normalize-ArchiveLines {
+    <#
+    .SYNOPSIS
+    将旧版归档占位内容升级为标准表格。
+    .DESCRIPTION
+    旧工作区只包含标题和“当前暂无归档项”占位时，先补齐标准表头，
+    再交给后续的表格解析和归档写回逻辑处理。
+    .PARAMETER Lines
+    原始归档文件行数组。
+    .OUTPUTS
+    System.String[].
+    #>
+    param([string[]]$Lines)
+
+    foreach ($line in $Lines) {
+        if ($line -like '| ID *') {
+            return ,$Lines
+        }
+    }
+
+    $frontmatterEnd = -1
+    $delimiterCount = 0
+    for ($i = 0; $i -lt $Lines.Count; $i++) {
+        if ($Lines[$i] -eq '---') {
+            $delimiterCount += 1
+            if ($delimiterCount -eq 2) {
+                $frontmatterEnd = $i
+                break
+            }
+        }
+    }
+
+    $normalized = @()
+    if ($frontmatterEnd -ge 0) {
+        $normalized += $Lines[0..$frontmatterEnd]
+    } else {
+        $normalized += @(
+            '---'
+            'updated: 1970-01-01 00:00:00'
+            '---'
+        )
+    }
+
+    $normalized += @(
+        ''
+        '# 记忆候选归档'
+        ''
+        '| ID | 归档日期 | 类型 | 内容摘要 | 结果 | 目标位置 / 原因 | 备注 |'
+        '|----|----------|------|----------|------|-----------------|------|'
+        '| 无 | - | - | 当前暂无归档项 | - | - | - |'
+    )
+
+    return ,$normalized
+}
+
 function Split-Columns {
     param([string]$Line)
 
@@ -75,6 +132,11 @@ function Split-Columns {
 
 function Build-CandidateRow {
     param([string[]]$Columns)
+
+    if ($Columns.Count -ge 9) {
+        return '| {0} | {1} | {2} | {3} | {4} | {5} | {6} | {7} | {8} |' -f $Columns[0], $Columns[1], $Columns[2], $Columns[3], $Columns[4], $Columns[5], $Columns[6], $Columns[7], $Columns[8]
+    }
+
     return '| {0} | {1} | {2} | {3} | {4} | {5} | {6} | {7} |' -f $Columns[0], $Columns[1], $Columns[2], $Columns[3], $Columns[4], $Columns[5], $Columns[6], $Columns[7]
 }
 
@@ -102,6 +164,26 @@ function Write-Utf8Bom {
     [System.IO.File]::WriteAllText($Path, $content, (New-Object System.Text.UTF8Encoding($true)))
 }
 
+function Get-LastTableRowIndex {
+    <#
+    .SYNOPSIS
+    返回表体的最后一行索引。
+    .DESCRIPTION
+    只有表头和分隔线时，替换范围要停在分隔线，而不是访问不存在的数据行。
+    .PARAMETER Table
+    Parse-TableRows 返回的结构。
+    .OUTPUTS
+    Int32。
+    #>
+    param([pscustomobject]$Table)
+
+    if ($Table.Rows.Count -eq 0) {
+        return $Table.DelimiterIndex
+    }
+
+    return $Table.Rows[-1].Index
+}
+
 $candidatePath = Join-Path $VaultRoot '运行时\记忆候选.md'
 $archivePath = Join-Path $VaultRoot '运行时\记忆候选归档.md'
 
@@ -117,9 +199,18 @@ $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
 
 $candidateLines = Get-Content -Path $candidatePath -Encoding utf8
 $archiveLines = Get-Content -Path $archivePath -Encoding utf8
+$archiveHasStandardTable = $false
+foreach ($line in $archiveLines) {
+    if ($line -like '| ID *') {
+        $archiveHasStandardTable = $true
+        break
+    }
+}
 
 $candidateTable = Parse-TableRows -Lines $candidateLines
+$archiveLines = Normalize-ArchiveLines -Lines $archiveLines
 $archiveTable = Parse-TableRows -Lines $archiveLines
+$candidateHeaderColumns = Split-Columns -Line $candidateLines[$candidateTable.HeaderIndex]
 
 $candidateRowData = foreach ($row in $candidateTable.Rows) {
     $cols = Split-Columns -Line $row.Line
@@ -136,6 +227,7 @@ $candidateRowData = foreach ($row in $candidateTable.Rows) {
         Source = $cols[5]
         Status = $cols[6]
         Confirmation = $cols[7]
+        Created = if ($cols.Count -ge 9) { $cols[8] } else { '-' }
     }
 }
 
@@ -143,6 +235,10 @@ $toArchive = @($candidateRowData | Where-Object { $TerminalStatuses -contains $_
 $toKeep = @($candidateRowData | Where-Object { $TerminalStatuses -notcontains $_.Status })
 
 if ($toArchive.Count -eq 0) {
+    if (-not $archiveHasStandardTable) {
+        $archiveLines = Update-FrontmatterDate -Lines $archiveLines -Timestamp $timestamp
+        Write-Utf8Bom -Path $archivePath -Lines $archiveLines
+    }
     Write-Output 'STATUS: PASS'
     Write-Output 'Archived: 0'
     Write-Output 'Message: no terminal candidates to archive.'
@@ -177,7 +273,7 @@ if ($newArchiveTableRows.Count -eq 0) {
 
 $newCandidateTableRows = @()
 foreach ($item in $toKeep) {
-    $newCandidateTableRows += Build-CandidateRow -Columns @(
+    $candidateColumns = @(
         $item.Id,
         $item.Date,
         $item.Type,
@@ -187,9 +283,17 @@ foreach ($item in $toKeep) {
         $item.Status,
         $item.Confirmation
     )
+    if ($candidateHeaderColumns.Count -ge 9) {
+        $candidateColumns += $item.Created
+    }
+    $newCandidateTableRows += Build-CandidateRow -Columns $candidateColumns
 }
 if ($newCandidateTableRows.Count -eq 0) {
-    $newCandidateTableRows = @('| 无 | - | - | 当前暂无候选项 | - | - | - | - |')
+    if ($candidateHeaderColumns.Count -ge 9) {
+        $newCandidateTableRows = @('| 无 | - | - | 当前暂无候选项 | - | - | - | - | - |')
+    } else {
+        $newCandidateTableRows = @('| 无 | - | - | 当前暂无候选项 | - | - | - | - |')
+    }
 }
 
 $candidateLines = Update-FrontmatterDate -Lines $candidateLines -Timestamp $timestamp
@@ -205,7 +309,7 @@ for ($i = 0; $i -lt $candidateLines.Count; $i++) {
         $candidateOutput += $candidateLines[$i]
         $candidateOutput += $candidateLines[$candidateTable.DelimiterIndex]
         $candidateOutput += $newCandidateTableRows
-        $i = $candidateTable.Rows[-1].Index
+        $i = Get-LastTableRowIndex -Table $candidateTable
         continue
     }
 }
@@ -220,7 +324,7 @@ for ($i = 0; $i -lt $archiveLines.Count; $i++) {
         $archiveOutput += $archiveLines[$i]
         $archiveOutput += $archiveLines[$archiveTable.DelimiterIndex]
         $archiveOutput += $newArchiveTableRows
-        $i = $archiveTable.Rows[-1].Index
+        $i = Get-LastTableRowIndex -Table $archiveTable
         continue
     }
 }
@@ -233,3 +337,4 @@ Write-Output ('Archived: {0}' -f $toArchive.Count)
 foreach ($item in $toArchive) {
     Write-Output ('- {0} -> {1}' -f $item.Id, $item.Status)
 }
+exit 0

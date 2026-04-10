@@ -1,0 +1,28 @@
+﻿# Project-local stage advance shim.
+# Delegates to the harness repo stage driver without requiring a workspace scripts directory.
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$TaskId,
+
+    [string]$Tool = ""
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+<#
+.SYNOPSIS
+Advance the current lite task stage from the workspace.
+.DESCRIPTION
+This shim keeps the user-facing command inside `.assistant\entry` while delegating to the managed harness repo script.
+.PARAMETER TaskId
+The task id under `docs/tasks/<task-id>/`.
+.PARAMETER Tool
+The next-stage tool for non-DONE transitions.
+.OUTPUTS
+None.
+#>
+
+& '{REPO_ROOT}\scripts\advance-stage.ps1' -TaskId $TaskId -Tool $Tool -VaultRoot '{VAULT_PATH}'
+exit $LASTEXITCODE

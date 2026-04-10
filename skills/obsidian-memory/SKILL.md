@@ -26,14 +26,15 @@ Claude、Codex、Gemini 共用同一份 Obsidian 记忆仓库：
 
 ## Writeback
 
-- 单写者：只有入口 agent（Claude Code）写 `当前任务.md`、`中断任务.md`、`上次会话.md`、`恢复索引.md`
-- Codex / Gemini 只写 `docs/<task-id>/*` 和 `运行时\tasks\<task-id>.md`
-- 多步骤任务开始、切换或继续：入口 agent 更新 `运行时\当前任务.md`（共享指针） + `运行时\tasks\<task-id>.md`
-- 任务暂停或待续：入口 agent 同步更新 `运行时\tasks\<task-id>.md` 和 `运行时\中断任务.md`
-- 阶段完成：入口 agent 更新 `运行时\上次会话.md` 并刷新 `运行时\恢复索引.md`
+- 单写者：只有当前入口 host 写 `当前任务.md`、`中断任务.md`、`上次会话.md`、`恢复索引.md`
+- Codex / Gemini 若不是当前入口 host，只写 `docs/tasks/<task-id>/*` 和 `运行时\tasks\<task-id>.md`
+- 多步骤任务开始、切换或继续：当前入口 host 更新 `运行时\当前任务.md`（共享指针） + `运行时\tasks\<task-id>.md`
+- 任务暂停或待续：当前入口 host 同步更新 `运行时\tasks\<task-id>.md` 和 `运行时\中断任务.md`
+- 阶段完成：当前入口 host 更新 `运行时\上次会话.md` 并刷新 `运行时\恢复索引.md`
 - 未确认的稳定偏好先写 `运行时\记忆候选.md`
 - 已结束生命周期的候选移入 `运行时\记忆候选归档.md`
 - 新事项先写 `运行时\收件箱.md`
+- 收件箱条目可通过 `..\..\scripts\append-runtime-inbox.ps1`、`..\..\scripts\promote-runtime-inbox.ps1`、`..\..\scripts\triage-runtime-inbox.ps1` 维护
 
 ## Guardrails
 

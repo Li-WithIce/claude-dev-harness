@@ -1,89 +1,72 @@
 ---
 name: review
-description: Use when reviewing implementation output against the current plan and optional delta-spec during REVIEW(implementation).
+description: Use when the task is in PLAN_REVIEW or CODE_REVIEW and a new append-only review run must be written into `plan.md`.
 ---
 
-# Review - 实现审查技能
-
-本 skill 只用于 `REVIEW(implementation)`。它对照 `plan.md`、可选 `spec.md`、`implementation-notes.md` 和当前 diff，产出结构化 `review.md`。
-
-## 核心原则
-
-1. **plan 优先**：以 `plan.md` 为主审查依据
-2. **spec 可选**：只有存在 delta-spec 时才把 `spec.md` 当作补充约束
-3. **证据驱动**：结论必须基于代码与运行证据
-4. **结构化输出**：固定输出到 `docs/<task-id>/review.md`
-5. **P0/P1 阻塞 TEST**：只有仅剩 `P2` 时才能进入 TEST
-6. **P2 必须传递**：所有 `P2` 风险都要进入 TEST / HANDOFF
-
-## 输入
-
-- `docs/<task-id>/plan.md`
-- optional `docs/<task-id>/spec.md`
-- `docs/<task-id>/implementation-notes.md`
-- 当前 diff
-
-## 审查维度
-
-1. 功能完整性：是否满足 plan TODO 和验收标准
-2. 逻辑正确性：是否有明显错误、漏做、做错
-3. 架构合规性：是否遵循既有边界和依赖方向
-4. 风险控制：是否引入明显安全 / 性能 / 回归风险
-5. 证据质量：`implementation-notes.md` 与实际 diff 是否一致
-
-## 输出模板
-
-`review.md` 至少包含：
-
-- `task_id` / `task_name`
-- `review_scope: implementation`
-- `review_verdict: pass | revise`
-- Findings
-- `P0 / P1 / P2`
-- Summary
-- Watchouts（传递到 TEST / HANDOFF）
-
-推荐最小模板：
-
-```markdown
 # Review
 
-> task_id: <task-id>
-> task_name: <task-name>
-> review_scope: implementation
-> review_verdict: <pass|revise>
-> reviewed_by: <tool>
-> date: YYYY-MM-DD
+这个 skill 同时服务 `PLAN_REVIEW` 和 `CODE_REVIEW`。它不再产出独立 `review.md`，而是把审查结论追加到 `plan.md`。
 
-## Findings
+## 何时使用
 
-### P0
+- `plan.md` frontmatter 的 `stage` 是 `PLAN_REVIEW`
+- `plan.md` frontmatter 的 `stage` 是 `CODE_REVIEW`
 
-- 无
+## 当前阶段对应关系
 
-### P1
+- `PLAN_REVIEW`：追加到 `## Plan Review`
+- `CODE_REVIEW`：追加到 `## Code Review`
 
-- 无
+## Run 格式
 
-### P2
-
-- 无
-
-## Summary
-
-用 1 段话概括实现是否满足 plan / delta-spec，并说明 verdict 的依据。
-
-## Watchouts
-
-- <需要传递到 TEST / HANDOFF 的风险或注意事项；若无写“无”>
+```markdown
+### Run 1 · 2026-04-09 10:30 · runner: Codex
+- verdict: pass | revise
+- findings:
+  - P1: ...
+  - P2: ...
+- next: 下一步动作；无则写 none
 ```
 
-- `review_verdict = pass` 仅当不存在 `P0 / P1` 时成立
-- 只要存在 `P0 / P1`，`review_verdict` 必须写为 `revise`
-- 仅剩 `P2` 时仍可写 `pass`，但所有 `P2` 都必须进入 `Watchouts`
+`advance-stage.ps1` 只读取最新一条 run 的 `- verdict:`，所以字段名不要变。
 
-## 关键约束
+## 审查重点
 
-- 不负责 `spec.md` / `plan.md` 的文档 review
-- 不把缺少证据的情况包装成通过
-- 不遗漏 `P2` 风险传递
+### PLAN_REVIEW
+
+- Clarification 是否完整
+- User Confirmation 是否已经 `confirmed`
+- 计划粒度是否足够指导实现和验证
+- 风险和验证命令是否可执行
+
+### CODE_REVIEW
+
+- 实现是否满足计划
+- 是否有明显漏做、做错、多做
+- 最新 `Implementation Notes` 是否和代码一致
+- 是否还需要回 IMPLEMENT 补证据或补实现
+
+## 判定规则
+
+- `pass`：当前阶段可以推进
+- `revise`：退回上一可写阶段重做
+  - `PLAN_REVIEW -> PLAN`
+  - `CODE_REVIEW -> IMPLEMENT`
+
+写完最新 run 后，再按下一阶段选择执行 `.assistant\entry\advance-stage.ps1`；它会自动调用 validator。
+
+推进规则：
+
+- `PLAN_REVIEW -> IMPLEMENT` 或 `PLAN_REVIEW -> PLAN` 前，必须让用户指定下一阶段 `tool`
+- `CODE_REVIEW -> TEST` 或 `CODE_REVIEW -> IMPLEMENT` 前，必须让用户指定下一阶段 `tool`
+- 推进命令固定为 `.assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <next-tool>`
+
+## 不要做的事
+
+- 不要写独立 `review.md`
+- 不要修改旧 run
+- 不要省略 `verdict`
+
+## Reference
+
+- 写作规范: [../orchestrator/references/lite-writing-guide.md](../orchestrator/references/lite-writing-guide.md)

@@ -1,4 +1,4 @@
-$sharedPathsHelper = Join-Path (Split-Path -Parent $PSScriptRoot) 'skills\obsidian-memory\scripts\resolve-shared-memory-paths.ps1'
+﻿$sharedPathsHelper = Join-Path (Split-Path -Parent $PSScriptRoot) 'skills\obsidian-memory\scripts\resolve-shared-memory-paths.ps1'
 if (Test-Path -LiteralPath $sharedPathsHelper) {
     . $sharedPathsHelper
 }

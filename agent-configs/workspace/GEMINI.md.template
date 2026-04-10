@@ -7,3 +7,4 @@ Use the shared Obsidian memory vault for project context:
 
 - If the task needs recovery, long-term context, user preferences, tool paths, or runtime state, use the local `obsidian-memory` skill first.
 - Do not create parallel runtime notes outside the shared vault.
+- The full workspace Gemini entry instructions live in `.assistant\entry\GEMINI.md`.

@@ -1,4 +1,4 @@
-function Resolve-NormalizedPath {
+﻿function Resolve-NormalizedPath {
     param([string]$Path)
 
     if ([string]::IsNullOrWhiteSpace($Path)) {
@@ -43,6 +43,30 @@ function Find-ParentDirectoryNamed {
     return $null
 }
 
+function Get-FlowSharedVaultRoot {
+    param([string]$OrchestratorFlowPath)
+
+    if ([string]::IsNullOrWhiteSpace($OrchestratorFlowPath) -or -not (Test-Path -LiteralPath $OrchestratorFlowPath -PathType Leaf)) {
+        return $null
+    }
+
+    $match = Select-String -Path $OrchestratorFlowPath -Pattern '^shared_vault_root:\s*(.+)$' -Encoding utf8 | Select-Object -First 1
+    if ($null -eq $match) {
+        return $null
+    }
+
+    $value = $match.Matches[0].Groups[1].Value.Trim()
+    if (
+        ($value.StartsWith('"') -and $value.EndsWith('"')) -or
+        ($value.StartsWith("'") -and $value.EndsWith("'")) -or
+        ($value.StartsWith('`') -and $value.EndsWith('`'))
+    ) {
+        $value = $value.Substring(1, $value.Length - 2)
+    }
+
+    return Resolve-NormalizedPath -Path $value
+}
+
 function Resolve-SharedMemoryVaultRoot {
     param(
         [string]$VaultRoot = "",
@@ -73,6 +97,9 @@ function Resolve-SharedMemoryVaultRoot {
     Add-Candidate -Value $VaultRoot
     Add-Candidate -Value $env:CLAUDE_DEV_HARNESS_VAULT_PATH
     Add-Candidate -Value $env:OBSIDIAN_SHARED_VAULT
+
+    $flowSharedVaultRoot = Get-FlowSharedVaultRoot -OrchestratorFlowPath $OrchestratorFlowPath
+    Add-Candidate -Value $flowSharedVaultRoot
 
     if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
         Add-Candidate -Value (Join-Path $WorkspaceRoot '.assistant')

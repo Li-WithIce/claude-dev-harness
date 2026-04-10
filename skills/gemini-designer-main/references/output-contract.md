@@ -10,8 +10,9 @@ Gemini output must include:
 - `## Findings`
 - `## Risks / Gaps`
 - `## Conclusion`
+- `## Handoff`
 
-`## Conclusion` must contain exactly one verdict word: `pass`, `fail`, or `blocked`.
+`## Conclusion` must contain exactly one verdict word on the first non-empty line: `pass`, `fail`, or `blocked`.
 
 ## Invalid Output Conditions
 
@@ -21,6 +22,5 @@ Treat Gemini output as insufficient for TEST gate if any of the following is tru
 - Output is not a valid markdown test report
 - Required sections are missing
 - `Conclusion` is missing or not one of `pass / fail / blocked`
+- `Handoff` is missing
 - Findings are clearly not grounded in the provided inputs
-
-If any invalid-output condition is met, do not use Gemini output as the sole TEST gate basis. Return to orchestrator and follow the current tool profile's fallback policy.

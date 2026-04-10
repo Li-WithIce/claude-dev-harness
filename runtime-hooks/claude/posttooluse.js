@@ -1,25 +1,33 @@
+// Shared-memory posttooluse hook.
+// Rebuilds recovery-index after tool writes and records inbox fallback when another writer holds the runtime lock.
+// The hook is self-contained because tests render it into a temporary directory.
+
 const fs = require("fs");
 const path = require("path");
 
 const assistantRoot = "{VAULT_PATH}";
-const runtimeDir = path.join(assistantRoot, "\u8fd0\u884c\u65f6");
-const currentTaskFile = path.join(runtimeDir, "\u5f53\u524d\u4efb\u52a1.md");
-const interruptedTasksFile = path.join(runtimeDir, "\u4e2d\u65ad\u4efb\u52a1.md");
-const lastSessionFile = path.join(runtimeDir, "\u4e0a\u6b21\u4f1a\u8bdd.md");
-const recoveryIndexFile = path.join(runtimeDir, "\u6062\u590d\u7d22\u5f15.md");
+const runtimeDir = path.join(assistantRoot, "运行时");
+const currentTaskPath = path.join(runtimeDir, "当前任务.md");
+const currentFlowPath = path.join(assistantRoot, "orchestration", "current-flow.md");
+const recoveryIndexPath = path.join(runtimeDir, "恢复索引.md");
+const inboxPath = path.join(runtimeDir, "收件箱.md");
+const lockPath = path.join(runtimeDir, "runtime.lock.json");
+const activeStages = new Set(["PLAN", "PLAN_REVIEW", "IMPLEMENT", "CODE_REVIEW", "TEST"]);
+const placeholderSummary = "当前暂无收件箱事项";
 
-const watchedFiles = new Set(
-  [currentTaskFile, interruptedTasksFile, lastSessionFile].map(normalizePath),
-);
-
-function normalizePath(filePath) {
-  return path.resolve(filePath).toLowerCase();
-}
-
+/**
+ * Writes a JSON payload to stdout.
+ * @param {object} payload The hook response payload.
+ * @returns {void}
+ */
 function writeJson(payload) {
   process.stdout.write(JSON.stringify(payload));
 }
 
+/**
+ * Reads stdin as UTF-8.
+ * @returns {string}
+ */
 function readStdin() {
   try {
     return fs.readFileSync(0, "utf8");
@@ -28,264 +36,352 @@ function readStdin() {
   }
 }
 
+/**
+ * Reads a file as UTF-8 and returns an empty string when it is missing.
+ * @param {string} filePath Absolute file path.
+ * @returns {string}
+ */
 function safeRead(filePath) {
   if (!fs.existsSync(filePath)) {
     return "";
   }
-  return fs.readFileSync(filePath, "utf8");
+  return fs.readFileSync(filePath, "utf8").replace(/^\uFEFF/, "");
 }
 
-function parseJson(raw) {
-  if (!raw.trim()) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
+/**
+ * Escapes a string for use in a regular expression.
+ * @param {string} value Raw string.
+ * @returns {string}
+ */
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function collectStringPaths(value, bucket = []) {
-  if (typeof value === "string") {
-    if (
-      value.includes(".assistant") &&
-      (value.endsWith(".md") || value.includes(".md\""))
-    ) {
-      bucket.push(value);
-    }
-    return bucket;
+/**
+ * Removes Markdown inline-code wrappers.
+ * @param {string} value Raw field value.
+ * @returns {string}
+ */
+function stripTicks(value) {
+  const text = String(value || "").trim();
+  if (text.startsWith("`") && text.endsWith("`")) {
+    return text.slice(1, -1);
   }
-
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      collectStringPaths(item, bucket);
-    }
-    return bucket;
-  }
-
-  if (value && typeof value === "object") {
-    for (const [key, nested] of Object.entries(value)) {
-      if (
-        (key === "file_path" || key === "filePath" || key === "path") &&
-        typeof nested === "string"
-      ) {
-        bucket.push(nested);
-        continue;
-      }
-      collectStringPaths(nested, bucket);
-    }
-  }
-
-  return bucket;
+  return text;
 }
 
-function shouldRefresh(payload, raw) {
-  if (!payload) {
-    return true;
-  }
-
-  const toolName = payload.tool_name || payload.toolName || "";
-  if (toolName && !["Write", "Edit", "MultiEdit"].includes(toolName)) {
-    return false;
-  }
-
-  const candidates = new Set(
-    collectStringPaths(payload).map((item) =>
-      normalizePath(item.replace(/^"+|"+$/g, "")),
-    ),
-  );
-
-  if ([...candidates].some((item) => watchedFiles.has(item))) {
-    return true;
-  }
-
-  return (
-    typeof raw === "string" &&
-    [
-      "\u5f53\u524d\u4efb\u52a1.md",
-      "\u4e2d\u65ad\u4efb\u52a1.md",
-      "\u4e0a\u6b21\u4f1a\u8bdd.md",
-    ].some((fileName) => raw.includes(fileName))
-  );
+/**
+ * Returns true when a task or status value means idle.
+ * @param {string} value Field value.
+ * @returns {boolean}
+ */
+function isIdle(value) {
+  const normalized = stripTicks(value).trim().toLowerCase();
+  return !normalized || ["none", "无", "空闲", "idle", "done"].includes(normalized);
 }
 
-function clean(value) {
-  return String(value || "")
-    .replace(/\r/g, "")
-    .replace(/\n+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+/**
+ * Reads a simple YAML/frontmatter field.
+ * @param {string} content File content.
+ * @param {string} key YAML key to match.
+ * @returns {string}
+ */
+function parseYamlValue(content, key) {
+  const pattern = new RegExp(`^${escapeRegExp(key)}:\\s*(.+)$`, "m");
+  const match = content.match(pattern);
+  if (!match) {
+    return "";
+  }
+  return stripTicks(match[1].trim());
 }
 
-function parseKeyValueTable(content) {
-  const lines = content.split(/\r?\n/);
-  const data = {};
-  let started = false;
+/**
+ * Reads a single value from a Markdown key-value table.
+ * @param {string} content Markdown file content.
+ * @param {string} key Table key to match.
+ * @returns {string}
+ */
+function parseTableValue(content, key) {
+  const pattern = new RegExp(`^\\|\\s*${escapeRegExp(key)}\\s*\\|\\s*(.+?)\\s*\\|$`, "m");
+  const match = content.match(pattern);
+  return match ? stripTicks(match[1].trim()) : "";
+}
 
-  for (const line of lines) {
-    if (!line.startsWith("|")) {
-      if (started) {
-        break;
-      }
-      continue;
-    }
+/**
+ * Returns the current local timestamp in the harness format.
+ * @returns {string}
+ */
+function getTimestamp() {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("sv-SE", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second}`;
+}
 
-    const cells = line
-      .split("|")
-      .slice(1, -1)
-      .map((item) => item.trim());
+/**
+ * Returns today's date in yyyy-MM-dd format.
+ * @returns {string}
+ */
+function getToday() {
+  return getTimestamp().slice(0, 10);
+}
 
-    if (cells.length !== 2) {
-      continue;
-    }
+/**
+ * Ensures the runtime directory exists.
+ * @returns {void}
+ */
+function ensureRuntimeDir() {
+  fs.mkdirSync(runtimeDir, { recursive: true });
+}
 
-    if (/^-+$/.test(cells[0].replace(/:/g, ""))) {
-      started = true;
-      continue;
-    }
+/**
+ * Escapes a value for a Markdown table cell.
+ * @param {string} value Raw cell content.
+ * @returns {string}
+ */
+function escapeCell(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "-";
+  }
+  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n/g, " <br> ").replace(/\|/g, "｜");
+}
 
-    if (cells[0] === "\u9879\u76ee" && cells[1] === "\u503c") {
-      started = true;
-      continue;
-    }
+/**
+ * Parses the current pointer and flow into one active task snapshot.
+ * @returns {{taskId: string, taskName: string, status: string, currentDoc: string, next: string}}
+ */
+function resolveTaskState() {
+  const currentTaskContent = safeRead(currentTaskPath);
+  const flowContent = safeRead(currentFlowPath);
 
-    if (!started) {
-      continue;
-    }
+  const pointerTaskId = parseTableValue(currentTaskContent, "task_id") || parseYamlValue(currentTaskContent, "task_id");
+  const pointerTaskName = parseTableValue(currentTaskContent, "任务");
+  const pointerStatus = parseTableValue(currentTaskContent, "状态");
+  const pointerCurrentDoc = parseTableValue(currentTaskContent, "当前文档");
+  const pointerNext = parseTableValue(currentTaskContent, "下一步");
 
-    data[cells[0]] = cells[1];
+  const flowTaskId = parseYamlValue(flowContent, "task_id");
+  const flowTaskName = parseYamlValue(flowContent, "task_name");
+  const flowStatus = parseYamlValue(flowContent, "stage");
+  const flowCurrentDoc = parseYamlValue(flowContent, "current_doc");
+  const flowNext = parseYamlValue(flowContent, "next");
+
+  if (!isIdle(flowTaskId) && activeStages.has(flowStatus) && (isIdle(pointerTaskId) || isIdle(pointerStatus))) {
+    return {
+      taskId: flowTaskId,
+      taskName: flowTaskName || pointerTaskName || "未命名任务",
+      status: flowStatus,
+      currentDoc: flowCurrentDoc,
+      next: flowNext || pointerNext || "continue",
+    };
   }
 
-  return data;
+  return {
+    taskId: pointerTaskId || flowTaskId || "none",
+    taskName: pointerTaskName || flowTaskName || "无",
+    status: pointerStatus || flowStatus || "空闲",
+    currentDoc: pointerCurrentDoc || flowCurrentDoc || "none",
+    next: pointerNext || flowNext || "等待新任务",
+  };
 }
 
-function parseInterruptedTasks(content) {
-  const lines = content.split(/\r?\n/);
-  const rows = [];
-  let headers = null;
-
-  for (const line of lines) {
-    if (!line.startsWith("|")) {
-      if (headers && rows.length > 0) {
-        break;
-      }
-      continue;
-    }
-
-    const cells = line
-      .split("|")
-      .slice(1, -1)
-      .map((item) => item.trim());
-
-    if (!headers) {
-      if (cells[0] === "\u4f18\u5148\u7ea7") {
-        headers = cells;
-      }
-      continue;
-    }
-
-    if (cells.every((cell) => /^:?-{3,}:?$/.test(cell))) {
-      continue;
-    }
-
-    if (cells.length !== headers.length) {
-      continue;
-    }
-
-    const row = {};
-    headers.forEach((header, index) => {
-      row[header] = cells[index];
-    });
-    rows.push(row);
-  }
-
-  return rows;
-}
-
-function buildRecoveryIndex() {
-  const currentTask = parseKeyValueTable(safeRead(currentTaskFile));
-  const interruptedTasks = parseInterruptedTasks(safeRead(interruptedTasksFile));
-  const lastSession = parseKeyValueTable(safeRead(lastSessionFile));
-
-  const currentTaskName = clean(currentTask["\u4efb\u52a1"]) || "\u65e0";
-  const currentStatus = clean(currentTask["\u72b6\u6001"]) || "\u672a\u77e5";
-  const currentNextStep = clean(currentTask["\u4e0b\u4e00\u6b65"]) || "\u65e0";
-  const lastDone =
-    clean(currentTask["\u4e0a\u6b21\u5b8c\u6210\u6b65\u9aa4"]) || "\u65e0";
-
-  const topInterrupted = interruptedTasks.slice(0, 3);
-  const interruptedLines =
-    topInterrupted.length > 0
-      ? topInterrupted
-          .map((item) => {
-            const priority = clean(item["\u4f18\u5148\u7ea7"]) || "P?";
-            const task = clean(item["\u4efb\u52a1"]) || "\u672a\u547d\u540d";
-            const status = clean(item["\u72b6\u6001"]) || "\u672a\u77e5";
-            const nextStep = clean(item["\u4e0b\u4e00\u6b65"]) || "\u65e0";
-            return `- [${priority}] ${task} | ${status} | ${nextStep}`;
-          })
-          .join("\n")
-      : "- \u65e0";
-
-  const lastSessionDate = clean(lastSession["\u65e5\u671f"]) || "\u65e0";
-  const lastSessionTask = clean(lastSession["\u4efb\u52a1"]) || "\u65e0";
-  const lastSessionStatus = clean(lastSession["\u72b6\u6001"]) || "\u65e0";
-  const lastSessionSummary = clean(lastSession["\u6458\u8981"]) || "\u65e0";
-
-  const generatedAt = new Date().toLocaleString("sv-SE", { hour12: false });
-
+/**
+ * Builds the recovery-index Markdown document.
+ * @param {{taskId: string, taskName: string, status: string, currentDoc: string, next: string}} taskState Active task snapshot.
+ * @returns {string}
+ */
+function buildRecoveryIndex(taskState) {
   return [
     "---",
-    "tags: [\u8fd0\u884c\u65f6, \u6062\u590d\u7d22\u5f15]",
-    "created: 2026-03-13",
-    `updated: ${generatedAt}`,
+    "tags: [运行时, 恢复索引]",
+    `updated: ${getTimestamp()}`,
     "---",
     "",
-    "# \u6062\u590d\u7d22\u5f15",
+    "# 恢复索引",
     "",
-    "\u7ee7\u7eed\u4efb\u52a1\u65f6\u5148\u8bfb\u672c\u6587\uff1b\u53ea\u5728\u4fe1\u606f\u4e0d\u8db3\u65f6\u518d\u56de\u8bfb\u8be6\u7ec6\u8fd0\u884c\u65f6\u6587\u4ef6\u3002",
+    "## 当前主任务",
+    `- task_id: \`${taskState.taskId}\``,
+    `- 任务: ${taskState.taskName}`,
+    `- 状态: ${taskState.status}`,
+    `- 当前文档: ${taskState.currentDoc}`,
+    `- 下一步: ${taskState.next}`,
     "",
-    "## \u5f53\u524d\u4e3b\u4efb\u52a1",
-    `- \u4efb\u52a1: ${currentTaskName}`,
-    `- \u72b6\u6001: ${currentStatus}`,
-    `- \u4e0a\u6b21\u5b8c\u6210: ${lastDone}`,
-    `- \u4e0b\u4e00\u6b65: ${currentNextStep}`,
+    "## 中断任务 Top 3",
+    "- 无",
     "",
-    "## \u4e2d\u65ad\u4efb\u52a1 Top 3",
-    interruptedLines,
-    "",
-    "## \u4e0a\u6b21\u4f1a\u8bdd",
-    `- ${lastSessionDate} | ${lastSessionTask} | ${lastSessionStatus}`,
-    `- \u6458\u8981: ${lastSessionSummary}`,
-    "",
-    "## \u56de\u9000\u8bfb\u53d6",
-    "- \u8be6\u7ec6\u4e0d\u8db3\u65f6\uff0c\u518d\u8bfb\uff1a`\u5f53\u524d\u4efb\u52a1.md -> \u4e2d\u65ad\u4efb\u52a1.md -> \u4e0a\u6b21\u4f1a\u8bdd.md`",
-    "",
+    "## 回退读取",
+    "- 详细不足时，再读：`当前任务.md -> 中断任务.md -> 上次会话.md`",
   ].join("\n");
 }
 
-function writeRecoveryIndex() {
-  fs.mkdirSync(runtimeDir, { recursive: true });
-  fs.writeFileSync(recoveryIndexFile, buildRecoveryIndex(), "utf8");
+/**
+ * Parses the inbox data rows.
+ * @param {string} content Inbox file content.
+ * @returns {Array<{createdAt: string, source: string, taskId: string, type: string, status: string, summary: string, payload: string}>}
+ */
+function parseInboxRows(content) {
+  return content
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("|"))
+    .map((line) => line.split("|").slice(1, -1).map((cell) => cell.trim()))
+    .filter((cells) => cells.length >= 7 && cells[0] !== "created_at" && !/^[-:]+$/.test(cells[0]))
+    .map((cells) => ({
+      createdAt: cells[0],
+      source: cells[1],
+      taskId: cells[2],
+      type: cells[3],
+      status: cells[4],
+      summary: cells[5],
+      payload: cells[6],
+    }));
 }
 
-function main() {
-  const raw = readStdin();
-  const payload = parseJson(raw);
+/**
+ * Writes a canonical inbox file.
+ * @param {Array<{createdAt: string, source: string, taskId: string, type: string, status: string, summary: string, payload: string}>} rows Inbox rows.
+ * @returns {void}
+ */
+function writeInbox(rows) {
+  const effectiveRows = rows.length
+    ? rows
+    : [
+        {
+          createdAt: "-",
+          source: "-",
+          taskId: "-",
+          type: "-",
+          status: "cleared",
+          summary: placeholderSummary,
+          payload: "-",
+        },
+      ];
 
-  if (!shouldRefresh(payload, raw)) {
-    writeJson({});
+  const rowLines = effectiveRows.map(
+    (row) =>
+      `| ${escapeCell(row.createdAt)} | ${escapeCell(row.source)} | ${escapeCell(row.taskId)} | ${escapeCell(row.type)} | ${escapeCell(row.status)} | ${escapeCell(row.summary)} | ${escapeCell(row.payload)} |`,
+  );
+
+  const content = [
+    "---",
+    "tags: [runtime, inbox]",
+    `created: ${getToday()}`,
+    `updated: ${getTimestamp()}`,
+    "schema_version: runtime-inbox/v1.0",
+    "---",
+    "",
+    "# Runtime Inbox",
+    "",
+    "| created_at | source | task_id | type | status | summary | payload |",
+    "|------------|--------|---------|------|--------|---------|---------|",
+    ...rowLines,
+    "",
+  ].join("\n");
+
+  fs.writeFileSync(inboxPath, content, "utf8");
+}
+
+/**
+ * Appends a lock-blocked inbox entry.
+ * @param {string} writerName Lock owner.
+ * @param {string} taskId Task id held by the other writer.
+ * @returns {void}
+ */
+function appendLockBlockedInbox(writerName, taskId) {
+  const existing = parseInboxRows(safeRead(inboxPath)).filter((row) => row.summary !== placeholderSummary);
+  existing.push({
+    createdAt: getTimestamp(),
+    source: "claude-posttooluse",
+    taskId: taskId || "unknown",
+    type: "lock-blocked",
+    status: "open",
+    summary: "Recovery-index refresh blocked by runtime lock.",
+    payload: `Shared runtime lock is held by ${writerName} for task ${taskId || "unknown"}.`,
+  });
+  writeInbox(existing);
+}
+
+/**
+ * Returns true when another writer still holds an active runtime lock.
+ * @returns {{blocked: boolean, writer: string, taskId: string}}
+ */
+function checkForeignLock() {
+  if (!fs.existsSync(lockPath)) {
+    return { blocked: false, writer: "", taskId: "" };
+  }
+
+  try {
+    const lock = JSON.parse(safeRead(lockPath));
+    const ageMs = Date.now() - Date.parse(lock.locked_at);
+    if (ageMs <= 30 * 60 * 1000 && lock.writer !== "claude-posttooluse") {
+      return { blocked: true, writer: lock.writer || "unknown-writer", taskId: lock.task_id || "unknown" };
+    }
+  } catch {
+    // Malformed lock files are discarded so the hook can keep moving.
+  }
+
+  fs.rmSync(lockPath, { force: true });
+  return { blocked: false, writer: "", taskId: "" };
+}
+
+/**
+ * Acquires the runtime lock for this hook run.
+ * @param {string} taskId Active task id.
+ * @returns {void}
+ */
+function acquireLock(taskId) {
+  const lock = {
+    writer: "claude-posttooluse",
+    task_id: taskId,
+    locked_at: new Date().toISOString(),
+  };
+  fs.writeFileSync(lockPath, JSON.stringify(lock), "utf8");
+}
+
+/**
+ * Entry point for the posttooluse hook.
+ * @returns {void}
+ */
+function main() {
+  readStdin();
+  ensureRuntimeDir();
+
+  const foreignLock = checkForeignLock();
+  if (foreignLock.blocked) {
+    appendLockBlockedInbox(foreignLock.writer, foreignLock.taskId);
+    writeJson({
+      systemMessage: `Shared runtime lock is held by ${foreignLock.writer} for task ${foreignLock.taskId}. Recorded in runtime inbox.`,
+    });
     return;
   }
 
-  writeRecoveryIndex();
+  const taskState = resolveTaskState();
+  acquireLock(taskState.taskId);
+
+  try {
+    fs.writeFileSync(recoveryIndexPath, buildRecoveryIndex(taskState), "utf8");
+  } finally {
+    fs.rmSync(lockPath, { force: true });
+  }
+
   writeJson({});
 }
 
 try {
   main();
 } catch {
+  try {
+    fs.rmSync(lockPath, { force: true });
+  } catch {
+    // Ignore cleanup failures in the error path.
+  }
   writeJson({ systemMessage: "memory hook error in posttooluse.js" });
 }

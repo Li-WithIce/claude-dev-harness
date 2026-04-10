@@ -1,4 +1,4 @@
-#!/usr/bin/env powershell
+﻿#!/usr/bin/env powershell
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
@@ -61,8 +61,8 @@ Output (on success):
   output_path=<file>           Path to generated report
 
 Examples:
-  ask_gemini.ps1 "Generate a test report" -f docs/task/spec.md -f docs/task/plan.md
-  ask_gemini.ps1 "Re-check the current task" -ApprovalMode plan -o docs/task/test.md
+  ask_gemini.ps1 "Generate a test report" -f docs/tasks/task/spec.md -f docs/tasks/task/plan.md
+  ask_gemini.ps1 "Re-check the current task" -ApprovalMode plan -o docs/tasks/task/test.md
 '@
 }
 
@@ -216,6 +216,7 @@ $promptBuilder = New-Object System.Text.StringBuilder
 [void]$promptBuilder.AppendLine("  ## Findings")
 [void]$promptBuilder.AppendLine("  ## Risks / Gaps")
 [void]$promptBuilder.AppendLine("  ## Conclusion")
+[void]$promptBuilder.AppendLine("  ## Handoff")
 [void]$promptBuilder.AppendLine("- Under '## Conclusion', output exactly one lowercase word on the first non-empty line: pass, fail, or blocked.")
 [void]$promptBuilder.AppendLine("- Choose blocked when evidence is insufficient, inputs conflict, or execution cannot be validated confidently.")
 [void]$promptBuilder.AppendLine("- Respond in the same language as the task text when practical.")

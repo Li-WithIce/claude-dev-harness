@@ -29,6 +29,11 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     $OutputPath = Join-Path (Join-Path $VaultRoot '运行时') '记忆体检报告.md'
 }
 
+$outputDirectory = Split-Path -Parent $OutputPath
+if (-not [string]::IsNullOrWhiteSpace($outputDirectory) -and -not (Test-Path -LiteralPath $outputDirectory -PathType Container)) {
+    New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
+}
+
 $outputLines = if ([string]::IsNullOrWhiteSpace($OrchestratorFlowPath)) {
     @(& $checkScript -VaultRoot $VaultRoot 2>&1 | ForEach-Object { $_.ToString() })
 } else {
@@ -69,7 +74,8 @@ $report = @(
 
 Write-Utf8Bom -Path $OutputPath -Content $report
 
-Write-Output "STATUS: PASS"
+Write-Output ("STATUS: {0}" -f $(if ($exitCode -eq 0) { 'PASS' } elseif ($exitCode -eq 1) { 'WARN' } else { 'FAIL' }))
 Write-Output "Report: $OutputPath"
 Write-Output "SourceStatus: $status"
-exit 0
+Write-Output "SourceExitCode: $exitCode"
+exit $exitCode
