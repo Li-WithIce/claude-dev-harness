@@ -219,7 +219,13 @@ pwsh -File .\tests\verify-installation.ps1 -WorkspaceRoot <ws> -RepoRoot <repo> 
 
 ### 任务产物校验
 
+仓库脚本入口：`scripts/validate-lite-artifacts.ps1`
+
 ```powershell
+# 直接调用仓库脚本
+pwsh -File .\scripts\validate-lite-artifacts.ps1 -TaskId <task-id>
+
+# workspace 入口 shim
 pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 ```
 
