@@ -59,6 +59,30 @@ function Get-TodayDate {
     return (Get-Date -Format 'yyyy-MM-dd')
 }
 
+function Get-EntryHostValue {
+    <#
+    .SYNOPSIS
+    解析共享运行时 writer host。
+
+    .PARAMETER EntryHost
+    调用方显式传入的 host。
+
+    .OUTPUTS
+    System.String.
+    #>
+    param([string]$EntryHost = '')
+
+    if (-not [string]::IsNullOrWhiteSpace($env:CLAUDE_DEV_HARNESS_ENTRY_HOST)) {
+        return $env:CLAUDE_DEV_HARNESS_ENTRY_HOST.Trim()
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($EntryHost)) {
+        return $EntryHost.Trim()
+    }
+
+    return 'unknown'
+}
+
 function Get-YamlValue {
     <#
     .SYNOPSIS
@@ -328,6 +352,10 @@ function Get-RuntimeMarkdownPaths {
         [Parameter(Mandatory = $true)]
         [string]$VaultRoot
     )
+
+    if (Get-Command Assert-ProjectLocalVault -ErrorAction SilentlyContinue) {
+        $VaultRoot = Assert-ProjectLocalVault -VaultRoot $VaultRoot
+    }
 
     $runtimeDir = Join-Path $VaultRoot '运行时'
     return [pscustomobject]@{

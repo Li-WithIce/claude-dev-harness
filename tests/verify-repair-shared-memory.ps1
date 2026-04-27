@@ -158,10 +158,13 @@ function New-RepairFixture {
 }
 
 function Invoke-Repair {
-    param([string]$VaultRoot)
+    param(
+        [string]$VaultRoot,
+        [string]$EntryHost = 'team-leader'
+    )
 
     $scriptPath = Join-Path $RepoRoot "scripts\\repair-shared-memory.ps1"
-    $output = @(& $scriptPath -VaultRoot $VaultRoot 2>&1)
+    $output = @(& $scriptPath -VaultRoot $VaultRoot -EntryHost $EntryHost 2>&1)
     return [pscustomobject]@{
         Output   = @($output | ForEach-Object { [string]$_ })
         ExitCode = $LASTEXITCODE
@@ -196,6 +199,7 @@ $activeLock = [ordered]@{
     writer    = "other-writer"
     task_id   = "sample-task"
     locked_at = [datetimeoffset]::UtcNow.ToString("o")
+    entry_host = "codex"
 } | ConvertTo-Json -Depth 3
 Set-Content -LiteralPath $blockedFixture.LockPath -Value $activeLock -Encoding utf8
 $blockedResult = Invoke-Repair -VaultRoot $blockedFixture.AssistantRoot
@@ -245,6 +249,7 @@ $expiredLock = [ordered]@{
     writer    = "stale-writer"
     task_id   = "sample-task"
     locked_at = ([datetimeoffset]::UtcNow.AddMinutes(-31)).ToString("o")
+    entry_host = "gemini"
 } | ConvertTo-Json -Depth 3
 Set-Content -LiteralPath $expiredFixture.LockPath -Value $expiredLock -Encoding utf8
 $expiredResult = Invoke-Repair -VaultRoot $expiredFixture.AssistantRoot
@@ -287,6 +292,8 @@ if ($expiredOutput -notmatch "cleared 1 lock-blocked inbox item\(s\)") {
 }
 
 $expiredInboxContent = Get-Content -LiteralPath $expiredFixture.InboxPath -Raw -Encoding utf8
+$expiredCurrentTaskContent = Get-Content -LiteralPath $expiredFixture.CurrentPath -Raw -Encoding utf8
+$expiredIndexContent = Get-Content -LiteralPath $expiredFixture.IndexPath -Raw -Encoding utf8
 if ($expiredInboxContent -notmatch "\|\s*2026-04-03 08:50:00\s*\|\s*claude-posttooluse\s*\|\s*sample-task\s*\|\s*lock-blocked\s*\|\s*cleared\s*\|") {
     Add-Failure "repair-shared-memory should clear stale lock-blocked inbox rows after refreshing shared runtime"
 } else {
@@ -297,6 +304,18 @@ if ($expiredInboxContent -notmatch [regex]::Escape("Resolved by repair-shared-me
     Add-Failure "repair-shared-memory should append a repair note when it clears lock-blocked inbox rows"
 } else {
     Add-Check "repair-shared-memory appends a repair note when it clears lock-blocked inbox rows"
+}
+
+if ($expiredCurrentTaskContent -notmatch 'entry_host:\s+team-leader') {
+    Add-Failure 'repair-shared-memory should persist entry_host into current-task.md during repair'
+} else {
+    Add-Check 'repair-shared-memory persists entry_host into current-task.md during repair'
+}
+
+if ($expiredIndexContent -notmatch [regex]::Escape('derived_from: [运行时/tasks/, 运行时/中断任务.md]')) {
+    Add-Failure 'repair-shared-memory should persist derived_from into recovery-index during repair'
+} else {
+    Add-Check 'repair-shared-memory persists derived_from into recovery-index during repair'
 }
 
 if (Test-Path -LiteralPath $expiredFixture.LockPath -PathType Leaf) {
@@ -389,11 +408,12 @@ if (
 if (
     -not (Test-Path -LiteralPath $flowTaskRuntimePath -PathType Leaf) -or
     $flowTaskRuntimeContent -notmatch [regex]::Escape('primary_artifact: docs/tasks/sample-task/test.md') -or
-    $flowTaskRuntimeContent -notmatch [regex]::Escape('- stage: TEST')
+    $flowTaskRuntimeContent -notmatch [regex]::Escape('- stage: TEST') -or
+    $flowTaskRuntimeContent -notmatch 'entry_host:\s+team-leader'
 ) {
-    Add-Failure "repair-shared-memory should create a minimal task runtime from current-flow when tasks/<task-id>.md is missing"
+    Add-Failure "repair-shared-memory should create a minimal task runtime with entry_host from current-flow when tasks/<task-id>.md is missing"
 } else {
-    Add-Check "repair-shared-memory creates a minimal task runtime from current-flow when tasks/<task-id>.md is missing"
+    Add-Check "repair-shared-memory creates a minimal task runtime with entry_host from current-flow when tasks/<task-id>.md is missing"
 }
 
 $missingPointerCaseRoot = Join-Path $tmpRoot "missing-pointer-files-recreated"

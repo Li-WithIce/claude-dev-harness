@@ -4,7 +4,8 @@
 
 [CmdletBinding()]
 param(
-    [string]$VaultRoot = ''
+    [string]$VaultRoot = '',
+    [string]$EntryHost = ''
 )
 
 Set-StrictMode -Version Latest
@@ -104,6 +105,7 @@ function New-CurrentTaskContent {
         '---'
         ('updated: {0}' -f (Get-CurrentTimestamp))
         ('task_id: {0}' -f $TaskId)
+        ('entry_host: {0}' -f $script:ResolvedEntryHost)
         'writer: repair-shared-memory'
         '---'
         ''
@@ -132,6 +134,7 @@ function New-InterruptedTemplate {
     return @(
         '---'
         ('updated: {0}' -f (Get-CurrentTimestamp))
+        'derived_from: [运行时/tasks/]'
         '---'
         ''
         '# 中断任务'
@@ -200,6 +203,7 @@ function New-TaskRuntimeContent {
         ('task_id: {0}' -f $TaskId)
         ('task_name: {0}' -f $TaskName)
         ('primary_artifact: {0}' -f $PrimaryArtifact)
+        ('entry_host: {0}' -f $script:ResolvedEntryHost)
         '---'
         ''
         '# Task Runtime'
@@ -247,6 +251,8 @@ function New-RecoveryIndexContent {
         '---'
         'tags: [运行时, 恢复索引]'
         ('updated: {0}' -f (Get-CurrentTimestamp))
+        'schema_version: recovery-index/v1.1'
+        'derived_from: [运行时/tasks/, 运行时/中断任务.md]'
         '---'
         ''
         '# 恢复索引'
@@ -397,6 +403,7 @@ $VaultRoot = Resolve-SharedMemoryVaultRoot -VaultRoot $VaultRoot
 $paths = Get-RuntimeMarkdownPaths -VaultRoot $VaultRoot
 $today = Get-TodayDate
 $repairs = @()
+$script:ResolvedEntryHost = Get-EntryHostValue -EntryHost $EntryHost
 
 if (-not (Test-Path -LiteralPath $paths.RuntimeDir -PathType Container)) {
     New-Item -ItemType Directory -Path $paths.RuntimeDir -Force | Out-Null
@@ -426,6 +433,7 @@ $lockContent = [ordered]@{
     writer    = 'repair-shared-memory'
     task_id   = $repairState.TaskId
     locked_at = [datetimeoffset]::UtcNow.ToString('o')
+    entry_host = $script:ResolvedEntryHost
 } | ConvertTo-Json -Depth 3
 Write-Utf8Bom -Path $paths.LockPath -Content $lockContent
 

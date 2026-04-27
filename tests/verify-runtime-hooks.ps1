@@ -44,6 +44,20 @@ function Write-RenderedHook {
     Set-Content -LiteralPath $TargetPath -Value $rendered -Encoding utf8
 }
 
+function Enable-LockWriteCapture {
+    param(
+        [string]$HookPath,
+        [string]$CapturePath
+    )
+
+    $content = Read-FileUtf8 -Path $HookPath
+    $instrumented = $content.Replace(
+        '  fs.writeFileSync(lockPath, JSON.stringify(lock), "utf8");',
+        ('  fs.writeFileSync(lockPath, JSON.stringify(lock), "utf8");' + [Environment]::NewLine + '  fs.writeFileSync("' + $CapturePath.Replace('\', '\\') + '", JSON.stringify(lock), "utf8");')
+    )
+    Set-Content -LiteralPath $HookPath -Value $instrumented -Encoding utf8
+}
+
 function Invoke-NodeHook {
     param(
         [string]$HookPath,
@@ -285,10 +299,17 @@ New-Item -ItemType Directory -Path $postToolCase -Force | Out-Null
 $postToolFixture = New-HookFixture -CaseRoot $postToolCase -PointerStatus "TEST"
 $postToolHookPath = Join-Path $postToolCase "posttooluse.js"
 Write-RenderedHook -TemplatePath $postToolTemplatePath -TargetPath $postToolHookPath -VaultRoot $postToolFixture.VaultRoot
+$postToolLockCapturePath = Join-Path $postToolCase 'lock-capture.json'
+Enable-LockWriteCapture -HookPath $postToolHookPath -CapturePath $postToolLockCapturePath
 $postToolResult = Invoke-NodeHook -HookPath $postToolHookPath
 $postToolMessage = Get-JsonPropertyValue -Object $postToolResult.Json -Name "systemMessage"
 $postToolRecoveryIndex = if (Test-Path -LiteralPath $postToolFixture.RecoveryIndexPath -PathType Leaf) {
     Get-Content -LiteralPath $postToolFixture.RecoveryIndexPath -Raw -Encoding utf8
+} else {
+    ''
+}
+$postToolLockCapture = if (Test-Path -LiteralPath $postToolLockCapturePath -PathType Leaf) {
+    Get-Content -LiteralPath $postToolLockCapturePath -Raw -Encoding utf8
 } else {
     ''
 }
@@ -306,11 +327,18 @@ if (
 
 if (
     $postToolRecoveryIndex -notmatch [regex]::Escape('- task_id: `sample-task`') -or
-    $postToolRecoveryIndex -notmatch [regex]::Escape('- 当前文档: docs/tasks/sample-task/test.md')
+    $postToolRecoveryIndex -notmatch [regex]::Escape('- 当前文档: docs/tasks/sample-task/test.md') -or
+    $postToolRecoveryIndex -notmatch [regex]::Escape('derived_from: ["运行时/当前任务.md","运行时/tasks/"]')
 ) {
-    Add-Failure "posttooluse should write task_id and current_doc into recovery-index"
+    Add-Failure "posttooluse should write task_id, current_doc, and derived_from into recovery-index"
 } else {
-    Add-Check "posttooluse writes task_id and current_doc into recovery-index"
+    Add-Check "posttooluse writes task_id, current_doc, and derived_from into recovery-index"
+}
+
+if ($postToolLockCapture -notmatch [regex]::Escape('"entry_host":"claudecode"')) {
+    Add-Failure 'posttooluse should write entry_host=claudecode into runtime.lock.json before rebuilding recovery-index'
+} else {
+    Add-Check 'posttooluse writes entry_host=claudecode into runtime.lock.json before rebuilding recovery-index'
 }
 
 $postToolFlowCase = Join-Path $scratchRoot "posttooluse-pointer-idle-flow-active"
@@ -331,7 +359,8 @@ if (
     $postToolFlowRecoveryIndex -notmatch [regex]::Escape('- task_id: `sample-task`') -or
     $postToolFlowRecoveryIndex -notmatch [regex]::Escape('- 任务: Sample Task') -or
     $postToolFlowRecoveryIndex -notmatch [regex]::Escape('- 状态: TEST') -or
-    $postToolFlowRecoveryIndex -notmatch [regex]::Escape('- 当前文档: docs/tasks/sample-task/test.md')
+    $postToolFlowRecoveryIndex -notmatch [regex]::Escape('- 当前文档: docs/tasks/sample-task/test.md') -or
+    $postToolFlowRecoveryIndex -notmatch [regex]::Escape('derived_from: ["运行时/当前任务.md","运行时/tasks/"]')
 ) {
     Add-Failure "posttooluse should rebuild recovery-index from current-flow when the shared pointer is idle"
 } else {
@@ -347,6 +376,7 @@ Set-Content -LiteralPath $postToolLockedFixture.LockPath -Value (@{
         writer    = "other-writer"
         task_id   = "sample-task"
         locked_at = (Get-Date).ToString("s")
+        entry_host = "team-leader"
     } | ConvertTo-Json) -Encoding utf8
 $postToolLockedResult = Invoke-NodeHook -HookPath $postToolLockedHookPath
 $postToolLockedMessage = Get-JsonPropertyValue -Object $postToolLockedResult.Json -Name "systemMessage"
@@ -364,7 +394,8 @@ if (
     -not (Test-Path -LiteralPath $postToolLockedFixture.LockPath -PathType Leaf) -or
     -not (Test-Path -LiteralPath $postToolLockedFixture.InboxPath -PathType Leaf) -or
     $postToolLockedInboxContent -notmatch 'lock-blocked' -or
-    $postToolLockedInboxContent -notmatch 'other-writer'
+    $postToolLockedInboxContent -notmatch 'other-writer' -or
+    $postToolLockedInboxContent -notmatch 'entry_host=team-leader'
 ) {
     Add-Failure "posttooluse should respect an active runtime.lock.json from another writer and record the blocked write in inbox"
 } else {

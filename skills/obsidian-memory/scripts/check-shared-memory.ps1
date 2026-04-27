@@ -54,6 +54,46 @@ function Get-YamlField {
     return $match.Matches[0].Groups[1].Value.Trim()
 }
 
+function Get-InlineArrayValues {
+    param(
+        [string]$Path,
+        [string]$Field
+    )
+
+    $rawValue = Get-YamlField -Path $Path -Field $Field
+    if ([string]::IsNullOrWhiteSpace($rawValue)) {
+        return @()
+    }
+
+    $trimmedValue = $rawValue.Trim()
+    if (-not ($trimmedValue.StartsWith('[') -and $trimmedValue.EndsWith(']'))) {
+        return @()
+    }
+
+    $inner = $trimmedValue.Substring(1, $trimmedValue.Length - 2)
+    if ([string]::IsNullOrWhiteSpace($inner)) {
+        return @()
+    }
+
+    return @(
+        $inner.Split(',') |
+            ForEach-Object { $_.Trim().Trim('"', '''', '`') } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+}
+
+function Test-HasConcreteArrayValue {
+    param([string[]]$Values)
+
+    foreach ($value in @($Values)) {
+        if ($value -and $value -notmatch '^\s*<.+>\s*$') {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Get-UpdatedTime {
     param([string]$Path)
 
@@ -313,6 +353,31 @@ $indexUpdated = Get-UpdatedTime -Path $indexPath
 $currentUpdated = Get-UpdatedTime -Path $currentPath
 $interruptedUpdated = Get-UpdatedTime -Path $interruptedPath
 $lastUpdated = Get-UpdatedTime -Path $lastSessionPath
+$currentEntryHost = Get-YamlField -Path $currentPath -Field 'entry_host'
+$recoveryDerivedFrom = Get-InlineArrayValues -Path $indexPath -Field 'derived_from'
+$interruptedDerivedFrom = Get-InlineArrayValues -Path $interruptedPath -Field 'derived_from'
+
+if (-not [string]::IsNullOrWhiteSpace($currentEntryHost)) {
+    Add-Check ('当前任务 entry_host={0}' -f $currentEntryHost)
+} elseif (Test-Path -LiteralPath $currentPath -PathType Leaf) {
+    Add-Warning ('当前任务缺少 entry_host，按 legacy fallback 处理: {0}' -f $currentPath)
+}
+
+if (Test-Path -LiteralPath $indexPath -PathType Leaf) {
+    if (Test-HasConcreteArrayValue -Values $recoveryDerivedFrom) {
+        Add-Check ('恢复索引声明 derived_from: {0}' -f ($recoveryDerivedFrom -join ', '))
+    } else {
+        Add-Warning ('恢复索引缺少可用 derived_from: {0}' -f $indexPath)
+    }
+}
+
+if (Test-Path -LiteralPath $interruptedPath -PathType Leaf) {
+    if (Test-HasConcreteArrayValue -Values $interruptedDerivedFrom) {
+        Add-Check ('中断任务声明 derived_from: {0}' -f ($interruptedDerivedFrom -join ', '))
+    } else {
+        Add-Warning ('中断任务缺少可用 derived_from: {0}' -f $interruptedPath)
+    }
+}
 
 $currentTaskValue = Get-TableValue -Path $currentPath -Key '任务'
 $hasActiveCurrentTask = -not [string]::IsNullOrWhiteSpace($currentTaskValue) -and $currentTaskValue -notlike '无*'

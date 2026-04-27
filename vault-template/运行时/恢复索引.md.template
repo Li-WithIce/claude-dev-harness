@@ -2,6 +2,8 @@
 tags: [运行时, 恢复索引]
 created: __RENDER_AT_INSTALL__
 updated: __RENDER_AT_INSTALL__
+schema_version: recovery-index/v1.1
+derived_from: [运行时/当前任务.md, 运行时/tasks/, 运行时/中断任务.md]
 ---
 
 # 恢复索引

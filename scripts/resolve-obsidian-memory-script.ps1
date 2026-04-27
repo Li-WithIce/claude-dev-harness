@@ -3,6 +3,17 @@ if (Test-Path -LiteralPath $sharedPathsHelper) {
     . $sharedPathsHelper
 }
 
+$script:RuntimeTouchingScripts = @(
+    'append-runtime-inbox.ps1',
+    'promote-runtime-inbox.ps1',
+    'triage-runtime-inbox.ps1',
+    'repair-shared-memory.ps1',
+    'archive-memory-candidates.ps1',
+    'maintain-shared-memory.ps1',
+    'run-memory-health.ps1',
+    'write-memory-health-report.ps1'
+)
+
 function Resolve-ObsidianMemoryScript {
     param(
         [Parameter(Mandatory = $true)]
@@ -10,9 +21,16 @@ function Resolve-ObsidianMemoryScript {
     )
 
     $repoRoot = Split-Path -Parent $PSScriptRoot
-    $candidates = @(
-        (Join-Path $repoRoot ("skills\obsidian-memory\scripts\{0}" -f $ScriptName))
-    )
+    $repoCandidate = Join-Path $repoRoot ("skills\obsidian-memory\scripts\{0}" -f $ScriptName)
+    if (Test-Path -LiteralPath $repoCandidate) {
+        return $repoCandidate
+    }
+
+    $isRuntimeTouching = $ScriptName -in $script:RuntimeTouchingScripts
+    $allowAgentHomeFallback = $env:CLAUDE_DEV_HARNESS_ALLOW_AGENT_HOME -eq '1'
+    if ($isRuntimeTouching -and -not $allowAgentHomeFallback) {
+        throw "Missing obsidian-memory script in repo (agent-home fallback disabled for runtime-touching scripts): $ScriptName"
+    }
 
     $agentRoots = if (Get-Command Get-DefaultAgentRoots -ErrorAction SilentlyContinue) {
         Get-DefaultAgentRoots
@@ -29,10 +47,7 @@ function Resolve-ObsidianMemoryScript {
             continue
         }
 
-        $candidates += Join-Path $agentRoot ("skills\obsidian-memory\scripts\{0}" -f $ScriptName)
-    }
-
-    foreach ($candidate in $candidates) {
+        $candidate = Join-Path $agentRoot ("skills\obsidian-memory\scripts\{0}" -f $ScriptName)
         if (Test-Path -LiteralPath $candidate) {
             return $candidate
         }

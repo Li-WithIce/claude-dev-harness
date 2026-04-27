@@ -14,10 +14,10 @@ updated: 2026-04-01
 
 | Schema | 当前版本 | 作用范围 | 兼容策略 |
 |------|------|------|------|
-| shared-memory-core | `1.1` | `.assistant/工作流/*.md` 的共享记忆主协议 | 入口 agent 优先读取最新协议 |
+| shared-memory-core | `1.2` | `.assistant/工作流/*.md` 的共享记忆主协议 | 入口 agent 优先读取最新协议 |
 | task-runtime | `1.1` | `.assistant/运行时/tasks/<task-id>.md` | 未声明版本的历史任务按 `1.0-legacy` 兼容读取 |
-| current-task-pointer | `1.0` | `.assistant/运行时/当前任务.md` | 继续保持共享指针简版 |
-| recovery-index | `1.0` | `.assistant/运行时/恢复索引.md` | 继续保持派生导航视图 |
+| current-task-pointer | `1.1` | `.assistant/运行时/当前任务.md` | 缺失 `entry_host` 的旧文件按 `1.0-legacy` 兼容读取 |
+| recovery-index | `1.1` | `.assistant/运行时/恢复索引.md` | 缺失 `derived_from` 的旧文件按 `1.0-legacy` 兼容读取 |
 | lite-plan-frontmatter | `1.1` | `docs/tasks/<task-id>/plan.md` frontmatter | 仅接受 lite stage/tool 合法值，`DONE` 固定 `tool: none` |
 | lite-test-report | `1.0` | `docs/tasks/<task-id>/test.md` | `## Conclusion` 与 `## Handoff` 为最低契约 |
 
@@ -30,6 +30,7 @@ updated: 2026-04-01
 - `artifact_root`
 - `primary_artifact`
 - `artifact_links`
+- `entry_host`
 
 ## 升级规则
 

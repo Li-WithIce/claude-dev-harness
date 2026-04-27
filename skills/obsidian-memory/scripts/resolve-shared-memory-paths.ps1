@@ -8,6 +8,24 @@
     return [System.IO.Path]::GetFullPath($Path)
 }
 
+function Test-PathUnderRoot {
+    param(
+        [string]$Path,
+        [string]$Root
+    )
+
+    $normalizedPath = Resolve-NormalizedPath -Path $Path
+    $normalizedRoot = Resolve-NormalizedPath -Path $Root
+    if ([string]::IsNullOrWhiteSpace($normalizedPath) -or [string]::IsNullOrWhiteSpace($normalizedRoot)) {
+        return $false
+    }
+
+    $trimmedPath = $normalizedPath.TrimEnd('\', '/')
+    $trimmedRoot = $normalizedRoot.TrimEnd('\', '/')
+    return $trimmedPath.Equals($trimmedRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $trimmedPath.StartsWith(($trimmedRoot + '\'), [System.StringComparison]::OrdinalIgnoreCase)
+}
+
 function Find-ParentDirectoryNamed {
     param(
         [string]$StartPath,
@@ -67,66 +85,24 @@ function Get-FlowSharedVaultRoot {
     return Resolve-NormalizedPath -Path $value
 }
 
-function Resolve-SharedMemoryVaultRoot {
-    param(
-        [string]$VaultRoot = "",
-        [string]$OrchestratorFlowPath = "",
-        [string]$WorkspaceRoot = ""
-    )
+function Get-FlowWorkspaceVaultRoot {
+    param([string]$OrchestratorFlowPath)
 
-    $candidateSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    $candidates = [System.Collections.Generic.List[string]]::new()
-
-    function Add-Candidate {
-        param([string]$Value)
-
-        if ([string]::IsNullOrWhiteSpace($Value)) {
-            return
-        }
-
-        $normalized = Resolve-NormalizedPath -Path $Value
-        if ([string]::IsNullOrWhiteSpace($normalized)) {
-            return
-        }
-
-        if ($candidateSet.Add($normalized)) {
-            $candidates.Add($normalized)
-        }
+    if ([string]::IsNullOrWhiteSpace($OrchestratorFlowPath) -or -not (Test-Path -LiteralPath $OrchestratorFlowPath -PathType Leaf)) {
+        return $null
     }
 
-    Add-Candidate -Value $VaultRoot
-    Add-Candidate -Value $env:CLAUDE_DEV_HARNESS_VAULT_PATH
-    Add-Candidate -Value $env:OBSIDIAN_SHARED_VAULT
-
-    $flowSharedVaultRoot = Get-FlowSharedVaultRoot -OrchestratorFlowPath $OrchestratorFlowPath
-    Add-Candidate -Value $flowSharedVaultRoot
-
-    if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
-        Add-Candidate -Value (Join-Path $WorkspaceRoot '.assistant')
-    }
-    if (-not [string]::IsNullOrWhiteSpace($env:CLAUDE_DEV_HARNESS_WORKSPACE_ROOT)) {
-        Add-Candidate -Value (Join-Path $env:CLAUDE_DEV_HARNESS_WORKSPACE_ROOT '.assistant')
-    }
-    if (-not [string]::IsNullOrWhiteSpace($env:WORKSPACE_ROOT)) {
-        Add-Candidate -Value (Join-Path $env:WORKSPACE_ROOT '.assistant')
+    $flowDirectory = Split-Path -Parent (Resolve-NormalizedPath -Path $OrchestratorFlowPath)
+    if ([string]::IsNullOrWhiteSpace($flowDirectory)) {
+        return $null
     }
 
-    $flowVaultRoot = Find-ParentDirectoryNamed -StartPath $OrchestratorFlowPath -DirectoryName '.assistant'
-    Add-Candidate -Value $flowVaultRoot
-
-    try {
-        $cwdVaultRoot = Find-ParentDirectoryNamed -StartPath (Get-Location).Path -DirectoryName '.assistant'
-        Add-Candidate -Value $cwdVaultRoot
-        Add-Candidate -Value (Join-Path (Get-Location).Path '.assistant')
-    } catch {
-        # Ignore location resolution failures.
+    $assistantDirectory = Split-Path -Parent $flowDirectory
+    if ((Split-Path -Leaf $flowDirectory) -ieq 'orchestration' -and (Split-Path -Leaf $assistantDirectory) -ieq '.assistant') {
+        return $assistantDirectory
     }
 
-    if ($candidates.Count -gt 0) {
-        return $candidates[0]
-    }
-
-    throw 'Unable to resolve shared memory vault root. Pass -VaultRoot, set CLAUDE_DEV_HARNESS_VAULT_PATH, or provide -OrchestratorFlowPath.'
+    return $null
 }
 
 function Get-DefaultAgentRoots {
@@ -161,4 +137,113 @@ function Get-DefaultAgentRoots {
     }
 
     return @($candidates)
+}
+
+function Assert-ProjectLocalVault {
+    param([string]$VaultRoot)
+
+    $normalizedVaultRoot = Resolve-NormalizedPath -Path $VaultRoot
+    if ([string]::IsNullOrWhiteSpace($normalizedVaultRoot)) {
+        return $normalizedVaultRoot
+    }
+
+    $runtimeDirectory = Join-Path $normalizedVaultRoot '运行时'
+    if (-not (Test-Path -LiteralPath $runtimeDirectory -PathType Container)) {
+        return $normalizedVaultRoot
+    }
+
+    foreach ($agentRoot in Get-DefaultAgentRoots) {
+        if (Test-PathUnderRoot -Path $normalizedVaultRoot -Root $agentRoot) {
+            throw "[vault-layer-violation] user-level agent home cannot host runtime layer: $normalizedVaultRoot"
+        }
+    }
+
+    return $normalizedVaultRoot
+}
+
+function Resolve-SharedMemoryVaultRoot {
+    param(
+        [string]$VaultRoot = "",
+        [string]$OrchestratorFlowPath = "",
+        [string]$WorkspaceRoot = ""
+    )
+
+    function New-CandidateBucket {
+        return [pscustomobject]@{
+            Set   = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            Items = [System.Collections.Generic.List[string]]::new()
+        }
+    }
+
+    function Add-CandidateToBucket {
+        param(
+            [pscustomobject]$Bucket,
+            [string]$Value
+        )
+
+        if ([string]::IsNullOrWhiteSpace($Value)) {
+            return
+        }
+
+        $normalized = Resolve-NormalizedPath -Path $Value
+        if ([string]::IsNullOrWhiteSpace($normalized)) {
+            return
+        }
+
+        if ($Bucket.Set.Add($normalized)) {
+            $Bucket.Items.Add($normalized)
+        }
+    }
+
+    $tierA = New-CandidateBucket
+    $tierB = New-CandidateBucket
+    $fallback = New-CandidateBucket
+
+    Add-CandidateToBucket -Bucket $tierA -Value $VaultRoot
+    Add-CandidateToBucket -Bucket $tierA -Value $env:CLAUDE_DEV_HARNESS_VAULT_PATH
+    Add-CandidateToBucket -Bucket $tierA -Value $env:OBSIDIAN_SHARED_VAULT
+    Add-CandidateToBucket -Bucket $tierA -Value (Get-FlowSharedVaultRoot -OrchestratorFlowPath $OrchestratorFlowPath)
+
+    if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+        Add-CandidateToBucket -Bucket $tierB -Value (Join-Path $WorkspaceRoot '.assistant')
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:CLAUDE_DEV_HARNESS_WORKSPACE_ROOT)) {
+        Add-CandidateToBucket -Bucket $tierB -Value (Join-Path $env:CLAUDE_DEV_HARNESS_WORKSPACE_ROOT '.assistant')
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:WORKSPACE_ROOT)) {
+        Add-CandidateToBucket -Bucket $tierB -Value (Join-Path $env:WORKSPACE_ROOT '.assistant')
+    }
+    Add-CandidateToBucket -Bucket $tierB -Value (Get-FlowWorkspaceVaultRoot -OrchestratorFlowPath $OrchestratorFlowPath)
+
+    try {
+        Add-CandidateToBucket -Bucket $fallback -Value (Join-Path (Get-Location).Path '.assistant')
+        Add-CandidateToBucket -Bucket $fallback -Value (Find-ParentDirectoryNamed -StartPath (Get-Location).Path -DirectoryName '.assistant')
+    } catch {
+        # Ignore location resolution failures.
+    }
+
+    if ($tierA.Items.Count -gt 1) {
+        $uniqueTierA = @($tierA.Items | Sort-Object -Unique)
+        if ($uniqueTierA.Count -gt 1) {
+            [Console]::Error.WriteLine(
+                "[vault-ambiguous] multiple explicit shared-memory vault candidates resolved; using {0} (others: {1})" -f
+                $tierA.Items[0],
+                (($uniqueTierA | Select-Object -Skip 1) -join ', ')
+            )
+        }
+    }
+
+    if ($tierA.Items.Count -gt 0) {
+        return $tierA.Items[0]
+    }
+
+    if ($tierB.Items.Count -gt 0) {
+        return $tierB.Items[0]
+    }
+
+    if ($fallback.Items.Count -gt 0) {
+        return $fallback.Items[0]
+    }
+
+    throw 'Unable to resolve shared memory vault root. Pass -VaultRoot, set CLAUDE_DEV_HARNESS_VAULT_PATH, or provide -OrchestratorFlowPath.'
 }

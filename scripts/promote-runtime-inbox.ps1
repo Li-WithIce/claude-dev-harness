@@ -10,6 +10,7 @@ param(
     [string]$SummaryContains = "",
     [string]$TargetTaskId = "",
     [string]$TargetTaskName = "",
+    [string]$EntryHost = "",
     [string]$Priority = 'P2',
     [string]$TaskStage = 'PLAN',
     [string]$NextStep = '',
@@ -41,6 +42,7 @@ $scriptPath = Resolve-ObsidianMemoryScript -ScriptName 'promote-runtime-inbox.ps
     -SummaryContains $SummaryContains `
     -TargetTaskId $TargetTaskId `
     -TargetTaskName $TargetTaskName `
+    -EntryHost $EntryHost `
     -Priority $Priority `
     -TaskStage $TaskStage `
     -NextStep $NextStep `

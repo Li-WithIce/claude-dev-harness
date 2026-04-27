@@ -33,6 +33,14 @@ members:
 - `role_prompt_ref` 由 leader 在 spawn 时读取，作为 system prompt seed
 - `members_read_only_path_prefixes` 表示 member 的只读保护集合
 
+## Shared-memory authority
+
+- team-mode 下，leader 视为 `entry_host = team-leader`
+- leader 是共享运行时（`.assistant/运行时/当前任务.md`、`恢复索引.md` 等）的唯一写者
+- spawned member 只写 `运行时/tasks/<task-id>.md` 与 `docs/tasks/<task-id>/`
+- `team_task_update` 是 vault 的镜像，不回写 vault 真相字段
+- 4 层真相源关系见 `docs/shared-memory-layers.md`
+
 ## spawn-team payload
 
 `skills/workflow-team/scripts/spawn-team.ps1` 为每个 member 构造如下 payload：

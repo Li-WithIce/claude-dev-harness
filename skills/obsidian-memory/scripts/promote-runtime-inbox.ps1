@@ -15,6 +15,7 @@ param(
     [string]$SummaryContains = '',
     [string]$TargetTaskId = '',
     [string]$TargetTaskName = '',
+    [string]$EntryHost = '',
     [string]$Priority = 'P2',
     [string]$TaskStage = 'PLAN',
     [string]$NextStep = '',
@@ -67,6 +68,7 @@ function Ensure-InterruptedTaskFile {
         $content = @(
             '---'
             ('updated: {0}' -f (Get-CurrentTimestamp))
+            'derived_from: [运行时/tasks/]'
             '---'
             ''
             '# 中断任务'
@@ -99,6 +101,7 @@ function Write-InterruptedTaskFile {
     $content = @(
         '---'
         ('updated: {0}' -f (Get-CurrentTimestamp))
+        'derived_from: [运行时/tasks/]'
         '---'
         ''
         '# 中断任务'
@@ -185,6 +188,9 @@ function New-TaskRuntimeDocument {
     .PARAMETER PrimaryArtifact
     主产物相对路径。
 
+    .PARAMETER EntryHost
+    当前写者 host。
+
     .PARAMETER NextStep
     下一步动作。
 
@@ -197,6 +203,7 @@ function New-TaskRuntimeDocument {
         [string]$WorkspaceRoot,
         [string]$Stage,
         [string]$PrimaryArtifact,
+        [string]$EntryHost,
         [string]$NextStep
     )
 
@@ -207,6 +214,7 @@ function New-TaskRuntimeDocument {
         ('task_name: {0}' -f $TaskName)
         ('workspace: {0}' -f $WorkspaceRoot)
         ('primary_artifact: {0}' -f $PrimaryArtifact)
+        ('entry_host: {0}' -f $EntryHost)
         '---'
         ''
         '# Task Runtime'
@@ -230,6 +238,7 @@ $VaultRoot = Resolve-SharedMemoryVaultRoot -VaultRoot $VaultRoot -WorkspaceRoot 
 $WorkspaceRoot = Resolve-WorkspaceRoot -WorkspaceRoot $WorkspaceRoot -VaultRoot $VaultRoot
 $paths = Get-RuntimeMarkdownPaths -VaultRoot $VaultRoot
 $inbox = Read-RuntimeInbox -VaultRoot $VaultRoot
+$resolvedEntryHost = Get-EntryHostValue -EntryHost $EntryHost
 
 if (
     [string]::IsNullOrWhiteSpace($CreatedAt) -and
@@ -300,6 +309,7 @@ if ($Target -eq 'interrupted-task') {
         -WorkspaceRoot $WorkspaceRoot `
         -Stage $TaskStage `
         -PrimaryArtifact $PrimaryArtifact `
+        -EntryHost $resolvedEntryHost `
         -NextStep $NextStep
     Write-Utf8Bom -Path $taskRuntimePath -Content $taskRuntimeContent
 

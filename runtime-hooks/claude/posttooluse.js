@@ -204,6 +204,7 @@ function buildRecoveryIndex(taskState) {
     "---",
     "tags: [运行时, 恢复索引]",
     `updated: ${getTimestamp()}`,
+    'derived_from: ["运行时/当前任务.md","运行时/tasks/"]',
     "---",
     "",
     "# 恢复索引",
@@ -293,10 +294,12 @@ function writeInbox(rows) {
  * Appends a lock-blocked inbox entry.
  * @param {string} writerName Lock owner.
  * @param {string} taskId Task id held by the other writer.
+ * @param {string} entryHost Entry host held by the other writer.
  * @returns {void}
  */
-function appendLockBlockedInbox(writerName, taskId) {
+function appendLockBlockedInbox(writerName, taskId, entryHost) {
   const existing = parseInboxRows(safeRead(inboxPath)).filter((row) => row.summary !== placeholderSummary);
+  const payloadSuffix = entryHost && entryHost !== "claudecode" ? ` entry_host=${entryHost}` : "";
   existing.push({
     createdAt: getTimestamp(),
     source: "claude-posttooluse",
@@ -304,32 +307,37 @@ function appendLockBlockedInbox(writerName, taskId) {
     type: "lock-blocked",
     status: "open",
     summary: "Recovery-index refresh blocked by runtime lock.",
-    payload: `Shared runtime lock is held by ${writerName} for task ${taskId || "unknown"}.`,
+    payload: `Shared runtime lock is held by ${writerName} for task ${taskId || "unknown"}.${payloadSuffix}`,
   });
   writeInbox(existing);
 }
 
 /**
  * Returns true when another writer still holds an active runtime lock.
- * @returns {{blocked: boolean, writer: string, taskId: string}}
+ * @returns {{blocked: boolean, writer: string, taskId: string, entryHost: string}}
  */
 function checkForeignLock() {
   if (!fs.existsSync(lockPath)) {
-    return { blocked: false, writer: "", taskId: "" };
+    return { blocked: false, writer: "", taskId: "", entryHost: "" };
   }
 
   try {
     const lock = JSON.parse(safeRead(lockPath));
     const ageMs = Date.now() - Date.parse(lock.locked_at);
     if (ageMs <= 30 * 60 * 1000 && lock.writer !== "claude-posttooluse") {
-      return { blocked: true, writer: lock.writer || "unknown-writer", taskId: lock.task_id || "unknown" };
+      return {
+        blocked: true,
+        writer: lock.writer || "unknown-writer",
+        taskId: lock.task_id || "unknown",
+        entryHost: lock.entry_host || "",
+      };
     }
   } catch {
     // Malformed lock files are discarded so the hook can keep moving.
   }
 
   fs.rmSync(lockPath, { force: true });
-  return { blocked: false, writer: "", taskId: "" };
+  return { blocked: false, writer: "", taskId: "", entryHost: "" };
 }
 
 /**
@@ -342,6 +350,7 @@ function acquireLock(taskId) {
     writer: "claude-posttooluse",
     task_id: taskId,
     locked_at: new Date().toISOString(),
+    entry_host: "claudecode",
   };
   fs.writeFileSync(lockPath, JSON.stringify(lock), "utf8");
 }
@@ -356,7 +365,7 @@ function main() {
 
   const foreignLock = checkForeignLock();
   if (foreignLock.blocked) {
-    appendLockBlockedInbox(foreignLock.writer, foreignLock.taskId);
+    appendLockBlockedInbox(foreignLock.writer, foreignLock.taskId, foreignLock.entryHost);
     writeJson({
       systemMessage: `Shared runtime lock is held by ${foreignLock.writer} for task ${foreignLock.taskId}. Recorded in runtime inbox.`,
     });

@@ -43,10 +43,6 @@ if (-not (Test-Path -LiteralPath $planPath -PathType Leaf)) {
     throw "Missing $planPath"
 }
 
-if (-not (Test-Path -LiteralPath $tasksDir -PathType Container)) {
-    New-Item -ItemType Directory -Path $tasksDir -Force | Out-Null
-}
-
 function Invoke-LiteArtifactValidator {
     <#
     .SYNOPSIS
@@ -270,6 +266,106 @@ function Write-Utf8NoBom {
     )
 
     [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function Get-PowerShellHostPath {
+    try {
+        $currentHostPath = (Get-Process -Id $PID -ErrorAction Stop).Path
+        if (-not [string]::IsNullOrWhiteSpace($currentHostPath) -and (Test-Path -LiteralPath $currentHostPath -PathType Leaf)) {
+            return $currentHostPath
+        }
+    } catch {
+        # Fall through to explicit discovery.
+    }
+
+    foreach ($commandName in @('pwsh', 'powershell.exe')) {
+        try {
+            $command = Get-Command $commandName -ErrorAction Stop | Select-Object -First 1
+            if (-not [string]::IsNullOrWhiteSpace($command.Source)) {
+                return $command.Source
+            }
+        } catch {
+            # Try the next candidate.
+        }
+    }
+
+    throw 'Unable to locate a PowerShell host executable for shared-memory writeback fallback.'
+}
+
+function Ensure-ParentDirectory {
+    param([string]$Path)
+
+    $parent = Split-Path -Parent $Path
+    if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path -LiteralPath $parent -PathType Container)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+}
+
+function Invoke-AppendRuntimeInboxFallback {
+    param(
+        [string]$VaultRoot,
+        [string]$TaskId,
+        [string]$Step,
+        [string]$Reason
+    )
+
+    $appendScriptPath = Join-Path $PSScriptRoot 'append-runtime-inbox.ps1'
+    if (-not (Test-Path -LiteralPath $appendScriptPath -PathType Leaf)) {
+        throw 'append-runtime-inbox.ps1 is missing.'
+    }
+
+    $shellPath = Get-PowerShellHostPath
+    $argumentList = @('-NoProfile')
+    if ((Split-Path -Leaf $shellPath) -ieq 'powershell.exe') {
+        $argumentList += @('-ExecutionPolicy', 'Bypass')
+    }
+    $argumentList += @(
+        '-File', $appendScriptPath,
+        '-VaultRoot', $VaultRoot,
+        '-TaskId', $TaskId,
+        '-Type', 'writeback-fallback',
+        '-Summary', ('[writeback-fallback] {0}' -f $Step),
+        '-Payload', $Reason,
+        '-Source', 'advance-stage'
+    )
+
+    $null = @(& $shellPath @argumentList 2>&1 | ForEach-Object { [string]$_ })
+    if ($LASTEXITCODE -ne 0) {
+        throw ('append-runtime-inbox.ps1 exited with code {0}' -f $LASTEXITCODE)
+    }
+}
+
+function Report-WritebackFallback {
+    param(
+        [string]$VaultRoot,
+        [string]$TaskId,
+        [string]$Step,
+        [string]$Reason
+    )
+
+    $message = '[writeback-fallback] {0}: {1}' -f $Step, $Reason
+    [Console]::Error.WriteLine($message)
+
+    try {
+        Invoke-AppendRuntimeInboxFallback -VaultRoot $VaultRoot -TaskId $TaskId -Step $Step -Reason $Reason
+    } catch {
+        [Console]::Error.WriteLine('[writeback-fallback] inbox-note: {0}' -f $_.Exception.Message)
+    }
+}
+
+function Invoke-BestEffortRuntimeWrite {
+    param(
+        [string]$VaultRoot,
+        [string]$TaskId,
+        [string]$Step,
+        [scriptblock]$Action
+    )
+
+    try {
+        & $Action
+    } catch {
+        Report-WritebackFallback -VaultRoot $VaultRoot -TaskId $TaskId -Step $Step -Reason $_.Exception.Message
+    }
 }
 
 function Test-FullModelId {
@@ -1011,6 +1107,7 @@ function New-CurrentTaskContent {
         '---'
         ('updated: {0}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
         ('task_id: {0}' -f $TaskId)
+        'entry_host: claudecode'
         'writer: advance-stage'
         '---'
         ''
@@ -1067,7 +1164,17 @@ function Write-RecoveryIndex {
     }
 
     $ordered = $rows | Sort-Object Updated, TaskId -Descending
-    $content = "# 恢复索引`r`n`r`n"
+    $content = @(
+        '---'
+        'tags: [运行时, 恢复索引]'
+        ('updated: {0}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+        'derived_from: [运行时/tasks/]'
+        'schema_version: recovery-index/v1.1'
+        '---'
+        ''
+        '# 恢复索引'
+        ''
+    ) -join "`r`n"
     foreach ($row in $ordered) {
         $content += "- $($row.TaskId) | $($row.Stage) | $($row.Updated)`r`n"
     }
@@ -1204,6 +1311,7 @@ $taskMirrorLines = @(
     "task_id: $TaskId"
     "stage: $nextStage"
     "tool: $nextTool"
+    "entry_host: claudecode"
 )
 
 if (-not [string]::IsNullOrWhiteSpace($nextProfile)) {
@@ -1238,9 +1346,18 @@ $taskMirrorLines += @(
 )
 $taskMirror = $taskMirrorLines -join "`r`n"
 
-Write-Utf8Bom -Path $taskMirrorPath -Content $taskMirror
-Write-Utf8Bom -Path $currentPath -Content (New-CurrentTaskContent -TaskId $TaskId -Status $nextStage -CurrentDoc $currentDoc -Tool $nextTool -ToolProfile $nextProfile -Model $nextModel -NextStep $nextStep)
-Write-RecoveryIndex -TasksDirectory $tasksDir -Path $indexPath
+Invoke-BestEffortRuntimeWrite -VaultRoot $VaultRoot -TaskId $TaskId -Step 'tasks-mirror' -Action {
+    Ensure-ParentDirectory -Path $taskMirrorPath
+    Write-Utf8Bom -Path $taskMirrorPath -Content $taskMirror
+}
+Invoke-BestEffortRuntimeWrite -VaultRoot $VaultRoot -TaskId $TaskId -Step 'current-task' -Action {
+    Ensure-ParentDirectory -Path $currentPath
+    Write-Utf8Bom -Path $currentPath -Content (New-CurrentTaskContent -TaskId $TaskId -Status $nextStage -CurrentDoc $currentDoc -Tool $nextTool -ToolProfile $nextProfile -Model $nextModel -NextStep $nextStep)
+}
+Invoke-BestEffortRuntimeWrite -VaultRoot $VaultRoot -TaskId $TaskId -Step 'recovery-index' -Action {
+    Ensure-ParentDirectory -Path $indexPath
+    Write-RecoveryIndex -TasksDirectory $tasksDir -Path $indexPath
+}
 
 Write-Output "$nextStage | $nextTool"
 try {

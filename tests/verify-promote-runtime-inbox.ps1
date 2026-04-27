@@ -161,6 +161,7 @@ $interruptResult = Invoke-PromoteInbox `
         CreatedAt      = '2026-04-03 10:05:00'
         TargetTaskId   = 'workflow-stability-followup'
         TargetTaskName = 'Workflow Stability Follow-up'
+        EntryHost      = 'gemini'
         Priority       = 'P1'
         TaskStage      = 'PLAN'
         NextStep       = 'Draft the workflow stabilization plan.'
@@ -196,6 +197,12 @@ if ($taskStateContent -notmatch 'schema_version:\s+task-runtime/v1\.1') {
     Add-Failure 'promote-runtime-inbox should create a task-runtime/v1.1 state file for interrupted-task promotion'
 } else {
     Add-Check 'promote-runtime-inbox creates a task-runtime/v1.1 state file for interrupted-task promotion'
+}
+
+if ($taskStateContent -notmatch 'entry_host:\s+gemini') {
+    Add-Failure 'promote-runtime-inbox should persist entry_host into the promoted task runtime when interrupted-task promotion supplies one'
+} else {
+    Add-Check 'promote-runtime-inbox persists entry_host into the promoted task runtime when interrupted-task promotion supplies one'
 }
 
 if ($taskStateContent -notmatch 'primary_artifact:\s+docs/tasks/workflow-stability-followup/plan\.md') {

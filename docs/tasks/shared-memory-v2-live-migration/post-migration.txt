@@ -1,0 +1,18 @@
+STATUS: PASS
+RepoRoot: D:\data\claude-dev-harness
+VaultRoot: D:\data\claude-dev-harness\.assistant
+
+Checks:
+- section present: shared-memory-layers.md -> ## Layers
+- section present: shared-memory-layers.md -> ## Writeback Ladder
+- section present: shared-memory-layers.md -> ## Forbidden Reverse Edges
+- 共享记忆协议引用了 docs/shared-memory-layers.md
+- 当前任务 entry_host=claudecode
+- 恢复索引 derived_from=运行时/当前任务.md, 运行时/tasks/, 运行时/中断任务.md
+- 中断任务 derived_from=运行时/tasks/
+
+Warnings:
+- none
+
+Errors:
+- none

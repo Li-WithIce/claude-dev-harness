@@ -236,12 +236,34 @@ if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'docs/team-write-authorit
     Add-Failure 'team write authority doc should exist at docs/team-write-authority.md'
 }
 
+if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'docs/shared-memory-layers.md') -PathType Leaf) {
+    Add-Check 'shared memory layers doc exists'
+} else {
+    Add-Failure 'shared memory layers doc should exist at docs/shared-memory-layers.md'
+}
+
+if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'scripts/check-shared-memory-layers.ps1') -PathType Leaf) {
+    Add-Check 'shared memory layers checker exists'
+} else {
+    Add-Failure 'shared memory layers checker should exist at scripts/check-shared-memory-layers.ps1'
+}
+
+if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'tests/verify-shared-memory-layers.ps1') -PathType Leaf) {
+    Add-Check 'shared memory layers regression exists'
+} else {
+    Add-Failure 'shared memory layers regression should exist at tests/verify-shared-memory-layers.ps1'
+}
+
 Assert-FileContains -Path '.gitignore' -Needle '.assistant/'
 Assert-FileContains -Path '.gitignore' -Needle 'skills/*/.runtime/'
 Assert-FileContains -Path '.gitignore' -Needle 'agent-configs/workspace/entry/'
 Assert-FileContains -Path '.gitignore' -Needle '/.codex/'
 Assert-FileContains -Path '.gitignore' -Needle '/.gemini/'
+Assert-FileContains -Path 'docs/shared-memory-layers.md' -Needle '## Layers'
+Assert-FileContains -Path 'docs/shared-memory-layers.md' -Needle '## Writeback Ladder'
+Assert-FileContains -Path 'docs/shared-memory-layers.md' -Needle '## Forbidden Reverse Edges'
 Assert-FileContains -Path 'vault-template/工作流/共享记忆协议.md' -Needle 'docs/tasks/<task-id>/*'
+Assert-FileContains -Path 'vault-template/工作流/共享记忆协议.md' -Needle '{REPO_ROOT}\docs\shared-memory-layers.md'
 Assert-FileContains -Path 'vault-template/工作流/写回协议.md' -Needle 'docs/tasks/<task-id>/*'
 Assert-FileContains -Path 'vault-template/配置/敏感信息规范.md' -Needle 'docs/tasks/**'
 Assert-FileContains -Path 'README.md' -Needle 'skills/orchestrator/references/lite-writing-guide.md'
@@ -255,7 +277,10 @@ Assert-FileContains -Path 'README.md' -Needle 'tool_profile'
 Assert-FileContains -Path 'skills/workflow-team/SKILL.md' -Needle '.assistant/'
 Assert-FileContains -Path 'skills/workflow-team/SKILL.md' -Needle 'docs/tasks/<task-id>/'
 Assert-FileContains -Path 'scripts/advance-stage.ps1' -Needle 'validate-lite-artifacts.ps1'
+Assert-FileContains -Path 'scripts/advance-stage.ps1' -Needle '[writeback-fallback]'
 Assert-FileContains -Path 'scripts/export-team-preset.ps1' -Needle 'members_read_only_path_prefixes'
+Assert-FileContains -Path 'scripts/check-shared-memory-layers.ps1' -Needle 'derived_from'
+Assert-FileContains -Path 'tests/verify-shared-memory-layers.ps1' -Needle 'runtime.lock.json'
 Assert-FileContains -Path 'scripts/advance-stage.ps1' -Needle '[string]$Tool = ""'
 Assert-FileContains -Path 'scripts/advance-stage.ps1' -Needle '[string]$Profile = ""'
 Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle 'tool_profile'
