@@ -4,6 +4,8 @@
 
 1. 解析任务是 `resume-current`、`switch-existing` 还是 `new-task`
 2. 为新任务选择 `task_id`，并让用户显式指定当前 stage 的 `tool`
+   可选：同时选择 `tool_profile` 和完整 `model`
+   可选：在仓库里维护 `agent-configs/workflows/harness-lite.yaml`，为后续 stage 声明 `default_profile`
 3. 如无 `plan.md`，先创建 `docs/tasks/<task-id>/plan.md`
 4. 输入不足时再补 `docs/tasks/<task-id>/spec.md`
 
@@ -21,6 +23,12 @@
 
 ```powershell
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <claudecode|codex|gemini>
+# 可选 profile/model 绑定
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <codex> -Profile harness-default-codex -Model gpt-5.5/xhigh
+# 可选：只传 profile，backend 从 profile.backend 解析
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Profile harness-default-codex
+# 可选：若 workflow descriptor 为目标 stage 配了 default_profile，也可省略 -Tool/-Profile
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
 ```
 
 这个 workspace shim 会转调 repo 内的 `advance-stage.ps1`，并先自动运行 validator。
@@ -29,21 +37,46 @@ pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <claudecod
 
 - 更新 `plan.md` frontmatter
 - 写入下一阶段 `tool`
+- 按解析来源写入下一阶段 `tool_profile` / `model`
 - 刷新共享运行时 mirror
 
 规则：
 
-- 只有 `TEST -> DONE` 可以省略 `-Tool`
-- 其余推进都必须由用户显式指定下一阶段 `tool`
+- 非 `DONE` 推进的 fallback 顺序固定为：`cli-tool -> cli-profile -> workflow-default`
+- `workflow-default` 读取 `agent-configs/workflows/harness-lite.yaml.stages.<next>.default_profile`
+- 当前 stage 的 `tool_profile/model` 是 non-sticky 元数据，不参与下一 stage fallback
+- `pure cli-tool`（显式 `-Tool`、未传 `-Profile/-Model`）会清空下一 stage 继承的 `tool_profile/model`
+- `cli-profile` 与 `cli-tool + explicit -Profile/-Model` 继续要求 `tool == profile.backend`
+- 三层都缺失时，非 `DONE` 推进才会报 `requires -Tool`
 - 用户可以在任意 stage 边界切换 tool
+- 解析 trace `resolved tool=<tool> via <source>` 只写 stderr；stdout 仍固定为 `<stage> | <tool>`
 
-## 4. Loop Rules
+## 4. Skill Invocation Modes
+
+- 优先入口：`scripts/invoke-harness-skill.ps1`
+- adapter 白名单固定为：`review`、`test`、`gemini-designer-main`、`codex`
+- `implement` 明确禁入 adapter；需要主 agent / 人类直接执行
+- `review` / `test` 当前是 stub：stdout 返回合法 JSON，`status=markdown-fallback`，stderr 提示回退到 Markdown skill 流
+- `codex` 只允许 `-Mode readonly`
+- invocation trace 只允许 append 到目标 section 里已经存在的最新 `### Run N`；如果没有 Run block，就跳过写入并在 stderr 记录诊断
+- 成功推进后，`advance-stage.ps1` 会 best-effort 写 `docs/tasks/<task-id>/skill-manifest.json`
+- 需要给嵌入消费端展示技能清单时，运行 `scripts/generate-skills-index.ps1` 生成 `docs/tasks/<task-id>/skills-index.md`
+
+## 5. Team Mode Dispatch
+
+- orchestrator 只保留 team-mode 的文档分支，不新增可执行 dispatcher
+- 唯一可执行强制点：`skills/workflow-team/scripts/spawn-team.ps1`
+- `spawn-team.ps1` 只有在 `$env:AIONUI_TEAM_MODE='1'` 时才会进入 spawn 路径
+- env 未设时，脚本会 fail-closed 返回 `reason=team_mode_disabled`
+- 单写者约束参考 [docs/team-write-authority.md](../../../docs/team-write-authority.md)
+
+## 6. Loop Rules
 
 - `PLAN_REVIEW verdict=revise` -> 回 `PLAN`
 - `CODE_REVIEW verdict=revise` -> 回 `IMPLEMENT`
 - `TEST conclusion=fail|blocked` -> 不自动回环，直接停止并报告
 
-## 5. Terminal State
+## 7. Terminal State
 
 - `TEST conclusion=pass` -> `DONE`
 - `DONE` 只写进 frontmatter，不再有独立 `HANDOFF` stage

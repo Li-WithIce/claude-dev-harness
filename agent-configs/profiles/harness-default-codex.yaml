@@ -1,0 +1,16 @@
+name: harness-default-codex
+backend: codex
+model: gpt-5.5/xhigh
+skills_dirs:
+  - .codex/skills
+enabled_skills:
+  - using-superpowers
+  - orchestrator
+  - plan
+  - implement
+  - review
+  - test
+  - spec
+disabled_builtin_skills: []
+context: |
+  Harness lite default Codex profile. Use Codex for implementation, review, and validation work inside the workspace.

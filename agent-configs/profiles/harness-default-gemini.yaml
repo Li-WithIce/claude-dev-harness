@@ -1,0 +1,11 @@
+name: harness-default-gemini
+backend: gemini
+model: gemini-2.5-pro
+skills_dirs:
+  - .gemini/skills
+enabled_skills:
+  - test
+  - gemini-designer-main
+disabled_builtin_skills: []
+context: |
+  Harness lite default Gemini profile. Prefer read-only evidence-based TEST output.

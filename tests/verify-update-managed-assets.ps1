@@ -59,6 +59,42 @@ function Get-StatusLineValue {
     return ([string]$line[0] -replace ("^{0}:\s+" -f [regex]::Escape($Prefix)), '')
 }
 
+function Add-Warning {
+    param([string]$Message)
+
+    $script:Warnings += $Message
+}
+
+function Remove-DirectoryWithRetry {
+    param(
+        [string]$Path,
+        [int]$MaxAttempts = 10,
+        [int]$DelayMilliseconds = 200
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+        return $true
+    }
+
+    $lastError = $null
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
+        try {
+            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+            return $true
+        } catch {
+            $lastError = $_
+            Start-Sleep -Milliseconds $DelayMilliseconds
+        }
+    }
+
+    if (Test-Path -LiteralPath $Path) {
+        Add-Warning ("cleanup failed for scratch root {0}: {1}" -f $Path, $lastError.Exception.Message)
+        return $false
+    }
+
+    return $true
+}
+
 function Invoke-ManagedAssetsCase {
     param(
         [string]$Name,
@@ -148,102 +184,103 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 }
 
 $RepoRoot = Get-NormalizedPath -Path $RepoRoot
-$scratchRoot = Join-Path $RepoRoot 'tmp\update-managed-assets-regression'
-
-if (Test-Path -LiteralPath $scratchRoot) {
-    Remove-Item -LiteralPath $scratchRoot -Recurse -Force
-}
-
-New-Item -ItemType Directory -Path $scratchRoot | Out-Null
+$scratchRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('update-managed-assets-regression-' + [guid]::NewGuid().ToString('N'))
 
 $script:Checks = @()
+$script:Warnings = @()
 $script:Failures = @()
 
-Invoke-ManagedAssetsCase `
-    -Name 'workflow-protocol-drift-is-repaired' `
-    -Scope 'All' `
-    -ExpectedStatus 'PASS' `
-    -Mutator {
-        param($CaseRoot, $UserProfile, $WorkspaceRoot)
+try {
+    New-Item -ItemType Directory -Path $scratchRoot -Force | Out-Null
 
-        $protocolLeafName = -join (@(20849, 20139, 35760, 24518, 21327, 35758, 46, 109, 100) | ForEach-Object { [char]$_ })
-        $protocolPath = @(Get-ChildItem -LiteralPath (Join-Path $WorkspaceRoot '.assistant') -Recurse -File | Where-Object {
-                $_.Name -eq $protocolLeafName
-            } | Select-Object -First 1)
-        if ($protocolPath.Count -ne 1) {
-            throw 'unable to resolve managed workflow protocol file in workspace vault'
+    Invoke-ManagedAssetsCase `
+        -Name 'workflow-protocol-drift-is-repaired' `
+        -Scope 'All' `
+        -ExpectedStatus 'PASS' `
+        -Mutator {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot)
+
+            $protocolLeafName = -join (@(20849, 20139, 35760, 24518, 21327, 35758, 46, 109, 100) | ForEach-Object { [char]$_ })
+            $protocolPath = @(Get-ChildItem -LiteralPath (Join-Path $WorkspaceRoot '.assistant') -Recurse -File | Where-Object {
+                    $_.Name -eq $protocolLeafName
+                } | Select-Object -First 1)
+            if ($protocolPath.Count -ne 1) {
+                throw 'unable to resolve managed workflow protocol file in workspace vault'
+            }
+
+            Add-Content -LiteralPath $protocolPath[0].FullName -Value "`nDRIFT-LINE" -Encoding utf8
+        } `
+        -PostAssert {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot, $Result)
+
+            $protocolLeafName = -join (@(20849, 20139, 35760, 24518, 21327, 35758, 46, 109, 100) | ForEach-Object { [char]$_ })
+            $protocolPath = @(Get-ChildItem -LiteralPath (Join-Path $WorkspaceRoot '.assistant') -Recurse -File | Where-Object {
+                    $_.Name -eq $protocolLeafName
+                } | Select-Object -First 1)
+            if ($protocolPath.Count -ne 1) {
+                throw 'unable to resolve managed workflow protocol file in workspace vault after update'
+            }
+
+            $content = Get-Content -LiteralPath $protocolPath[0].FullName -Raw -Encoding utf8
+            if ($content.Contains('DRIFT-LINE')) {
+                throw 'workflow protocol drift should be repaired by Scope=All'
+            }
         }
 
-        Add-Content -LiteralPath $protocolPath[0].FullName -Value "`nDRIFT-LINE" -Encoding utf8
-    } `
-    -PostAssert {
-        param($CaseRoot, $UserProfile, $WorkspaceRoot, $Result)
+    Invoke-ManagedAssetsCase `
+        -Name 'cwd-autodetect-pass' `
+        -Scope 'All' `
+        -ExpectedStatus 'PASS' `
+        -WorkingDirectory '{WORKSPACE_ROOT}\.assistant' `
+        -UpdateArguments @{ Scope = 'All' } `
+        -Mutator {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot)
+        } `
+        -PostAssert {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot, $Result)
 
-        $protocolLeafName = -join (@(20849, 20139, 35760, 24518, 21327, 35758, 46, 109, 100) | ForEach-Object { [char]$_ })
-        $protocolPath = @(Get-ChildItem -LiteralPath (Join-Path $WorkspaceRoot '.assistant') -Recurse -File | Where-Object {
-                $_.Name -eq $protocolLeafName
-            } | Select-Object -First 1)
-        if ($protocolPath.Count -ne 1) {
-            throw 'unable to resolve managed workflow protocol file in workspace vault after update'
+            $status = Get-StatusLineValue -Output $Result.Output -Prefix 'STATUS'
+            if ($status -ne 'PASS') {
+                throw 'update-managed-assets should pass when it infers WorkspaceRoot from the current working directory'
+            }
         }
 
-        $content = Get-Content -LiteralPath $protocolPath[0].FullName -Raw -Encoding utf8
-        if ($content.Contains('DRIFT-LINE')) {
-            throw 'workflow protocol drift should be repaired by Scope=All'
+    Invoke-ManagedAssetsCase `
+        -Name 'decision-needed-template-drift-is-repaired' `
+        -Scope 'All' `
+        -ExpectedStatus 'PASS' `
+        -Mutator {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot)
+
+            $templateLeafName = -join (@(20915, 31574, 38656, 27714, 27169, 26495, 46, 109, 100) | ForEach-Object { [char]$_ })
+            $templatePath = @(Get-ChildItem -LiteralPath (Join-Path $WorkspaceRoot '.assistant') -Recurse -File | Where-Object {
+                    $_.Name -eq $templateLeafName
+                } | Select-Object -First 1)
+            if ($templatePath.Count -ne 1) {
+                throw 'unable to resolve decision-needed template in workspace vault'
+            }
+
+            Add-Content -LiteralPath $templatePath[0].FullName -Value "`nDRIFT-LINE" -Encoding utf8
+        } `
+        -PostAssert {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot, $Result)
+
+            $templateLeafName = -join (@(20915, 31574, 38656, 27714, 27169, 26495, 46, 109, 100) | ForEach-Object { [char]$_ })
+            $templatePath = @(Get-ChildItem -LiteralPath (Join-Path $WorkspaceRoot '.assistant') -Recurse -File | Where-Object {
+                    $_.Name -eq $templateLeafName
+                } | Select-Object -First 1)
+            if ($templatePath.Count -ne 1) {
+                throw 'unable to resolve decision-needed template in workspace vault after update'
+            }
+
+            $content = Get-Content -LiteralPath $templatePath[0].FullName -Raw -Encoding utf8
+            if ($content.Contains('DRIFT-LINE')) {
+                throw 'decision-needed template drift should be repaired by Scope=All'
+            }
         }
-    }
-
-Invoke-ManagedAssetsCase `
-    -Name 'cwd-autodetect-pass' `
-    -Scope 'All' `
-    -ExpectedStatus 'PASS' `
-    -WorkingDirectory '{WORKSPACE_ROOT}\.assistant' `
-    -UpdateArguments @{ Scope = 'All' } `
-    -Mutator {
-        param($CaseRoot, $UserProfile, $WorkspaceRoot)
-    } `
-    -PostAssert {
-        param($CaseRoot, $UserProfile, $WorkspaceRoot, $Result)
-
-        $status = Get-StatusLineValue -Output $Result.Output -Prefix 'STATUS'
-        if ($status -ne 'PASS') {
-            throw 'update-managed-assets should pass when it infers WorkspaceRoot from the current working directory'
-        }
-    }
-
-Invoke-ManagedAssetsCase `
-    -Name 'decision-needed-template-drift-is-repaired' `
-    -Scope 'All' `
-    -ExpectedStatus 'PASS' `
-    -Mutator {
-        param($CaseRoot, $UserProfile, $WorkspaceRoot)
-
-        $templateLeafName = -join (@(20915, 31574, 38656, 27714, 27169, 26495, 46, 109, 100) | ForEach-Object { [char]$_ })
-        $templatePath = @(Get-ChildItem -LiteralPath (Join-Path $WorkspaceRoot '.assistant') -Recurse -File | Where-Object {
-                $_.Name -eq $templateLeafName
-            } | Select-Object -First 1)
-        if ($templatePath.Count -ne 1) {
-            throw 'unable to resolve decision-needed template in workspace vault'
-        }
-
-        Add-Content -LiteralPath $templatePath[0].FullName -Value "`nDRIFT-LINE" -Encoding utf8
-    } `
-    -PostAssert {
-        param($CaseRoot, $UserProfile, $WorkspaceRoot, $Result)
-
-        $templateLeafName = -join (@(20915, 31574, 38656, 27714, 27169, 26495, 46, 109, 100) | ForEach-Object { [char]$_ })
-        $templatePath = @(Get-ChildItem -LiteralPath (Join-Path $WorkspaceRoot '.assistant') -Recurse -File | Where-Object {
-                $_.Name -eq $templateLeafName
-            } | Select-Object -First 1)
-        if ($templatePath.Count -ne 1) {
-            throw 'unable to resolve decision-needed template in workspace vault after update'
-        }
-
-        $content = Get-Content -LiteralPath $templatePath[0].FullName -Raw -Encoding utf8
-        if ($content.Contains('DRIFT-LINE')) {
-            throw 'decision-needed template drift should be repaired by Scope=All'
-        }
-    }
+} finally {
+    Remove-DirectoryWithRetry -Path $scratchRoot | Out-Null
+}
 
 Write-Output 'Checks:'
 if ($script:Checks.Count -eq 0) {
@@ -251,6 +288,16 @@ if ($script:Checks.Count -eq 0) {
 } else {
     foreach ($item in $script:Checks) {
         Write-Output ('- {0}: {1}' -f $item.Name, $item.Status)
+    }
+}
+
+Write-Output ''
+Write-Output 'Warnings:'
+if ($script:Warnings.Count -eq 0) {
+    Write-Output '- none'
+} else {
+    foreach ($warning in $script:Warnings) {
+        Write-Output ('- {0}' -f $warning)
     }
 }
 

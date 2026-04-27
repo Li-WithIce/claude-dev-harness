@@ -1,0 +1,23 @@
+name: harness-lite
+version: 1
+stages:
+  PLAN:
+    role: plan-author
+    default_profile: harness-default-claude
+    skills_whitelist: [plan, using-superpowers]
+  PLAN_REVIEW:
+    role: plan-reviewer
+    default_profile: harness-default-codex
+    skills_whitelist: [review]
+  IMPLEMENT:
+    role: implementer
+    default_profile: harness-default-claude
+    skills_whitelist: [implement]
+  CODE_REVIEW:
+    role: code-reviewer
+    default_profile: harness-default-codex
+    skills_whitelist: [review]
+  TEST:
+    role: tester
+    default_profile: harness-default-gemini
+    skills_whitelist: [test, gemini-designer-main]

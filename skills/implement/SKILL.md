@@ -38,7 +38,7 @@ IMPLEMENT 负责两件事：改代码，以及把本轮实现证据追加到 `do
 2. 只实现当前计划要求的内容
 3. 跑最小必要验证
 4. 在 `## Implementation Notes` 末尾追加新 run
-5. 推进到 `CODE_REVIEW` 前，必须让用户指定下一阶段 `tool`
+5. 推进到 `CODE_REVIEW` 前，必须让用户指定下一阶段 `tool`；如使用 profile，同步传 `-Profile` 和完整 `-Model`
 6. 调用 `.assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <next-tool>` 进入 `CODE_REVIEW`
 7. 如需单独排查文档问题，再手动运行 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
 

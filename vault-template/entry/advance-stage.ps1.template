@@ -5,7 +5,11 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$TaskId,
 
-    [string]$Tool = ""
+    [string]$Tool = "",
+
+    [string]$Profile = "",
+
+    [string]$Model = ""
 )
 
 Set-StrictMode -Version Latest
@@ -20,9 +24,13 @@ This shim keeps the user-facing command inside `.assistant\entry` while delegati
 The task id under `docs/tasks/<task-id>/`.
 .PARAMETER Tool
 The next-stage tool for non-DONE transitions.
+.PARAMETER Profile
+Optional next-stage tool profile.
+.PARAMETER Model
+Optional full model id override.
 .OUTPUTS
 None.
 #>
 
-& '{REPO_ROOT}\scripts\advance-stage.ps1' -TaskId $TaskId -Tool $Tool -VaultRoot '{VAULT_PATH}'
+& '{REPO_ROOT}\scripts\advance-stage.ps1' -TaskId $TaskId -Tool $Tool -Profile $Profile -Model $Model -VaultRoot '{VAULT_PATH}'
 exit $LASTEXITCODE

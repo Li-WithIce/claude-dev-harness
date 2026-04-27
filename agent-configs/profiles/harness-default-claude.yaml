@@ -1,0 +1,16 @@
+name: harness-default-claude
+backend: claudecode
+model: claude-opus-4-7
+skills_dirs:
+  - .claude/skills
+enabled_skills:
+  - using-superpowers
+  - orchestrator
+  - plan
+  - implement
+  - review
+  - test
+  - spec
+disabled_builtin_skills: []
+context: |
+  Harness lite default Claude profile. Follow plan.md frontmatter and stage gates.

@@ -32,8 +32,30 @@ harness.cmd -WorkspaceRoot D:\my-project
 # 推进阶段（在目标项目目录中执行）
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <claudecode|codex|gemini>
 
+# 可选：同时写入下一阶段 tool profile / model
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool codex -Profile harness-default-codex -Model gpt-5.5/xhigh
+
+# 可选：只传 profile，backend 从 profile.backend 解析
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Profile harness-default-codex
+
+# 可选：已配置 agent-configs/workflows/harness-lite.yaml 且目标 stage 有 default_profile 时，可省略 -Tool/-Profile
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
+
 # TEST -> DONE 可以省略 -Tool
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
+
+# Phase 3：adapter 发起 skill（stdout 单行 JSON）
+pwsh -File .\scripts\invoke-harness-skill.ps1 -TaskId <task-id> -Stage PLAN_REVIEW -Skill review -Tool codex -WorkspaceRoot <workspace-root> -ArtifactRoot docs\tasks\<task-id> -Mode readonly -PayloadJson '{}'
+
+# Phase 3：生成当前 stage 可用 skill 索引
+pwsh -File .\scripts\generate-skills-index.ps1 -TaskId <task-id> -Stage TEST -BackendHint kimi
+
+# Phase 4：导出 team preset
+pwsh -File .\scripts\export-team-preset.ps1 -Workflow harness-lite -Output <tmp>\team.yaml
+
+# Phase 4：显式 opt-in team mode（仅在 AionUi 主进程提供 team_spawn_agent 时有意义）
+$env:AIONUI_TEAM_MODE='1'
+pwsh -File .\skills\workflow-team\scripts\spawn-team.ps1 -TaskId <task-id>
 ```
 
 ## 工作流
@@ -51,12 +73,19 @@ PLAN → PLAN_REVIEW → IMPLEMENT → CODE_REVIEW → TEST → DONE
 task_id: <task-id>
 stage: PLAN | PLAN_REVIEW | IMPLEMENT | CODE_REVIEW | TEST | DONE
 tool: claudecode | codex | gemini | none
+tool_profile: <optional profile name>
+model: <optional full model id>
 updated: YYYY-MM-DD
 ---
 ```
 
 - 非 `DONE` 阶段时，`tool` 只能是 `claudecode`、`codex`、`gemini`
 - `DONE` 固定写 `tool: none`
+- `tool_profile` 可选，描述符位于 `agent-configs/profiles/`
+- `tool_profile` 只记录“当前 stage 已分配到的 profile”，不会作为下一 stage 的黏性 fallback 来源
+- 存在 `tool_profile` 时，`tool` 必须等于 profile 的 `backend`
+- `model` 可选，但必须是完整模型 ID，不写 `opus`、`pro`、`latest` 这类短别名
+- 可选 workflow descriptor 位于 `agent-configs/workflows/harness-lite.yaml`，可为下一 stage 提供 `default_profile`
 - 用户可以在任意 stage 边界切换 tool
 
 ### 阶段职责
@@ -75,9 +104,16 @@ updated: YYYY-MM-DD
 ### 推进规则
 
 - 所有推进只走 `advance-stage.ps1`，它会先自动运行 `validate-lite-artifacts.ps1` 校验产物
-- 非 `DONE` 推进必须由用户显式指定下一阶段 `tool`
+- 非 `DONE` 推进的下一阶段 tool 解析顺序是：显式 `-Tool` → 显式 `-Profile` → `agent-configs/workflows/harness-lite.yaml` 的 `default_profile`
+- `pure cli-tool`（显式 `-Tool`、未传 `-Profile/-Model`）会清空下一 stage 继承的 `tool_profile/model`
+- 当前 stage 的 `tool_profile/model` 是 non-sticky 元数据，不参与下一 stage fallback
+- workflow descriptor 有问题时只会出现在 validator 的 `Warnings:` 段；显式 `-Tool` 路径仍可继续推进
+- 当 `-Tool` / `-Profile` / workflow-default 都缺失时，非 `DONE` 推进才会报 `requires -Tool`
+- 成功推进后，`advance-stage.ps1` 会 best-effort 写 `docs/tasks/<task-id>/skill-manifest.json`
 - CODE_REVIEW verdict=revise → 回退到 IMPLEMENT
 - TEST fail/blocked → 停止报告，不自动回退
+
+FAQ：如果当前 `plan.md` 里已经有 `tool_profile: harness-default-claude`，但下一 stage 还是走到了 `workflow-default`，这是预期行为；当前 stage 的 `tool_profile` 只记录本 stage 选型，不会黏性传递到下一 stage。
 
 ### Skill 路由
 
@@ -94,6 +130,20 @@ using-superpowers（每次对话自动加载）
 ```
 
 可选委派：用户显式要求时通过 `codex` skill 委派给 Codex CLI。
+
+Phase 3 新增 ACP-style adapter：
+
+- `scripts/invoke-harness-skill.ps1`：统一入口，白名单仅 `review` / `test` / `gemini-designer-main` / `codex`
+- `review` / `test` 当前返回 `status=markdown-fallback`，提示宿主回退到原 Markdown skill 流
+- `implement` 明确禁入 adapter
+- invocation trace 只追加到已有 `### Run N`；没有 run block 时安全跳过并写 stderr 诊断
+
+Phase 4 新增 team preset bridge：
+
+- `scripts/export-team-preset.ps1` 从 `harness-lite.yaml` + profile/role-prompt 即时派生 team preset
+- `skills/workflow-team/scripts/spawn-team.ps1` 是 team-mode 的唯一可执行强制点
+- `skills/orchestrator/SKILL.md` 只保留 team-mode 文档分支，不新增读 env 的可执行 dispatcher
+- member 的只读保护集合统一为 `.assistant/` 与 `docs/tasks/<task-id>/`
 
 ### 共享记忆
 
@@ -134,10 +184,11 @@ claude-dev-harness/
 ├── harness.ps1 / harness.cmd     # 快捷引导入口
 ├── install.ps1                    # 安装到目标项目
 ├── uninstall.ps1                  # 从目标项目卸载
-├── skills/                        # 10 个工作流 skills
+├── skills/                        # 11 个工作流 skills
 │   ├── using-superpowers/         #   顶层路由入口
 │   ├── orchestrator/              #   lite workflow 调度
 │   │   └── references/            #   gates, runbook, state-templates, writing-guide
+│   ├── workflow-team/             #   team-mode preset bridge（文档 skill + spawn helper）
 │   ├── plan/                      #   PLAN 产物规则
 │   ├── implement/                 #   IMPLEMENT 产物规则
 │   ├── review/                    #   PLAN_REVIEW / CODE_REVIEW 规则
@@ -146,8 +197,11 @@ claude-dev-harness/
 │   ├── obsidian-memory/           #   共享记忆与 runtime 维护
 │   ├── codex/                     #   Codex CLI 委派
 │   └── gemini-designer-main/      #   Gemini TEST runner
-├── scripts/                       # 12 个 PowerShell 脚本
+├── scripts/                       # 15 个 PowerShell 脚本
 │   ├── advance-stage.ps1          #   阶段推进（核心）
+│   ├── export-team-preset.ps1     #   导出 team preset
+│   ├── invoke-harness-skill.ps1   #   ACP-style skill adapter
+│   ├── generate-skills-index.ps1  #   生成 per-task skills-index.md
 │   ├── validate-lite-artifacts.ps1#   任务产物校验
 │   ├── update-managed-assets.ps1  #   托管资产刷新
 │   ├── memory-health.ps1          #   共享记忆健康检查
@@ -160,9 +214,9 @@ claude-dev-harness/
 │   ├── promote-runtime-inbox.ps1  #   提升收件箱条目为任务
 │   └── resolve-obsidian-memory-script.ps1  # 解析共享记忆路径
 ├── runtime-hooks/claude/          # 3 个 Claude Code hooks
-├── agent-configs/                 # Claude / Codex / workspace 配置模板
+├── agent-configs/                 # Claude / Codex / workspace 配置模板 + profiles/workflows/role-prompts 描述符
 ├── vault-template/                # .assistant 初始化骨架
-├── tests/                         # 16 个回归测试
+├── tests/                         # 23 个回归测试
 └── backups/                       # 安装备份（.gitignore）
 ```
 
@@ -229,7 +283,12 @@ pwsh -File .\scripts\validate-lite-artifacts.ps1 -TaskId <task-id>
 pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 ```
 
-校验内容：`plan.md` frontmatter schema、section 结构、append-only run 格式、`spec.md` 可选结构、`test.md` Conclusion/Handoff 契约。
+校验内容：`plan.md` frontmatter schema、section 结构、append-only run 格式、`spec.md` 可选结构、`test.md` Conclusion/Handoff 契约，以及 workflow descriptor 的 advisory `Warnings:` audit。
+
+Phase 3 产物：
+
+- `docs/tasks/<task-id>/skill-manifest.json`：per-task best-effort manifest，不写入 `.assistant/`
+- `docs/tasks/<task-id>/skills-index.md`：当前 stage 的 skills whitelist 展示页
 
 ### 共享记忆维护
 
@@ -246,7 +305,7 @@ pwsh -File .\scripts\repair-shared-memory.ps1 -VaultRoot <workspace-root>\.assis
 
 ## 回归测试
 
-16 个测试覆盖全部核心功能：
+23 个测试覆盖全部核心功能：
 
 | 测试 | 覆盖范围 |
 |---|---|
@@ -256,6 +315,12 @@ pwsh -File .\scripts\repair-shared-memory.ps1 -VaultRoot <workspace-root>\.assis
 | `verify-harness-entry.ps1` | harness.ps1 引导入口 |
 | `verify-update-managed-assets.ps1` | 托管资产刷新 |
 | `verify-workflow-contracts.ps1` | 阶段推进契约（advance-stage） |
+| `verify-tool-profile.ps1` | Phase 1 tool_profile/model 兼容契约 |
+| `verify-workflow-descriptor.ps1` | Phase 2 workflow descriptor fallback / writeback |
+| `verify-aionui-skill-contract.ps1` | Phase 3 skill adapter / trace / skills-index |
+| `verify-skill-manifest.ps1` | Phase 3 per-task skill-manifest best-effort hook |
+| `verify-team-preset.ps1` | Phase 4 team preset 导出与前缀契约 |
+| `verify-team-orchestration.ps1` | Phase 4 spawn-team env opt-in / payload / fallback |
 | `verify-lite-artifact-validator.ps1` | 产物校验规则 |
 | `verify-lite-footprint.ps1` | UTF-8 BOM 与文件规范 |
 | `verify-runtime-hooks.ps1` | Runtime hooks 行为 |
@@ -267,10 +332,14 @@ pwsh -File .\scripts\repair-shared-memory.ps1 -VaultRoot <workspace-root>\.assis
 | `verify-triage-runtime-inbox.ps1` | 收件箱处理 |
 | `verify-promote-runtime-inbox.ps1` | 收件箱提升 |
 
-运行全部测试：
+运行全部可直接执行的 verify 脚本：
 
 ```powershell
-Get-ChildItem tests\verify-*.ps1 | ForEach-Object { pwsh -File $_.FullName }
+# 先单独跑安装验证
+pwsh -File .\tests\verify-installation.ps1 -WorkspaceRoot <workspace-root> -RepoRoot <repo-root>
+
+# 其余 verify 脚本可直接顺跑
+Get-ChildItem tests\verify-*.ps1 | Where-Object Name -ne 'verify-installation.ps1' | ForEach-Object { pwsh -File $_.FullName }
 ```
 
 ## Windows 兼容

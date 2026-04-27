@@ -22,13 +22,15 @@
 
 ### Frontmatter
 
-`plan.md` frontmatter 只允许这 4 个字段：
+`plan.md` frontmatter 必须包含 4 个基础字段，并可选择性增加 `tool_profile` / `model`：
 
 ```yaml
 ---
 task_id: <task-id>
 stage: PLAN | PLAN_REVIEW | IMPLEMENT | CODE_REVIEW | TEST | DONE
 tool: claudecode | codex | gemini | none
+tool_profile: harness-default-codex
+model: gpt-5.5/xhigh
 updated: YYYY-MM-DD
 ---
 ```
@@ -37,7 +39,40 @@ updated: YYYY-MM-DD
 
 - 非 `DONE` 阶段时，`tool` 只能是 `claudecode`、`codex`、`gemini`
 - `DONE` 只能写 `tool: none`
-- `tool` 表示“当前 stage 由哪个工具继续”，不是固定 profile
+- `tool` 表示“当前 stage 由哪个 backend 继续”，即使用 profile 也必须显式保留
+- `tool_profile` 指向 `agent-configs/profiles/<name>.yaml`
+- 当前 stage 的 `tool_profile/model` 只是活跃元数据，不会作为下一 stage 的黏性 fallback
+- 存在 `tool_profile` 时，`tool` 必须等于 profile 描述符中的 `backend`
+- `model` 必须写完整模型 ID，不写 `opus`、`pro`、`latest` 这类短别名
+- 未启用 `tool_profile` / `model` 时，旧四字段 frontmatter 继续合法
+
+### Workflow Descriptor（可选）
+
+若仓库启用了 `agent-configs/workflows/harness-lite.yaml`，它只为下一 stage 提供 `workflow-default` fallback，不改变 `plan.md` frontmatter 仍是唯一当前 stage 真相源。
+
+最小字段：
+
+```yaml
+name: harness-lite
+version: 1
+stages:
+  PLAN_REVIEW:
+    role: plan-reviewer
+    default_profile: harness-default-codex
+    skills_whitelist: [review]
+```
+
+规则：
+
+- fallback 顺序固定为：显式 `-Tool` → 显式 `-Profile` → workflow descriptor `default_profile`
+- descriptor 只影响“下一 stage 默认选哪个 profile/backend”，不会把当前 stage 的 `tool_profile` 黏性传下去
+- descriptor 校验问题只出现在 validator 的 `Warnings:` 段，不会单独变成 `Errors:`
+
+### Phase 3 Side Artifacts（可选）
+
+- `docs/tasks/<task-id>/skill-manifest.json`：由 `advance-stage.ps1` 在成功推进后 best-effort 生成；不是新的真相源，也不写入 `.assistant/`
+- `docs/tasks/<task-id>/skills-index.md`：由 `scripts/generate-skills-index.ps1` 生成，给嵌入消费端或非原生 backend 展示当前 stage 的可用 skills
+- invocation trace 只允许以单行 `- invocation: ...` 追加到已有 `### Run N` 块内部；目标 section 没有 Run block 时必须跳过，不能新建 section 或 bare 顶层 bullet
 
 ### 必备 section
 
@@ -51,6 +86,28 @@ updated: YYYY-MM-DD
 6. `## Plan Review`
 7. `## Implementation Notes`
 8. `## Code Review`
+
+### 可选 section：Change Contract
+
+在 `## User Confirmation` 与 `## Plan` 之间可以插入可选的 `## Change Contract`，把本次变更的类型和路径以机器可读方式声明出来，降低 IMPLEMENT/CODE_REVIEW/TEST 理解成本。
+
+格式固定为：
+
+```markdown
+## Change Contract
+- change_type: task | feature | enhance | refactor
+- affected_paths:
+  - <path>
+  - <path>
+```
+
+字段规则：
+
+- `change_type` 必须在枚举内：`task | feature | enhance | refactor`
+- `affected_paths` 至少一条非空、非占位条目（占位符 `<path>` 视为未填）
+- 未启用该 section 时 validator 自动跳过；这是 opt-in 字段
+
+不写 `## Change Contract` 不影响现有任务——旧任务继续通过。
 
 ### Clarification 最低要求
 
@@ -158,6 +215,7 @@ updated: YYYY-MM-DD
 - `advance-stage.ps1` 只读取最新 run 的 `- verdict:`。
 - 没有 findings 时写 `- findings: none`，不要写空 severity 标题。
 - 只在真的有问题时使用 `P0/P1/P2/P3`。
+- Phase 3 adapter 的 invocation trace 只能追加到现有 run 末尾，不能手写到 section 顶层
 
 ### Implementation Notes
 
@@ -209,13 +267,28 @@ pass
 ## Handoff
 - delivery: 交付摘要
 - follow_up: 后续动作；无则写 none
+- current_state: 当前阶段与关键产物路径
+- key_decisions:
+  - decision: 跨会话必须保留的决策
+    why: 决策原因
+- next_actions:
+  - 恢复后第一组动作
 ```
 
 规则：
 
 - `## Conclusion` 下第一行必须且只能是 `pass`、`fail`、`blocked`。
 - `## Handoff` 必须存在。
+- `delivery` 与 `follow_up` 是最低必填，validator 只校验这两条。
+- `current_state`、`key_decisions`、`next_actions` 为 opt-in 密度扩展，推荐长任务填写；不写不影响 validator。
+- 旧格式 Handoff（只含 delivery/follow_up）继续通过校验。
 - 不要把 review 发现写成独立 `review.md`。
+
+## FAQ
+
+### 为什么我的 `tool_profile: harness-default-claude` 没有影响下一 stage
+
+因为 `tool_profile` 只记录“当前 stage 已分配到哪个 profile”。下一 stage 的解析顺序是显式 `-Tool` → 显式 `-Profile` → workflow descriptor `default_profile`。如果当前 stage 没传新参数，而目标 stage 在 `agent-configs/workflows/harness-lite.yaml` 里有 `default_profile`，就会走 `workflow-default`，而不是复用旧 frontmatter 的 `tool_profile/model`。
 
 ## 严重级别
 
@@ -234,7 +307,7 @@ pass
 ## 自检清单
 
 - [ ] 路径全部位于 `docs/tasks/<task-id>/`
-- [ ] `plan.md` frontmatter 只有 4 个合法字段
+- [ ] `plan.md` frontmatter 只有 4 个基础字段，或再加合法的 `tool_profile` / `model`
 - [ ] `tool` 与当前 `stage` 组合合法
 - [ ] `User Confirmation` 使用机器可读 `status`
 - [ ] append-only run 没有改写旧历史

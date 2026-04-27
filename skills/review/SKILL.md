@@ -59,6 +59,7 @@ description: Use when the task is in PLAN_REVIEW or CODE_REVIEW and a new append
 
 - `PLAN_REVIEW -> IMPLEMENT` 或 `PLAN_REVIEW -> PLAN` 前，必须让用户指定下一阶段 `tool`
 - `CODE_REVIEW -> TEST` 或 `CODE_REVIEW -> IMPLEMENT` 前，必须让用户指定下一阶段 `tool`
+- 如使用 profile，推进时同步传 `-Profile <profile-name>` 和完整 `-Model <model-id>`；profile 的 backend 必须等于 `-Tool`
 - 推进命令固定为 `.assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <next-tool>`
 
 ## 不要做的事

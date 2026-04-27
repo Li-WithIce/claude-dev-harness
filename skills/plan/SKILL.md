@@ -16,10 +16,12 @@ PLAN 的唯一产物是 `docs/tasks/<task-id>/plan.md`。这个文件的 frontma
 ## 硬约束
 
 - 路径固定：`docs/tasks/<task-id>/plan.md`
-- frontmatter 只能包含：`task_id`、`stage`、`tool`、`updated`
+- frontmatter 必须包含：`task_id`、`stage`、`tool`、`updated`；可选 `tool_profile` / `model` 只能放在 `tool` 与 `updated` 之间
 - `stage` 在 PLAN 内保持 `PLAN`；不要手改到下一阶段，推进只走 `.assistant\entry\advance-stage.ps1`
 - 新任务进入 PLAN 前，必须让用户显式指定当前 `tool`
 - PLAN 阶段的 `tool` 只允许：`claudecode`、`codex`、`gemini`
+- 如使用 `tool_profile`，必须来自 `agent-configs/profiles/<name>.yaml`，且 profile `backend` 必须等于 `tool`
+- 如写 `model`，必须使用完整模型 ID，不写 `opus`、`pro`、`latest` 这类短别名
 - `spec.md` 只是可选附件，路径为 `docs/tasks/<task-id>/spec.md`
 - 必须保留 append-only sections：`## Plan Review`、`## Implementation Notes`、`## Code Review`
 
@@ -53,6 +55,19 @@ PLAN 的唯一产物是 `docs/tasks/<task-id>/plan.md`。这个文件的 frontma
 
 没有明确确认前写 `draft`；用户确认后改成 `confirmed`，然后再调用 `advance-stage.ps1`。
 
+### 可选 Change Contract
+
+`## Change Contract` 可在 `## User Confirmation` 与 `## Plan` 之间插入，用机器可读格式声明变更类型与受影响路径：
+
+```markdown
+## Change Contract
+- change_type: task | feature | enhance | refactor
+- affected_paths:
+  - <path>
+```
+
+`change_type` 必须在枚举内；`affected_paths` 至少一条非占位条目。不需要时整段删除即可，validator 自动跳过。详见 `../orchestrator/references/lite-writing-guide.md`。
+
 ## 推荐骨架
 
 ```markdown
@@ -74,6 +89,11 @@ updated: 2026-04-09
 ## User Confirmation
 - status: draft
 
+## Change Contract
+- change_type: task | feature | enhance | refactor
+- affected_paths:
+  - <path>
+
 ## Plan
 - TODO 1: ...
 - TODO 2: ...
@@ -91,13 +111,20 @@ updated: 2026-04-09
 ## Code Review
 ```
 
+如需启用 tool profile，在 `tool` 与 `updated` 之间插入：
+
+```yaml
+tool_profile: harness-default-claude
+model: claude-opus-4-7
+```
+
 ## 工作方式
 
 1. 先读已批准输入和可选 `spec.md`
 2. 把 Clarification 补齐到能执行的粒度
 3. 写出精确文件路径、验证命令和风险
 4. 用户确认后，把 `User Confirmation` 改成 `confirmed`
-5. 推进到 `PLAN_REVIEW` 前，必须让用户指定下一阶段 `tool`
+5. 推进到 `PLAN_REVIEW` 前，必须让用户指定下一阶段 `tool`；如指定 profile，同步传 `-Profile` 和完整 `-Model`
 6. 只在 gate 满足后执行 `.assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <next-tool>`
 7. 如需单独排查文档问题，再手动运行 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
 

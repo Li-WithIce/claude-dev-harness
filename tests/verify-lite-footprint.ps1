@@ -174,6 +174,7 @@ $expectedSkills = @(
     'review',
     'spec',
     'test',
+    'workflow-team',
     'using-superpowers'
 )
 
@@ -211,20 +212,56 @@ if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'scripts/validate-lite-ar
     Add-Failure 'lite artifact validator should exist at scripts/validate-lite-artifacts.ps1'
 }
 
+if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'skills/workflow-team/SKILL.md') -PathType Leaf) {
+    Add-Check 'workflow-team skill exists'
+} else {
+    Add-Failure 'workflow-team skill should exist at skills/workflow-team/SKILL.md'
+}
+
+if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'scripts/export-team-preset.ps1') -PathType Leaf) {
+    Add-Check 'team preset export script exists'
+} else {
+    Add-Failure 'team preset export script should exist at scripts/export-team-preset.ps1'
+}
+
+if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'agent-configs/role-prompts/plan-author.md') -PathType Leaf) {
+    Add-Check 'role prompt templates exist'
+} else {
+    Add-Failure 'role prompt templates should exist at agent-configs/role-prompts/'
+}
+
+if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'docs/team-write-authority.md') -PathType Leaf) {
+    Add-Check 'team write authority doc exists'
+} else {
+    Add-Failure 'team write authority doc should exist at docs/team-write-authority.md'
+}
+
 Assert-FileContains -Path '.gitignore' -Needle '.assistant/'
 Assert-FileContains -Path '.gitignore' -Needle 'skills/*/.runtime/'
 Assert-FileContains -Path '.gitignore' -Needle 'agent-configs/workspace/entry/'
+Assert-FileContains -Path '.gitignore' -Needle '/.codex/'
+Assert-FileContains -Path '.gitignore' -Needle '/.gemini/'
 Assert-FileContains -Path 'vault-template/工作流/共享记忆协议.md' -Needle 'docs/tasks/<task-id>/*'
 Assert-FileContains -Path 'vault-template/工作流/写回协议.md' -Needle 'docs/tasks/<task-id>/*'
 Assert-FileContains -Path 'vault-template/配置/敏感信息规范.md' -Needle 'docs/tasks/**'
 Assert-FileContains -Path 'README.md' -Needle 'skills/orchestrator/references/lite-writing-guide.md'
 Assert-FileContains -Path 'README.md' -Needle 'scripts/validate-lite-artifacts.ps1'
+Assert-FileContains -Path 'README.md' -Needle 'export-team-preset.ps1'
+Assert-FileContains -Path 'README.md' -Needle 'AIONUI_TEAM_MODE'
 Assert-FileContains -Path 'README.md' -Needle '.assistant\entry\advance-stage.ps1'
 Assert-FileContains -Path 'README.md' -Needle '.assistant\entry\validate-lite-artifacts.ps1'
 Assert-FileContains -Path 'README.md' -Needle 'tool: claudecode | codex | gemini | none'
+Assert-FileContains -Path 'README.md' -Needle 'tool_profile'
+Assert-FileContains -Path 'skills/workflow-team/SKILL.md' -Needle '.assistant/'
+Assert-FileContains -Path 'skills/workflow-team/SKILL.md' -Needle 'docs/tasks/<task-id>/'
 Assert-FileContains -Path 'scripts/advance-stage.ps1' -Needle 'validate-lite-artifacts.ps1'
+Assert-FileContains -Path 'scripts/export-team-preset.ps1' -Needle 'members_read_only_path_prefixes'
 Assert-FileContains -Path 'scripts/advance-stage.ps1' -Needle '[string]$Tool = ""'
-Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle 'task_id/stage/tool/updated'
+Assert-FileContains -Path 'scripts/advance-stage.ps1' -Needle '[string]$Profile = ""'
+Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle 'tool_profile'
+Assert-FileContains -Path 'agent-configs/profiles/harness-default-claude.yaml' -Needle 'backend: claudecode'
+Assert-FileContains -Path 'agent-configs/profiles/harness-default-codex.yaml' -Needle 'backend: codex'
+Assert-FileContains -Path 'agent-configs/profiles/harness-default-gemini.yaml' -Needle 'backend: gemini'
 Assert-FileContains -Path 'skills/spec/SKILL.md' -Needle '../orchestrator/references/lite-writing-guide.md'
 Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle '../orchestrator/references/lite-writing-guide.md'
 Assert-FileContains -Path 'skills/review/SKILL.md' -Needle '../orchestrator/references/lite-writing-guide.md'
@@ -235,7 +272,11 @@ Assert-FileContains -Path 'skills/implement/SKILL.md' -Needle '.assistant\entry\
 Assert-FileContains -Path 'skills/review/SKILL.md' -Needle '.assistant\entry\advance-stage.ps1'
 Assert-FileContains -Path 'skills/test/SKILL.md' -Needle '.assistant\entry\validate-lite-artifacts.ps1'
 Assert-FileContains -Path 'skills/orchestrator/references/runbook.md' -Needle '.assistant\entry\advance-stage.ps1'
+Assert-FileContains -Path 'skills/orchestrator/references/runbook.md' -Needle 'spawn-team.ps1'
 Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle '.assistant\entry\advance-stage.ps1'
+Assert-FileContains -Path 'skills/orchestrator/references/default-tool-profiles.md' -Needle 'team preset'
+Assert-FileContains -Path 'docs/team-write-authority.md' -Needle '.assistant/'
+Assert-FileContains -Path 'docs/team-write-authority.md' -Needle 'docs/tasks/<task-id>/'
 Assert-FileContains -Path 'vault-template/entry/advance-stage.ps1.template' -Needle '{REPO_ROOT}\scripts\advance-stage.ps1'
 Assert-FileContains -Path 'vault-template/entry/advance-stage.ps1.template' -Needle '[string]$Tool = ""'
 Assert-FileContains -Path 'vault-template/entry/validate-lite-artifacts.ps1.template' -Needle '{REPO_ROOT}\scripts\validate-lite-artifacts.ps1'
@@ -246,6 +287,8 @@ Assert-FileNotContains -Path 'README.md' -Needle 'claude-codex-gemini'
 Assert-FileNotContains -Path 'skills/orchestrator/SKILL.md' -Needle 'claude-codex-gemini'
 Assert-FileNotContains -Path 'skills/orchestrator/SKILL.md' -Needle 'next_runner'
 Assert-FileNotContains -Path 'skills/orchestrator/references/default-tool-profiles.md' -Needle 'codex-gemini'
+Assert-FileNotContains -Path 'skills/plan/SKILL.md' -Needle '## Change Contract  (optional, opt-in)'
+Assert-FileNotContains -Path 'skills/orchestrator/references/state-templates.md' -Needle '## Change Contract  (optional, opt-in)'
 
 $bomTargets = @(
     'harness.ps1',

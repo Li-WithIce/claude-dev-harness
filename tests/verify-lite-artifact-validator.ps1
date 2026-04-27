@@ -61,6 +61,56 @@ function Write-Utf8Bom {
     [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($true)))
 }
 
+function Remove-DirectoryWithRetry {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+
+    $lastError = $null
+    for ($attempt = 0; $attempt -lt 10; $attempt++) {
+        try {
+            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+            return
+        } catch {
+            $lastError = $_
+            Start-Sleep -Milliseconds 200
+        }
+    }
+
+    if (Test-Path -LiteralPath $Path) {
+        Add-Failure ("cleanup failed for {0}: {1}" -f $Path, $lastError.Exception.Message)
+    }
+}
+
+function Copy-RepoPathToFixture {
+    param(
+        [string]$SourceRoot,
+        [string]$FixtureRoot,
+        [string]$RelativePath
+    )
+
+    $sourcePath = Join-Path $SourceRoot $RelativePath
+    $destinationPath = Join-Path $FixtureRoot $RelativePath
+    $destinationParent = Split-Path -Parent $destinationPath
+    New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
+    Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Recurse -Force
+}
+
+function New-IsolatedRepoFixture {
+    param([string]$SourceRoot)
+
+    $fixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('harness-lite-validator-repo-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'docs\tasks') -Force | Out-Null
+    Copy-RepoPathToFixture -SourceRoot $SourceRoot -FixtureRoot $fixtureRoot -RelativePath 'scripts\validate-lite-artifacts.ps1'
+    if (Test-Path -LiteralPath (Join-Path $SourceRoot 'agent-configs\profiles') -PathType Container) {
+        Copy-RepoPathToFixture -SourceRoot $SourceRoot -FixtureRoot $fixtureRoot -RelativePath 'agent-configs\profiles'
+    }
+
+    return $fixtureRoot
+}
+
 function Invoke-Validator {
     <#
     .SYNOPSIS
@@ -259,7 +309,9 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 }
 
-$RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
+$SourceRoot = [System.IO.Path]::GetFullPath($RepoRoot)
+$fixtureRoot = New-IsolatedRepoFixture -SourceRoot $SourceRoot
+$RepoRoot = $fixtureRoot
 $validatorPath = Join-Path $RepoRoot 'scripts\validate-lite-artifacts.ps1'
 $taskBase = Join-Path $RepoRoot 'docs\tasks'
 $script:Checks = @()
@@ -396,10 +448,10 @@ try {
     }
 } finally {
     foreach ($taskDir in $createdTaskDirs) {
-        if (Test-Path -LiteralPath $taskDir) {
-            Remove-Item -LiteralPath $taskDir -Recurse -Force
-        }
+        Remove-DirectoryWithRetry -Path $taskDir
     }
+
+    Remove-DirectoryWithRetry -Path $fixtureRoot
 }
 
 Write-Output 'Checks:'

@@ -50,7 +50,15 @@ pass
 ## Handoff
 - delivery: 交付摘要
 - follow_up: 后续动作；无则写 none
+- current_state: 当前阶段与关键产物路径   # optional
+- key_decisions:                              # optional
+  - decision: 跨会话必须保留的决策
+    why: 决策原因
+- next_actions:                               # optional
+  - 恢复后第一组动作
 ```
+
+`delivery` 与 `follow_up` 是最低必填；`current_state`、`key_decisions`、`next_actions` 为 opt-in 密度扩展，推荐长任务填写。旧格式 Handoff（只含 delivery/follow_up）继续通过 validator。格式契约以 `../orchestrator/references/lite-writing-guide.md` 为单一真相源。
 
 ## 工作流程
 
@@ -60,7 +68,8 @@ pass
 4. 确认 `Conclusion` 和 `Handoff` 合法
 5. 只有结论为 `pass` 时再执行 `.assistant\entry\advance-stage.ps1 -TaskId <task-id>` 进入 `DONE`
 6. `TEST -> DONE` 不需要再指定下一阶段 `tool`
-7. 如需单独排查文档问题，再手动运行 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
+7. `DONE` 会清除 `tool_profile` / `model`，因为终态固定为 `tool: none`
+8. 如需单独排查文档问题，再手动运行 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
 
 ## 不要做的事
 

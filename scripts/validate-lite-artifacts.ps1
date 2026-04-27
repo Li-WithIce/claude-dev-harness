@@ -13,6 +13,10 @@ $ErrorActionPreference = "Stop"
 
 $script:AllowedStages = @("PLAN", "PLAN_REVIEW", "IMPLEMENT", "CODE_REVIEW", "TEST", "DONE")
 $script:AllowedTools = @("claudecode", "codex", "gemini")
+$script:AllowedFrontmatterFields = @("task_id", "stage", "tool", "tool_profile", "model", "updated")
+$script:RequiredFrontmatterFields = @("task_id", "stage", "tool", "updated")
+$script:OptionalFrontmatterFields = @("tool_profile", "model")
+$script:ModelAliasPattern = '^(opus|sonnet|haiku|pro|flash|default|latest|codex|gemini|claude|gpt)$'
 $script:PlanSections = @(
     "Clarification",
     "User Confirmation",
@@ -23,6 +27,8 @@ $script:PlanSections = @(
     "Implementation Notes",
     "Code Review"
 )
+$script:OptionalPlanSections = @("Change Contract")
+$script:AllowedChangeTypes = @("task", "feature", "enhance", "refactor")
 $script:TestSections = @(
     "Summary",
     "Scope",
@@ -65,6 +71,22 @@ function Add-Failure {
     param([string]$Message)
 
     $script:Failures += $Message
+}
+
+function Add-Warning {
+    <#
+    .SYNOPSIS
+    记录一条警告项。
+    .DESCRIPTION
+    advisory 检查使用 Warnings 输出，不改变 validator 的退出码。
+    .PARAMETER Message
+    警告说明。
+    .OUTPUTS
+    None。
+    #>
+    param([string]$Message)
+
+    $script:Warnings += $Message
 }
 
 function Get-Frontmatter {
@@ -127,6 +149,495 @@ function Get-Sections {
     }
 
     return $sections
+}
+
+function Test-FullModelId {
+    <#
+    .SYNOPSIS
+    判断 model 是否看起来像完整模型 ID。
+    .DESCRIPTION
+    Phase 1 不接入具体模型注册表，只阻止 `opus`、`pro` 这类短别名进入机器可读契约。
+    .PARAMETER Model
+    待检查的模型 ID。
+    .OUTPUTS
+    Boolean。
+    #>
+    param([string]$Model)
+
+    if ([string]::IsNullOrWhiteSpace($Model)) {
+        return $false
+    }
+
+    $normalized = $Model.Trim()
+    if ($normalized -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*[A-Za-z0-9]$') {
+        return $false
+    }
+
+    if ($normalized -notmatch '[-./]') {
+        return $false
+    }
+
+    return ($normalized -notmatch $script:ModelAliasPattern)
+}
+
+function Get-ToolProfile {
+    <#
+    .SYNOPSIS
+    读取 agent-configs/profiles 下的 profile 描述符。
+    .DESCRIPTION
+    只解析 Phase 1 需要的顶层 scalar 字段：name/backend/model。
+    .PARAMETER RepoRoot
+    仓库根目录。
+    .PARAMETER Name
+    profile 名称。
+    .OUTPUTS
+    PSCustomObject 或 $null。
+    #>
+    param(
+        [string]$RepoRoot,
+        [string]$Name
+    )
+
+    try {
+        return Read-ToolProfileDescriptor -RepoRoot $RepoRoot -Name $Name
+    } catch {
+        Add-Failure $_.Exception.Message
+        return $null
+    }
+}
+
+function Read-ToolProfileDescriptor {
+    <#
+    .SYNOPSIS
+    读取 tool profile 描述符。
+    .DESCRIPTION
+    返回纯数据对象；调用方决定把异常记为 failure 还是 warning。
+    .PARAMETER RepoRoot
+    仓库根目录。
+    .PARAMETER Name
+    profile 名称。
+    .OUTPUTS
+    PSCustomObject。
+    #>
+    param(
+        [string]$RepoRoot,
+        [string]$Name
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Name)) {
+        throw "tool_profile should not be empty"
+    }
+
+    $normalizedName = $Name.Trim()
+    if ($normalizedName -notmatch '^[a-z0-9][a-z0-9._-]*$') {
+        throw ("tool_profile has unsupported name: {0}" -f $normalizedName)
+    }
+
+    $profilePath = Join-Path (Join-Path $RepoRoot 'agent-configs\profiles') ("{0}.yaml" -f $normalizedName)
+    if (-not (Test-Path -LiteralPath $profilePath -PathType Leaf)) {
+        throw ("tool_profile descriptor should exist: {0}" -f $profilePath)
+    }
+
+    $fields = @{}
+    foreach ($line in (Get-Content -LiteralPath $profilePath -Encoding utf8)) {
+        if ($line -match '^\s*#' -or [string]::IsNullOrWhiteSpace($line)) {
+            continue
+        }
+
+        if ($line -match '^([a-z_]+):\s*(.+?)\s*$') {
+            $fields[$Matches[1]] = $Matches[2].Trim().Trim('"').Trim("'")
+        }
+    }
+
+    foreach ($required in @('name', 'backend', 'model')) {
+        if (-not $fields.ContainsKey($required) -or [string]::IsNullOrWhiteSpace($fields[$required])) {
+            throw ("tool_profile {0} descriptor should contain {1}" -f $normalizedName, $required)
+        }
+    }
+
+    if ($fields['name'] -ne $normalizedName) {
+        throw ("tool_profile file name {0} should match descriptor name {1}" -f $normalizedName, $fields['name'])
+    }
+
+    [pscustomobject]@{
+        Name = $fields['name']
+        Backend = $fields['backend']
+        Model = $fields['model']
+        Path = $profilePath
+    }
+}
+
+function Split-InlineYamlList {
+    <#
+    .SYNOPSIS
+    解析 YAML inline list。
+    .DESCRIPTION
+    workflow descriptor 只使用 `[a, b]` 的最小列表语法。
+    .PARAMETER Value
+    inline list 文本。
+    .OUTPUTS
+    String[]。
+    #>
+    param([string]$Value)
+
+    $normalized = $Value.Trim()
+    if ($normalized -notmatch '^\[(.*)\]$') {
+        throw ("Unsupported inline YAML list: {0}" -f $Value)
+    }
+
+    $inner = $Matches[1].Trim()
+    if ([string]::IsNullOrWhiteSpace($inner)) {
+        return @()
+    }
+
+    $items = @()
+    foreach ($item in ($inner -split ',')) {
+        $trimmed = $item.Trim().Trim('"').Trim("'")
+        if (-not [string]::IsNullOrWhiteSpace($trimmed)) {
+            $items += $trimmed
+        }
+    }
+
+    return $items
+}
+
+function Get-AllowedWorkflowSkills {
+    <#
+    .SYNOPSIS
+    返回 workflow descriptor 允许引用的 skill 白名单。
+    .DESCRIPTION
+    直接读取仓库当前 `skills/` 目录，和 footprint 测试锁定的技能集合保持同步。
+    .PARAMETER RepoRoot
+    仓库根目录。
+    .OUTPUTS
+    String[]。
+    #>
+    param([string]$RepoRoot)
+
+    return @(
+        'codex',
+        'gemini-designer-main',
+        'implement',
+        'obsidian-memory',
+        'orchestrator',
+        'plan',
+        'review',
+        'spec',
+        'test',
+        'using-superpowers'
+    )
+}
+
+function Get-WorkflowDescriptorForAudit {
+    <#
+    .SYNOPSIS
+    读取 workflow descriptor 供 advisory audit 使用。
+    .DESCRIPTION
+    解析失败时只收集 warning，不抛 fatal failure。
+    .PARAMETER RepoRoot
+    仓库根目录。
+    .OUTPUTS
+    PSCustomObject。
+    #>
+    param([string]$RepoRoot)
+
+    $descriptorPath = Join-Path (Join-Path $RepoRoot 'agent-configs\workflows') 'harness-lite.yaml'
+    if (-not (Test-Path -LiteralPath $descriptorPath -PathType Leaf)) {
+        return [pscustomobject]@{
+            Exists = $false
+            Descriptor = $null
+            Warnings = @()
+        }
+    }
+
+    $warnings = @()
+    $descriptor = [ordered]@{
+        Name = ''
+        Version = ''
+        Stages = [ordered]@{}
+        Path = $descriptorPath
+    }
+
+    $sawStages = $false
+    $currentStage = ''
+    $lineNumber = 0
+    foreach ($line in (Get-Content -LiteralPath $descriptorPath -Encoding utf8)) {
+        $lineNumber += 1
+        $trimmed = $line.Trim()
+        if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith('#')) {
+            continue
+        }
+
+        if ($line -match '^name:\s*(.+?)\s*$') {
+            $descriptor.Name = $Matches[1].Trim().Trim('"').Trim("'")
+            continue
+        }
+
+        if ($line -match '^version:\s*(.+?)\s*$') {
+            $descriptor.Version = $Matches[1].Trim().Trim('"').Trim("'")
+            continue
+        }
+
+        if ($line -match '^stages:\s*$') {
+            $sawStages = $true
+            $currentStage = ''
+            continue
+        }
+
+        if ($line -match '^\s{2}([A-Z_]+):\s*$') {
+            $currentStage = $Matches[1]
+            if ($descriptor.Stages.Contains($currentStage)) {
+                $warnings += ("workflow descriptor duplicates stage {0} at line {1}" -f $currentStage, $lineNumber)
+                continue
+            }
+
+            $descriptor.Stages[$currentStage] = [ordered]@{
+                Role = ''
+                DefaultProfile = ''
+                SkillsWhitelist = @()
+            }
+            continue
+        }
+
+        if ([string]::IsNullOrWhiteSpace($currentStage)) {
+            $warnings += ("workflow descriptor has unsupported line {0}: {1}" -f $lineNumber, $trimmed)
+            continue
+        }
+
+        if ($line -match '^\s{4}role:\s*(.+?)\s*$') {
+            $descriptor.Stages[$currentStage]['Role'] = $Matches[1].Trim().Trim('"').Trim("'")
+            continue
+        }
+
+        if ($line -match '^\s{4}default_profile:\s*(.+?)\s*$') {
+            $descriptor.Stages[$currentStage]['DefaultProfile'] = $Matches[1].Trim().Trim('"').Trim("'")
+            continue
+        }
+
+        if ($line -match '^\s{4}skills_whitelist:\s*(.+?)\s*$') {
+            try {
+                $descriptor.Stages[$currentStage]['SkillsWhitelist'] = @(Split-InlineYamlList -Value $Matches[1])
+            } catch {
+                $warnings += ("workflow descriptor stage {0} has invalid skills_whitelist at line {1}" -f $currentStage, $lineNumber)
+            }
+            continue
+        }
+
+        $warnings += ("workflow descriptor has unsupported line {0}: {1}" -f $lineNumber, $trimmed)
+    }
+
+    if ([string]::IsNullOrWhiteSpace($descriptor.Name)) {
+        $warnings += "workflow descriptor should contain name"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($descriptor.Version)) {
+        $warnings += "workflow descriptor should contain version"
+    }
+
+    if (-not $sawStages) {
+        $warnings += "workflow descriptor should contain stages"
+    }
+
+    return [pscustomobject]@{
+        Exists = $true
+        Descriptor = [pscustomobject]@{
+            Name = $descriptor.Name
+            Version = $descriptor.Version
+            Stages = $descriptor.Stages
+            Path = $descriptor.Path
+        }
+        Warnings = $warnings
+    }
+}
+
+function Assert-WorkflowDescriptorAdvisory {
+    <#
+    .SYNOPSIS
+    执行 workflow descriptor advisory audit。
+    .DESCRIPTION
+    只写 Warnings，不写 Errors，确保显式 `-Tool` 路径不会被坏描述符阻塞。
+    .PARAMETER RepoRoot
+    仓库根目录。
+    .OUTPUTS
+    None。
+    #>
+    param([string]$RepoRoot)
+
+    $audit = Get-WorkflowDescriptorForAudit -RepoRoot $RepoRoot
+    if (-not $audit.Exists) {
+        return
+    }
+
+    foreach ($warning in $audit.Warnings) {
+        Add-Warning $warning
+    }
+
+    $descriptor = $audit.Descriptor
+    if ($null -eq $descriptor) {
+        return
+    }
+
+    $expectedStages = @('PLAN', 'PLAN_REVIEW', 'IMPLEMENT', 'CODE_REVIEW', 'TEST')
+    foreach ($expectedStage in $expectedStages) {
+        if (-not $descriptor.Stages.Contains($expectedStage)) {
+            Add-Warning ("workflow descriptor should define stage: {0}" -f $expectedStage)
+        }
+    }
+
+    foreach ($stageName in @($descriptor.Stages.Keys)) {
+        $stageDescriptor = $descriptor.Stages[$stageName]
+        if ($stageName -notin $expectedStages) {
+            Add-Warning ("workflow descriptor contains unsupported stage: {0}" -f $stageName)
+        }
+
+        if ([string]::IsNullOrWhiteSpace($stageDescriptor.Role)) {
+            Add-Warning ("workflow descriptor stage {0} should contain role" -f $stageName)
+        } elseif ($stageDescriptor.Role -notmatch '^[a-z0-9]+(?:-[a-z0-9]+)*$') {
+            Add-Warning ("workflow descriptor stage {0} role should be kebab-case, got [{1}]" -f $stageName, $stageDescriptor.Role)
+        }
+
+        if ([string]::IsNullOrWhiteSpace($stageDescriptor.DefaultProfile)) {
+            Add-Warning ("workflow descriptor stage {0} should contain default_profile" -f $stageName)
+        } else {
+            try {
+                [void](Read-ToolProfileDescriptor -RepoRoot $RepoRoot -Name $stageDescriptor.DefaultProfile)
+            } catch {
+                Add-Warning ("workflow descriptor stage {0} default_profile is invalid: {1}" -f $stageName, $stageDescriptor.DefaultProfile)
+            }
+        }
+
+        if ($stageDescriptor.SkillsWhitelist.Count -eq 0) {
+            Add-Warning ("workflow descriptor stage {0} should contain skills_whitelist" -f $stageName)
+            continue
+        }
+
+        $allowedSkills = @(Get-AllowedWorkflowSkills -RepoRoot $RepoRoot)
+        foreach ($skill in $stageDescriptor.SkillsWhitelist) {
+            if ($skill -notin $allowedSkills) {
+                Add-Warning ("workflow descriptor stage {0} references unsupported skill: {1}" -f $stageName, $skill)
+            }
+        }
+    }
+}
+
+function Assert-FullModelId {
+    <#
+    .SYNOPSIS
+    校验 model 字段使用完整 ID。
+    .PARAMETER Model
+    模型 ID。
+    .PARAMETER Label
+    错误标签。
+    .OUTPUTS
+    None。
+    #>
+    param(
+        [string]$Model,
+        [string]$Label
+    )
+
+    if (Test-FullModelId -Model $Model) {
+        Add-Check ("{0} uses a full model id" -f $Label)
+    } else {
+        Add-Failure ("{0} should use a full model id, got [{1}]" -f $Label, $Model)
+    }
+}
+
+function Assert-FrontmatterFields {
+    <#
+    .SYNOPSIS
+    校验 plan.md frontmatter 字段集合。
+    .DESCRIPTION
+    老四字段格式继续合法；`tool_profile` 与 `model` 是 opt-in 字段，位置固定在 `tool` 与 `updated` 之间。
+    .PARAMETER FieldNames
+    frontmatter 字段名。
+    .OUTPUTS
+    None。
+    #>
+    param([string[]]$FieldNames)
+
+    $unknownFields = @($FieldNames | Where-Object { $_ -notin $script:AllowedFrontmatterFields })
+    $missingRequired = @($script:RequiredFrontmatterFields | Where-Object { $_ -notin $FieldNames })
+    $requiredInOrder = @($FieldNames | Where-Object { $_ -in $script:RequiredFrontmatterFields })
+    $duplicateOptional = @()
+    foreach ($optional in $script:OptionalFrontmatterFields) {
+        if (@($FieldNames | Where-Object { $_ -eq $optional }).Count -gt 1) {
+            $duplicateOptional += $optional
+        }
+    }
+
+    if ($unknownFields.Count -gt 0 -or
+        $missingRequired.Count -gt 0 -or
+        ($requiredInOrder -join '|') -ne ($script:RequiredFrontmatterFields -join '|') -or
+        $duplicateOptional.Count -gt 0) {
+        Add-Failure ('plan.md frontmatter should only contain task_id/stage/tool/updated plus optional tool_profile/model, got [{0}]' -f ($FieldNames -join ', '))
+        return
+    }
+
+    $toolIndex = [array]::IndexOf($FieldNames, 'tool')
+    $updatedIndex = [array]::IndexOf($FieldNames, 'updated')
+    foreach ($optional in $script:OptionalFrontmatterFields) {
+        $optionalIndex = [array]::IndexOf($FieldNames, $optional)
+        if ($optionalIndex -ge 0 -and ($optionalIndex -le $toolIndex -or $optionalIndex -ge $updatedIndex)) {
+            Add-Failure ('plan.md optional frontmatter field {0} should appear between tool and updated' -f $optional)
+            return
+        }
+    }
+
+    if (@($FieldNames | Where-Object { $_ -in $script:OptionalFrontmatterFields }).Count -eq 0) {
+        Add-Check "plan.md frontmatter fields are exact"
+    } else {
+        Add-Check "plan.md frontmatter fields include legal optional profile fields"
+    }
+}
+
+function Assert-ToolProfileBinding {
+    <#
+    .SYNOPSIS
+    校验 frontmatter tool_profile 与 tool/model 的一致性。
+    .PARAMETER Fields
+    frontmatter 字段。
+    .PARAMETER RepoRoot
+    仓库根目录。
+    .OUTPUTS
+    None。
+    #>
+    param(
+        [System.Collections.Specialized.OrderedDictionary]$Fields,
+        [string]$RepoRoot
+    )
+
+    $hasProfile = $Fields.Contains('tool_profile') -and -not [string]::IsNullOrWhiteSpace($Fields['tool_profile'])
+    $hasModel = $Fields.Contains('model') -and -not [string]::IsNullOrWhiteSpace($Fields['model'])
+
+    if ($hasModel) {
+        Assert-FullModelId -Model $Fields['model'] -Label 'plan.md model'
+    }
+
+    if (-not $hasProfile) {
+        return
+    }
+
+    $profile = Get-ToolProfile -RepoRoot $RepoRoot -Name $Fields['tool_profile']
+    if ($null -eq $profile) {
+        return
+    }
+
+    Add-Check ("tool_profile descriptor exists: {0}" -f $profile.Name)
+
+    if ($script:AllowedTools -contains $profile.Backend) {
+        Add-Check "tool_profile backend is legal"
+    } else {
+        Add-Failure ("tool_profile backend should be one of [{0}], got [{1}]" -f ($script:AllowedTools -join ', '), $profile.Backend)
+    }
+
+    if ($Fields['tool'] -eq $profile.Backend) {
+        Add-Check "plan.md tool matches tool_profile backend"
+    } else {
+        Add-Failure ("plan.md tool [{0}] should match tool_profile backend [{1}]" -f $Fields['tool'], $profile.Backend)
+    }
+
+    Assert-FullModelId -Model $profile.Model -Label ('tool_profile {0} model' -f $profile.Name)
 }
 
 function Assert-SectionOrder {
@@ -335,6 +846,64 @@ function Assert-ImplementationRuns {
     return $runs
 }
 
+function Assert-ChangeContract {
+    <#
+    .SYNOPSIS
+    校验可选 Change Contract section。
+    .DESCRIPTION
+    opt-in 字段：存在时必须满足 change_type 枚举与 affected_paths 至少一条非占位条目。
+    占位符 `<path>` 或空白条目视为未填。
+    .PARAMETER SectionContent
+    Change Contract section 正文。
+    .OUTPUTS
+    None。
+    #>
+    param([string]$SectionContent)
+
+    $changeTypeMatch = [regex]::Match($SectionContent, '(?m)^-\s*change_type:\s*(\S+)\s*$')
+    if (-not $changeTypeMatch.Success) {
+        Add-Failure "Change Contract should contain - change_type: <task|feature|enhance|refactor>"
+    } elseif ($script:AllowedChangeTypes -contains $changeTypeMatch.Groups[1].Value) {
+        Add-Check "Change Contract change_type is legal"
+    } else {
+        Add-Failure ("Change Contract change_type should be one of [{0}], got [{1}]" -f ($script:AllowedChangeTypes -join ', '), $changeTypeMatch.Groups[1].Value)
+    }
+
+    if ($SectionContent -notmatch '(?m)^-\s*affected_paths:\s*$') {
+        Add-Failure "Change Contract should contain - affected_paths: followed by at least one entry"
+        return
+    }
+
+    $pathEntries = @()
+    $lines = @($SectionContent -split "\r?\n")
+    $inAffectedPaths = $false
+    foreach ($line in $lines) {
+        if ($line -match '^-\s*affected_paths:\s*$') {
+            $inAffectedPaths = $true
+            continue
+        }
+
+        if (-not $inAffectedPaths) {
+            continue
+        }
+
+        if ($line -match '^-\s*.+?:') {
+            break
+        }
+
+        if ($line -match '^\s{2,}-\s+(.+?)\s*$') {
+            $pathEntries += $matches[1].Trim()
+        }
+    }
+
+    $validEntries = @($pathEntries | Where-Object { $_ -and $_ -ne '<path>' })
+    if ($validEntries.Count -ge 1) {
+        Add-Check "Change Contract affected_paths has at least one entry"
+    } else {
+        Add-Failure "Change Contract affected_paths should contain at least one non-placeholder entry"
+    }
+}
+
 function Assert-PlanContract {
     <#
     .SYNOPSIS
@@ -350,7 +919,8 @@ function Assert-PlanContract {
     #>
     param(
         [string]$TaskId,
-        [string]$PlanPath
+        [string]$PlanPath,
+        [string]$RepoRoot
     )
 
     $content = Get-Content -LiteralPath $PlanPath -Raw -Encoding utf8
@@ -358,11 +928,7 @@ function Assert-PlanContract {
     $fields = $frontmatter.Fields
 
     $fieldNames = @($fields.Keys)
-    if (($fieldNames -join '|') -eq ('task_id|stage|tool|updated')) {
-        Add-Check "plan.md frontmatter fields are exact"
-    } else {
-        Add-Failure ('plan.md frontmatter should only contain task_id/stage/tool/updated, got [{0}]' -f ($fieldNames -join ', '))
-    }
+    Assert-FrontmatterFields -FieldNames $fieldNames
 
     if (($fields['task_id']) -eq $TaskId) {
         Add-Check "plan.md task_id matches task directory"
@@ -388,6 +954,8 @@ function Assert-PlanContract {
         Add-Failure ('plan.md tool should be one of [{0}], got [{1}]' -f ($script:AllowedTools -join ', '), $fields['tool'])
     }
 
+    Assert-ToolProfileBinding -Fields $fields -RepoRoot $RepoRoot
+
     if (($fields['updated']) -match '^\d{4}-\d{2}-\d{2}$') {
         Add-Check "plan.md updated uses YYYY-MM-DD"
     } else {
@@ -395,7 +963,26 @@ function Assert-PlanContract {
     }
 
     $sections = Get-Sections -Content $frontmatter.Body
-    Assert-SectionOrder -Sections $sections -Expected $script:PlanSections -Label "plan.md"
+    $requiredSections = @($sections | Where-Object { $_.Name -notin $script:OptionalPlanSections })
+    Assert-SectionOrder -Sections $requiredSections -Expected $script:PlanSections -Label "plan.md"
+
+    $sectionNames = @($sections | ForEach-Object { $_.Name })
+    $changeContracts = @($sections | Where-Object { $_.Name -eq 'Change Contract' })
+    if ($changeContracts.Count -gt 1) {
+        Add-Failure "plan.md should contain at most one Change Contract section"
+    } elseif ($changeContracts.Count -eq 1) {
+        $changeIndex = [array]::IndexOf($sectionNames, 'Change Contract')
+        $confirmationIndex = [array]::IndexOf($sectionNames, 'User Confirmation')
+        $planIndex = [array]::IndexOf($sectionNames, 'Plan')
+        if ($changeIndex -eq ($confirmationIndex + 1) -and $planIndex -eq ($changeIndex + 1)) {
+            Add-Check "Change Contract section is positioned between User Confirmation and Plan"
+        } else {
+            Add-Failure "Change Contract should appear between User Confirmation and Plan"
+        }
+
+        $changeContract = $changeContracts[0]
+        Assert-ChangeContract -SectionContent $changeContract.Content
+    }
 
     $clarification = Get-SectionContent -Sections $sections -Name 'Clarification'
     foreach ($needle in @('验收标准', '非目标', '受影响目录', '回滚', 'ui:')) {
@@ -524,6 +1111,7 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 
 $script:Checks = @()
 $script:Failures = @()
+$script:Warnings = @()
 $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
 $taskRoot = Join-Path (Join-Path $RepoRoot 'docs\tasks') $TaskId
 $planPath = Join-Path $taskRoot 'plan.md'
@@ -538,7 +1126,7 @@ if (Test-Path -LiteralPath $taskRoot -PathType Container) {
 
 if (Test-Path -LiteralPath $planPath -PathType Leaf) {
     Add-Check "plan.md exists"
-    $planState = Assert-PlanContract -TaskId $TaskId -PlanPath $planPath
+    $planState = Assert-PlanContract -TaskId $TaskId -PlanPath $planPath -RepoRoot $RepoRoot
 
     if (Test-Path -LiteralPath $specPath -PathType Leaf) {
         Add-Check "spec.md exists"
@@ -559,6 +1147,8 @@ if (Test-Path -LiteralPath $planPath -PathType Leaf) {
 } else {
     Add-Failure "plan.md should exist"
 }
+
+Assert-WorkflowDescriptorAdvisory -RepoRoot $RepoRoot
 
 if ($script:Failures.Count -gt 0) {
     Write-Output 'STATUS: FAIL'
@@ -582,6 +1172,15 @@ if ($script:Failures.Count -eq 0) {
     Write-Output '- none'
 } else {
     foreach ($item in $script:Failures) {
+        Write-Output ("- {0}" -f $item)
+    }
+}
+Write-Output ''
+Write-Output 'Warnings:'
+if ($script:Warnings.Count -eq 0) {
+    Write-Output '- none'
+} else {
+    foreach ($item in $script:Warnings) {
         Write-Output ("- {0}" -f $item)
     }
 }
