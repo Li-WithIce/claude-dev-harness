@@ -71,8 +71,9 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 
 - 唯一真相源：`docs/tasks/<task-id>/plan.md` frontmatter（`stage`、`tool`、`task_id`）
 - 终态标记：`DONE`，只写回 `plan.md` frontmatter，不是独立 stage
-- 阶段推进：`.assistant\entry\advance-stage.ps1 -TaskId <id> -Tool <claudecode|codex|gemini>`
-- 非 `DONE` 推进必须由用户显式指定下一阶段 `tool`
+- 阶段推进：优先使用 `.assistant\entry\advance-stage.ps1 -TaskId <id> -Tool <claudecode|codex|gemini>`
+- 非 `DONE` 推进的下一阶段 tool 解析顺序是：显式 `-Tool` → 显式 `-Profile` → `agent-configs/workflows/harness-lite.yaml` 的 `default_profile`
+- 只有在显式 `-Tool`、显式 `-Profile` 和 workflow `default_profile` 都缺失时，非 `DONE` 推进才会报 `requires -Tool`
 - 用户可以在任意 stage 边界切换不同工具继续同一个 task
 - CODE_REVIEW revise → 回 IMPLEMENT；TEST fail/blocked → 停止报告，不触发 IMPLEMENT 循环
 - spec.md 只作为可选附件，不是默认入口
