@@ -5,7 +5,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$TaskId,
 
-    [string]$RepoRoot = ""
+    [string]$RepoRoot = "",
+
+    [switch]$Quality
 )
 
 Set-StrictMode -Version Latest
@@ -29,6 +31,7 @@ $script:PlanSections = @(
 )
 $script:OptionalPlanSections = @("Change Contract")
 $script:AllowedChangeTypes = @("task", "feature", "enhance", "refactor")
+$script:QualityScoreDimensions = @("completeness", "consistency", "accuracy", "depth")
 $script:TestSections = @(
     "Summary",
     "Scope",
@@ -299,6 +302,132 @@ function Split-InlineYamlList {
     }
 
     return $items
+}
+
+function Get-TopLevelPlanBullets {
+    <#
+    .SYNOPSIS
+    解析 `## Plan` 段顶部 metadata-style 字段与普通 bullets。
+    .DESCRIPTION
+    Phase 6 允许 `read_first:` / `convergence:` 作为可选 metadata block，
+    但它们必须出现在第一条普通 bullet 之前。
+    .PARAMETER Content
+    `## Plan` section 正文。
+    .OUTPUTS
+    PSCustomObject。
+    #>
+    param([string]$Content)
+
+    $lines = @($Content -split "\r?\n")
+    $ordinaryBullets = @()
+    $readFirstItems = @()
+    $convergenceItems = @()
+    $hasReadFirst = $false
+    $hasConvergence = $false
+    $metadataClosed = $false
+    $capturingConvergence = $false
+
+    foreach ($line in $lines) {
+        $trimmed = $line.Trim()
+        if ([string]::IsNullOrWhiteSpace($trimmed)) {
+            continue
+        }
+
+        if ($line -match '^- read_first:\s*(.*?)\s*$') {
+            if ($metadataClosed) {
+                Add-Failure "Plan metadata read_first should appear before ordinary Plan bullets"
+                continue
+            }
+
+            if ($hasReadFirst) {
+                Add-Failure "Plan metadata should contain at most one read_first field"
+                continue
+            }
+
+            $hasReadFirst = $true
+            $capturingConvergence = $false
+
+            try {
+                $readFirstItems = @(Split-InlineYamlList -Value $Matches[1])
+            } catch {
+                Add-Failure "Plan read_first should use inline-array syntax like [a, b]"
+                continue
+            }
+
+            if ($readFirstItems.Count -eq 0) {
+                Add-Failure "Plan read_first should contain at least one entry"
+            } else {
+                Add-Check "Plan read_first metadata is legal"
+            }
+
+            continue
+        }
+
+        if ($line -match '^- convergence:\s*$') {
+            if ($metadataClosed) {
+                Add-Failure "Plan metadata convergence should appear before ordinary Plan bullets"
+                continue
+            }
+
+            if ($hasConvergence) {
+                Add-Failure "Plan metadata should contain at most one convergence block"
+                continue
+            }
+
+            $hasConvergence = $true
+            $capturingConvergence = $true
+            continue
+        }
+
+        if ($capturingConvergence -and $line -match '^\s{2,}-\s+(.+?)\s*$') {
+            $criterion = $Matches[1].Trim()
+            if (-not [string]::IsNullOrWhiteSpace($criterion)) {
+                $convergenceItems += $criterion
+            }
+            continue
+        }
+
+        if ($line -match '^- .+$') {
+            if ($capturingConvergence) {
+                $capturingConvergence = $false
+            }
+
+            $metadataClosed = $true
+            $ordinaryBullets += $trimmed
+            continue
+        }
+
+        if ($capturingConvergence) {
+            Add-Failure "Plan convergence should use indented bullets"
+            $capturingConvergence = $false
+            $metadataClosed = $true
+        }
+
+        $metadataClosed = $true
+    }
+
+    if ($hasConvergence) {
+        if ($convergenceItems.Count -eq 0) {
+            Add-Failure "Plan convergence should contain at least one criterion"
+        } else {
+            $nonPlaceholderCriteria = @(
+                $convergenceItems | Where-Object {
+                    $_ -notmatch '^(?i:tbd|todo|none)$'
+                }
+            )
+            if ($nonPlaceholderCriteria.Count -eq 0) {
+                Add-Failure "Plan convergence should contain at least one non-placeholder criterion"
+            } else {
+                Add-Check "Plan convergence metadata is legal"
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        OrdinaryBullets = $ordinaryBullets
+        ReadFirstItems = $readFirstItems
+        ConvergenceItems = $convergenceItems
+    }
 }
 
 function Get-AllowedWorkflowSkills {
@@ -791,8 +920,10 @@ function Assert-ReviewRuns {
     Assert-RunSequence -Runs $runs -Label $Label
 
     foreach ($run in $runs) {
-        if ($run.Body -notmatch '(?m)^- verdict:\s*(pass|revise)\s*$') {
+        $verdictMatch = [regex]::Match($run.Body, '(?m)^- verdict:\s*(pass|revise)\s*$')
+        if (-not $verdictMatch.Success) {
             Add-Failure ('{0} Run {1} should contain - verdict: pass | revise' -f $Label, $run.Number)
+            continue
         }
 
         $hasFindingsNone = $run.Body -match '(?m)^- findings:\s*none\s*$'
@@ -803,6 +934,55 @@ function Assert-ReviewRuns {
 
         if ($run.Body -notmatch '(?m)^- next:\s+.+$') {
             Add-Failure ('{0} Run {1} should contain - next:' -f $Label, $run.Number)
+        }
+
+        if (-not $Quality.IsPresent) {
+            continue
+        }
+
+        $scores = @{}
+        $scoreMatches = 0
+        foreach ($dimension in $script:QualityScoreDimensions) {
+            $scoreMatch = [regex]::Match($run.Body, ("(?m)^- score\.{0}:\s*(\d+)\s*$" -f [regex]::Escape($dimension)))
+            if ($scoreMatch.Success) {
+                $scoreMatches += 1
+                $scoreValue = [int]$scoreMatch.Groups[1].Value
+                if ($scoreValue -lt 0 -or $scoreValue -gt 100) {
+                    Add-Failure ('{0} Run {1} score.{2} should be an integer between 0 and 100' -f $Label, $run.Number, $dimension)
+                    continue
+                }
+
+                $scores[$dimension] = $scoreValue
+            }
+        }
+
+        if ($scoreMatches -eq 0) {
+            Add-Warning ('{0} Run {1} 未录入 4-dim score' -f $Label, $run.Number)
+            continue
+        }
+
+        if ($scoreMatches -ne $script:QualityScoreDimensions.Count) {
+            Add-Failure ('{0} Run {1} should contain all 4 quality scores: {2}' -f $Label, $run.Number, ($script:QualityScoreDimensions -join ', '))
+            continue
+        }
+
+        $scoreSum = 0
+        $hasBlockingDimension = $false
+        foreach ($dimension in $script:QualityScoreDimensions) {
+            $scoreSum += $scores[$dimension]
+            if ($scores[$dimension] -lt 60) {
+                $hasBlockingDimension = $true
+            }
+        }
+
+        $averageScore = [math]::Floor($scoreSum / $script:QualityScoreDimensions.Count)
+        $expectedVerdict = if ($hasBlockingDimension) { 'revise' } elseif ($averageScore -ge 80) { 'pass' } else { 'revise' }
+        $actualVerdict = $verdictMatch.Groups[1].Value
+
+        if ($actualVerdict -eq $expectedVerdict) {
+            Add-Check ('{0} Run {1} verdict matches 4-dim score threshold' -f $Label, $run.Number)
+        } else {
+            Add-Failure ('{0} Run {1} verdict-score 不一致: verdict [{2}] should be [{3}] (avg={4}; completeness={5}, consistency={6}, accuracy={7}, depth={8})' -f $Label, $run.Number, $actualVerdict, $expectedVerdict, $averageScore, $scores['completeness'], $scores['consistency'], $scores['accuracy'], $scores['depth'])
         }
     }
 
@@ -1001,10 +1181,11 @@ function Assert-PlanContract {
     }
 
     $planBody = Get-SectionContent -Sections $sections -Name 'Plan'
-    if ($planBody -match '(?m)^- .+$') {
+    $planMetadata = Get-TopLevelPlanBullets -Content $planBody
+    if ($planMetadata.OrdinaryBullets.Count -gt 0) {
         Add-Check "Plan contains actionable bullets"
     } else {
-        Add-Failure "Plan should contain at least one bullet"
+        Add-Failure "Plan should contain at least one ordinary bullet"
     }
 
     $verification = Get-SectionContent -Sections $sections -Name 'Verification'

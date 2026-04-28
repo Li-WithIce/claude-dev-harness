@@ -138,6 +138,38 @@ function Assert-Utf8Bom {
     }
 }
 
+function Assert-GitIgnoreState {
+    <#
+    .SYNOPSIS
+    断言路径当前是否被 `.gitignore` 命中。
+    .DESCRIPTION
+    Phase 6 需要锁定 wisdom 文件被放行、其余 `运行时/` 文件继续 ignore 的实际行为，
+    不能只锁 `.gitignore` 文本。
+    .PARAMETER Path
+    相对仓库根目录的路径。
+    .PARAMETER ShouldBeIgnored
+    期望是否被 ignore。
+    .OUTPUTS
+    None。
+    #>
+    param(
+        [string]$Path,
+        [bool]$ShouldBeIgnored
+    )
+
+    $fullPath = Join-Path $script:RepoRoot $Path
+    & git -C $script:RepoRoot check-ignore -q -- $fullPath
+    $isIgnored = ($LASTEXITCODE -eq 0)
+
+    if ($isIgnored -eq $ShouldBeIgnored) {
+        $label = if ($ShouldBeIgnored) { 'is ignored' } else { 'is reviewable' }
+        Add-Check ('git ignore behavior ok: {0} {1}' -f $Path, $label)
+    } else {
+        $expected = if ($ShouldBeIgnored) { 'ignored' } else { 'reviewable' }
+        Add-Failure ('git ignore behavior drifted: {0} should be {1}' -f $Path, $expected)
+    }
+}
+
 function Get-RepoRelativePath {
     <#
     .SYNOPSIS
@@ -255,6 +287,12 @@ if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'tests/verify-shared-memo
 }
 
 Assert-FileContains -Path '.gitignore' -Needle '.assistant/'
+Assert-FileContains -Path '.gitignore' -Needle '!.assistant/运行时/'
+Assert-FileContains -Path '.gitignore' -Needle '.assistant/运行时/*'
+Assert-FileContains -Path '.gitignore' -Needle '!.assistant/运行时/记忆-学习.md'
+Assert-FileContains -Path '.gitignore' -Needle '!.assistant/运行时/记忆-决策.md'
+Assert-FileContains -Path '.gitignore' -Needle '!.assistant/运行时/记忆-约定.md'
+Assert-FileContains -Path '.gitignore' -Needle '!.assistant/运行时/记忆-问题.md'
 Assert-FileContains -Path '.gitignore' -Needle 'skills/*/.runtime/'
 Assert-FileContains -Path '.gitignore' -Needle 'agent-configs/workspace/entry/'
 Assert-FileContains -Path '.gitignore' -Needle '/.codex/'
@@ -284,14 +322,21 @@ Assert-FileContains -Path 'tests/verify-shared-memory-layers.ps1' -Needle 'runti
 Assert-FileContains -Path 'scripts/advance-stage.ps1' -Needle '[string]$Tool = ""'
 Assert-FileContains -Path 'scripts/advance-stage.ps1' -Needle '[string]$Profile = ""'
 Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle 'tool_profile'
+Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle '[switch]$Quality'
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-claude.yaml' -Needle 'backend: claudecode'
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-codex.yaml' -Needle 'backend: codex'
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-gemini.yaml' -Needle 'backend: gemini'
 Assert-FileContains -Path 'skills/spec/SKILL.md' -Needle '../orchestrator/references/lite-writing-guide.md'
 Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle '../orchestrator/references/lite-writing-guide.md'
 Assert-FileContains -Path 'skills/review/SKILL.md' -Needle '../orchestrator/references/lite-writing-guide.md'
+Assert-FileContains -Path 'skills/review/SKILL.md' -Needle 'quality-rubric.md'
 Assert-FileContains -Path 'skills/test/SKILL.md' -Needle '../orchestrator/references/lite-writing-guide.md'
 Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'references/lite-writing-guide.md'
+Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'read_first'
+Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'convergence'
+Assert-FileContains -Path 'skills/review/SKILL.md' -Needle 'read_first'
+Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'read_first'
+Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'convergence'
 Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle '.assistant\entry\validate-lite-artifacts.ps1'
 Assert-FileContains -Path 'skills/implement/SKILL.md' -Needle '.assistant\entry\validate-lite-artifacts.ps1'
 Assert-FileContains -Path 'skills/review/SKILL.md' -Needle '.assistant\entry\advance-stage.ps1'
@@ -302,6 +347,26 @@ Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle '.assistan
 Assert-FileContains -Path 'skills/orchestrator/references/default-tool-profiles.md' -Needle 'team preset'
 Assert-FileContains -Path 'docs/team-write-authority.md' -Needle '.assistant/'
 Assert-FileContains -Path 'docs/team-write-authority.md' -Needle 'docs/tasks/<task-id>/'
+Assert-FileContains -Path 'skills/obsidian-memory/SKILL.md' -Needle '记忆-学习.md'
+Assert-FileContains -Path 'skills/obsidian-memory/SKILL.md' -Needle '记忆-决策.md'
+Assert-FileContains -Path 'skills/obsidian-memory/SKILL.md' -Needle '记忆-约定.md'
+Assert-FileContains -Path 'skills/obsidian-memory/SKILL.md' -Needle '记忆-问题.md'
+Assert-FileContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle '-Quality'
+Assert-FileContains -Path 'docs/工作流/quality-rubric.md' -Needle 'completeness'
+Assert-FileContains -Path 'docs/工作流/quality-rubric.md' -Needle 'consistency'
+Assert-FileContains -Path 'docs/工作流/quality-rubric.md' -Needle 'accuracy'
+Assert-FileContains -Path 'docs/工作流/quality-rubric.md' -Needle 'depth'
+Assert-FileContains -Path '.assistant/运行时/记忆-学习.md' -Needle 'phase6-init'
+Assert-FileContains -Path '.assistant/运行时/记忆-决策.md' -Needle 'phase6-init'
+Assert-FileContains -Path '.assistant/运行时/记忆-约定.md' -Needle 'phase6-init'
+Assert-FileContains -Path '.assistant/运行时/记忆-问题.md' -Needle 'phase6-init'
+Assert-GitIgnoreState -Path '.assistant/运行时/记忆-学习.md' -ShouldBeIgnored $false
+Assert-GitIgnoreState -Path '.assistant/运行时/记忆-决策.md' -ShouldBeIgnored $false
+Assert-GitIgnoreState -Path '.assistant/运行时/记忆-约定.md' -ShouldBeIgnored $false
+Assert-GitIgnoreState -Path '.assistant/运行时/记忆-问题.md' -ShouldBeIgnored $false
+Assert-GitIgnoreState -Path '.assistant/运行时/记忆候选.md' -ShouldBeIgnored $true
+Assert-GitIgnoreState -Path '.assistant/运行时/记忆候选归档.md' -ShouldBeIgnored $true
+Assert-GitIgnoreState -Path '.assistant/运行时/收件箱.md' -ShouldBeIgnored $true
 Assert-FileContains -Path 'vault-template/entry/advance-stage.ps1.template' -Needle '{REPO_ROOT}\scripts\advance-stage.ps1'
 Assert-FileContains -Path 'vault-template/entry/advance-stage.ps1.template' -Needle '[string]$Tool = ""'
 Assert-FileContains -Path 'vault-template/entry/validate-lite-artifacts.ps1.template' -Needle '{REPO_ROOT}\scripts\validate-lite-artifacts.ps1'

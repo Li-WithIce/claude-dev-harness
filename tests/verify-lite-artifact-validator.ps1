@@ -129,10 +129,22 @@ function Invoke-Validator {
     param(
         [string]$ValidatorPath,
         [string]$TaskId,
-        [string]$RepoRoot
+        [string]$RepoRoot,
+        [switch]$Quality
     )
 
-    $output = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ValidatorPath -TaskId $TaskId -RepoRoot $RepoRoot 2>&1 | ForEach-Object { [string]$_ })
+    $command = @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', $ValidatorPath,
+        '-TaskId', $TaskId,
+        '-RepoRoot', $RepoRoot
+    )
+    if ($Quality.IsPresent) {
+        $command += '-Quality'
+    }
+
+    $output = @(& powershell.exe @command 2>&1 | ForEach-Object { [string]$_ })
     [pscustomobject]@{
         ExitCode = $LASTEXITCODE
         Output = $output
@@ -170,6 +182,7 @@ function New-PlanContent {
         [string]$Tool,
         [string]$ConfirmationStatus = "confirmed",
         [string]$FrontmatterExtra = "",
+        [string]$PlanSectionBody = "",
         [string]$PlanReviewRuns = "",
         [string]$ImplementationRuns = "",
         [string]$CodeReviewRuns = ""
@@ -177,6 +190,11 @@ function New-PlanContent {
 
     $updatedDate = Get-Date -Format 'yyyy-MM-dd'
     $extra = if ([string]::IsNullOrWhiteSpace($FrontmatterExtra)) { "" } else { "$FrontmatterExtra`r`n" }
+    $planSection = if ([string]::IsNullOrWhiteSpace($PlanSectionBody)) {
+        "- 更新 ``scripts/validate-lite-artifacts.ps1`` `r`n- 更新 ``tests/verify-lite-artifact-validator.ps1``"
+    } else {
+        $PlanSectionBody
+    }
 @"
 ---
 task_id: $TaskId
@@ -197,8 +215,7 @@ $extra---
 - status: $ConfirmationStatus
 
 ## Plan
-- 更新 ``scripts/validate-lite-artifacts.ps1``
-- 更新 ``tests/verify-lite-artifact-validator.ps1``
+$planSection
 
 ## Verification
 - ``powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/verify-lite-artifact-validator.ps1``
@@ -305,6 +322,34 @@ $handoff
 "@
 }
 
+function Assert-TaskSetEquals {
+    <#
+    .SYNOPSIS
+    比较实际 task 集合与预期快照。
+    .DESCRIPTION
+    Phase 6 需要把 live 13-task baseline 的 PASS/FAIL 集合锁成可复跑回归。
+    .PARAMETER Label
+    集合标签。
+    .PARAMETER Actual
+    实际 task 名称集合。
+    .PARAMETER Expected
+    预期 task 名称集合。
+    .OUTPUTS
+    None。
+    #>
+    param(
+        [string]$Label,
+        [string[]]$Actual,
+        [string[]]$Expected
+    )
+
+    if ((@($Actual) -join '|') -eq (@($Expected) -join '|')) {
+        Add-Check ('{0} matches live snapshot' -f $Label)
+    } else {
+        Add-Failure ('{0} drifted. expected [{1}], got [{2}]' -f $Label, (@($Expected) -join ', '), (@($Actual) -join ', '))
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 }
@@ -351,6 +396,194 @@ try {
     } else {
         Add-Failure ("valid task should pass validator, got: {0}" -f ($validResult.Output -join ' | '))
     }
+
+    $validQualityResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskValid -RepoRoot $RepoRoot -Quality
+    if ($validQualityResult.ExitCode -eq 0 -and ($validQualityResult.Output -join "`n") -match 'Plan Review Run 1 未录入 4-dim score') {
+        Add-Check 'legacy review runs pass with warnings in -Quality mode'
+    } else {
+        Add-Failure ("legacy review runs should pass with quality warnings, got: {0}" -f ($validQualityResult.Output -join ' | '))
+    }
+
+    $taskPlanMetadataValid = 'lite-validator-planmeta-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskPlanMetadataValidDir = Join-Path $taskBase $taskPlanMetadataValid
+    $createdTaskDirs += $taskPlanMetadataValidDir
+    New-Item -ItemType Directory -Path $taskPlanMetadataValidDir -Force | Out-Null
+    $planMetadataBody = @'
+- read_first: [docs/shared-memory-layers.md, scripts/validate-lite-artifacts.ps1]
+- convergence:
+  - `Select-String -Path scripts/validate-lite-artifacts.ps1 -Pattern '\[switch\]\`$Quality'`
+  - `pwsh -NoProfile -File tests/verify-lite-artifact-validator.ps1`
+- 更新 ``scripts/validate-lite-artifacts.ps1``
+'@
+    Write-Utf8Bom -Path (Join-Path $taskPlanMetadataValidDir 'plan.md') -Content (New-PlanContent -TaskId $taskPlanMetadataValid -Stage 'PLAN' -Tool 'codex' -PlanSectionBody $planMetadataBody)
+    $planMetadataValidResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskPlanMetadataValid -RepoRoot $RepoRoot
+    if ($planMetadataValidResult.ExitCode -eq 0 -and ($planMetadataValidResult.Output -join "`n") -match 'Plan read_first metadata is legal') {
+        Add-Check 'plan read_first/convergence metadata passes validator'
+    } else {
+        Add-Failure ("valid plan metadata should pass validator, got: {0}" -f ($planMetadataValidResult.Output -join ' | '))
+    }
+
+    $taskReadFirstInvalid = 'lite-validator-readfirst-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskReadFirstInvalidDir = Join-Path $taskBase $taskReadFirstInvalid
+    $createdTaskDirs += $taskReadFirstInvalidDir
+    New-Item -ItemType Directory -Path $taskReadFirstInvalidDir -Force | Out-Null
+    $invalidReadFirstBody = @"
+- read_first:
+  - docs/shared-memory-layers.md
+  - scripts/validate-lite-artifacts.ps1
+- 更新 ``scripts/validate-lite-artifacts.ps1``
+"@
+    Write-Utf8Bom -Path (Join-Path $taskReadFirstInvalidDir 'plan.md') -Content (New-PlanContent -TaskId $taskReadFirstInvalid -Stage 'PLAN' -Tool 'codex' -PlanSectionBody $invalidReadFirstBody)
+    $invalidReadFirstResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskReadFirstInvalid -RepoRoot $RepoRoot
+    if ($invalidReadFirstResult.ExitCode -ne 0 -and ($invalidReadFirstResult.Output -join "`n") -match 'read_first should use inline-array syntax') {
+        Add-Check 'block-list read_first is rejected'
+    } else {
+        Add-Failure ("block-list read_first should fail validator, got: {0}" -f ($invalidReadFirstResult.Output -join ' | '))
+    }
+
+    $taskConvergenceInvalid = 'lite-validator-convergence-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskConvergenceInvalidDir = Join-Path $taskBase $taskConvergenceInvalid
+    $createdTaskDirs += $taskConvergenceInvalidDir
+    New-Item -ItemType Directory -Path $taskConvergenceInvalidDir -Force | Out-Null
+    $invalidConvergenceBody = @"
+- convergence:
+  - TBD
+- 更新 ``scripts/validate-lite-artifacts.ps1``
+"@
+    Write-Utf8Bom -Path (Join-Path $taskConvergenceInvalidDir 'plan.md') -Content (New-PlanContent -TaskId $taskConvergenceInvalid -Stage 'PLAN' -Tool 'codex' -PlanSectionBody $invalidConvergenceBody)
+    $invalidConvergenceResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskConvergenceInvalid -RepoRoot $RepoRoot
+    if ($invalidConvergenceResult.ExitCode -ne 0 -and ($invalidConvergenceResult.Output -join "`n") -match 'convergence should contain at least one non-placeholder criterion') {
+        Add-Check 'placeholder-only convergence is rejected'
+    } else {
+        Add-Failure ("placeholder-only convergence should fail validator, got: {0}" -f ($invalidConvergenceResult.Output -join ' | '))
+    }
+
+    $taskMetadataPositionInvalid = 'lite-validator-planmeta-position-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskMetadataPositionInvalidDir = Join-Path $taskBase $taskMetadataPositionInvalid
+    $createdTaskDirs += $taskMetadataPositionInvalidDir
+    New-Item -ItemType Directory -Path $taskMetadataPositionInvalidDir -Force | Out-Null
+    $misplacedMetadataBody = @'
+- 更新 ``scripts/validate-lite-artifacts.ps1``
+- read_first: [docs/shared-memory-layers.md, scripts/validate-lite-artifacts.ps1]
+- convergence:
+  - `Select-String -Path scripts/validate-lite-artifacts.ps1 -Pattern '\[switch\]\`$Quality'`
+'@
+    Write-Utf8Bom -Path (Join-Path $taskMetadataPositionInvalidDir 'plan.md') -Content (New-PlanContent -TaskId $taskMetadataPositionInvalid -Stage 'PLAN' -Tool 'codex' -PlanSectionBody $misplacedMetadataBody)
+    $metadataPositionResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskMetadataPositionInvalid -RepoRoot $RepoRoot
+    if ($metadataPositionResult.ExitCode -ne 0 -and
+        ($metadataPositionResult.Output -join "`n") -match 'Plan metadata read_first should appear before ordinary Plan bullets' -and
+        ($metadataPositionResult.Output -join "`n") -match 'Plan metadata convergence should appear before ordinary Plan bullets') {
+        Add-Check 'misplaced Plan metadata is rejected'
+    } else {
+        Add-Failure ("misplaced Plan metadata should fail validator, got: {0}" -f ($metadataPositionResult.Output -join ' | '))
+    }
+
+    $taskQualityPass = 'lite-validator-quality-pass-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskQualityPassDir = Join-Path $taskBase $taskQualityPass
+    $createdTaskDirs += $taskQualityPassDir
+    New-Item -ItemType Directory -Path $taskQualityPassDir -Force | Out-Null
+    $qualityReviewPass = @"
+### Run 1 · 2026-04-09 10:00 · runner: Codex
+- verdict: pass
+- score.completeness: 88
+- score.consistency: 82
+- score.accuracy: 90
+- score.depth: 84
+- findings: none
+- next: none
+"@
+    Write-Utf8Bom -Path (Join-Path $taskQualityPassDir 'plan.md') -Content (New-PlanContent -TaskId $taskQualityPass -Stage 'PLAN_REVIEW' -Tool 'codex' -PlanReviewRuns $qualityReviewPass)
+    $qualityPassResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskQualityPass -RepoRoot $RepoRoot -Quality
+    if ($qualityPassResult.ExitCode -eq 0 -and ($qualityPassResult.Output -join "`n") -match 'verdict matches 4-dim score threshold') {
+        Add-Check 'scored review run passes in -Quality mode'
+    } else {
+        Add-Failure ("scored review run should pass in -Quality mode, got: {0}" -f ($qualityPassResult.Output -join ' | '))
+    }
+
+    $taskQualityMismatch = 'lite-validator-quality-mismatch-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskQualityMismatchDir = Join-Path $taskBase $taskQualityMismatch
+    $createdTaskDirs += $taskQualityMismatchDir
+    New-Item -ItemType Directory -Path $taskQualityMismatchDir -Force | Out-Null
+    $qualityReviewMismatch = @"
+### Run 1 · 2026-04-09 10:00 · runner: Codex
+- verdict: pass
+- score.completeness: 50
+- score.consistency: 50
+- score.accuracy: 50
+- score.depth: 50
+- findings: none
+- next: none
+"@
+    Write-Utf8Bom -Path (Join-Path $taskQualityMismatchDir 'plan.md') -Content (New-PlanContent -TaskId $taskQualityMismatch -Stage 'PLAN_REVIEW' -Tool 'codex' -PlanReviewRuns $qualityReviewMismatch)
+    $qualityMismatchResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskQualityMismatch -RepoRoot $RepoRoot -Quality
+    if ($qualityMismatchResult.ExitCode -ne 0 -and ($qualityMismatchResult.Output -join "`n") -match 'verdict-score 不一致') {
+        Add-Check 'score verdict mismatch is rejected in -Quality mode'
+    } else {
+        Add-Failure ("score verdict mismatch should fail in -Quality mode, got: {0}" -f ($qualityMismatchResult.Output -join ' | '))
+    }
+
+    $livePlanTasks = Get-ChildItem (Join-Path $SourceRoot 'docs\tasks') -Directory |
+        Where-Object { Test-Path (Join-Path $_.FullName 'plan.md') } |
+        Sort-Object Name |
+        Select-Object -ExpandProperty Name
+    if ($livePlanTasks.Count -eq 13) {
+        Add-Check 'live baseline still contains 13 plan-bearing tasks'
+    } else {
+        Add-Failure ("live baseline should contain 13 plan-bearing tasks, got {0}" -f $livePlanTasks.Count)
+    }
+
+    $expectedPassTasks = @(
+        'eo-lite-enhancement',
+        'overview-maintenance-enhancement',
+        'phase3-acp-skill-alignment',
+        'phase4-team-preset-bridge',
+        'phase5-doc-protocol-hardening',
+        'phase6-quality-score-hard-constraints',
+        'shared-memory-v2-live-migration',
+        'shared-memory-v2-optimization',
+        'workflow-optimization-roadmap'
+    )
+    $expectedFailTasks = @(
+        'harness-aionui-workflow-alignment',
+        'phase2-workflow-descriptor',
+        'review-probe-crossmatch',
+        'review-probe-misordered'
+    )
+
+    $livePassesDefault = @()
+    $liveFailsDefault = @()
+    foreach ($taskName in $livePlanTasks) {
+        $result = Invoke-Validator -ValidatorPath (Join-Path $SourceRoot 'scripts\validate-lite-artifacts.ps1') -TaskId $taskName -RepoRoot $SourceRoot
+        if ($result.ExitCode -eq 0) {
+            $livePassesDefault += $taskName
+        } else {
+            $liveFailsDefault += $taskName
+        }
+    }
+
+    Assert-TaskSetEquals -Label 'live default PASS set' -Actual $livePassesDefault -Expected $expectedPassTasks
+    Assert-TaskSetEquals -Label 'live default FAIL set' -Actual $liveFailsDefault -Expected $expectedFailTasks
+
+    $legacyQualityResult = Invoke-Validator -ValidatorPath (Join-Path $SourceRoot 'scripts\validate-lite-artifacts.ps1') -TaskId 'phase4-team-preset-bridge' -RepoRoot $SourceRoot -Quality
+    if ($legacyQualityResult.ExitCode -eq 0 -and ($legacyQualityResult.Output -join "`n") -match 'Plan Review Run 1 未录入 4-dim score') {
+        Add-Check 'live legacy task stays warning-only in -Quality mode'
+    } else {
+        Add-Failure ("live legacy task should stay warning-only in -Quality mode, got: {0}" -f ($legacyQualityResult.Output -join ' | '))
+    }
+
+    $livePassesQuality = @()
+    $liveFailsQuality = @()
+    foreach ($taskName in $livePlanTasks) {
+        $result = Invoke-Validator -ValidatorPath (Join-Path $SourceRoot 'scripts\validate-lite-artifacts.ps1') -TaskId $taskName -RepoRoot $SourceRoot -Quality
+        if ($result.ExitCode -eq 0) {
+            $livePassesQuality += $taskName
+        } else {
+            $liveFailsQuality += $taskName
+        }
+    }
+
+    Assert-TaskSetEquals -Label 'live -Quality PASS set' -Actual $livePassesQuality -Expected $expectedPassTasks
+    Assert-TaskSetEquals -Label 'live -Quality FAIL set' -Actual $liveFailsQuality -Expected $expectedFailTasks
 
     $taskExtraField = 'lite-validator-extra-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     $taskExtraFieldDir = Join-Path $taskBase $taskExtraField

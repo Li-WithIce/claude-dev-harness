@@ -36,6 +36,20 @@ Claude、Codex、Gemini 共用同一份 Obsidian 记忆仓库：
 - 新事项先写 `运行时\收件箱.md`
 - 收件箱条目可通过 `..\..\scripts\append-runtime-inbox.ps1`、`..\..\scripts\promote-runtime-inbox.ps1`、`..\..\scripts\triage-runtime-inbox.ps1` 维护
 
+## Wisdom 4 类写入约束
+
+- `运行时\记忆候选.md` 仍是未分流条目的 inbox；4 类 wisdom 文件只接收 triage 后已认定的稳定条目
+- wisdom 目标文件固定为：
+  - `运行时\记忆-学习.md`：跨任务可复用知识
+  - `运行时\记忆-决策.md`：不可逆设计选择
+  - `运行时\记忆-约定.md`：命名 / 路径 / 协议规范
+  - `运行时\记忆-问题.md`：已知缺陷待修
+- 4 文件均为 append-only；禁止 delete / rewrite 旧条目
+- 每条 entry 必须以 `### YYYY-MM-DD HH:mm · <task-id> · <author>` 标题开头
+- 同一时刻只有当前入口 host 可向 4 文件追加
+- 从 inbox 分流到 4 文件时只 `Copy` 不 `Move`，保留原始 inbox 时间线
+- 无法判断归类时，继续留在 `运行时\记忆候选.md`，不要强行写入错误类别
+
 ## Guardrails
 
 - 共享真相源只在 `{VAULT_PATH}`

@@ -18,7 +18,16 @@ skills/.system/
 skills/*/.runtime/
 
 # Local workspace state
-.assistant/
+.assistant/*
+!.assistant/工作流/
+.assistant/工作流/*
+!.assistant/工作流/长会话恢复.md
+!.assistant/运行时/
+.assistant/运行时/*
+!.assistant/运行时/记忆-学习.md
+!.assistant/运行时/记忆-决策.md
+!.assistant/运行时/记忆-约定.md
+!.assistant/运行时/记忆-问题.md
 .obsidian/
 vault-template/.obsidian/workspace.json
 agent-configs/workspace/entry/

@@ -130,6 +130,21 @@ stages:
 
 ### Plan 内容要求
 
+在普通 TODO bullets 之前，可选地放一个 metadata-style 顶部块：
+
+```markdown
+## Plan
+- read_first: [docs/shared-memory-layers.md, scripts/validate-lite-artifacts.ps1]
+- convergence:
+  - `Select-String -Path scripts/validate-lite-artifacts.ps1 -Pattern '\[switch\]\$Quality'`
+  - `pwsh -NoProfile -File tests/verify-lite-artifact-validator.ps1`
+- 更新 `scripts/validate-lite-artifacts.ps1`，统一质量评分校验。
+```
+
+- `read_first:` 与 `convergence:` 只允许出现在 `## Plan` 标题之后、第一条普通 bullet 之前
+- `read_first:` 必须使用 inline-array 语法
+- `convergence:` 下面至少 1 条非空 criterion，且不要只写 `TBD`
+- 不需要时整段删除即可；不要把它们插到普通 TODO 中途
 - 每一项都是可执行动作，不写抽象口号。
 - 尽量带文件路径或模块名。
 - 控制在实现可直接消费的粒度。
@@ -167,9 +182,30 @@ stages:
 
 `spec.md` 只是 PLAN 的可选附件，不是独立 stage。
 
+### 可选 frontmatter
+
+`spec.md` 可在文件顶部加入 opt-in frontmatter：
+
+```yaml
+---
+front_keywords: [shared-memory, long-session, recovery]
+---
+```
+
+规则：
+
+- 仅在跨任务关键词检索或长会话恢复需要快速命中时使用
+- 单任务、无跨任务复用价值时不写
+- 必须使用 inline-array 语法，keyword 优先 kebab-case
+- 单个 `spec.md` 最多写 5 个 keyword
+- validator 当前不读取该 frontmatter；不写也完全合法
+
 推荐结构：
 
 ```markdown
+---
+front_keywords: [shared-memory, long-session, recovery]
+---
 # <Task Title> Spec
 
 ## Gap

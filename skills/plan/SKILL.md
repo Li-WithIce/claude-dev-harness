@@ -95,6 +95,10 @@ updated: 2026-04-09
   - <path>
 
 ## Plan
+- read_first: [docs/shared-memory-layers.md, scripts/validate-lite-artifacts.ps1]
+- convergence:
+  - `Select-String -Path scripts/validate-lite-artifacts.ps1 -Pattern '\[switch\]\$Quality'`
+  - `pwsh -NoProfile -File tests/verify-lite-artifact-validator.ps1`
 - TODO 1: ...
 - TODO 2: ...
 
@@ -118,6 +122,13 @@ tool_profile: harness-default-claude
 model: claude-opus-4-7
 ```
 
+`read_first:` / `convergence:` 都是 `## Plan` 段的可选 metadata-style 字段：
+
+- 必须紧跟在 `## Plan` 标题之后，位于第一条普通 `- TODO ...` bullet 之前
+- `read_first:` 必须使用 inline-array 语法
+- `convergence:` 下面至少列 1 条可抽查的 criterion
+- 不需要时整段删除即可；不要把它们混到普通 TODO bullets 中
+
 ## 工作方式
 
 1. 先读已批准输入和可选 `spec.md`
@@ -127,6 +138,18 @@ model: claude-opus-4-7
 5. 推进到 `PLAN_REVIEW` 前，必须让用户指定下一阶段 `tool`；如指定 profile，同步传 `-Profile` 和完整 `-Model`
 6. 只在 gate 满足后执行 `.assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <next-tool>`
 7. 如需单独排查文档问题，再手动运行 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
+
+## TodoWrite Milestones
+
+- 适用：`claudecode`；其余 backend 视宿主实现而定。
+- TodoWrite 是 Claude Code 内置 surface，不引入新依赖。
+- milestone 是事件，不是签到点；遇到 blocker 时必须立刻汇报，不要堆积到收尾再说。
+- 推荐最小节奏固定为：`phase-loaded` → `core-work-done` → `verification-done`。
+- `verification-done` 之后必须紧跟最终的 stage callback / `team_send_message` / 用户回报，不能只停在 TodoWrite 完成。
+- 最小示例：
+  - `phase-loaded`：已读完 `plan.md` / `spec.md`，边界与验收已确认
+  - `core-work-done`：`plan.md` 主体、受影响路径与验证命令已写完
+  - `verification-done`：validator 与必要抽查已完成，准备进入下一步交接
 
 ## 不要做的事
 

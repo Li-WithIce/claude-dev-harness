@@ -1,3 +1,9 @@
+# `harness-lite` 在 Phase 5 只增加 auto-mode 文档协议，不改 YAML 实体字段。
+# 当 leader 同时设置 AIONUI_TEAM_MODE=1 与 HARNESS_AUTO=1 时，
+# spawned member 可按 non-interactive 方式执行自己的阶段工作。
+# 缺少 HARNESS_AUTO 时按 fail-closed 处理，保持当前 non-auto 行为。
+# auto-mode 不得绕过 PLAN_REVIEW / CODE_REVIEW 或 leader 的推进确认。
+# 详细条款见 `skills/workflow-team/SKILL.md` 的 `Auto Mode Propagation`。
 name: harness-lite
 version: 1
 stages:
@@ -9,6 +15,8 @@ stages:
     role: plan-reviewer
     default_profile: harness-default-codex
     skills_whitelist: [review]
+    # `-Quality` 推荐从 Phase 6 之后的新任务开始启用。
+    # 旧任务保持 opt-in；未录入 4-dim score 时只输出 warning。
   IMPLEMENT:
     role: implementer
     default_profile: harness-default-claude
@@ -17,6 +25,8 @@ stages:
     role: code-reviewer
     default_profile: harness-default-codex
     skills_whitelist: [review]
+    # `-Quality` 只约束 review run 的 score/verdict 一致性。
+    # 该注释不改变 YAML 实体字段，也不影响默认 stage 解析。
   TEST:
     role: tester
     default_profile: harness-default-gemini

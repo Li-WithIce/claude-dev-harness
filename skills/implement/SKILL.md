@@ -42,6 +42,19 @@ IMPLEMENT 负责两件事：改代码，以及把本轮实现证据追加到 `do
 6. 调用 `.assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <next-tool>` 进入 `CODE_REVIEW`
 7. 如需单独排查文档问题，再手动运行 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
 
+## TodoWrite Milestones
+
+- 适用：`claudecode`；其余 backend 视宿主实现而定。
+- TodoWrite 是 Claude Code 内置 surface，不引入新依赖。
+- milestone 是事件，不是签到点；一旦发现 blocker、计划外改动或验证无法完成，必须立刻汇报。
+- 推荐最小节奏固定为：`context-loaded` → `code-edited` → `tests-run` → `notes-appended`。
+- `notes-appended` 完成后，必须与最终的 stage callback / `team_send_message` / 用户回报配对，不能只停在本地 TodoWrite。
+- 最小示例：
+  - `context-loaded`：已读完 `plan.md`、`spec.md` 与目标文件
+  - `code-edited`：本轮代码或文档改动已落盘
+  - `tests-run`：本轮最小必要验证已执行并记录结果
+  - `notes-appended`：`Implementation Notes` 已追加新 run，准备交给 `CODE_REVIEW`
+
 ## 不要做的事
 
 - 不要重写旧 run
