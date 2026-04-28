@@ -1,361 +1,361 @@
 # Harness Lite
 
-Windows 优先的单仓库开发 Harness，把 lite workflow 稳定安装到 Claude Code / Codex / Gemini workspace，保持共享记忆与任务产物结构一致。
+Windows 优先的单仓库开发 harness。它把 `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST -> DONE` 的任务流、共享记忆 `.assistant/`、以及 `docs/tasks/<task-id>/` 产物统一到同一套协议里，当前仓库状态已经包含 Phase 1-7 与 shared-memory v2 的主线能力。
+
+## 这份 README 面向谁
+
+- 使用者：把 harness 安装到你的工作区后，按这里的“日常使用”与“阶段推进”工作。
+- 维护者：在本仓库里修改脚本、skills、模板与测试，并用这里的校验命令确认行为没有回退。
 
 ## 快速开始
 
-### 首次安装到目标项目
+### 安装到目标工作区
 
 ```powershell
-# 方式一：快捷入口（自动推断 workspace）
+# 快捷入口
 pwsh -File .\harness.ps1 -WorkspaceRoot D:\my-project
 
-# 方式二：完整参数
-pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot <repo-root>
-
-# Windows CMD 简写
-harness.cmd -WorkspaceRoot D:\my-project
+# 直接安装
+pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\claude-dev-harness
 ```
 
-安装完成后，在目标项目中启动 Claude Code / Codex / Gemini 即可使用 lite workflow。
+安装完成后，目标工作区会得到：
+
+- 工作区入口文档：`AGENTS.md`、`GEMINI.md`
+- 工作区共享记忆：`.assistant/`
+- 工作区脚本 shim：`.assistant/entry/advance-stage.ps1`、`.assistant/entry/validate-lite-artifacts.ps1`
+- Claude Code hooks：`runtime-hooks/claude/*.js` 的安装副本
+
+宿主侧当前真实行为是：
+
+- repo `skills/` 会同步到 `%USERPROFILE%\.claude\skills` 与 `%USERPROFILE%\.codex\skills`
+- Claude / Codex 会写入各自的 `settings.local.json` / managed config
+- Gemini 当前依赖工作区 `GEMINI.md` 入口，不会像 Claude/Codex 一样同步一份 host-level `skills` 目录
 
 ### 日常使用
 
-安装后，开发任务自动经过以下流程：
+安装后的用户视角，日常基本只有 4 件事：
 
-1. **对话启动** — `using-superpowers` skill 自动加载，路由到 orchestrator
-2. **新任务** — orchestrator 创建 `docs/tasks/<task-id>/plan.md`，进入 PLAN 阶段
-3. **阶段推进** — 每个阶段完成后，执行推进命令进入下一阶段
-4. **恢复** — 说"继续"或"resume"，自动从共享记忆恢复上次中断点
+1. 在目标工作区里直接发起开发任务，让入口文档把对话路由到 `using-superpowers -> orchestrator`。
+2. 让当前阶段把产物写到 `docs/tasks/<task-id>/`。
+3. 阶段完成后，用 `.assistant/entry/advance-stage.ps1` 推进到下一阶段。
+4. 会话中断后，说“继续”/“恢复”/`resume`，按 `.assistant/工作流/长会话恢复.md` 的顺序恢复。
+
+最常用命令：
 
 ```powershell
-# 推进阶段（在目标项目目录中执行）
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <claudecode|codex|gemini>
+# 非 DONE 阶段：显式指定 backend
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool claudecode
 
-# 可选：同时写入下一阶段 tool profile / model
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool codex -Profile harness-default-codex -Model gpt-5.5/xhigh
-
-# 可选：只传 profile，backend 从 profile.backend 解析
+# 显式指定 profile，backend 从 profile.backend 解析
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Profile harness-default-codex
 
-# 可选：已配置 agent-configs/workflows/harness-lite.yaml 且目标 stage 有 default_profile 时，可省略 -Tool/-Profile
+# 显式指定 tool + profile + model
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool codex -Profile harness-default-codex -Model gpt-5.5/xhigh
+
+# 若 workflow descriptor 为下一阶段声明了 default_profile，可省略 -Tool/-Profile
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
 
-# TEST -> DONE 可以省略 -Tool
+# TEST -> DONE 可省略 -Tool
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
 
-# Phase 3：adapter 发起 skill（stdout 单行 JSON）
-pwsh -File .\scripts\invoke-harness-skill.ps1 -TaskId <task-id> -Stage PLAN_REVIEW -Skill review -Tool codex -WorkspaceRoot <workspace-root> -ArtifactRoot docs\tasks\<task-id> -Mode readonly -PayloadJson '{}'
-
-# Phase 3：生成当前 stage 可用 skill 索引
-pwsh -File .\scripts\generate-skills-index.ps1 -TaskId <task-id> -Stage TEST -BackendHint kimi
-
-# Phase 4：导出 team preset
-pwsh -File .\scripts\export-team-preset.ps1 -Workflow harness-lite -Output <tmp>\team.yaml
-
-# Phase 4：显式 opt-in team mode（仅在 AionUi 主进程提供 team_spawn_agent 时有意义）
-$env:AIONUI_TEAM_MODE='1'
-pwsh -File .\skills\workflow-team\scripts\spawn-team.ps1 -TaskId <task-id>
+# 单独校验任务产物
+pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 ```
 
-## 工作流
+## 真实任务流程
 
-### 阶段流转
+### 阶段与真相源
 
+可执行阶段是：
+
+```text
+PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 ```
-PLAN → PLAN_REVIEW → IMPLEMENT → CODE_REVIEW → TEST → DONE
-```
 
-唯一阶段真相源：`docs/tasks/<task-id>/plan.md` frontmatter。
+`DONE` 不是单独执行阶段，而是 `plan.md` frontmatter 的终态标记。
+
+唯一阶段真相源始终是 `docs/tasks/<task-id>/plan.md` frontmatter：
 
 ```yaml
 ---
 task_id: <task-id>
 stage: PLAN | PLAN_REVIEW | IMPLEMENT | CODE_REVIEW | TEST | DONE
 tool: claudecode | codex | gemini | none
-tool_profile: <optional profile name>
+tool_profile: <optional profile id>
 model: <optional full model id>
 updated: YYYY-MM-DD
 ---
 ```
 
+当前仓库的真实约束：
+
 - 非 `DONE` 阶段时，`tool` 只能是 `claudecode`、`codex`、`gemini`
 - `DONE` 固定写 `tool: none`
-- `tool_profile` 可选，描述符位于 `agent-configs/profiles/`
-- `tool_profile` 只记录“当前 stage 已分配到的 profile”，不会作为下一 stage 的黏性 fallback 来源
-- 存在 `tool_profile` 时，`tool` 必须等于 profile 的 `backend`
-- `model` 可选，但必须是完整模型 ID，不写 `opus`、`pro`、`latest` 这类短别名
-- 可选 workflow descriptor 位于 `agent-configs/workflows/harness-lite.yaml`，可为下一 stage 提供 `default_profile`
-- 用户可以在任意 stage 边界切换 tool
+- `tool_profile` 是可选当前阶段元数据，不是下一阶段的黏性 fallback
+- `model` 必须是完整模型 ID，不接受 `pro`、`latest` 这类短别名
+- 存在 `tool_profile` 时，`tool` 必须等于对应 profile 的 `backend`
 
-### 阶段职责
+### 每个阶段写什么
 
-| Stage | 调用 Skill | 主要产物 |
+| Stage | 主要产物 | 说明 |
 |---|---|---|
-| `PLAN` | `plan` | `plan.md` 含 Clarification / User Confirmation / Plan / Verification / Risks |
-| `PLAN_REVIEW` | `review` | `plan.md` 追加 `## Plan Review` run |
-| `IMPLEMENT` | `implement` | 代码改动 + `plan.md` 追加 `## Implementation Notes` run |
-| `CODE_REVIEW` | `review` | `plan.md` 追加 `## Code Review` run |
-| `TEST` | `test` / `gemini-designer-main` | `docs/tasks/<task-id>/test.md` 含 Conclusion / Handoff |
-| `DONE` | — | frontmatter 终态 |
+| `PLAN` | `docs/tasks/<task-id>/plan.md` | 含 frontmatter、Clarification、User Confirmation、Plan、Verification、Risks、Change Contract |
+| `PLAN_REVIEW` | `plan.md` 里的 `## Plan Review` | append-only run，最新 run 决定下一步 |
+| `IMPLEMENT` | 代码改动 + `plan.md` 里的 `## Implementation Notes` | 只追加新 run，不回写旧 run |
+| `CODE_REVIEW` | `plan.md` 里的 `## Code Review` | append-only review run |
+| `TEST` | `docs/tasks/<task-id>/test.md` | 结论与 handoff |
+| `DONE` | `plan.md` frontmatter | 终态，不再新开独立文档 |
 
-补充分支：输入不足时可用 `spec` skill 生成 `docs/tasks/<task-id>/spec.md`（可选 delta-spec，不是默认入口）。
+补充分支：
+
+- 输入不足时，可选创建 `docs/tasks/<task-id>/spec.md`
+- `spec.md` 现在支持可选 `front_keywords` frontmatter，用于跨任务检索和长会话恢复，但不是必填字段
 
 ### 推进规则
 
-- 所有推进只走 `advance-stage.ps1`，它会先自动运行 `validate-lite-artifacts.ps1` 校验产物
-- 非 `DONE` 推进的下一阶段 tool 解析顺序是：显式 `-Tool` → 显式 `-Profile` → `agent-configs/workflows/harness-lite.yaml` 的 `default_profile`
-- `pure cli-tool`（显式 `-Tool`、未传 `-Profile/-Model`）会清空下一 stage 继承的 `tool_profile/model`
-- 当前 stage 的 `tool_profile/model` 是 non-sticky 元数据，不参与下一 stage fallback
-- workflow descriptor 有问题时只会出现在 validator 的 `Warnings:` 段；显式 `-Tool` 路径仍可继续推进
-- 当 `-Tool` / `-Profile` / workflow-default 都缺失时，非 `DONE` 推进才会报 `requires -Tool`
-- 成功推进后，`advance-stage.ps1` 会 best-effort 写 `docs/tasks/<task-id>/skill-manifest.json`
-- CODE_REVIEW verdict=revise → 回退到 IMPLEMENT
-- TEST fail/blocked → 停止报告，不自动回退
+当前 `advance-stage.ps1` 的真实语义如下：
 
-FAQ：如果当前 `plan.md` 里已经有 `tool_profile: harness-default-claude`，但下一 stage 还是走到了 `workflow-default`，这是预期行为；当前 stage 的 `tool_profile` 只记录本 stage 选型，不会黏性传递到下一 stage。
+- 所有阶段推进都必须走 `advance-stage.ps1`
+- 推进前自动调用 `validate-lite-artifacts.ps1`
+- 非 `DONE` 推进的 tool 解析顺序：
+  - 显式 `-Tool`
+  - 显式 `-Profile`
+  - `agent-configs/workflows/harness-lite.yaml` 的 `default_profile`
+- `pure cli-tool`：显式传 `-Tool`，但未传 `-Profile/-Model` 时，会主动清空下一阶段的 `tool_profile/model`
+- `workflow-default`：若命中 descriptor 的 `default_profile`，会把该 profile 与其 model 写回下一阶段 frontmatter
+- `PLAN_REVIEW` / `CODE_REVIEW` 的最新 run 若 `verdict: revise`，下一步会回到对应修订阶段
+  - `PLAN_REVIEW revise -> PLAN`
+  - `CODE_REVIEW revise -> IMPLEMENT`
+- `TEST fail/blocked` 不自动回退，停在报告层处理
 
-### Skill 路由
+## `.assistant`、`docs/tasks`、validator、git 的职责
 
-```
-using-superpowers（每次对话自动加载）
-  ├── 检测开发意图 → orchestrator
-  │     ├── PLAN        → plan skill
-  │     ├── PLAN_REVIEW → review skill
-  │     ├── IMPLEMENT   → implement skill
-  │     ├── CODE_REVIEW → review skill
-  │     └── TEST        → test / gemini-designer-main skill
-  ├── 恢复触发词 → 读共享记忆恢复上次中断点
-  └── 非开发任务 → 直接处理（不进入 workflow）
-```
+### `docs/tasks/<task-id>/`
 
-可选委派：用户显式要求时通过 `codex` skill 委派给 Codex CLI。
+这是任务的审阅面与阶段真相源。
 
-Phase 3 新增 ACP-style adapter：
+- `plan.md` frontmatter 是唯一阶段真相源
+- `plan.md` 的 review / implementation run 是 append-only
+- `test.md` 记录 TEST 结论
+- `spec.md` 是可选补充，不是默认入口
+- Phase 3 之后的可选 side artifacts：
+  - `skill-manifest.json`
+  - `skills-index.md`
 
-- `scripts/invoke-harness-skill.ps1`：统一入口，白名单仅 `review` / `test` / `gemini-designer-main` / `codex`
-- `review` / `test` 当前返回 `status=markdown-fallback`，提示宿主回退到原 Markdown skill 流
-- `implement` 明确禁入 adapter
-- invocation trace 只追加到已有 `### Run N`；没有 run block 时安全跳过并写 stderr 诊断
+### `.assistant/`
 
-Phase 4 新增 team preset bridge：
+这是共享记忆、恢复、运行时派生视图与协议文档所在位置。
 
-- `scripts/export-team-preset.ps1` 从 `harness-lite.yaml` + profile/role-prompt 即时派生 team preset
-- `skills/workflow-team/scripts/spawn-team.ps1` 是 team-mode 的唯一可执行强制点
-- `skills/orchestrator/SKILL.md` 只保留 team-mode 文档分支，不新增读 env 的可执行 dispatcher
-- member 的只读保护集合统一为 `.assistant/` 与 `docs/tasks/<task-id>/`
+按 shared-memory v2 当前约定，可以把它理解成四层：
 
-### 共享记忆
-
-安装后在目标项目生成 `.assistant/` Obsidian vault，结构：
-
-| 路径 | 用途 |
-|---|---|
-| `运行时/当前任务.md` | 当前活跃任务指针（标准双列表格格式） |
-| `运行时/恢复索引.md` | 快速恢复视图 |
-| `运行时/中断任务.md` | 暂停的其他任务 |
-| `运行时/上次会话.md` | 上次会话摘要 |
-| `运行时/tasks/<task-id>.md` | 任务级详细状态 |
-| `运行时/收件箱.md` | 待处理事项收件箱 |
-| `运行时/记忆候选.md` | 未确认的记忆候选 |
-| `配置/` | 用户偏好、系统信息、工具组件 |
-| `工作流/` | 恢复协议、写回协议等 |
-
-写回规则：
-
-- `advance-stage.ps1` 每次推进自动重写 `当前任务.md`、`tasks/<task-id>.md`、`恢复索引.md`
-- Runtime hooks 在 Claude Code 工具调用后自动刷新 `恢复索引.md`
-- 空闲态当前文档统一写 `none`
-
-### Runtime Hooks
-
-安装到 Claude Code 的 3 个 hooks（`runtime-hooks/claude/`）：
-
-| Hook | 触发时机 | 功能 |
+| 层 | 路径 | 角色 |
 |---|---|---|
-| `posttooluse.js` | 每次工具调用后 | 刷新 `恢复索引.md`；释放 `runtime.lock.json`；锁冲突时回退到收件箱 |
-| `stop.js` | 对话结束时 | 检测 `当前任务.md` 是否仍处于活跃状态，发出警告 |
-| `userpromptsubmit.js` | 用户提交消息时 | 检测恢复触发词，注入恢复指引到对话上下文 |
+| artifact | `docs/tasks/<task-id>/` | 任务真相源 |
+| runtime | `.assistant/运行时/` | 当前任务、恢复索引、task mirror、收件箱、wisdom 等运行时状态 |
+| config | `.assistant/配置/` | 用户偏好、工具、schema 版本 |
+| workflow | `.assistant/工作流/` | 协议与恢复说明 |
 
-## 仓库结构
+当前最重要的职责分工：
 
+- `.assistant/运行时/tasks/<task-id>.md` 是从任务产物镜像出来的 task-runtime
+- `.assistant/运行时/当前任务.md` / `恢复索引.md` 是共享 pointer / derived view
+- `.assistant/工作流/长会话恢复.md` 汇总了恢复触发词、读取顺序和单写者场景
+- 新事项先进入 `.assistant/运行时/收件箱.md`
+- pending wisdom 不直接落到 `记忆-*.md`，而是先走收件箱，再 promote/triage
+
+### `validate-lite-artifacts.ps1`
+
+这是任务文档 gate，不是共享记忆 gate。
+
+当前它会校验：
+
+- `plan.md` frontmatter schema
+- `PLAN` / `PLAN_REVIEW` / `IMPLEMENT` / `CODE_REVIEW` / `TEST` 的 section 结构
+- review run 的 `verdict/findings/next` 契约
+- 可选 `spec.md` 与 `front_keywords`
+- Phase 2 的 workflow descriptor advisory `Warnings:`
+- Phase 6/7 的 plan metadata：`read_first` / `convergence` / `artifacts`
+
+它当前不会做两件事：
+
+- 不校验 `artifacts:` 里路径是否真的存在
+- 不把 `artifacts:` 与 `Change Contract -> affected_paths` 做交叉校验
+
+### `git`
+
+`git` 在这个体系里承担“可审计变更面”角色，不是运行时状态容器。
+
+当前真实边界：
+
+- `docs/tasks/<task-id>/*` 是应当进入 review/commit 的主产物面
+- 大部分 `.assistant/` 仍默认忽略，不应该把运行时噪音随手提交
+- 已显式放开的 `.assistant` 审计面目前主要包括：
+  - `.assistant/工作流/长会话恢复.md`
+  - `.assistant/运行时/记忆-学习.md`
+  - `.assistant/运行时/记忆-决策.md`
+  - `.assistant/运行时/记忆-约定.md`
+  - `.assistant/运行时/记忆-问题.md`
+- 仓库历史里还保留了部分 shared-memory migration 相关 `.assistant` 文件；除非任务明确要求，不要把 live pointer 文件当成普通文档随手提交
+
+## Phase 5 / 6 / 7 已新增或强化的使用约束
+
+### Phase 5：文档协议收口
+
+- `agent-configs/workflows/harness-lite.yaml` 只增加注释协议，不增加新的 YAML 实体字段
+- team auto mode 的环境变量名固定为 `HARNESS_AUTO`
+- 长会话恢复统一看 `.assistant/工作流/长会话恢复.md`
+- `spec.md` 可选支持 `front_keywords`
+
+### Phase 6：quality 与 plan metadata
+
+`## Plan` 段现在支持顶部 metadata-style 块：
+
+```markdown
+## Plan
+- read_first: [docs/shared-memory-layers.md, scripts/validate-lite-artifacts.ps1]
+- convergence:
+  - `pwsh -File tests/verify-lite-artifact-validator.ps1`
+- artifacts: [docs/工作流/single-writer-precompact.md, scripts/validate-lite-artifacts.ps1]
+- TODO 1: ...
 ```
-claude-dev-harness/
-├── harness.ps1 / harness.cmd     # 快捷引导入口
-├── install.ps1                    # 安装到目标项目
-├── uninstall.ps1                  # 从目标项目卸载
-├── skills/                        # 11 个工作流 skills
-│   ├── using-superpowers/         #   顶层路由入口
-│   ├── orchestrator/              #   lite workflow 调度
-│   │   └── references/            #   gates, runbook, state-templates, writing-guide
-│   ├── workflow-team/             #   team-mode preset bridge（文档 skill + spawn helper）
-│   ├── plan/                      #   PLAN 产物规则
-│   ├── implement/                 #   IMPLEMENT 产物规则
-│   ├── review/                    #   PLAN_REVIEW / CODE_REVIEW 规则
-│   ├── test/                      #   TEST 产物规则
-│   ├── spec/                      #   可选 delta-spec
-│   ├── obsidian-memory/           #   共享记忆与 runtime 维护
-│   ├── codex/                     #   Codex CLI 委派
-│   └── gemini-designer-main/      #   Gemini TEST runner
-├── scripts/                       # 15 个 PowerShell 脚本
-│   ├── advance-stage.ps1          #   阶段推进（核心）
-│   ├── export-team-preset.ps1     #   导出 team preset
-│   ├── invoke-harness-skill.ps1   #   ACP-style skill adapter
-│   ├── generate-skills-index.ps1  #   生成 per-task skills-index.md
-│   ├── validate-lite-artifacts.ps1#   任务产物校验
-│   ├── update-managed-assets.ps1  #   托管资产刷新
-│   ├── memory-health.ps1          #   共享记忆健康检查
-│   ├── memory-maintain.ps1        #   共享记忆维护（归档 + 报告 + 健康检查）
-│   ├── memory-health-report.ps1   #   生成健康报告
-│   ├── repair-shared-memory.ps1   #   修复共享记忆一致性
-│   ├── archive-memory-candidates.ps1  # 归档已处理的记忆候选
-│   ├── append-runtime-inbox.ps1   #   向收件箱追加条目
-│   ├── triage-runtime-inbox.ps1   #   处理收件箱条目
-│   ├── promote-runtime-inbox.ps1  #   提升收件箱条目为任务
-│   └── resolve-obsidian-memory-script.ps1  # 解析共享记忆路径
-├── runtime-hooks/claude/          # 3 个 Claude Code hooks
-├── agent-configs/                 # Claude / Codex / workspace 配置模板 + profiles/workflows/role-prompts 描述符
-├── vault-template/                # .assistant 初始化骨架
-├── tests/                         # 23 个回归测试
-└── backups/                       # 安装备份（.gitignore）
-```
 
-## 安装与卸载
+当前规则是：
 
-### 安装
+- `read_first` / `convergence` / `artifacts` 只能出现在 `## Plan` 标题之后、第一条普通 TODO 之前
+- `read_first` 与 `artifacts` 必须是 inline array
+- `convergence` 必须至少有 1 条非占位 criterion
+- `artifacts` 是声明性字段，只做格式校验
+
+review run 现在支持 `-Quality`：
 
 ```powershell
-pwsh -File .\install.ps1 -WorkspaceRoot <workspace-root> [-RepoRoot <repo-root>]
+pwsh -File .\scripts\validate-lite-artifacts.ps1 -TaskId <task-id> -Quality
 ```
 
-安装动作：
+当前真实语义：
 
-1. 把 repo `skills/` junction 到 `%USERPROFILE%\.claude\skills` 与 `%USERPROFILE%\.codex\skills`
-2. 写入 Claude hooks 到 `%USERPROFILE%\.claude\settings.local.json`
-3. 生成 workspace `AGENTS.md` / `GEMINI.md`（入口 shim）
-4. 初始化或刷新 `<workspace-root>/.assistant` vault
-5. 写入 `.assistant/entry/advance-stage.ps1` 和 `validate-lite-artifacts.ps1` 入口
-6. 写入 Codex managed config block
+- 只在 `PLAN_REVIEW` / `CODE_REVIEW` 的 review run 上检查 4-dim score
+- 4 个维度固定为 `completeness` / `consistency` / `accuracy` / `depth`
+- 阈值以 `docs/工作流/quality-rubric.md` 为准
+- 旧任务未补 score 时，在 `-Quality` 模式下只产生 warning，不强制失败
 
-### 卸载
+### Phase 7：PreCompact 与 single-writer
+
+Phase 7 没有新增后台进程或新 hook，只有协议收口：
+
+- `PreCompact` 是 leader / worker 的自检协议，不是新的 Claude Code runtime hook
+- 需要先保留上下文时，只允许 append 到 `.assistant/运行时/收件箱.md`
+- append 路径使用现有 `append-runtime-inbox.ps1`
+- 收件箱后续仍走 `promote-runtime-inbox.ps1` / `triage-runtime-inbox.ps1`
+- 一旦涉及非 append 写回，必须委托现有 `.assistant/entry/advance-stage.ps1`
+- 不允许手工 patch：
+  - `docs/tasks/<task-id>/plan.md` frontmatter
+  - `.assistant/运行时/tasks/<task-id>.md`
+  - `.assistant/运行时/当前任务.md`
+  - `.assistant/运行时/恢复索引.md`
+
+这套约束的当前文档入口是：
+
+- `skills/orchestrator/SKILL.md`
+- `skills/workflow-team/SKILL.md`
+- `docs/工作流/single-writer-precompact.md`
+
+## 关键入口命令
+
+### 终端用户最常用
 
 ```powershell
-pwsh -File .\uninstall.ps1 [-ManifestPath <path>] [-RepoRoot <repo-root>]
-```
-
-卸载根据 `backups/active-install.json` 清单恢复所有被修改的文件。
-
-### 更新
-
-已安装的 workspace 更新到最新 harness 版本：
-
-```powershell
-# 方式一：快捷入口
+# 安装 / 更新
 pwsh -File .\harness.ps1 -WorkspaceRoot <workspace-root>
-
-# 方式二：直接调用
 pwsh -File .\scripts\update-managed-assets.ps1 -WorkspaceRoot <workspace-root>
+
+# 推进与校验
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> [-Tool <backend>] [-Profile <profile>] [-Model <full-model-id>]
+pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id> [-Quality]
+
+# 共享记忆
+pwsh -File .\scripts\memory-health.ps1 -VaultRoot <workspace-root>\.assistant
+pwsh -File .\scripts\repair-shared-memory.ps1 -VaultRoot <workspace-root>\.assistant
+pwsh -File .\scripts\check-shared-memory-layers.ps1 -VaultRoot <workspace-root>\.assistant
 ```
 
-## 验证
+### 高级 / 维护入口
+
+```powershell
+# ACP-style skill adapter
+pwsh -File .\scripts\invoke-harness-skill.ps1 -TaskId <task-id> -Stage PLAN_REVIEW -Skill review -Tool codex -WorkspaceRoot <workspace-root> -ArtifactRoot docs\tasks\<task-id> -Mode readonly -PayloadJson '{}'
+
+# per-task skills index
+pwsh -File .\scripts\generate-skills-index.ps1 -TaskId <task-id> -Stage TEST -BackendHint gemini
+
+# team preset 导出与 team mode
+pwsh -File .\scripts\export-team-preset.ps1 -Workflow harness-lite -Output <tmp>\team.yaml
+$env:AIONUI_TEAM_MODE='1'
+$env:HARNESS_AUTO='1'
+pwsh -File .\skills\workflow-team\scripts\spawn-team.ps1 -TaskId <task-id>
+```
+
+## 当前仓库清单
+
+截至当前仓库状态：
+
+- `skills/` 下有 `11` 个 workflow skills
+- `scripts/` 下有 `16` 个 PowerShell 脚本
+- `runtime-hooks/claude/` 下有 `3` 个 hooks
+- `tests/` 下有 `24` 个 `verify-*.ps1` 回归脚本
+
+关键组件分布：
+
+| 区域 | 当前重点 |
+|---|---|
+| `skills/using-superpowers` | 顶层入口与开发路由 |
+| `skills/orchestrator` | 主流程编排 |
+| `skills/plan` / `implement` / `review` / `test` | 各阶段写作与产物规则 |
+| `skills/workflow-team` | team preset bridge 与 auto / PreCompact 协议 |
+| `skills/obsidian-memory` | 共享记忆读写、repair、promotion |
+| `agent-configs/profiles` | tool profile 描述符 |
+| `agent-configs/workflows/harness-lite.yaml` | workflow descriptor 与阶段注释协议 |
+| `vault-template/` | 新工作区 `.assistant` 骨架 |
+
+## 验证与回归
 
 ### 安装验证
 
 ```powershell
-pwsh -File .\tests\verify-installation.ps1 -WorkspaceRoot <workspace-root> -RepoRoot <repo-root>
+pwsh -File .\tests\verify-installation.ps1 -WorkspaceRoot <workspace-root> -RepoRoot D:\data\claude-dev-harness
 ```
 
-隔离 smoke 环境中传入临时 user profile：
+### 文档 / 协议核心验证
 
 ```powershell
-pwsh -File .\tests\verify-installation.ps1 -WorkspaceRoot <ws> -RepoRoot <repo> -UserProfileRoot <temp-user>
+pwsh -File .\tests\verify-lite-artifact-validator.ps1
+pwsh -File .\tests\verify-lite-footprint.ps1
+pwsh -File .\tests\verify-workflow-contracts.ps1
+pwsh -File .\tests\verify-shared-memory-layers.ps1
 ```
 
-### 任务产物校验
+### 跑完整 verify 套件
 
-仓库脚本入口：`scripts/validate-lite-artifacts.ps1`
+当前共有 `24` 个 `verify-*.ps1`；其中 `verify-installation.ps1` 需要显式传 `-WorkspaceRoot`。
 
 ```powershell
-# 直接调用仓库脚本
-pwsh -File .\scripts\validate-lite-artifacts.ps1 -TaskId <task-id>
+# 先跑安装验证
+pwsh -File .\tests\verify-installation.ps1 -WorkspaceRoot <workspace-root> -RepoRoot D:\data\claude-dev-harness
 
-# workspace 入口 shim
-pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
+# 再顺跑其余 23 个
+Get-ChildItem .\tests -Filter 'verify-*.ps1' |
+  Where-Object Name -ne 'verify-installation.ps1' |
+  Sort-Object Name |
+  ForEach-Object { pwsh -NoProfile -ExecutionPolicy Bypass -File $_.FullName }
 ```
 
-校验内容：`plan.md` frontmatter schema、section 结构、append-only run 格式、`spec.md` 可选结构、`test.md` Conclusion/Handoff 契约，以及 workflow descriptor 的 advisory `Warnings:` audit。
+## 维护提示
 
-Phase 3 产物：
-
-- `docs/tasks/<task-id>/skill-manifest.json`：per-task best-effort manifest，不写入 `.assistant/`
-- `docs/tasks/<task-id>/skills-index.md`：当前 stage 的 skills whitelist 展示页
-
-### 共享记忆维护
-
-```powershell
-# 健康检查
-pwsh -File .\scripts\memory-health.ps1 -VaultRoot <workspace-root>\.assistant
-
-# 全量维护（归档 + 报告 + 健康检查）
-pwsh -File .\scripts\memory-maintain.ps1 -VaultRoot <workspace-root>\.assistant
-
-# 修复一致性
-pwsh -File .\scripts\repair-shared-memory.ps1 -VaultRoot <workspace-root>\.assistant
-```
-
-## 回归测试
-
-23 个测试覆盖全部核心功能：
-
-| 测试 | 覆盖范围 |
-|---|---|
-| `verify-installation.ps1` | 安装闭环 |
-| `verify-install-isolation.ps1` | 安装隔离性 |
-| `verify-uninstall-isolation.ps1` | 卸载隔离性 |
-| `verify-harness-entry.ps1` | harness.ps1 引导入口 |
-| `verify-update-managed-assets.ps1` | 托管资产刷新 |
-| `verify-workflow-contracts.ps1` | 阶段推进契约（advance-stage） |
-| `verify-tool-profile.ps1` | Phase 1 tool_profile/model 兼容契约 |
-| `verify-workflow-descriptor.ps1` | Phase 2 workflow descriptor fallback / writeback |
-| `verify-aionui-skill-contract.ps1` | Phase 3 skill adapter / trace / skills-index |
-| `verify-skill-manifest.ps1` | Phase 3 per-task skill-manifest best-effort hook |
-| `verify-team-preset.ps1` | Phase 4 team preset 导出与前缀契约 |
-| `verify-team-orchestration.ps1` | Phase 4 spawn-team env opt-in / payload / fallback |
-| `verify-lite-artifact-validator.ps1` | 产物校验规则 |
-| `verify-lite-footprint.ps1` | UTF-8 BOM 与文件规范 |
-| `verify-runtime-hooks.ps1` | Runtime hooks 行为 |
-| `verify-memory-maintain.ps1` | 记忆维护流程 |
-| `verify-memory-health-report.ps1` | 健康报告生成 |
-| `verify-repair-shared-memory.ps1` | 共享记忆修复 |
-| `verify-archive-memory-candidates.ps1` | 记忆候选归档 |
-| `verify-runtime-inbox.ps1` | 收件箱追加 |
-| `verify-triage-runtime-inbox.ps1` | 收件箱处理 |
-| `verify-promote-runtime-inbox.ps1` | 收件箱提升 |
-
-运行全部可直接执行的 verify 脚本：
-
-```powershell
-# 先单独跑安装验证
-pwsh -File .\tests\verify-installation.ps1 -WorkspaceRoot <workspace-root> -RepoRoot <repo-root>
-
-# 其余 verify 脚本可直接顺跑
-Get-ChildItem tests\verify-*.ps1 | Where-Object Name -ne 'verify-installation.ps1' | ForEach-Object { pwsh -File $_.FullName }
-```
-
-## Windows 兼容
-
-硬约束：
-
-- 所有 active `.ps1` 必须使用 UTF-8 BOM（`verify-lite-footprint.ps1` 校验）
-- Node hooks 读取共享运行时文件时必须容忍 BOM
-- `verify-workflow-contracts.ps1` 校验 `advance-stage.ps1` 能被 `powershell.exe` 解析
-
-## 写作规范
-
-任务文档写法由 `skills/orchestrator/references/lite-writing-guide.md` 统一约束，覆盖：
-
-- `plan.md` frontmatter 与 section 顺序
-- `spec.md` 差量写法
-- append-only review / implementation run 格式
-- `test.md` 的 Conclusion / Handoff 契约
-- P0/P1/P2/P3 finding 级别和自检清单
+- 本仓库当前默认语言是中文；代码、命令、标识符保留英文
+- active `.ps1` 继续要求 UTF-8 BOM，`tests/verify-lite-footprint.ps1` 会锁这个约束
+- repo 根目录并不自带 `.assistant/entry/AGENTS.md`；那是安装到目标工作区后才生成的 shim
+- 如果你改了 workflow/validator/shared-memory 协议，优先同步：
+  - `README.md`
+  - `skills/orchestrator/references/lite-writing-guide.md`
+  - 相关 `tests/verify-*.ps1`
