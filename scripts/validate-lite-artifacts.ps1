@@ -309,7 +309,7 @@ function Get-TopLevelPlanBullets {
     .SYNOPSIS
     解析 `## Plan` 段顶部 metadata-style 字段与普通 bullets。
     .DESCRIPTION
-    Phase 6 允许 `read_first:` / `convergence:` 作为可选 metadata block，
+    Phase 6/7 允许 `read_first:` / `convergence:` / `artifacts:` 作为可选 metadata block，
     但它们必须出现在第一条普通 bullet 之前。
     .PARAMETER Content
     `## Plan` section 正文。
@@ -322,8 +322,10 @@ function Get-TopLevelPlanBullets {
     $ordinaryBullets = @()
     $readFirstItems = @()
     $convergenceItems = @()
+    $artifactsItems = @()
     $hasReadFirst = $false
     $hasConvergence = $false
+    $hasArtifacts = $false
     $metadataClosed = $false
     $capturingConvergence = $false
 
@@ -379,6 +381,36 @@ function Get-TopLevelPlanBullets {
             continue
         }
 
+        if ($line -match '^- artifacts:\s*(.*?)\s*$') {
+            if ($metadataClosed) {
+                Add-Failure "Plan metadata artifacts should appear before ordinary Plan bullets"
+                continue
+            }
+
+            if ($hasArtifacts) {
+                Add-Failure "Plan metadata should contain at most one artifacts field"
+                continue
+            }
+
+            $hasArtifacts = $true
+            $capturingConvergence = $false
+
+            try {
+                $artifactsItems = @(Split-InlineYamlList -Value $Matches[1])
+            } catch {
+                Add-Failure "Plan artifacts should use inline-array syntax like [a, b]"
+                continue
+            }
+
+            if ($artifactsItems.Count -eq 0) {
+                Add-Failure "Plan artifacts should contain at least one entry"
+            } else {
+                Add-Check "Plan artifacts metadata is legal"
+            }
+
+            continue
+        }
+
         if ($capturingConvergence -and $line -match '^\s{2,}-\s+(.+?)\s*$') {
             $criterion = $Matches[1].Trim()
             if (-not [string]::IsNullOrWhiteSpace($criterion)) {
@@ -427,6 +459,7 @@ function Get-TopLevelPlanBullets {
         OrdinaryBullets = $ordinaryBullets
         ReadFirstItems = $readFirstItems
         ConvergenceItems = $convergenceItems
+        ArtifactsItems = $artifactsItems
     }
 }
 

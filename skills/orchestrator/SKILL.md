@@ -88,6 +88,19 @@ pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
 - best-effort 写入 `docs/tasks/<task-id>/skill-manifest.json`
 - 把 `resolved tool=<tool> via <source>` 写到 stderr，stdout 保持 `<stage> | <tool>`
 
+## PreCompact 自检
+
+- 这是协议条款，不是注册到 Claude Code 内核的 hook。
+- 当你主观判断当前 context 已接近上限时，宁可早触发，也不要漏触发。
+- 每次 stage callback 结束前，leader 至少自检 3 件事：
+  - 是否存在还没提交的 wisdom 条目
+  - 当前 task 是否已经具备推进条件
+  - 若现在中断，会不会丢失下一位接手者恢复所需的最小上下文
+- wisdom 路径只允许 append：如需提交 pending wisdom，先走 `skills/obsidian-memory/scripts/append-runtime-inbox.ps1` 写入 `.assistant/运行时/收件箱.md`。
+- 收件箱后的分流仍走仓库现有 `promote-runtime-inbox.ps1` / `triage-runtime-inbox.ps1` 路径；不要手工直写 `.assistant/运行时/记忆-*.md`。
+- 若当前 stage 已可推进，非 append 写回只能委托 `.assistant\entry\advance-stage.ps1`；不要手工 patch `plan.md`、`运行时/tasks/<task-id>.md`、`运行时/当前任务.md` 或 `运行时/恢复索引.md`。
+- 触发 append 或 advance 前，先按 [docs/工作流/single-writer-precompact.md](../../docs/工作流/single-writer-precompact.md) 执行 `cooperative-yield` / single-writer 协议；不要与正在运行的 `advance-stage` 主流程竞争。
+
 ## stop 条件
 
 出现以下任一情况就停止并直接报告：

@@ -138,12 +138,16 @@ stages:
 - convergence:
   - `Select-String -Path scripts/validate-lite-artifacts.ps1 -Pattern '\[switch\]\$Quality'`
   - `pwsh -NoProfile -File tests/verify-lite-artifact-validator.ps1`
+- artifacts: [docs/工作流/single-writer-precompact.md, scripts/validate-lite-artifacts.ps1]
 - 更新 `scripts/validate-lite-artifacts.ps1`，统一质量评分校验。
 ```
 
-- `read_first:` 与 `convergence:` 只允许出现在 `## Plan` 标题之后、第一条普通 bullet 之前
+- `read_first:`、`convergence:`、`artifacts:` 只允许出现在 `## Plan` 标题之后、第一条普通 bullet 之前
 - `read_first:` 必须使用 inline-array 语法
 - `convergence:` 下面至少 1 条非空 criterion，且不要只写 `TBD`
+- `artifacts:` 必须使用 inline-array 语法，且至少列 1 条非空路径
+- 示例顺序固定为 `read_first:` → `convergence:` → `artifacts:`；validator 不强制顺序，但文档示例与人工写作都按这个顺序
+- `artifacts:` 表示任务产出物声明；不要和 `## Change Contract` 里的 `affected_paths` 混用
 - 不需要时整段删除即可；不要把它们插到普通 TODO 中途
 - 每一项都是可执行动作，不写抽象口号。
 - 尽量带文件路径或模块名。
@@ -319,6 +323,15 @@ pass
 - `current_state`、`key_decisions`、`next_actions` 为 opt-in 密度扩展，推荐长任务填写；不写不影响 validator。
 - 旧格式 Handoff（只含 delivery/follow_up）继续通过校验。
 - 不要把 review 发现写成独立 `review.md`。
+
+## SKILL.md 拆分守则
+
+- 这是 Phase 7 的 lazy 守则，不是立即执行的拆分任务。
+- 只有当某个 `skills/*/SKILL.md` 实际增长到约 `600` 行或以上时，才考虑拆分。
+- 触发后目标形态应为：主 `SKILL.md` 控制在 `<= 200` 行，细分内容放到 `phases/<phase>.md`。
+- 主 `SKILL.md` 顶部必须保留导航，明确“何时加载哪个 phase”。
+- 拆分前后 `git diff --stat` 应接近纯位移；不要借拆分机会重写内容或顺手改语义。
+- 当前仓库现场没有任何 `SKILL.md` 达到该阈值，因此不要预先创建 `skills/*/phases/` 目录，也不要新建独立 `docs/工作流/skill-phase-loading.md`。
 
 ## FAQ
 

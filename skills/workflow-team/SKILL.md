@@ -32,6 +32,16 @@ description: Use when harness-lite runs in explicit AionUi team mode and the lea
 - auto 模式不绕过 `PLAN_REVIEW` / `CODE_REVIEW` gate，也不授予跳过 stage 推进确认的权限。
 - leader 仍负责最终的 stage callback / `team_send_message` 交接与推进确认；member 只负责把本阶段执行到可交付状态。
 
+## PreCompact Callback
+
+- leader 派发 worker 任务时，应在消息体显式带上 PreCompact 提示：
+  - 若你主观判断 context 临近上限，先把 pending wisdom 通过 `append-runtime-inbox.ps1` 追加到 `.assistant/运行时/收件箱.md`
+  - 若当前 stage 已具备推进条件，再调用 `.assistant\entry\advance-stage.ps1` 落盘当前进度
+  - 完成后再 `team_send_message` 回 leader 或进入 stand by
+- worker 不得手工直写 `.assistant/运行时/记忆-*.md`、`plan.md` 或 shared pointer；非 append 写回只能委托现有 `advance-stage.ps1` 语义执行。
+- 触发 append/advance 前，先遵守 [docs/工作流/single-writer-precompact.md](../../docs/工作流/single-writer-precompact.md) 中的 `cooperative-yield` 协议；若怀疑 leader 正在推进 stage，就先让出写入窗口。
+- 这条 callback 只约束 leader/worker 的自检与交接，不新增任何团队成员、队列或后台守护进程。
+
 ## Fallback
 
 - `team_spawn_agent` 不可用或任一 spawn 失败时，立即停止后续 spawn

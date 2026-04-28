@@ -167,6 +167,8 @@ function New-PlanContent {
     User Confirmation 状态。
     .PARAMETER FrontmatterExtra
     额外 frontmatter 行。
+    .PARAMETER ChangeContractBody
+    可选 Change Contract 内容。
     .PARAMETER PlanReviewRuns
     Plan Review 内容。
     .PARAMETER ImplementationRuns
@@ -182,6 +184,7 @@ function New-PlanContent {
         [string]$Tool,
         [string]$ConfirmationStatus = "confirmed",
         [string]$FrontmatterExtra = "",
+        [string]$ChangeContractBody = "",
         [string]$PlanSectionBody = "",
         [string]$PlanReviewRuns = "",
         [string]$ImplementationRuns = "",
@@ -190,6 +193,11 @@ function New-PlanContent {
 
     $updatedDate = Get-Date -Format 'yyyy-MM-dd'
     $extra = if ([string]::IsNullOrWhiteSpace($FrontmatterExtra)) { "" } else { "$FrontmatterExtra`r`n" }
+    $changeContractSection = if ([string]::IsNullOrWhiteSpace($ChangeContractBody)) {
+        ""
+    } else {
+        "## Change Contract`r`n$ChangeContractBody`r`n`r`n"
+    }
     $planSection = if ([string]::IsNullOrWhiteSpace($PlanSectionBody)) {
         "- 更新 ``scripts/validate-lite-artifacts.ps1`` `r`n- 更新 ``tests/verify-lite-artifact-validator.ps1``"
     } else {
@@ -214,6 +222,7 @@ $extra---
 ## User Confirmation
 - status: $ConfirmationStatus
 
+$changeContractSection
 ## Plan
 $planSection
 
@@ -413,12 +422,15 @@ try {
 - convergence:
   - `Select-String -Path scripts/validate-lite-artifacts.ps1 -Pattern '\[switch\]\`$Quality'`
   - `pwsh -NoProfile -File tests/verify-lite-artifact-validator.ps1`
+- artifacts: [docs/工作流/single-writer-precompact.md, scripts/validate-lite-artifacts.ps1]
 - 更新 ``scripts/validate-lite-artifacts.ps1``
 '@
     Write-Utf8Bom -Path (Join-Path $taskPlanMetadataValidDir 'plan.md') -Content (New-PlanContent -TaskId $taskPlanMetadataValid -Stage 'PLAN' -Tool 'codex' -PlanSectionBody $planMetadataBody)
     $planMetadataValidResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskPlanMetadataValid -RepoRoot $RepoRoot
-    if ($planMetadataValidResult.ExitCode -eq 0 -and ($planMetadataValidResult.Output -join "`n") -match 'Plan read_first metadata is legal') {
-        Add-Check 'plan read_first/convergence metadata passes validator'
+    if ($planMetadataValidResult.ExitCode -eq 0 -and
+        ($planMetadataValidResult.Output -join "`n") -match 'Plan read_first metadata is legal' -and
+        ($planMetadataValidResult.Output -join "`n") -match 'Plan artifacts metadata is legal') {
+        Add-Check 'plan read_first/convergence/artifacts metadata passes validator'
     } else {
         Add-Failure ("valid plan metadata should pass validator, got: {0}" -f ($planMetadataValidResult.Output -join ' | '))
     }
@@ -458,6 +470,82 @@ try {
         Add-Failure ("placeholder-only convergence should fail validator, got: {0}" -f ($invalidConvergenceResult.Output -join ' | '))
     }
 
+    $taskArtifactsBlockInvalid = 'lite-validator-artifacts-block-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskArtifactsBlockInvalidDir = Join-Path $taskBase $taskArtifactsBlockInvalid
+    $createdTaskDirs += $taskArtifactsBlockInvalidDir
+    New-Item -ItemType Directory -Path $taskArtifactsBlockInvalidDir -Force | Out-Null
+    $invalidArtifactsBlockBody = @"
+- artifacts:
+  - docs/工作流/single-writer-precompact.md
+  - scripts/validate-lite-artifacts.ps1
+- 更新 ``scripts/validate-lite-artifacts.ps1``
+"@
+    Write-Utf8Bom -Path (Join-Path $taskArtifactsBlockInvalidDir 'plan.md') -Content (New-PlanContent -TaskId $taskArtifactsBlockInvalid -Stage 'PLAN' -Tool 'codex' -PlanSectionBody $invalidArtifactsBlockBody)
+    $invalidArtifactsBlockResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskArtifactsBlockInvalid -RepoRoot $RepoRoot
+    if ($invalidArtifactsBlockResult.ExitCode -ne 0 -and ($invalidArtifactsBlockResult.Output -join "`n") -match 'Plan artifacts should use inline-array syntax like \[a, b\]') {
+        Add-Check 'block-list artifacts is rejected'
+    } else {
+        Add-Failure ("block-list artifacts should fail validator, got: {0}" -f ($invalidArtifactsBlockResult.Output -join ' | '))
+    }
+
+    $taskArtifactsEmptyInvalid = 'lite-validator-artifacts-empty-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskArtifactsEmptyInvalidDir = Join-Path $taskBase $taskArtifactsEmptyInvalid
+    $createdTaskDirs += $taskArtifactsEmptyInvalidDir
+    New-Item -ItemType Directory -Path $taskArtifactsEmptyInvalidDir -Force | Out-Null
+    $invalidArtifactsEmptyBody = @"
+- artifacts: []
+- 更新 ``scripts/validate-lite-artifacts.ps1``
+"@
+    Write-Utf8Bom -Path (Join-Path $taskArtifactsEmptyInvalidDir 'plan.md') -Content (New-PlanContent -TaskId $taskArtifactsEmptyInvalid -Stage 'PLAN' -Tool 'codex' -PlanSectionBody $invalidArtifactsEmptyBody)
+    $invalidArtifactsEmptyResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskArtifactsEmptyInvalid -RepoRoot $RepoRoot
+    if ($invalidArtifactsEmptyResult.ExitCode -ne 0 -and ($invalidArtifactsEmptyResult.Output -join "`n") -match 'Plan artifacts should contain at least one entry') {
+        Add-Check 'empty artifacts array is rejected'
+    } else {
+        Add-Failure ("empty artifacts array should fail validator, got: {0}" -f ($invalidArtifactsEmptyResult.Output -join ' | '))
+    }
+
+    $taskArtifactsFutureValid = 'lite-validator-artifacts-future-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskArtifactsFutureValidDir = Join-Path $taskBase $taskArtifactsFutureValid
+    $createdTaskDirs += $taskArtifactsFutureValidDir
+    New-Item -ItemType Directory -Path $taskArtifactsFutureValidDir -Force | Out-Null
+    $futureArtifactsBody = @"
+- artifacts: [docs/future/not-yet-created.md, scripts/future/not-yet-created.ps1]
+- 更新 ``docs/tasks/$taskArtifactsFutureValid/plan.md``
+"@
+    Write-Utf8Bom -Path (Join-Path $taskArtifactsFutureValidDir 'plan.md') -Content (New-PlanContent -TaskId $taskArtifactsFutureValid -Stage 'PLAN' -Tool 'codex' -PlanSectionBody $futureArtifactsBody)
+    $futureArtifactsResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskArtifactsFutureValid -RepoRoot $RepoRoot
+    if ($futureArtifactsResult.ExitCode -eq 0 -and
+        ($futureArtifactsResult.Output -join "`n") -match 'Plan artifacts metadata is legal' -and
+        ($futureArtifactsResult.Output -join "`n") -notmatch '(?i)artifact.+exist|artifact.+missing|artifact.+not found') {
+        Add-Check 'artifacts metadata does not require existing paths'
+    } else {
+        Add-Failure ("artifacts should not require existing paths, got: {0}" -f ($futureArtifactsResult.Output -join ' | '))
+    }
+
+    $taskArtifactsCrossValid = 'lite-validator-artifacts-cross-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskArtifactsCrossValidDir = Join-Path $taskBase $taskArtifactsCrossValid
+    $createdTaskDirs += $taskArtifactsCrossValidDir
+    New-Item -ItemType Directory -Path $taskArtifactsCrossValidDir -Force | Out-Null
+    $crossArtifactsBody = @"
+- artifacts: [docs/outputs/generated-contract.md]
+- 更新 ``scripts/validate-lite-artifacts.ps1``
+"@
+    $crossChangeContract = @"
+- change_type: enhance
+- affected_paths:
+  - scripts/validate-lite-artifacts.ps1
+  - skills/plan/SKILL.md
+"@
+    Write-Utf8Bom -Path (Join-Path $taskArtifactsCrossValidDir 'plan.md') -Content (New-PlanContent -TaskId $taskArtifactsCrossValid -Stage 'PLAN' -Tool 'codex' -ChangeContractBody $crossChangeContract -PlanSectionBody $crossArtifactsBody)
+    $crossArtifactsResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskArtifactsCrossValid -RepoRoot $RepoRoot
+    if ($crossArtifactsResult.ExitCode -eq 0 -and
+        ($crossArtifactsResult.Output -join "`n") -match 'Plan artifacts metadata is legal' -and
+        ($crossArtifactsResult.Output -join "`n") -notmatch '(?i)artifacts.+affected_paths|affected_paths.+artifacts|cross.?check|overlap') {
+        Add-Check 'artifacts metadata is not cross-validated against affected_paths'
+    } else {
+        Add-Failure ("artifacts should not be cross-validated against affected_paths, got: {0}" -f ($crossArtifactsResult.Output -join ' | '))
+    }
+
     $taskMetadataPositionInvalid = 'lite-validator-planmeta-position-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     $taskMetadataPositionInvalidDir = Join-Path $taskBase $taskMetadataPositionInvalid
     $createdTaskDirs += $taskMetadataPositionInvalidDir
@@ -467,12 +555,14 @@ try {
 - read_first: [docs/shared-memory-layers.md, scripts/validate-lite-artifacts.ps1]
 - convergence:
   - `Select-String -Path scripts/validate-lite-artifacts.ps1 -Pattern '\[switch\]\`$Quality'`
+- artifacts: [docs/工作流/single-writer-precompact.md]
 '@
     Write-Utf8Bom -Path (Join-Path $taskMetadataPositionInvalidDir 'plan.md') -Content (New-PlanContent -TaskId $taskMetadataPositionInvalid -Stage 'PLAN' -Tool 'codex' -PlanSectionBody $misplacedMetadataBody)
     $metadataPositionResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskMetadataPositionInvalid -RepoRoot $RepoRoot
     if ($metadataPositionResult.ExitCode -ne 0 -and
         ($metadataPositionResult.Output -join "`n") -match 'Plan metadata read_first should appear before ordinary Plan bullets' -and
-        ($metadataPositionResult.Output -join "`n") -match 'Plan metadata convergence should appear before ordinary Plan bullets') {
+        ($metadataPositionResult.Output -join "`n") -match 'Plan metadata convergence should appear before ordinary Plan bullets' -and
+        ($metadataPositionResult.Output -join "`n") -match 'Plan metadata artifacts should appear before ordinary Plan bullets') {
         Add-Check 'misplaced Plan metadata is rejected'
     } else {
         Add-Failure ("misplaced Plan metadata should fail validator, got: {0}" -f ($metadataPositionResult.Output -join ' | '))
@@ -526,10 +616,10 @@ try {
         Where-Object { Test-Path (Join-Path $_.FullName 'plan.md') } |
         Sort-Object Name |
         Select-Object -ExpandProperty Name
-    if ($livePlanTasks.Count -eq 13) {
-        Add-Check 'live baseline still contains 13 plan-bearing tasks'
+    if ($livePlanTasks.Count -eq 14) {
+        Add-Check 'live baseline still contains 14 plan-bearing tasks'
     } else {
-        Add-Failure ("live baseline should contain 13 plan-bearing tasks, got {0}" -f $livePlanTasks.Count)
+        Add-Failure ("live baseline should contain 14 plan-bearing tasks, got {0}" -f $livePlanTasks.Count)
     }
 
     $expectedPassTasks = @(
@@ -539,6 +629,7 @@ try {
         'phase4-team-preset-bridge',
         'phase5-doc-protocol-hardening',
         'phase6-quality-score-hard-constraints',
+        'phase7-runtime-hooks-artifact-declaration',
         'shared-memory-v2-live-migration',
         'shared-memory-v2-optimization',
         'workflow-optimization-roadmap'

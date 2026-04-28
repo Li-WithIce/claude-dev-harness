@@ -224,6 +224,7 @@ if ((@($actualSkills) -join '|') -eq (($expectedSkills | Sort-Object) -join '|')
 foreach ($legacyPath in @(
     'agent-configs/workspace/entry',
     'skills/docs',
+    'docs/工作流/skill-phase-loading.md',
     'scripts/advance-orchestrator-stage.ps1',
     'scripts/validate-harness-artifacts.ps1',
     'scripts/migrate-task-artifacts.ps1',
@@ -272,6 +273,12 @@ if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'docs/shared-memory-layer
     Add-Check 'shared memory layers doc exists'
 } else {
     Add-Failure 'shared memory layers doc should exist at docs/shared-memory-layers.md'
+}
+
+if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'docs/工作流/single-writer-precompact.md') -PathType Leaf) {
+    Add-Check 'single-writer precompact doc exists'
+} else {
+    Add-Failure 'single-writer precompact doc should exist at docs/工作流/single-writer-precompact.md'
 }
 
 if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'scripts/check-shared-memory-layers.ps1') -PathType Leaf) {
@@ -323,6 +330,7 @@ Assert-FileContains -Path 'scripts/advance-stage.ps1' -Needle '[string]$Tool = "
 Assert-FileContains -Path 'scripts/advance-stage.ps1' -Needle '[string]$Profile = ""'
 Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle 'tool_profile'
 Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle '[switch]$Quality'
+Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle 'artifacts'
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-claude.yaml' -Needle 'backend: claudecode'
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-codex.yaml' -Needle 'backend: codex'
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-gemini.yaml' -Needle 'backend: gemini'
@@ -334,9 +342,12 @@ Assert-FileContains -Path 'skills/test/SKILL.md' -Needle '../orchestrator/refere
 Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'references/lite-writing-guide.md'
 Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'read_first'
 Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'convergence'
+Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'artifacts:'
 Assert-FileContains -Path 'skills/review/SKILL.md' -Needle 'read_first'
 Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'read_first'
 Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'convergence'
+Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'artifacts:'
+Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'SKILL.md 拆分守则'
 Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle '.assistant\entry\validate-lite-artifacts.ps1'
 Assert-FileContains -Path 'skills/implement/SKILL.md' -Needle '.assistant\entry\validate-lite-artifacts.ps1'
 Assert-FileContains -Path 'skills/review/SKILL.md' -Needle '.assistant\entry\advance-stage.ps1'
@@ -345,8 +356,18 @@ Assert-FileContains -Path 'skills/orchestrator/references/runbook.md' -Needle '.
 Assert-FileContains -Path 'skills/orchestrator/references/runbook.md' -Needle 'spawn-team.ps1'
 Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle '.assistant\entry\advance-stage.ps1'
 Assert-FileContains -Path 'skills/orchestrator/references/default-tool-profiles.md' -Needle 'team preset'
+Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'PreCompact 自检'
+Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'append-runtime-inbox.ps1'
+Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'single-writer-precompact.md'
+Assert-FileContains -Path 'skills/workflow-team/SKILL.md' -Needle 'PreCompact Callback'
+Assert-FileContains -Path 'skills/workflow-team/SKILL.md' -Needle 'append-runtime-inbox.ps1'
+Assert-FileContains -Path 'skills/workflow-team/SKILL.md' -Needle 'single-writer-precompact.md'
 Assert-FileContains -Path 'docs/team-write-authority.md' -Needle '.assistant/'
 Assert-FileContains -Path 'docs/team-write-authority.md' -Needle 'docs/tasks/<task-id>/'
+Assert-FileContains -Path 'docs/工作流/single-writer-precompact.md' -Needle 'cooperative-yield'
+Assert-FileContains -Path 'docs/工作流/single-writer-precompact.md' -Needle 'append-runtime-inbox.ps1'
+Assert-FileContains -Path 'docs/工作流/single-writer-precompact.md' -Needle 'skills/orchestrator/SKILL.md'
+Assert-FileContains -Path 'docs/工作流/single-writer-precompact.md' -Needle 'skills/workflow-team/SKILL.md'
 Assert-FileContains -Path 'skills/obsidian-memory/SKILL.md' -Needle '记忆-学习.md'
 Assert-FileContains -Path 'skills/obsidian-memory/SKILL.md' -Needle '记忆-决策.md'
 Assert-FileContains -Path 'skills/obsidian-memory/SKILL.md' -Needle '记忆-约定.md'
@@ -379,6 +400,13 @@ Assert-FileNotContains -Path 'skills/orchestrator/SKILL.md' -Needle 'next_runner
 Assert-FileNotContains -Path 'skills/orchestrator/references/default-tool-profiles.md' -Needle 'codex-gemini'
 Assert-FileNotContains -Path 'skills/plan/SKILL.md' -Needle '## Change Contract  (optional, opt-in)'
 Assert-FileNotContains -Path 'skills/orchestrator/references/state-templates.md' -Needle '## Change Contract  (optional, opt-in)'
+
+$phaseDirs = @(Get-ChildItem -LiteralPath (Join-Path $script:RepoRoot 'skills') -Recurse -Directory -Filter 'phases')
+if ($phaseDirs.Count -eq 0) {
+    Add-Check 'no skills/*/phases directories were created'
+} else {
+    Add-Failure ("skills phase-loading should stay lazy-only, found: {0}" -f (@($phaseDirs | ForEach-Object { Get-RepoRelativePath -TargetPath $_.FullName }) -join ', '))
+}
 
 $bomTargets = @(
     'harness.ps1',

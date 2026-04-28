@@ -99,6 +99,7 @@ updated: 2026-04-09
 - convergence:
   - `Select-String -Path scripts/validate-lite-artifacts.ps1 -Pattern '\[switch\]\$Quality'`
   - `pwsh -NoProfile -File tests/verify-lite-artifact-validator.ps1`
+- artifacts: [docs/工作流/single-writer-precompact.md, scripts/validate-lite-artifacts.ps1]
 - TODO 1: ...
 - TODO 2: ...
 
@@ -127,6 +128,8 @@ model: claude-opus-4-7
 - 必须紧跟在 `## Plan` 标题之后，位于第一条普通 `- TODO ...` bullet 之前
 - `read_first:` 必须使用 inline-array 语法
 - `convergence:` 下面至少列 1 条可抽查的 criterion
+- `artifacts:` 也是同一 metadata 块中的可选字段，示例顺序固定为 `read_first -> convergence -> artifacts`
+- `artifacts:` 必须使用 inline-array 语法，且至少列 1 条任务产出路径
 - 不需要时整段删除即可；不要把它们混到普通 TODO bullets 中
 
 ## 工作方式
