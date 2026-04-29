@@ -65,6 +65,80 @@ function Add-Warning {
     $script:Warnings += $Message
 }
 
+function Assert-GitIgnoreEntriesExactlyOnce {
+    param(
+        [string]$WorkspaceRoot,
+        [string[]]$Entries = @(
+            '# claude-dev-harness workspace artifacts',
+            '.assistant/',
+            'AGENTS.md',
+            'GEMINI.md',
+            '.claude'
+        )
+    )
+
+    $gitIgnorePath = Join-Path $WorkspaceRoot '.gitignore'
+    if (-not (Test-Path -LiteralPath $gitIgnorePath -PathType Leaf)) {
+        throw ("workspace .gitignore should exist after managed update: {0}" -f $gitIgnorePath)
+    }
+
+    $content = Get-Content -LiteralPath $gitIgnorePath -Raw -Encoding utf8
+    $lines = [regex]::Split($content, '\r?\n') | ForEach-Object { $_.Trim() }
+
+    foreach ($entry in $Entries) {
+        $count = @($lines | Where-Object { $_ -eq $entry }).Count
+        if ($count -ne 1) {
+            throw (".gitignore entry `{0}` should appear exactly once after managed update; got {1}" -f $entry, $count)
+        }
+    }
+}
+
+function Assert-GitIgnoreOrderedEntries {
+    param(
+        [string]$WorkspaceRoot,
+        [string[]]$Entries
+    )
+
+    $gitIgnorePath = Join-Path $WorkspaceRoot '.gitignore'
+    if (-not (Test-Path -LiteralPath $gitIgnorePath -PathType Leaf)) {
+        throw ("workspace .gitignore should exist after managed update: {0}" -f $gitIgnorePath)
+    }
+
+    $content = Get-Content -LiteralPath $gitIgnorePath -Raw -Encoding utf8
+    $lines = [regex]::Split($content, '\r?\n') | ForEach-Object { $_.Trim() }
+    $cursor = 0
+
+    foreach ($entry in $Entries) {
+        $foundIndex = -1
+        for ($index = $cursor; $index -lt $lines.Count; $index += 1) {
+            if ($lines[$index] -eq $entry) {
+                $foundIndex = $index
+                break
+            }
+        }
+
+        if ($foundIndex -lt 0) {
+            throw (".gitignore should preserve ordered entry sequence after managed update; missing `{0}` at or after index {1}" -f $entry, $cursor)
+        }
+
+        $cursor = $foundIndex + 1
+    }
+}
+
+function Assert-GitIgnoreLfOnly {
+    param([string]$WorkspaceRoot)
+
+    $gitIgnorePath = Join-Path $WorkspaceRoot '.gitignore'
+    if (-not (Test-Path -LiteralPath $gitIgnorePath -PathType Leaf)) {
+        throw ("workspace .gitignore should exist after managed update: {0}" -f $gitIgnorePath)
+    }
+
+    $bytes = [System.IO.File]::ReadAllBytes($gitIgnorePath)
+    if ($bytes -contains 13) {
+        throw '.gitignore should remain LF-only after managed update'
+    }
+}
+
 function Remove-DirectoryWithRetry {
     param(
         [string]$Path,
@@ -277,6 +351,65 @@ try {
             if ($content.Contains('DRIFT-LINE')) {
                 throw 'decision-needed template drift should be repaired by Scope=All'
             }
+        }
+
+    Invoke-ManagedAssetsCase `
+        -Name 'workspace-gitignore-managed-entries-are-idempotent' `
+        -Scope 'All' `
+        -ExpectedStatus 'PASS' `
+        -Mutator {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot)
+
+            $gitIgnorePath = Join-Path $WorkspaceRoot '.gitignore'
+            $content = Get-Content -LiteralPath $gitIgnorePath -Raw -Encoding utf8
+            $updatedContent = [regex]::Replace($content, '(?m)^GEMINI\.md\r?\n?', '')
+            [System.IO.File]::WriteAllText($gitIgnorePath, $updatedContent, (New-Object System.Text.UTF8Encoding($false)))
+        } `
+        -PostAssert {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot, $Result)
+
+            Assert-GitIgnoreEntriesExactlyOnce -WorkspaceRoot $WorkspaceRoot
+        }
+
+    Invoke-ManagedAssetsCase `
+        -Name 'workspace-gitignore-preserves-user-sentinel-rules' `
+        -Scope 'All' `
+        -ExpectedStatus 'PASS' `
+        -Mutator {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot)
+
+            $gitIgnorePath = Join-Path $WorkspaceRoot '.gitignore'
+            $content = Get-Content -LiteralPath $gitIgnorePath -Raw -Encoding utf8
+            $updatedContent = [regex]::Replace($content, '(?m)^GEMINI\.md\r?\n?', '')
+            $updatedContent = "# user sentinel`r`nnode_modules/`r`n*.log`r`n`r`n" + $updatedContent.TrimStart([char[]]@("`r", "`n"))
+            [System.IO.File]::WriteAllText($gitIgnorePath, $updatedContent, (New-Object System.Text.UTF8Encoding($false)))
+        } `
+        -PostAssert {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot, $Result)
+
+            Assert-GitIgnoreEntriesExactlyOnce -WorkspaceRoot $WorkspaceRoot
+            Assert-GitIgnoreEntriesExactlyOnce -WorkspaceRoot $WorkspaceRoot -Entries @('# user sentinel', 'node_modules/', '*.log')
+            Assert-GitIgnoreOrderedEntries -WorkspaceRoot $WorkspaceRoot -Entries @('# user sentinel', 'node_modules/', '*.log', '# claude-dev-harness workspace artifacts', '.assistant/', 'AGENTS.md')
+        }
+
+    Invoke-ManagedAssetsCase `
+        -Name 'workspace-gitignore-preserves-lf-only-newlines' `
+        -Scope 'All' `
+        -ExpectedStatus 'PASS' `
+        -Mutator {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot)
+
+            $gitIgnorePath = Join-Path $WorkspaceRoot '.gitignore'
+            $content = Get-Content -LiteralPath $gitIgnorePath -Raw -Encoding utf8
+            $updatedContent = [regex]::Replace($content, '(?m)^GEMINI\.md\r?\n?', '')
+            $updatedContent = [regex]::Replace($updatedContent, "`r`n", "`n")
+            [System.IO.File]::WriteAllText($gitIgnorePath, $updatedContent, (New-Object System.Text.UTF8Encoding($false)))
+        } `
+        -PostAssert {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot, $Result)
+
+            Assert-GitIgnoreEntriesExactlyOnce -WorkspaceRoot $WorkspaceRoot
+            Assert-GitIgnoreLfOnly -WorkspaceRoot $WorkspaceRoot
         }
 } finally {
     Remove-DirectoryWithRetry -Path $scratchRoot | Out-Null

@@ -195,6 +195,81 @@ function Read-FileUtf8 {
     return Get-Content -LiteralPath $Path -Raw -Encoding utf8
 }
 
+function Get-ExistingNewlineStyle {
+    param([string]$Content)
+
+    if ($null -eq $Content) {
+        return "`r`n"
+    }
+
+    if ($Content.Contains("`r`n")) {
+        return "`r`n"
+    }
+
+    if ($Content.Contains("`n")) {
+        return "`n"
+    }
+
+    return "`r`n"
+}
+
+function Ensure-WorkspaceGitIgnoreEntries {
+    param([string]$WorkspaceRoot)
+
+    $gitIgnorePath = Join-Path $WorkspaceRoot '.gitignore'
+    $requiredEntries = @(
+        '.assistant/',
+        'AGENTS.md',
+        'GEMINI.md',
+        '.claude'
+    )
+    $managedComment = '# claude-dev-harness workspace artifacts'
+
+    $existingContent = Read-FileUtf8 -Path $gitIgnorePath
+    $existingLines = if ($null -eq $existingContent) {
+        @()
+    } else {
+        [regex]::Split($existingContent, '\r?\n')
+    }
+
+    $normalizedLines = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($line in $existingLines) {
+        [void]$normalizedLines.Add($line.Trim())
+    }
+
+    $missingEntries = @(
+        $requiredEntries | Where-Object { -not $normalizedLines.Contains($_) }
+    )
+    if ($missingEntries.Count -eq 0) {
+        return
+    }
+
+    Backup-IfNeeded -Path $gitIgnorePath
+
+    $newline = Get-ExistingNewlineStyle -Content $existingContent
+    $appendedLines = New-Object System.Collections.Generic.List[string]
+    if (-not $normalizedLines.Contains($managedComment)) {
+        [void]$appendedLines.Add($managedComment)
+    }
+    foreach ($entry in $missingEntries) {
+        [void]$appendedLines.Add($entry)
+    }
+
+    $trimmedExisting = if ($null -eq $existingContent) {
+        ''
+    } else {
+        $existingContent.TrimEnd([char[]]@("`r", "`n"))
+    }
+
+    $updatedContent = if ([string]::IsNullOrWhiteSpace($trimmedExisting)) {
+        ($appendedLines -join $newline) + $newline
+    } else {
+        $trimmedExisting + $newline + $newline + ($appendedLines -join $newline) + $newline
+    }
+
+    Write-Utf8NoBom -Path $gitIgnorePath -Content $updatedContent
+}
+
 function ConvertTo-NormalizedObject {
     param($Value)
 
@@ -1142,6 +1217,7 @@ try {
     Save-InstallManifestSnapshot
 
     Ensure-Directory -Path (Join-Path $RepoSkillsPath '.system')
+    Ensure-WorkspaceGitIgnoreEntries -WorkspaceRoot $WorkspaceRoot
 
     Install-VaultTemplate -TemplateRoot (Join-Path $RepoRoot 'vault-template') -TargetRoot $VaultPath
 

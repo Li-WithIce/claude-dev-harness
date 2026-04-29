@@ -131,6 +131,33 @@ function Assert-RenderedFile {
     }
 }
 
+function Assert-GitIgnoreManagedEntries {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        Add-Error ("缺少 workspace .gitignore: {0}" -f $Path)
+        return
+    }
+
+    $content = Read-FileUtf8 -Path $Path
+    if ($null -eq $content) {
+        Add-Error ("无法读取 workspace .gitignore: {0}" -f $Path)
+        return
+    }
+
+    $lines = [regex]::Split($content, '\r?\n') | ForEach-Object { $_.Trim() }
+    foreach ($entry in @('# claude-dev-harness workspace artifacts', '.assistant/', 'AGENTS.md', 'GEMINI.md', '.claude')) {
+        $matches = @($lines | Where-Object { $_ -eq $entry })
+        if ($matches.Count -eq 1) {
+            Add-Check (".gitignore 包含且仅包含一条 [{0}]" -f $entry)
+        } elseif ($matches.Count -eq 0) {
+            Add-Error (".gitignore 缺少 [{0}]" -f $entry)
+        } else {
+            Add-Error (".gitignore 中 [{0}] 出现了 {1} 次，应为 1 次" -f $entry, $matches.Count)
+        }
+    }
+}
+
 function Assert-PreservedDirectoryMatchesRepo {
     param(
         [string]$HostPath,
@@ -328,6 +355,7 @@ $CodexConfigPath = Join-Path $CodexHome 'config.toml'
 $CodexAgentsPath = Join-Path $CodexHome 'AGENTS.md'
 $WorkspaceAgentsPath = Join-Path $WorkspaceRoot 'AGENTS.md'
 $WorkspaceGeminiPath = Join-Path $WorkspaceRoot 'GEMINI.md'
+$WorkspaceGitIgnorePath = Join-Path $WorkspaceRoot '.gitignore'
 $WorkspaceEntryAgentsPath = Join-Path $VaultPath 'entry\AGENTS.md'
 $WorkspaceEntryGeminiPath = Join-Path $VaultPath 'entry\GEMINI.md'
 $WorkspaceAdvanceStageShimPath = Join-Path $VaultPath 'entry\advance-stage.ps1'
@@ -356,6 +384,7 @@ foreach ($hookName in @('userpromptsubmit.js', 'posttooluse.js', 'stop.js')) {
 Assert-RenderedFile -Path $CodexAgentsPath -ForbiddenTokens $ForbiddenTokens
 Assert-RenderedFile -Path $WorkspaceAgentsPath -ForbiddenTokens $ForbiddenTokens
 Assert-RenderedFile -Path $WorkspaceGeminiPath -ForbiddenTokens $ForbiddenTokens
+Assert-GitIgnoreManagedEntries -Path $WorkspaceGitIgnorePath
 Assert-RenderedFile -Path $WorkspaceEntryAgentsPath -ForbiddenTokens $ForbiddenTokens
 Assert-RenderedFile -Path $WorkspaceEntryGeminiPath -ForbiddenTokens $ForbiddenTokens
 Assert-RenderedFile -Path $WorkspaceAdvanceStageShimPath -ForbiddenTokens $ForbiddenTokens
