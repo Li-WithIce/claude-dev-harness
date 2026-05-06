@@ -40,6 +40,11 @@ description: Use when the task is in PLAN_REVIEW or CODE_REVIEW and a new append
 ### PLAN_REVIEW
 
 - Clarification 是否完整
+- 若 `## Clarification` 含 `work_type:`，核对它是否只作为 PLAN 语义路由使用，且与验收标准、非目标、受影响路径和验证命令一致
+- 确认 `work_type` 没有替代 `Change Contract.change_type`，没有写入 frontmatter，也没有要求 `advance-stage.ps1` 或 validator 把它当作阶段真相源
+- 若 `work_type: bug`，检查 PLAN 是否说明复现步骤、期望/实际行为、影响范围/严重程度、根因定位动作和修复验证动作；不得退化为“见 issue”这类不可执行占位
+- 若 `work_type: refactor`，检查 PLAN 是否说明行为不变约束、重构边界、受影响调用点、等价验证和回滚/兼容路径；不得夹带功能变更
+- 确认 bug/refactor 模板仍嵌在现有 `plan.md` / `test.md` 结构内，没有新增 issue/analyze/fix stage 或独立真相源文件
 - User Confirmation 是否已经 `confirmed`
 - 计划粒度是否足够指导实现和验证
 - 风险和验证命令是否可执行
@@ -50,6 +55,10 @@ description: Use when the task is in PLAN_REVIEW or CODE_REVIEW and a new append
 - 实现是否满足计划
 - 是否有明显漏做、做错、多做
 - 最新 `Implementation Notes` 是否和代码一致
+- 抽查实现是否命中 reflection 风险：过大文件继续塞逻辑、计划外抽象、邻近顺手重构、未声明新概念、症状补丁替代根因修复
+- 若命中 reflection 风险，确认最新 `Implementation Notes - risks:` 或 `- next:` 已说明理由、取舍和验证；未说明或超出 PLAN 时用现有 P1/P2 finding 退回 IMPLEMENT
+- 若 `work_type: bug`，确认实现证据能对应复现问题、根因定位和修复验证；未覆盖影响面回归时应退回补证据
+- 若 `work_type: refactor`，确认实现没有计划外功能行为变化，并且等价验证覆盖 PLAN 声明的调用点或依赖面
 - 是否还需要回 IMPLEMENT 补证据或补实现
 
 ## TodoWrite Milestones

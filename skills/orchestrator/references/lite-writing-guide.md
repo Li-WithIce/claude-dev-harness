@@ -119,6 +119,83 @@ stages:
 - 回滚策略或兼容性约束
 - `ui: <expectation | not-applicable>`
 
+#### work_type（可选语义路由）
+
+新任务可以在 `## Clarification` 内增加一行 `work_type`，帮助 PLAN_REVIEW 选择审查重点：
+
+```markdown
+## Clarification
+- work_type: feature | bug | refactor | explore | doc | maintenance
+- 验收标准: ...
+- 非目标: ...
+- 受影响目录: ...
+- 回滚策略: ...
+- ui: not-applicable
+```
+
+规则：
+
+- `work_type` 只描述任务意图和审查路线，不是阶段字段，不写入 frontmatter。
+- `work_type` 不替代 `## Change Contract`；`Change Contract.change_type` 仍描述产物或变更类型，并继续使用现有 validator 枚举。
+- `work_type` 不参与 `advance-stage.ps1` 推进，不创建第二套真相源。
+- 旧任务缺少 `work_type` 仍合法；只有存在该字段时，PLAN_REVIEW 才核对它与验收标准、非目标、受影响路径和验证命令是否一致。
+
+#### bug / refactor 条件化模板
+
+以下模板只在 `work_type: bug` 或 `work_type: refactor` 时使用。它们是 `plan.md` / `test.md` 内的写作约束，不新增 issue/analyze/fix stage，也不新增单独真相源文件。
+
+`work_type: bug` 示例：
+
+```markdown
+## Clarification
+- work_type: bug
+- bug.repro: ...
+- bug.expected: ...
+- bug.actual: ...
+- bug.impact: ...
+- bug.root_cause_action: ...
+- bug.fix_verification: ...
+- 验收标准: ...
+- 非目标: ...
+- 受影响目录: ...
+- 回滚策略: ...
+- ui: not-applicable
+
+## Verification
+- `<rerun reproduction or equivalent command>`
+- `<fix verification command>`
+- `<impact regression command>`
+```
+
+`work_type: refactor` 示例：
+
+```markdown
+## Clarification
+- work_type: refactor
+- refactor.invariant: ...
+- refactor.scope: ...
+- refactor.callers: ...
+- refactor.equivalence_check: ...
+- refactor.rollback: ...
+- refactor.no_feature_change: ...
+- 验收标准: ...
+- 非目标: ...
+- 受影响目录: ...
+- 回滚策略: ...
+- ui: not-applicable
+
+## Verification
+- `<behavior equivalence command>`
+- `<affected caller regression command>`
+```
+
+规则：
+
+- 这些字段只在对应 `work_type` 下启用，不要求普通任务填写。
+- 不适用的字段要写原因，不能留下空占位。
+- PLAN_REVIEW 应检查这些字段是否导出了可执行 verification；TEST 应按同一复现、修复验证或等价验证口径收集证据。
+- `work_type: bug` 不等于新建 issue 流程；`work_type: refactor` 不等于绕过功能验收。
+
 ### User Confirmation
 
 `## User Confirmation` 只使用这条机器可读字段：
@@ -274,6 +351,24 @@ front_keywords: [shared-memory, long-session, recovery]
 - 回修后必须追加新 run，不能复用旧 run 充当“新证据”。
 - `changed` 写结果，不写空话。
 - `IMPLEMENT` 若是接 `CODE_REVIEW revise` 回来，最新 run 必须比那条 review 更晚。
+
+#### Implementation reflection checks
+
+IMPLEMENT 使用现有 `- risks:` / `- next:` 记录命中的反射风险，不新增 section、字段、stage 或独立 checklist。未命中时不需要逐项写“无”。
+
+只检查 5 类窄范围信号：
+
+- oversized-file stuffing: 继续往已过大的文件塞逻辑
+- 计划外抽象: 新增 PLAN 没声明的分支、层级、接口或抽象
+- 邻近顺手重构: 顺手改了当前验收范围外的邻近代码
+- 未声明新概念: 引入 PLAN / spec 没有定义的新术语、状态或配置口径
+- 症状补丁: 只压住表面现象，没有处理 PLAN 中要求验证的根因或约束
+
+规则：
+
+- 命中但仍在 PLAN 内时，在 `- risks:` 或 `- next:` 写明理由、取舍和验证。
+- 命中且超出 PLAN 时，停止实现并回 PLAN 或拆新任务。
+- CODE_REVIEW 用现有 `findings` 退回，不引入 validator 硬校验。
 
 ## test.md 契约
 

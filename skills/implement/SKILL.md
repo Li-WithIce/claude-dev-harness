@@ -32,6 +32,20 @@ IMPLEMENT 负责两件事：改代码，以及把本轮实现证据追加到 `do
 - next: 交给 CODE_REVIEW 关注什么
 ```
 
+## Implementation Reflection Checks
+
+实现前后做一次轻量反射，只在命中风险时记录到本轮 `- risks:` 或立刻停下询问；未命中时不需要逐项打勾。
+
+重点只看 5 类 AI 常见失败信号：
+
+- oversized-file stuffing: 是否继续往已过大的文件塞逻辑，而不是拆到更合适的位置。
+- 计划外抽象: 是否新增 PLAN 没声明的分支、层级、接口或抽象。
+- 邻近顺手重构: 是否顺手改了当前验收范围外的邻近代码。
+- 未声明新概念: 是否引入 PLAN / spec 没有定义的新术语、状态或配置口径。
+- 症状补丁: 是否只压住表面现象，而没有处理 PLAN 中要求验证的根因或约束。
+
+命中任一项时，先判断是否仍在已确认 PLAN 内：在范围内就把理由、取舍和验证补到 `- risks:` / `- next:`；超出范围就停止实现，要求回 PLAN 或拆新任务。不要新增反射 stage、独立 checklist 或新的 Implementation Notes 字段。
+
 ## 工作流程
 
 1. 读取 `plan.md` 和可选 `spec.md`

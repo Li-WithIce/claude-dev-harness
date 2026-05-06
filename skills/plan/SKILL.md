@@ -46,6 +46,51 @@ PLAN 的唯一产物是 `docs/tasks/<task-id>/plan.md`。这个文件的 frontma
 - 回滚或兼容性约束
 - `ui: <expectation | not-applicable>`
 
+### work_type 路由
+
+新建或重写 PLAN 时，建议在 `## Clarification` 内增加一行机器可读的工作类型分诊信号：
+
+```markdown
+- work_type: feature | bug | refactor | explore | doc | maintenance
+```
+
+`work_type` 描述本轮工作的意图和审查重点，只作为 PLAN / PLAN_REVIEW 的语义路由；不要写进 frontmatter，不要让 `advance-stage.ps1` 消费它，也不要把它作为第二套阶段真相源。
+
+`work_type` 与 `Change Contract.change_type` 职责不同：
+
+- `work_type`: 描述“为什么做 / 按哪类任务审”，例如修错、探索、文档维护。
+- `change_type`: 描述“产物或变更类型”，继续使用现有 `task | feature | enhance | refactor` 枚举和 validator 规则。
+
+旧任务没有 `work_type` 不视为缺陷；只有当当前计划主动启用该字段时，PLAN_REVIEW 才需要核对它是否与验收标准、非目标和验证命令一致。
+
+### bug / refactor 条件化模板
+
+以下模板只在 `work_type: bug` 或 `work_type: refactor` 时启用。不要为普通 feature/doc/maintenance 任务强制补这些字段，也不要新建 `bug-report.md`、`refactor-design.md` 或 analyze/fix 双阶段流程。
+
+`work_type: bug` 的 PLAN 至少要让 IMPLEMENT 和 TEST 看清：
+
+```markdown
+- bug.repro: 可重复执行的复现步骤；无法稳定复现时写已知触发条件和缺口
+- bug.expected: 期望行为
+- bug.actual: 实际行为
+- bug.impact: 影响范围和严重程度
+- bug.root_cause_action: 根因定位动作；未知根因时写要先验证的假设
+- bug.fix_verification: 修复后必须执行的验证动作
+```
+
+`work_type: refactor` 的 PLAN 至少要让 IMPLEMENT 和 TEST 看清：
+
+```markdown
+- refactor.invariant: 必须保持不变的外部行为
+- refactor.scope: 本轮重构边界和明确不碰的模块
+- refactor.callers: 受影响调用点或依赖面
+- refactor.equivalence_check: 行为等价验证命令或手工检查
+- refactor.rollback: 回滚路径或兼容性约束
+- refactor.no_feature_change: 明确不引入功能行为变化
+```
+
+这些字段是现有 `## Clarification` / `## Verification` 的条件化补充，不是新的阶段状态。若某项确实不适用，写清理由，不要留空占位。
+
 `## User Confirmation` 必须使用这条机器可读字段：
 
 ```markdown
@@ -80,6 +125,7 @@ updated: 2026-04-09
 # <Task Title>
 
 ## Clarification
+- work_type: feature | bug | refactor | explore | doc | maintenance
 - 验收标准: ...
 - 非目标: ...
 - 受影响目录: ...

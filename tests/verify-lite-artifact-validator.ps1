@@ -336,7 +336,7 @@ function Assert-TaskSetEquals {
     .SYNOPSIS
     比较实际 task 集合与预期快照。
     .DESCRIPTION
-    Phase 6 需要把 live 13-task baseline 的 PASS/FAIL 集合锁成可复跑回归。
+    Phase 6 需要把 live 15-task baseline 的 PASS/FAIL 集合锁成可复跑回归。
     .PARAMETER Label
     集合标签。
     .PARAMETER Actual
@@ -616,13 +616,14 @@ try {
         Where-Object { Test-Path (Join-Path $_.FullName 'plan.md') } |
         Sort-Object Name |
         Select-Object -ExpandProperty Name
-    if ($livePlanTasks.Count -eq 14) {
-        Add-Check 'live baseline still contains 14 plan-bearing tasks'
+    if ($livePlanTasks.Count -eq 15) {
+        Add-Check 'live baseline still contains 15 plan-bearing tasks'
     } else {
-        Add-Failure ("live baseline should contain 14 plan-bearing tasks, got {0}" -f $livePlanTasks.Count)
+        Add-Failure ("live baseline should contain 15 plan-bearing tasks, got {0}" -f $livePlanTasks.Count)
     }
 
     $expectedPassTasks = @(
+        'codestable-borrowing-roadmap',
         'eo-lite-enhancement',
         'overview-maintenance-enhancement',
         'phase3-acp-skill-alignment',

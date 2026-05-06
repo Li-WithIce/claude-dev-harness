@@ -60,6 +60,24 @@ pass
 
 `delivery` 与 `follow_up` 是最低必填；`current_state`、`key_decisions`、`next_actions` 为 opt-in 密度扩展，推荐长任务填写。旧格式 Handoff（只含 delivery/follow_up）继续通过 validator。格式契约以 `../orchestrator/references/lite-writing-guide.md` 为单一真相源。
 
+## work_type 条件化验证
+
+当 `plan.md` 的 `## Clarification` 含 `work_type: bug` 或 `work_type: refactor` 时，TEST 仍只产出同一个 `docs/tasks/<task-id>/test.md`，不要新增 issue/refactor 专用报告或额外阶段。
+
+`work_type: bug` 的 `## Test Approach` / `## Findings` 应覆盖：
+
+- 重跑或等价执行 PLAN 中声明的复现步骤
+- 验证期望行为已恢复，且实际行为不再出现
+- 执行 PLAN 中声明的修复验证动作
+- 覆盖影响范围内的最小回归；无法覆盖时在 `## Risks / Gaps` 写明
+
+`work_type: refactor` 的 `## Test Approach` / `## Findings` 应覆盖：
+
+- 执行 PLAN 中声明的行为等价验证
+- 抽查受影响调用点或依赖面
+- 说明未发现功能行为变化；若存在有意行为变化，TEST 应判为 `fail` 或 `blocked`，让任务回到前置阶段重定计划
+- 记录未覆盖的兼容性或回滚风险
+
 ## 工作流程
 
 1. 读取 `plan.md` 和可选 `spec.md`
