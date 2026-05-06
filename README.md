@@ -112,6 +112,42 @@ updated: YYYY-MM-DD
 - 输入不足时，可选创建 `docs/tasks/<task-id>/spec.md`
 - `spec.md` 现在支持可选 `front_keywords` frontmatter，用于跨任务检索和长会话恢复，但不是必填字段
 
+### `work_type`、条件化模板与 reflection guidance
+
+`work_type` 是可选的 PLAN / Clarification 分诊信号，用来描述“这轮按哪类工作审”，不是阶段状态、不是 frontmatter 字段，也不是 `advance-stage.ps1` 或 validator 的输入。
+
+它和 `Change Contract.change_type` 的职责分开：
+
+- `work_type` 描述意图和审查重点，例如 `bug`、`refactor`、`feature`、`doc`
+- `Change Contract.change_type` 描述产物或变更类型，继续使用现有 validator 认可的 `task | feature | enhance | refactor`
+
+当 `work_type: bug` 时，PLAN 里的 Clarification 应补足复现、期望/实际行为、影响面、根因定位动作和修复验证；TEST 会重点重跑复现、验证修复和最小回归；CODE_REVIEW 会检查实现证据是否覆盖根因与影响面。
+
+当 `work_type: refactor` 时，PLAN 里的 Clarification 应补足行为不变约束、重构边界、受影响调用点、等价验证和回滚/兼容路径；TEST 会重点验证行为等价；CODE_REVIEW 会检查是否夹带计划外功能行为变化。
+
+最小写法示例：
+
+```markdown
+## Clarification
+- work_type: bug
+- bug.repro: 运行 `pwsh -File tests/repro.ps1`，当前会复现退出码 1
+- bug.expected: 命令通过并生成 expected.json
+- bug.actual: 命令在缺少配置时提前失败
+- bug.impact: 缺少可选配置的工作区无法启动相关流程
+- bug.root_cause_action: 定位配置读取默认值为何未生效
+- bug.fix_verification: 重跑复现命令和相关最小回归
+- 验收标准: 缺少可选配置时仍使用默认值
+- 非目标: 不调整配置 schema
+
+## Change Contract
+- change_type: task
+- affected_paths:
+  - src/config-loader.ps1
+  - tests/repro.ps1
+```
+
+IMPLEMENT / CODE_REVIEW 的 implementation reflection checks 是轻量 guidance，只覆盖 5 类风险：过大文件继续塞逻辑、计划外抽象、邻近顺手重构、未声明新概念、症状补丁替代根因修复。实现者只在命中风险时，把理由、取舍和验证记录到最新 `Implementation Notes` 的 `risks` 或 `next`；未命中不需要逐项打勾。它不会新增阶段、独立 checklist、第二套真相源或 validator gate。
+
 ### 推进规则
 
 当前 `advance-stage.ps1` 的真实语义如下：
