@@ -44,6 +44,7 @@ description: Use when the task is in PLAN_REVIEW or CODE_REVIEW and a new append
 - 确认 `work_type` 没有替代 `Change Contract.change_type`，没有写入 frontmatter，也没有要求 `advance-stage.ps1` 或 validator 把它当作阶段真相源
 - 若 `work_type: bug`，检查 PLAN 是否说明复现步骤、期望/实际行为、影响范围/严重程度、根因定位动作和修复验证动作；不得退化为“见 issue”这类不可执行占位
 - 若 `work_type: refactor`，检查 PLAN 是否说明行为不变约束、重构边界、受影响调用点、等价验证和回滚/兼容路径；不得夹带功能变更
+- 声明型字段可以作为承诺，但必须有同任务内可执行的 `equivalence_check` 或 verification 证据兜底；不能只写“行为不变”这类空声明
 - 确认 bug/refactor 模板仍嵌在现有 `plan.md` / `test.md` 结构内，没有新增 issue/analyze/fix stage 或独立真相源文件
 - User Confirmation 是否已经 `confirmed`
 - 计划粒度是否足够指导实现和验证

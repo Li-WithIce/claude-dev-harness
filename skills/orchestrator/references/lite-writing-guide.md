@@ -119,7 +119,7 @@ stages:
 - 回滚策略或兼容性约束
 - `ui: <expectation | not-applicable>`
 
-#### work_type（可选语义路由）
+#### <a id="work-type-routing"></a>work_type（可选语义路由）
 
 新任务可以在 `## Clarification` 内增加一行 `work_type`，帮助 PLAN_REVIEW 选择审查重点：
 
@@ -144,7 +144,7 @@ stages:
 
 以下模板只在 `work_type: bug` 或 `work_type: refactor` 时使用。它们是 `plan.md` / `test.md` 内的写作约束，不新增 issue/analyze/fix stage，也不新增单独真相源文件。
 
-`work_type: bug` 示例：
+<a id="work-type-bug-template"></a>`work_type: bug` 示例：
 
 ```markdown
 ## Clarification
@@ -167,7 +167,7 @@ stages:
 - `<impact regression command>`
 ```
 
-`work_type: refactor` 示例：
+<a id="work-type-refactor-template"></a>`work_type: refactor` 示例：
 
 ```markdown
 ## Clarification
