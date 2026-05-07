@@ -1,0 +1,2 @@
+resolved tool=codex via cli-tool
+PLAN_REVIEW | codex
