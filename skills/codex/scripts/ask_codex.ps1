@@ -93,19 +93,53 @@ function Test-Command {
 
 function Test-CodexRunnable {
     try {
-        $ver = & codex --version 2>&1
-        if ($LASTEXITCODE -ne 0) {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        if ($IsWindows -or $PSVersionTable.PSVersion.Major -le 5) {
+            $psi.FileName = 'cmd.exe'
+            $psi.Arguments = '/c codex --version'
+        } else {
+            $psi.FileName = 'codex'
+            $psi.Arguments = '--version'
+        }
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
+        $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+        $psi.StandardErrorEncoding = [System.Text.Encoding]::UTF8
+
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $psi
+
+        try {
+            $process.Start() | Out-Null
+            $stdoutText = $process.StandardOutput.ReadToEnd().Trim()
+            $stderrText = $process.StandardError.ReadToEnd().Trim()
+            $process.WaitForExit()
+            $exitCode = $process.ExitCode
+        } finally {
+            $process.Dispose()
+        }
+
+        if ($exitCode -ne 0) {
+            $rawOutput = @($stdoutText, $stderrText) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
             $diag = @{
                 status = "preflight_failed"
                 tool = "codex"
-                reason = "codex --version returned exit code $LASTEXITCODE"
+                reason = "codex --version returned exit code $exitCode"
                 suggestion = "Reinstall Codex CLI or check PATH"
-                raw_output = "$ver"
+                raw_output = ($rawOutput -join [Environment]::NewLine)
             } | ConvertTo-Json -Compress
             Write-Output $diag
             exit 1
         }
-        Write-Host "[preflight] codex version: $ver" -ForegroundColor Gray
+
+        if (-not [string]::IsNullOrWhiteSpace($stderrText)) {
+            Write-Host "[preflight] codex warnings: $stderrText" -ForegroundColor Yellow
+        }
+
+        $versionSummary = @($stdoutText, $stderrText) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1
+        Write-Host "[preflight] codex version: $versionSummary" -ForegroundColor Gray
     } catch {
         $diag = @{
             status = "preflight_failed"
@@ -155,15 +189,103 @@ function Write-File-NoBOM {
     [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
 }
 
+function Ensure-Directory {
+    param([string]$Path)
+    if (-not (Test-Path $Path -PathType Container)) {
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null
+    }
+}
+
+function Resolve-SourceCodexHome {
+    if (-not [string]::IsNullOrWhiteSpace($env:CODEX_HOME)) {
+        return $env:CODEX_HOME
+    }
+    if ([string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
+        throw "USERPROFILE is required when CODEX_HOME is not set"
+    }
+    return (Join-Path $env:USERPROFILE '.codex')
+}
+
+function Sync-OptionalFile {
+    param(
+        [string]$Source,
+        [string]$Target
+    )
+
+    if (-not (Test-Path $Source -PathType Leaf)) {
+        return
+    }
+
+    $shouldCopy = -not (Test-Path $Target -PathType Leaf)
+    if (-not $shouldCopy) {
+        $shouldCopy = (Get-Item $Source).LastWriteTimeUtc -gt (Get-Item $Target).LastWriteTimeUtc
+    }
+
+    if ($shouldCopy) {
+        Copy-Item -Path $Source -Destination $Target -Force
+    }
+}
+
+function Initialize-CodexRuntimeHome {
+    param([string]$Workspace)
+
+    $sourceHome = Resolve-SourceCodexHome
+    $runtimeRoot = Join-Path $Workspace '.tmp'
+    $codexHome = Join-Path $runtimeRoot 'codex-home'
+    $tempDir = Join-Path $codexHome 'tmp'
+
+    Ensure-Directory -Path $runtimeRoot
+    Ensure-Directory -Path $codexHome
+    Ensure-Directory -Path $tempDir
+    Ensure-Directory -Path (Join-Path $codexHome 'skills')
+    Ensure-Directory -Path (Join-Path $codexHome 'sessions')
+
+    Sync-OptionalFile -Source (Join-Path $sourceHome 'auth.json') -Target (Join-Path $codexHome 'auth.json')
+    Sync-OptionalFile -Source (Join-Path $sourceHome 'AGENTS.md') -Target (Join-Path $codexHome 'AGENTS.md')
+
+    return @{
+        codex_home = $codexHome
+        temp_dir = $tempDir
+    }
+}
+
+function Convert-CertificateToPem {
+    param([byte[]]$RawData)
+
+    $base64 = [System.Convert]::ToBase64String($RawData, [System.Base64FormattingOptions]::InsertLineBreaks)
+    return @(
+        '-----BEGIN CERTIFICATE-----'
+        $base64
+        '-----END CERTIFICATE-----'
+        ''
+    ) -join [Environment]::NewLine
+}
+
+function Initialize-CodexCaBundle {
+    param([string]$CodexHome)
+
+    $caDir = Join-Path $CodexHome 'ca'
+    $bundlePath = Join-Path $caDir 'current-user-root.pem'
+    Ensure-Directory -Path $caDir
+
+    $certs = @(Get-ChildItem Cert:\CurrentUser\Root -ErrorAction Stop)
+    if ($certs.Count -eq 0) {
+        throw "CurrentUser Root certificate store is empty"
+    }
+
+    $pemBlocks = foreach ($cert in $certs) {
+        Convert-CertificateToPem -RawData $cert.RawData
+    }
+
+    Write-File-NoBOM -Path $bundlePath -Content (($pemBlocks -join '') + [Environment]::NewLine)
+    return $bundlePath
+}
+
 # Show help if requested
 if ($Help) {
     Show-Usage
     exit 0
 }
-
-# Preflight checks
-Test-Command 'codex'
-Test-CodexRunnable
 
 # Resolve task text from either positional or named parameter
 if ([string]::IsNullOrEmpty($Task) -and -not [string]::IsNullOrEmpty($TaskText)) {
@@ -176,6 +298,21 @@ if (-not (Test-Path $Workspace -PathType Container)) {
     exit 1
 }
 $Workspace = (Resolve-Path $Workspace).Path
+
+$codexRuntimeState = Initialize-CodexRuntimeHome -Workspace $Workspace
+$env:CODEX_HOME = $codexRuntimeState.codex_home
+$env:TEMP = $codexRuntimeState.temp_dir
+$env:TMP = $codexRuntimeState.temp_dir
+try {
+    $env:CODEX_CA_CERTIFICATE = Initialize-CodexCaBundle -CodexHome $codexRuntimeState.codex_home
+} catch {
+    Remove-Item Env:CODEX_CA_CERTIFICATE -ErrorAction SilentlyContinue
+    Write-Host "[preflight] custom CA bundle unavailable: $($_.Exception.Message)" -ForegroundColor Yellow
+}
+
+# Preflight checks
+Test-Command 'codex'
+Test-CodexRunnable
 
 # Validate task
 $Task = Trim-Whitespace $Task
@@ -220,11 +357,11 @@ $codexArgs = @()
 if (-not [string]::IsNullOrEmpty($Session)) {
     # Resume mode: continue a previous session
     # Note: resume only supports -c/--config and --last flags (no --json, --sandbox, etc.)
-    $codexArgs = @('exec', 'resume', '-c', "model_reasoning_effort=`"$Reasoning`"", '-c', 'skip_git_repo_check=true')
+    $codexArgs = @('exec', '--ignore-user-config', 'resume', '-c', "model_reasoning_effort=`"$Reasoning`"", '-c', 'skip_git_repo_check=true')
     $codexArgs += $Session
 } else {
     # New session
-    $codexArgs = @('exec', '--cd', $Workspace, '--skip-git-repo-check', '--json', '-c', "model_reasoning_effort=`"$Reasoning`"")
+    $codexArgs = @('exec', '--ignore-user-config', '--cd', $Workspace, '--skip-git-repo-check', '--json', '-c', "model_reasoning_effort=`"$Reasoning`"")
     if ($ReadOnly) {
         $codexArgs += '--sandbox', 'read-only'
     } elseif (-not [string]::IsNullOrEmpty($Sandbox)) {
