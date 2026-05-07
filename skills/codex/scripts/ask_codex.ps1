@@ -84,7 +84,7 @@ function Test-Command {
             status = "preflight_failed"
             tool = $Name
             reason = "Command '$Name' not found in PATH"
-            suggestion = if ($Name -eq 'codex') { "Install with: npm install -g @openai/codex" } elseif ($Name -eq 'jq') { "Install jq from https://jqlang.github.io/jq/download/" } else { "Install '$Name' and ensure it is in PATH" }
+            suggestion = if ($Name -eq 'codex') { "Install with: npm install -g @openai/codex" } else { "Install '$Name' and ensure it is in PATH" }
         } | ConvertTo-Json -Compress
         Write-Output $diag
         exit 1
@@ -164,7 +164,6 @@ if ($Help) {
 # Preflight checks
 Test-Command 'codex'
 Test-CodexRunnable
-Test-Command 'jq'
 
 # Resolve task text from either positional or named parameter
 if ([string]::IsNullOrEmpty($Task) -and -not [string]::IsNullOrEmpty($TaskText)) {
