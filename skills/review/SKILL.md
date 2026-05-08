@@ -64,8 +64,8 @@ description: Use when the task is in PLAN_REVIEW or CODE_REVIEW and a new append
 
 ## TodoWrite Milestones
 
-- 适用：`claudecode`；其余 backend 视宿主实现而定。
-- TodoWrite 是 Claude Code 内置 surface，不引入新依赖。
+- 适用：宿主提供 TodoWrite surface 时使用；不作为 Codex-only 默认流程的必需依赖。
+- TodoWrite 是可选宿主 surface，不引入新依赖；没有该 surface 时用原生计划 / team board / 回报消息表达同等 milestone。
 - milestone 是事件，不是签到点；遇到 blocker、证据缺口或 scope 漂移时，必须立刻汇报。
 - 推荐最小节奏固定为：`context-loaded` → `findings-collected` → `run-appended`。
 - `run-appended` 完成后，必须与最终的 verdict callback / `team_send_message` / 用户回报配对，不能只停在 TodoWrite 更新。

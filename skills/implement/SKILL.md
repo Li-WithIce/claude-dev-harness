@@ -63,8 +63,8 @@ IMPLEMENT 负责两件事：改代码，以及把本轮实现证据追加到 `do
 
 ## TodoWrite Milestones
 
-- 适用：`claudecode`；其余 backend 视宿主实现而定。
-- TodoWrite 是 Claude Code 内置 surface，不引入新依赖。
+- 适用：宿主提供 TodoWrite surface 时使用；不作为 Codex-only 默认流程的必需依赖。
+- TodoWrite 是可选宿主 surface，不引入新依赖；没有该 surface 时用原生计划 / team board / 回报消息表达同等 milestone。
 - milestone 是事件，不是签到点；一旦发现 blocker、计划外改动或验证无法完成，必须立刻汇报。
 - 推荐最小节奏固定为：`context-loaded` → `code-edited` → `tests-run` → `notes-appended`。
 - `notes-appended` 完成后，必须与最终的 stage callback / `team_send_message` / 用户回报配对，不能只停在本地 TodoWrite。

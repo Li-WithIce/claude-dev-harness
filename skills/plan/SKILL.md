@@ -192,8 +192,8 @@ model: gpt-5.5/xhigh
 
 ## TodoWrite Milestones
 
-- 适用：`claudecode`；其余 backend 视宿主实现而定。
-- TodoWrite 是 Claude Code 内置 surface，不引入新依赖。
+- 适用：宿主提供 TodoWrite surface 时使用；不作为 Codex-only 默认流程的必需依赖。
+- TodoWrite 是可选宿主 surface，不引入新依赖；没有该 surface 时用原生计划 / team board / 回报消息表达同等 milestone。
 - milestone 是事件，不是签到点；遇到 blocker 时必须立刻汇报，不要堆积到收尾再说。
 - 推荐最小节奏固定为：`phase-loaded` → `core-work-done` → `verification-done`。
 - `verification-done` 之后必须紧跟最终的 stage callback / `team_send_message` / 用户回报，不能只停在 TodoWrite 完成。
