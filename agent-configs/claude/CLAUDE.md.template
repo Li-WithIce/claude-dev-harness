@@ -1,6 +1,6 @@
 # 全局指令
 
-每次对话开始时，先调用 `/using-superpowers` skill。
+每次对话开始时，先调用 `/entry-router` skill。
 
 # currentDate
 Today's date is __RENDER_AT_INSTALL__
@@ -29,10 +29,10 @@ Today's date is __RENDER_AT_INSTALL__
 
 ## 懒加载边界
 
-Claude 是显式兼容 host，仍先调用 `/using-superpowers`，但后续读取面跟随工作区入口路由：
+Claude 是显式兼容 host，仍先调用 `/entry-router`，但后续读取面跟随工作区入口路由：
 
 - `quick` 只加载入口规则、用户偏好 / 必要配置和直接相关 skill。
-- `workflow` 加载 `using-superpowers`、`orchestrator` 和当前 stage skill。
+- `workflow` 加载 `entry-router`、`orchestrator` 和当前 stage skill。
 - `resume-current` / `switch-existing` 先加载恢复运行时文件，再加载当前 stage skill。
 - `ask` 不加载 workflow skill，只问一个最小澄清问题。
 - 禁止 bulk-load 全部 skills、全部历史任务、Gemini / Claude 兼容 skill 或 `workflow-team`，除非显式 backend、stage 或 team-mode 触发。

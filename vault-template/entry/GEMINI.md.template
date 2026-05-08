@@ -18,7 +18,7 @@ Mode hints: `directly edit` / `quick fix` / `直接改` / `快修` bias to `quic
 Lazy loading:
 
 - `quick`: load only entry rules, user preferences / necessary config, and the directly relevant skill or reference.
-- `workflow`: load `using-superpowers`, `orchestrator`, then exactly one current-stage skill (`plan`, `review`, `implement`, or `test`).
+- `workflow`: load `entry-router`, `orchestrator`, then exactly one current-stage skill (`plan`, `review`, `implement`, or `test`).
 - `resume-current` / `switch-existing`: load `.assistant\运行时\恢复索引.md`, `.assistant\运行时\当前任务.md`, `运行时\tasks\<task-id>.md`, then the current-stage skill.
 - `ask`: do not load workflow skills; ask one minimal clarification question.
 - Do not bulk-load all skills, all historical `docs/tasks/*`, Gemini / Claude compatibility skills, or `workflow-team` unless an explicit backend, stage, or team-mode trigger requires it.

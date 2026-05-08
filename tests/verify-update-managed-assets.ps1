@@ -188,6 +188,38 @@ function Assert-CodexRootKeysBeforeFirstTomlTable {
     }
 }
 
+function Assert-ManagedTextContains {
+    param(
+        [string]$Path,
+        [string]$Needle
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw ("managed text file should exist: {0}" -f $Path)
+    }
+
+    $content = Get-Content -LiteralPath $Path -Raw -Encoding utf8
+    if (-not $content.Contains($Needle)) {
+        throw ('{0} should contain `{1}`' -f $Path, $Needle)
+    }
+}
+
+function Assert-ManagedTextNotContains {
+    param(
+        [string]$Path,
+        [string]$Needle
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw ("managed text file should exist: {0}" -f $Path)
+    }
+
+    $content = Get-Content -LiteralPath $Path -Raw -Encoding utf8
+    if ($content.Contains($Needle)) {
+        throw ('{0} should not contain `{1}`' -f $Path, $Needle)
+    }
+}
+
 function Remove-DirectoryWithRetry {
     param(
         [string]$Path,
@@ -385,6 +417,29 @@ try {
                 'model = "gpt-test"',
                 'sandbox_mode = "workspace-write"'
             )
+            $codexConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'config.toml'
+            Assert-ManagedTextContains -Path $codexConfigPath -Needle 'skills\\entry-router\\SKILL.md'
+            Assert-ManagedTextContains -Path $codexConfigPath -Needle 'skills\\using-superpowers\\SKILL.md'
+            Assert-ManagedTextContains -Path $codexConfigPath -Needle 'Legacy explicit compatibility path'
+
+            $codexAgentsPath = Join-Path (Join-Path $UserProfile '.codex') 'AGENTS.md'
+            Assert-ManagedTextContains -Path $codexAgentsPath -Needle 'entry-router'
+            Assert-ManagedTextNotContains -Path $codexAgentsPath -Needle 'using-superpowers'
+
+            $claudeInstructionsPath = Join-Path (Join-Path $UserProfile '.claude') 'CLAUDE.md'
+            Assert-ManagedTextContains -Path $claudeInstructionsPath -Needle '/entry-router'
+            Assert-ManagedTextNotContains -Path $claudeInstructionsPath -Needle '/using-superpowers'
+
+            $workspaceAgentsPath = Join-Path $WorkspaceRoot 'AGENTS.md'
+            Assert-ManagedTextContains -Path $workspaceAgentsPath -Needle 'entry-router'
+            Assert-ManagedTextNotContains -Path $workspaceAgentsPath -Needle 'using-superpowers'
+
+            $vaultAgentsPath = Join-Path $WorkspaceRoot '.assistant\entry\AGENTS.md'
+            $vaultGeminiPath = Join-Path $WorkspaceRoot '.assistant\entry\GEMINI.md'
+            Assert-ManagedTextContains -Path $vaultAgentsPath -Needle 'entry-router'
+            Assert-ManagedTextNotContains -Path $vaultAgentsPath -Needle 'using-superpowers'
+            Assert-ManagedTextContains -Path $vaultGeminiPath -Needle 'entry-router'
+            Assert-ManagedTextNotContains -Path $vaultGeminiPath -Needle 'using-superpowers'
         }
 
     Invoke-ManagedAssetsCase `
@@ -402,6 +457,72 @@ try {
             $status = Get-StatusLineValue -Output $Result.Output -Prefix 'STATUS'
             if ($status -ne 'PASS') {
                 throw 'update-managed-assets should pass when it infers WorkspaceRoot from the current working directory'
+            }
+        }
+
+    Invoke-ManagedAssetsCase `
+        -Name 'entry-router-managed-assets-are-refreshed' `
+        -Scope 'All' `
+        -ExpectedStatus 'PASS' `
+        -Mutator {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot)
+
+            $managedTextFiles = @(
+                (Join-Path (Join-Path $UserProfile '.claude') 'CLAUDE.md'),
+                (Join-Path (Join-Path $UserProfile '.codex') 'AGENTS.md'),
+                (Join-Path $WorkspaceRoot 'AGENTS.md'),
+                (Join-Path (Join-Path (Join-Path $WorkspaceRoot '.assistant') 'entry') 'AGENTS.md'),
+                (Join-Path (Join-Path (Join-Path $WorkspaceRoot '.assistant') 'entry') 'GEMINI.md')
+            )
+
+            foreach ($path in $managedTextFiles) {
+                $content = Get-Content -LiteralPath $path -Raw -Encoding utf8
+                [System.IO.File]::WriteAllText($path, ($content -replace 'entry-router', 'using-superpowers'), (New-Object System.Text.UTF8Encoding($false)))
+            }
+
+            $codexConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'config.toml'
+            $codexConfig = Get-Content -LiteralPath $codexConfigPath -Raw -Encoding utf8
+            $codexConfig = ($codexConfig -replace 'entry-router', 'using-superpowers').TrimEnd() + @"
+
+[[skills.config]]
+path = "C:\\user-owned\\custom-skill\\SKILL.md"
+enabled = true
+"@
+            [System.IO.File]::WriteAllText($codexConfigPath, $codexConfig + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
+        } `
+        -PostAssert {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot, $Result)
+
+            $managedTextFiles = @(
+                (Join-Path (Join-Path $UserProfile '.claude') 'CLAUDE.md'),
+                (Join-Path (Join-Path $UserProfile '.codex') 'AGENTS.md'),
+                (Join-Path $WorkspaceRoot 'AGENTS.md'),
+                (Join-Path (Join-Path (Join-Path $WorkspaceRoot '.assistant') 'entry') 'AGENTS.md'),
+                (Join-Path (Join-Path (Join-Path $WorkspaceRoot '.assistant') 'entry') 'GEMINI.md')
+            )
+
+            foreach ($path in $managedTextFiles) {
+                $content = Get-Content -LiteralPath $path -Raw -Encoding utf8
+                if (-not $content.Contains('entry-router')) {
+                    throw ("managed entry file should be refreshed to entry-router: {0}" -f $path)
+                }
+                if ($content.Contains('workflow` loads `using-superpowers') -or
+                    $content.Contains('workflow`: load `using-superpowers') -or
+                    $content.Contains('/using-superpowers')) {
+                    throw ("managed entry file should not retain default using-superpowers routing: {0}" -f $path)
+                }
+            }
+
+            $codexConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'config.toml'
+            $codexConfig = Get-Content -LiteralPath $codexConfigPath -Raw -Encoding utf8
+            if (-not $codexConfig.Contains('skills\\entry-router\\SKILL.md')) {
+                throw 'Codex managed config should include entry-router skill path after update'
+            }
+            if (-not $codexConfig.Contains('Legacy explicit compatibility path')) {
+                throw 'Codex managed config should preserve explicit legacy compatibility marker'
+            }
+            if (-not $codexConfig.Contains('C:\\user-owned\\custom-skill\\SKILL.md')) {
+                throw 'Codex config update should preserve user-owned skills.config entries'
             }
         }
 

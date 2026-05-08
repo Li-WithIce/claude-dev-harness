@@ -4,7 +4,7 @@ model: gpt-5.5/xhigh
 skills_dirs:
   - .codex/skills
 enabled_skills:
-  - using-superpowers
+  - entry-router
   - orchestrator
   - plan
   - implement

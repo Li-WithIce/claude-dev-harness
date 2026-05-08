@@ -22,7 +22,7 @@ members:
   - role: plan-author
     backend: codex
     model: gpt-5.5/xhigh
-    skills_whitelist: [plan, using-superpowers]
+    skills_whitelist: [plan, entry-router]
     role_prompt_ref: agent-configs/role-prompts/plan-author.md
 ```
 
@@ -53,7 +53,7 @@ members:
   "backend": "codex",
   "model": "gpt-5.5/xhigh",
   "system_prompt": "<contents of role_prompt_ref>",
-  "skills_whitelist": ["plan", "using-superpowers"],
+  "skills_whitelist": ["plan", "entry-router"],
   "members_read_only_path_prefixes": [".assistant/", "docs/tasks/<task-id>/"]
 }
 ```

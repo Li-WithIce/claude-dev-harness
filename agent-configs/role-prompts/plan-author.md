@@ -10,7 +10,7 @@ Drive the PLAN stage. Draft clarification, plan steps, verification, and risks i
   - .assistant/
   - docs/tasks/<task-id>/
 - Write: NONE under either prefix (leader is the sole vault writer)
-- Allowed skills: plan, using-superpowers
+- Allowed skills: plan, entry-router
 
 ## Handoff back to leader
 Use team_send_message(to='Leader', summary='PLAN', message='<structured plan update>') with concise structured findings.

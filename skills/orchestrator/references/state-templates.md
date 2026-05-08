@@ -22,7 +22,7 @@ stages:
   PLAN:
     role: plan-author
     default_profile: harness-default-codex
-    skills_whitelist: [plan, using-superpowers]
+    skills_whitelist: [plan, entry-router]
   PLAN_REVIEW:
     role: plan-reviewer
     default_profile: harness-default-codex
@@ -57,7 +57,7 @@ members:
   - role: plan-author
     backend: codex
     model: gpt-5.5/xhigh
-    skills_whitelist: [plan, using-superpowers]
+    skills_whitelist: [plan, entry-router]
     role_prompt_ref: agent-configs/role-prompts/plan-author.md
 ```
 

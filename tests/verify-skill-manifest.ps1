@@ -79,10 +79,12 @@ function New-IsolatedRepoFixture {
     New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'docs\tasks') -Force | Out-Null
     foreach ($relativePath in @(
         'scripts\advance-stage.ps1',
+        'scripts\generate-skills-index.ps1',
         'scripts\validate-lite-artifacts.ps1',
         'agent-configs\profiles',
         'agent-configs\workflows',
         'skills\entry-router',
+        'skills\plan',
         'skills\review'
     )) {
         Copy-RepoPathToFixture -SourceRoot $SourceRoot -FixtureRoot $fixtureRoot -RelativePath $relativePath
@@ -215,16 +217,6 @@ function Get-WorkflowStageSkills {
     return @()
 }
 
-function Set-WorkflowDescriptor {
-    param(
-        [string]$RepoRoot,
-        [string]$Content
-    )
-
-    $workflowPath = Join-Path $RepoRoot 'agent-configs\workflows\harness-lite.yaml'
-    [System.IO.File]::WriteAllText($workflowPath, $Content, (New-Object System.Text.UTF8Encoding($false)))
-}
-
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent $PSScriptRoot
 }
@@ -302,9 +294,6 @@ try {
         Add-Failure 'E4 manifest rollback failed because the per-task file still exists'
     }
 
-    $workflowOriginal = Read-FileUtf8 -Path $workflowPath
-    $workflowPhase2 = $workflowOriginal -replace [regex]::Escape('skills_whitelist: [plan, using-superpowers]'), 'skills_whitelist: [plan, entry-router]'
-    Set-WorkflowDescriptor -RepoRoot $fixtureRoot -Content $workflowPhase2
     $taskE5 = 'skill-manifest-e5-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     $taskE5Dir = Join-Path (Join-Path $fixtureRoot 'docs\tasks') $taskE5
     New-Item -ItemType Directory -Path $taskE5Dir -Force | Out-Null
@@ -325,13 +314,32 @@ try {
         $e5Result.StdOut -eq 'PLAN | codex' -and
         $null -ne $e5Manifest -and
         $e5Manifest.stage -eq 'PLAN' -and
+        $e5CommandNames -contains 'plan' -and
         $e5CommandNames -contains 'entry-router' -and
         $e5CommandNames -notcontains 'using-superpowers' -and
         $null -ne $e5EntryRouterCommand -and
         ([string]$e5EntryRouterCommand.description) -match 'Canonical entry router') {
-        Add-Check 'E5 entry-router can be discovered in PLAN skill manifest when descriptor opts in'
+        Add-Check 'E5 entry-router is discovered in default PLAN skill manifest'
     } else {
         Add-Failure ("E5 entry-router manifest discoverability failed, got stdout=[{0}] stderr=[{1}] manifest=[{2}]" -f $e5Result.StdOut, $e5Result.StdErr, $e5ManifestText)
+    }
+
+    $taskE6 = 'skill-manifest-e6-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskE6Dir = Join-Path (Join-Path $fixtureRoot 'docs\tasks') $taskE6
+    New-Item -ItemType Directory -Path $taskE6Dir -Force | Out-Null
+    $e6OutputPath = Join-Path $taskE6Dir 'skills-index.md'
+    $e6Output = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $fixtureRoot 'scripts\generate-skills-index.ps1') -TaskId $taskE6 -Stage 'PLAN' -BackendHint 'codex' -OutputPath $e6OutputPath 2>&1 | ForEach-Object { [string]$_ })
+    $e6ExitCode = $LASTEXITCODE
+    $e6IndexText = Read-FileUtf8 -Path $e6OutputPath
+    if ($e6ExitCode -eq 0 -and
+        $e6IndexText -match '# Skills available at PLAN \(backend hint: codex\)' -and
+        $e6IndexText -match '\*\*plan\*\*' -and
+        $e6IndexText -match '\*\*entry-router\*\*' -and
+        $e6IndexText -match 'Canonical entry router' -and
+        $e6IndexText -notmatch 'using-superpowers') {
+        Add-Check 'E6 generate-skills-index uses entry-router for default PLAN commands'
+    } else {
+        Add-Failure ("E6 PLAN skills-index should use entry-router, got exit={0} output=[{1}] index=[{2}]" -f $e6ExitCode, ($e6Output -join ' | '), $e6IndexText)
     }
 } finally {
     foreach ($path in $cleanupPaths) {

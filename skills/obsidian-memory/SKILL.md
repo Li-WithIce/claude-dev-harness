@@ -5,7 +5,7 @@ description: Use when a task needs shared Obsidian memory, session recovery, run
 
 # Obsidian Memory
 
-> **已合入 using-superpowers**：核心读取顺序、写回规则和 guardrails 已内联到 `using-superpowers` skill 中。
+> **已合入 entry-router**：核心读取顺序、写回规则和 guardrails 已内联到 `entry-router` skill 中。
 > 本文件保留为详细参考文档，无需在每次对话中单独调用。
 
 Claude、Codex、Gemini 共用同一份 Obsidian 记忆仓库：

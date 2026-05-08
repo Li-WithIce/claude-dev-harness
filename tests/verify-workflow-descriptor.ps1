@@ -229,7 +229,7 @@ stages:
   PLAN:
     role: plan-author
     default_profile: harness-default-codex
-    skills_whitelist: [plan, using-superpowers]
+    skills_whitelist: [plan, entry-router]
   PLAN_REVIEW:
     role: plan-reviewer
     default_profile: harness-default-codex
@@ -346,7 +346,7 @@ stages:
   PLAN:
     role: plan-author
     default_profile: harness-default-codex
-    skills_whitelist: [plan, using-superpowers]
+    skills_whitelist: [plan, entry-router]
 "@
     $missingVersionResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskValid -RepoRoot $RepoRoot
     if ($missingVersionResult.ExitCode -eq 0 -and $missingVersionResult.Text -match 'workflow descriptor should contain version') {
@@ -362,7 +362,7 @@ stages:
   PLAN:
     role: plan-author
     default_profile: does-not-exist
-    skills_whitelist: [plan, using-superpowers]
+    skills_whitelist: [plan, entry-router]
 "@
     $missingProfileResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskValid -RepoRoot $RepoRoot
     if ($missingProfileResult.ExitCode -eq 0 -and $missingProfileResult.Text -match 'default_profile is invalid: does-not-exist') {
@@ -387,12 +387,12 @@ stages:
         Add-Failure ("A4 should warn on invalid skill, got: {0}" -f ($bogusSkillResult.Output -join ' | '))
     }
 
-    Set-WorkflowDescriptor -RepoRoot $RepoRoot -Content ((Get-ValidWorkflowDescriptorContent).Replace('skills_whitelist: [plan, using-superpowers]', 'skills_whitelist: [plan, entry-router]'))
-    $entryRouterSkillResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskValid -RepoRoot $RepoRoot
-    if ($entryRouterSkillResult.ExitCode -eq 0 -and (Assert-WarningsNone -Text $entryRouterSkillResult.Text)) {
-        Add-Check 'A5 entry-router is accepted by workflow skill advisory allowlist'
+    Set-WorkflowDescriptor -RepoRoot $RepoRoot -Content ((Get-ValidWorkflowDescriptorContent).Replace('skills_whitelist: [plan, entry-router]', 'skills_whitelist: [plan, using-superpowers]'))
+    $legacySkillResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskValid -RepoRoot $RepoRoot
+    if ($legacySkillResult.ExitCode -eq 0 -and (Assert-WarningsNone -Text $legacySkillResult.Text)) {
+        Add-Check 'A5 legacy using-superpowers remains accepted only as explicit workflow skill allowlist compatibility'
     } else {
-        Add-Failure ("A5 entry-router should be accepted without warnings, got: {0}" -f ($entryRouterSkillResult.Output -join ' | '))
+        Add-Failure ("A5 legacy using-superpowers should be accepted without warnings, got: {0}" -f ($legacySkillResult.Output -join ' | '))
     }
 
     Remove-WorkflowDescriptor -RepoRoot $RepoRoot

@@ -92,6 +92,8 @@ function New-IsolatedRepoFixture {
         'scripts\validate-lite-artifacts.ps1',
         'agent-configs\profiles',
         'agent-configs\workflows',
+        'skills\entry-router',
+        'skills\plan',
         'skills\review',
         'skills\test',
         'skills\gemini-designer-main'
@@ -677,6 +679,22 @@ try {
         Add-Check 'E1 generate-skills-index emits workflow-backed markdown with skill descriptions'
     } else {
         Add-Failure ("E1 generate-skills-index failed, got output=[{0}] doc=[{1}]" -f $e1Result.Text, $skillsIndexDoc)
+    }
+
+    $taskE2 = 'skill-contract-e2-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskE2Dir = Join-Path $taskBase $taskE2
+    New-Item -ItemType Directory -Path $taskE2Dir -Force | Out-Null
+    $e2Result = Invoke-GenerateSkillsIndex -ScriptPath $skillsIndexPath -TaskId $taskE2 -Stage 'PLAN' -BackendHint 'codex' -RepoRoot $fixtureRoot
+    $planSkillsIndexDoc = Read-FileUtf8 -Path (Join-Path $taskE2Dir 'skills-index.md')
+    if ($e2Result.ExitCode -eq 0 -and
+        $planSkillsIndexDoc -match '# Skills available at PLAN \(backend hint: codex\)' -and
+        $planSkillsIndexDoc -match '\*\*plan\*\*' -and
+        $planSkillsIndexDoc -match '\*\*entry-router\*\*' -and
+        $planSkillsIndexDoc -match 'Canonical entry router' -and
+        $planSkillsIndexDoc -notmatch '\*\*using-superpowers\*\*') {
+        Add-Check 'E2 PLAN skills-index uses entry-router as the default entry command'
+    } else {
+        Add-Failure ("E2 PLAN skills-index should expose entry-router and not using-superpowers, got output=[{0}] doc=[{1}]" -f $e2Result.Text, $planSkillsIndexDoc)
     }
 } finally {
     $env:USERPROFILE = $originalUserProfile

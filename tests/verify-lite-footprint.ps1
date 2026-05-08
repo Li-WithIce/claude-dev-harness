@@ -188,6 +188,63 @@ function Get-RepoRelativePath {
     return [System.Uri]::UnescapeDataString($baseUri.MakeRelativeUri($targetUri).ToString()).Replace('/', '\')
 }
 
+function Assert-UsingSuperpowersActivePathAllowlist {
+    <#
+    .SYNOPSIS
+    锁定默认入口面不再引用 using-superpowers。
+    .DESCRIPTION
+    Phase 2 之后，旧名只能留在 legacy skill 本体、Codex disabled 兼容配置、
+    repository skill allowlist，以及测试自身的 legacy 锁点。
+    .OUTPUTS
+    None。
+    #>
+
+    $searchPaths = @(
+        'README.md',
+        'agent-configs',
+        'scripts',
+        'skills',
+        'tests',
+        'vault-template',
+        'docs/aionui-integration',
+        'docs/team-write-authority.md',
+        'docs/shared-memory-layers.md',
+        'docs/工作流'
+    )
+    $allowedPrefixes = @(
+        'agent-configs/codex/config.shared.toml.template:',
+        'scripts/validate-lite-artifacts.ps1:',
+        'skills/using-superpowers/SKILL.md:',
+        'tests/verify-aionui-skill-contract.ps1:',
+        'tests/verify-lite-footprint.ps1:',
+        'tests/verify-skill-manifest.ps1:',
+        'tests/verify-update-managed-assets.ps1:',
+        'tests/verify-workflow-descriptor.ps1:'
+    )
+    $grepArgs = @('-C', $script:RepoRoot, 'grep', '-n', 'using-superpowers', '--') + $searchPaths
+    $grepMatches = @(& git @grepArgs 2>$null | ForEach-Object { [string]$_ })
+    $unexpected = @()
+    foreach ($match in $grepMatches) {
+        $isAllowed = $false
+        foreach ($prefix in $allowedPrefixes) {
+            if ($match.StartsWith($prefix, [System.StringComparison]::Ordinal)) {
+                $isAllowed = $true
+                break
+            }
+        }
+
+        if (-not $isAllowed) {
+            $unexpected += $match
+        }
+    }
+
+    if ($unexpected.Count -eq 0) {
+        Add-Check 'active path grep only finds using-superpowers in explicit legacy allowlist'
+    } else {
+        Add-Failure ("using-superpowers leaked into active defaults: {0}" -f ($unexpected -join ' | '))
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 }
@@ -341,10 +398,13 @@ Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle 'artifac
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-claude.yaml' -Needle 'backend: claudecode'
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-codex.yaml' -Needle 'backend: codex'
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-gemini.yaml' -Needle 'backend: gemini'
+Assert-FileContains -Path 'agent-configs/profiles/harness-default-codex.yaml' -Needle '  - entry-router'
+Assert-FileContains -Path 'agent-configs/profiles/harness-default-claude.yaml' -Needle '  - entry-router'
 Assert-FileContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle 'default_profile: harness-default-codex'
-Assert-FileContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle 'skills_whitelist: [plan, using-superpowers]'
-Assert-FileNotContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle 'skills_whitelist: [plan, entry-router]'
+Assert-FileContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle 'skills_whitelist: [plan, entry-router]'
+Assert-FileNotContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle 'skills_whitelist: [plan, using-superpowers]'
 Assert-FileContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle 'skills_whitelist: [test]'
+Assert-FileContains -Path 'agent-configs/role-prompts/plan-author.md' -Needle 'Allowed skills: plan, entry-router'
 Assert-FileContains -Path 'agent-configs/role-prompts/tester.md' -Needle 'Allowed skills: test'
 Assert-FileNotContains -Path 'agent-configs/role-prompts/tester.md' -Needle 'Allowed skills: test, gemini-designer-main'
 Assert-FileContains -Path 'skills/spec/SKILL.md' -Needle '../orchestrator/references/lite-writing-guide.md'
@@ -403,15 +463,20 @@ Assert-FileContains -Path '.assistant/工作流/长会话恢复.md' -Needle 'mod
 Assert-FileContains -Path '.assistant/工作流/长会话恢复.md' -Needle 'Resume 懒加载'
 Assert-FileContains -Path 'vault-template/entry/AGENTS.md.template' -Needle 'mode: quick | workflow | ask'
 Assert-FileContains -Path 'vault-template/entry/AGENTS.md.template' -Needle 'Lazy loading:'
+Assert-FileContains -Path 'vault-template/entry/AGENTS.md.template' -Needle '`workflow`: load `entry-router`, `orchestrator`'
 Assert-FileContains -Path 'vault-template/entry/AGENTS.md.template' -Needle '`ask`: do not load workflow skills; ask one minimal clarification question.'
 Assert-FileContains -Path 'vault-template/entry/GEMINI.md.template' -Needle 'mode: quick | workflow | ask'
 Assert-FileContains -Path 'vault-template/entry/GEMINI.md.template' -Needle 'Lazy loading:'
+Assert-FileContains -Path 'vault-template/entry/GEMINI.md.template' -Needle '`workflow`: load `entry-router`, `orchestrator`'
 Assert-FileContains -Path 'vault-template/entry/GEMINI.md.template' -Needle '`ask`: do not load workflow skills; ask one minimal clarification question.'
 Assert-FileContains -Path 'agent-configs/codex/AGENTS.md.template' -Needle 'Do not bulk-load all skills'
+Assert-FileContains -Path 'agent-configs/codex/AGENTS.md.template' -Needle '`workflow` loads `entry-router`, `orchestrator`'
 Assert-FileContains -Path 'agent-configs/codex/AGENTS.md.template' -Needle '`ask` does not load workflow skills; ask one minimal clarification question.'
 Assert-FileContains -Path 'agent-configs/workspace/AGENTS.md.template' -Needle 'Do not bulk-load all skills'
+Assert-FileContains -Path 'agent-configs/workspace/AGENTS.md.template' -Needle '`workflow` loads `entry-router`, `orchestrator`'
 Assert-FileContains -Path 'agent-configs/workspace/AGENTS.md.template' -Needle '`ask` does not load workflow skills; ask one minimal clarification question.'
 Assert-FileContains -Path 'agent-configs/claude/CLAUDE.md.template' -Needle 'Claude 是显式兼容 host'
+Assert-FileContains -Path 'agent-configs/claude/CLAUDE.md.template' -Needle '先调用 `/entry-router`'
 Assert-FileContains -Path 'agent-configs/claude/CLAUDE.md.template' -Needle '`ask` 不加载 workflow skill，只问一个最小澄清问题。'
 Assert-FileContains -Path 'skills/orchestrator/references/default-tool-profiles.md' -Needle 'team preset'
 Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'PreCompact 自检'
@@ -430,6 +495,9 @@ Assert-FileContains -Path 'skills/obsidian-memory/SKILL.md' -Needle '记忆-学�
 Assert-FileContains -Path 'skills/obsidian-memory/SKILL.md' -Needle '记忆-决策.md'
 Assert-FileContains -Path 'skills/obsidian-memory/SKILL.md' -Needle '记忆-约定.md'
 Assert-FileContains -Path 'skills/obsidian-memory/SKILL.md' -Needle '记忆-问题.md'
+Assert-FileContains -Path 'skills/obsidian-memory/SKILL.md' -Needle '已合入 entry-router'
+Assert-FileContains -Path 'agent-configs/codex/config.shared.toml.template' -Needle 'skills\\entry-router\\SKILL.md'
+Assert-FileContains -Path 'agent-configs/codex/config.shared.toml.template' -Needle 'Legacy explicit compatibility path'
 Assert-FileContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle '-Quality'
 Assert-FileContains -Path 'docs/工作流/quality-rubric.md' -Needle 'completeness'
 Assert-FileContains -Path 'docs/工作流/quality-rubric.md' -Needle 'consistency'
@@ -459,6 +527,8 @@ Assert-FileNotContains -Path 'skills/orchestrator/SKILL.md' -Needle 'next_runner
 Assert-FileNotContains -Path 'skills/orchestrator/references/default-tool-profiles.md' -Needle 'codex-gemini'
 Assert-FileNotContains -Path 'skills/plan/SKILL.md' -Needle '## Change Contract  (optional, opt-in)'
 Assert-FileNotContains -Path 'skills/orchestrator/references/state-templates.md' -Needle '## Change Contract  (optional, opt-in)'
+
+Assert-UsingSuperpowersActivePathAllowlist
 
 $phaseDirs = @(Get-ChildItem -LiteralPath (Join-Path $script:RepoRoot 'skills') -Recurse -Directory -Filter 'phases')
 if ($phaseDirs.Count -eq 0) {

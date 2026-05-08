@@ -37,7 +37,7 @@ pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\claude-d
 安装后的用户视角，日常基本只有 4 件事：
 
 1. 在目标工作区里直接发起开发任务，让入口文档先判定 `resume-current / switch-existing / new-task / inbox-first`；`new-task` 再轻量路由到 `quick / workflow / ask`。
-2. `quick` 直接完成并报告验证；`workflow` 才进入 `using-superpowers -> orchestrator` 并写 `docs/tasks/<task-id>/`。
+2. `quick` 直接完成并报告验证；`workflow` 才进入 `entry-router -> orchestrator` 并写 `docs/tasks/<task-id>/`。
 3. workflow 阶段完成后，用 `.assistant/entry/advance-stage.ps1` 推进到下一阶段。
 4. 会话中断后，说“继续”/“恢复”/`resume`，按 `.assistant/工作流/长会话恢复.md` 的顺序恢复。
 
@@ -70,7 +70,7 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 入口判定仍先保留四类结果：`resume-current`、`switch-existing`、`new-task`、`inbox-first`。只有判定为 `new-task` 后，才增加一层 `mode: quick | workflow | ask`。
 
 - `quick`：低风险、边界清楚、可在当前对话内直接完成和验证的小改动 / 简短回答；默认不创建 `docs/tasks/<task-id>/`，不改共享指针。
-- `workflow`：需要计划、留痕、review、test、多文件/跨模块协作、较高风险或用户明确要求可审计产物时，进入 `using-superpowers -> orchestrator`。
+- `workflow`：需要计划、留痕、review、test、多文件/跨模块协作、较高风险或用户明确要求可审计产物时，进入 `entry-router -> orchestrator`。
 - `ask`：只在 quick/workflow 置信度低、显式信号冲突或缺少关键判断信息时使用，并只问一个最小澄清问题。
 
 显式覆盖词优先：用户说“直接改”“快修”时偏 `quick`；用户说“走 workflow”“留痕”“review”“test”时偏 `workflow`。没有显式词时由入口 agent 自主判断，默认保持轻量。
@@ -80,7 +80,7 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 入口完成 `resume-current / switch-existing / new-task / inbox-first` 判定，以及 `new-task` 的 `quick | workflow | ask` 路由后，才加载下一层材料：
 
 - `quick`：只加载入口规则、用户偏好 / 必要配置，以及与本次请求直接相关的 skill 或 reference；不预读 orchestrator、全部 stage skill 或历史任务。
-- `workflow`：加载 `using-superpowers`、`orchestrator`，再按当前 stage 加载一个阶段 skill：`PLAN -> plan`、`PLAN_REVIEW -> review`、`IMPLEMENT -> implement`、`CODE_REVIEW -> review`、`TEST -> test`。
+- `workflow`：加载 `entry-router`、`orchestrator`，再按当前 stage 加载一个阶段 skill：`PLAN -> plan`、`PLAN_REVIEW -> review`、`IMPLEMENT -> implement`、`CODE_REVIEW -> review`、`TEST -> test`。
 - `resume-current` / `switch-existing`：先加载 `.assistant/运行时/恢复索引.md`、`.assistant/运行时/当前任务.md`、`运行时/tasks/<task-id>.md`；必要时只读当前任务的 `plan.md` frontmatter 判定 stage，再加载当前 stage skill。
 - `ask`：不加载 workflow skill，只问一个最小澄清问题。
 
@@ -361,7 +361,7 @@ pwsh -File .\skills\workflow-team\scripts\spawn-team.ps1 -TaskId <task-id>
 
 截至当前仓库状态：
 
-- `skills/` 下有 `11` 个 workflow skills
+- `skills/` 下有 `12` 个 workflow skills（含一个 legacy 兼容入口）
 - `scripts/` 下有 `16` 个 PowerShell 脚本
 - `runtime-hooks/claude/` 下有 `3` 个 hooks
 - `tests/` 下有 `24` 个 `verify-*.ps1` 回归脚本
@@ -370,7 +370,7 @@ pwsh -File .\skills\workflow-team\scripts\spawn-team.ps1 -TaskId <task-id>
 
 | 区域 | 当前重点 |
 |---|---|
-| `skills/using-superpowers` | 顶层入口与开发路由 |
+| `skills/entry-router` | 顶层入口与开发路由 |
 | `skills/orchestrator` | 主流程编排 |
 | `skills/plan` / `implement` / `review` / `test` | 各阶段写作与产物规则 |
 | `skills/workflow-team` | team preset bridge 与 auto / PreCompact 协议 |

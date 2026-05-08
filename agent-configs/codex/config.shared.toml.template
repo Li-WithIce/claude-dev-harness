@@ -8,6 +8,11 @@
 skills_root = "{CODEX_HOME}\\skills"
 
 [[skills.config]]
+path = "{CODEX_HOME}\\skills\\entry-router\\SKILL.md"
+enabled = false
+
+# Legacy explicit compatibility path; not part of harness-lite defaults.
+[[skills.config]]
 path = "{CODEX_HOME}\\skills\\using-superpowers\\SKILL.md"
 enabled = false
 
