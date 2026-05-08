@@ -198,6 +198,7 @@ $script:Failures = @()
 
 $expectedSkills = @(
     'codex',
+    'entry-router',
     'gemini-designer-main',
     'implement',
     'obsidian-memory',
@@ -341,6 +342,8 @@ Assert-FileContains -Path 'agent-configs/profiles/harness-default-claude.yaml' -
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-codex.yaml' -Needle 'backend: codex'
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-gemini.yaml' -Needle 'backend: gemini'
 Assert-FileContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle 'default_profile: harness-default-codex'
+Assert-FileContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle 'skills_whitelist: [plan, using-superpowers]'
+Assert-FileNotContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle 'skills_whitelist: [plan, entry-router]'
 Assert-FileContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle 'skills_whitelist: [test]'
 Assert-FileContains -Path 'agent-configs/role-prompts/tester.md' -Needle 'Allowed skills: test'
 Assert-FileNotContains -Path 'agent-configs/role-prompts/tester.md' -Needle 'Allowed skills: test, gemini-designer-main'
@@ -370,6 +373,13 @@ Assert-FileNotContains -Path 'skills/review/SKILL.md' -Needle '适用：`claudec
 Assert-FileContains -Path 'skills/test/SKILL.md' -Needle '.assistant\entry\validate-lite-artifacts.ps1'
 Assert-FileContains -Path 'skills/orchestrator/references/runbook.md' -Needle '.assistant\entry\advance-stage.ps1'
 Assert-FileContains -Path 'skills/orchestrator/references/runbook.md' -Needle 'spawn-team.ps1'
+Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle 'name: entry-router'
+Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '.assistant\entry\advance-stage.ps1'
+Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle 'mode: quick | workflow | ask'
+Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle 'quick`：只加载入口规则'
+Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '禁止 bulk-load 全部 skills'
+Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '直接改'
+Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '走 workflow'
 Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle '.assistant\entry\advance-stage.ps1'
 Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle 'mode: quick | workflow | ask'
 Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle 'quick`：只加载入口规则'
@@ -439,6 +449,7 @@ Assert-GitIgnoreState -Path '.assistant/运行时/收件箱.md' -ShouldBeIgnored
 Assert-FileContains -Path 'vault-template/entry/advance-stage.ps1.template' -Needle '{REPO_ROOT}\scripts\advance-stage.ps1'
 Assert-FileContains -Path 'vault-template/entry/advance-stage.ps1.template' -Needle '[string]$Tool = ""'
 Assert-FileContains -Path 'vault-template/entry/validate-lite-artifacts.ps1.template' -Needle '{REPO_ROOT}\scripts\validate-lite-artifacts.ps1'
+Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle "'entry-router'"
 Assert-FileContains -Path 'skills/obsidian-memory/scripts/check-shared-memory.ps1' -Needle "Join-Path (Join-Path `$workspaceRoot 'docs/tasks') `$TaskId"
 Assert-FileNotContains -Path 'skills/obsidian-memory/scripts/check-shared-memory.ps1' -Needle "Join-Path (Join-Path `$workspaceRoot 'docs') `$TaskId"
 Assert-FileNotContains -Path 'skills/obsidian-memory/scripts/repair-shared-memory.ps1' -Needle 'docs/tasks/none/plan.md'

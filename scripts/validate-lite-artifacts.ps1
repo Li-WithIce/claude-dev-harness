@@ -478,6 +478,7 @@ function Get-AllowedWorkflowSkills {
 
     return @(
         'codex',
+        'entry-router',
         'gemini-designer-main',
         'implement',
         'obsidian-memory',

@@ -387,12 +387,20 @@ stages:
         Add-Failure ("A4 should warn on invalid skill, got: {0}" -f ($bogusSkillResult.Output -join ' | '))
     }
 
+    Set-WorkflowDescriptor -RepoRoot $RepoRoot -Content ((Get-ValidWorkflowDescriptorContent).Replace('skills_whitelist: [plan, using-superpowers]', 'skills_whitelist: [plan, entry-router]'))
+    $entryRouterSkillResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskValid -RepoRoot $RepoRoot
+    if ($entryRouterSkillResult.ExitCode -eq 0 -and (Assert-WarningsNone -Text $entryRouterSkillResult.Text)) {
+        Add-Check 'A5 entry-router is accepted by workflow skill advisory allowlist'
+    } else {
+        Add-Failure ("A5 entry-router should be accepted without warnings, got: {0}" -f ($entryRouterSkillResult.Output -join ' | '))
+    }
+
     Remove-WorkflowDescriptor -RepoRoot $RepoRoot
     $missingWorkflowResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskValid -RepoRoot $RepoRoot
     if ($missingWorkflowResult.ExitCode -eq 0 -and (Assert-WarningsNone -Text $missingWorkflowResult.Text)) {
-        Add-Check 'A5 missing workflow descriptor is skipped without warnings'
+        Add-Check 'A6 missing workflow descriptor is skipped without warnings'
     } else {
-        Add-Failure ("A5 missing workflow descriptor should keep warnings empty, got: {0}" -f ($missingWorkflowResult.Output -join ' | '))
+        Add-Failure ("A6 missing workflow descriptor should keep warnings empty, got: {0}" -f ($missingWorkflowResult.Output -join ' | '))
     }
 
     Set-WorkflowDescriptor -RepoRoot $RepoRoot -Content (Get-ValidWorkflowDescriptorContent)

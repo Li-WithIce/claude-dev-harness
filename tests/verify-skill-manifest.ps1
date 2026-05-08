@@ -82,6 +82,7 @@ function New-IsolatedRepoFixture {
         'scripts\validate-lite-artifacts.ps1',
         'agent-configs\profiles',
         'agent-configs\workflows',
+        'skills\entry-router',
         'skills\review'
     )) {
         Copy-RepoPathToFixture -SourceRoot $SourceRoot -FixtureRoot $fixtureRoot -RelativePath $relativePath
@@ -214,6 +215,16 @@ function Get-WorkflowStageSkills {
     return @()
 }
 
+function Set-WorkflowDescriptor {
+    param(
+        [string]$RepoRoot,
+        [string]$Content
+    )
+
+    $workflowPath = Join-Path $RepoRoot 'agent-configs\workflows\harness-lite.yaml'
+    [System.IO.File]::WriteAllText($workflowPath, $Content, (New-Object System.Text.UTF8Encoding($false)))
+}
+
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent $PSScriptRoot
 }
@@ -289,6 +300,38 @@ try {
         Add-Check 'E4 per-task manifest can be removed cleanly as part of task-level rollback'
     } else {
         Add-Failure 'E4 manifest rollback failed because the per-task file still exists'
+    }
+
+    $workflowOriginal = Read-FileUtf8 -Path $workflowPath
+    $workflowPhase2 = $workflowOriginal -replace [regex]::Escape('skills_whitelist: [plan, using-superpowers]'), 'skills_whitelist: [plan, entry-router]'
+    Set-WorkflowDescriptor -RepoRoot $fixtureRoot -Content $workflowPhase2
+    $taskE5 = 'skill-manifest-e5-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskE5Dir = Join-Path (Join-Path $fixtureRoot 'docs\tasks') $taskE5
+    New-Item -ItemType Directory -Path $taskE5Dir -Force | Out-Null
+    $e5Plan = New-PlanContent -TaskId $taskE5 -Stage 'PLAN_REVIEW' -Tool 'codex'
+    $e5Plan = $e5Plan -replace '(?m)^## Plan Review\s*', "## Plan Review`r`n### Run 1 · 2026-04-25 10:00 · runner: harness-reviewer`r`n- verdict: revise`r`n- findings: none`r`n- next: route back to PLAN`r`n"
+    Write-Utf8Bom -Path (Join-Path $taskE5Dir 'plan.md') -Content $e5Plan
+    $e5Result = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskE5 -Tool 'codex' -VaultRoot $vaultRoot -RepoRoot $fixtureRoot
+    $e5ManifestPath = Join-Path $taskE5Dir 'skill-manifest.json'
+    $e5ManifestText = Read-FileUtf8 -Path $e5ManifestPath
+    $e5Manifest = if ([string]::IsNullOrWhiteSpace($e5ManifestText)) { $null } else { $e5ManifestText | ConvertFrom-Json }
+    $e5CommandNames = @()
+    $e5EntryRouterCommand = $null
+    if ($null -ne $e5Manifest) {
+        $e5CommandNames = @($e5Manifest.available_commands | ForEach-Object { $_.name })
+        $e5EntryRouterCommand = @($e5Manifest.available_commands | Where-Object { $_.name -eq 'entry-router' } | Select-Object -First 1)
+    }
+    if ($e5Result.ExitCode -eq 0 -and
+        $e5Result.StdOut -eq 'PLAN | codex' -and
+        $null -ne $e5Manifest -and
+        $e5Manifest.stage -eq 'PLAN' -and
+        $e5CommandNames -contains 'entry-router' -and
+        $e5CommandNames -notcontains 'using-superpowers' -and
+        $null -ne $e5EntryRouterCommand -and
+        ([string]$e5EntryRouterCommand.description) -match 'Canonical entry router') {
+        Add-Check 'E5 entry-router can be discovered in PLAN skill manifest when descriptor opts in'
+    } else {
+        Add-Failure ("E5 entry-router manifest discoverability failed, got stdout=[{0}] stderr=[{1}] manifest=[{2}]" -f $e5Result.StdOut, $e5Result.StdErr, $e5ManifestText)
     }
 } finally {
     foreach ($path in $cleanupPaths) {
