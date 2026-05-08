@@ -85,6 +85,17 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 - 需求仍在形成、影响面不清、需要用户确认验收、会改共享协议 / 脚本 / 多阶段产物、或需要独立 review/test 证据时，默认 `workflow`。
 - quick 执行中若发现影响面扩大或用户开始要求留痕 / review / test，停止扩大实现并切换到 workflow 或先确认。
 
+### 自动懒加载规则
+
+完成 `resume-current / switch-existing / new-task / inbox-first` 判定后，按模式收缩读取面：
+
+- `quick`：只加载入口规则、用户偏好 / 必要配置，以及与本次请求直接相关的 skill 或 reference；不加载 orchestrator 或全部 stage skill。
+- `workflow`：加载本 skill 与 `orchestrator`，再按当前 stage 只加载一个阶段 skill：`PLAN -> plan`、`PLAN_REVIEW -> review`、`IMPLEMENT -> implement`、`CODE_REVIEW -> review`、`TEST -> test`。
+- `resume-current` / `switch-existing`：先加载 `运行时\恢复索引.md`、`运行时\当前任务.md`、`运行时\tasks\<task-id>.md`；必要时只读当前任务 `plan.md` frontmatter 判定 stage，再加载当前 stage skill。
+- `ask`：不加载 workflow skill，只问一个最小澄清问题。
+
+禁止 bulk-load 全部 skills、全部历史任务、Gemini / Claude 兼容 skill、`workflow-team`。只有显式 backend override、当前 stage/frontmatter 命中、或 `$env:AIONUI_TEAM_MODE='1'` 触发时才加载这些路径。
+
 ### 当前开发流程（Harness Lite v2）
 
 5 个可执行阶段：`PLAN → PLAN_REVIEW → IMPLEMENT → CODE_REVIEW → TEST`

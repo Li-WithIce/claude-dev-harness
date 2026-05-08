@@ -14,6 +14,13 @@
 5. 如无 `plan.md`，先创建 `docs/tasks/<task-id>/plan.md`
 6. 输入不足时再补 `docs/tasks/<task-id>/spec.md`
 
+### 1.1 Lazy Loading
+
+- `quick` 只加载入口规则、用户偏好 / 必要配置和直接相关 skill；不进入 orchestrator。
+- `workflow` 加载 `using-superpowers`、`orchestrator` 和当前 stage skill。
+- `resume-current` / `switch-existing` 先加载 `恢复索引.md`、`当前任务.md`、`运行时/tasks/<task-id>.md`，必要时只读当前任务 `plan.md` frontmatter，再加载当前 stage skill。
+- 禁止 bulk-load 全部 skills、全部历史任务、Gemini / Claude 兼容 skill、`workflow-team`；显式 backend、stage 或 team-mode 触发时除外。
+
 ## 2. Execute by Stage
 
 - `PLAN`：写 Clarification、计划正文、Verification、Risks，并等待用户确认

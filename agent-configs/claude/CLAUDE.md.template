@@ -26,3 +26,13 @@ Today's date is __RENDER_AT_INSTALL__
 - 细节不足时再读 `{VAULT_PATH}\运行时\当前任务.md`
 - 然后按 `task_id` 读取 `{VAULT_PATH}\运行时\tasks\<task-id>.md`
 - 最后再读 `{VAULT_PATH}\运行时\中断任务.md` 与 `{VAULT_PATH}\运行时\上次会话.md`
+
+## 懒加载边界
+
+Claude 是显式兼容 host，仍先调用 `/using-superpowers`，但后续读取面跟随工作区入口路由：
+
+- `quick` 只加载入口规则、用户偏好 / 必要配置和直接相关 skill。
+- `workflow` 加载 `using-superpowers`、`orchestrator` 和当前 stage skill。
+- `resume-current` / `switch-existing` 先加载恢复运行时文件，再加载当前 stage skill。
+- `ask` 不加载 workflow skill，只问一个最小澄清问题。
+- 禁止 bulk-load 全部 skills、全部历史任务、Gemini / Claude 兼容 skill 或 `workflow-team`，除非显式 backend、stage 或 team-mode 触发。

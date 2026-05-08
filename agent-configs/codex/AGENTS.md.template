@@ -12,6 +12,15 @@
 - Orientation: the active workspace's `AGENTS.md` -> `.assistant\首页.md` -> `.assistant\工作流\项目约定.md` -> `.assistant\配置\系统信息.md` -> `.assistant\配置\用户偏好.md` -> `.assistant\配置\工具与组件.md`
 - Resume: the active workspace's `.assistant\运行时\恢复索引.md` -> `.assistant\运行时\当前任务.md` -> `.assistant\运行时\tasks\<task-id>.md` -> `.assistant\运行时\中断任务.md` -> `.assistant\运行时\上次会话.md`
 
+## Lazy Loading
+
+- After task recognition, follow the active workspace's `.assistant\entry\AGENTS.md` mode rules.
+- `quick` loads only entry rules, user preferences / necessary config, and the directly relevant skill.
+- `workflow` loads `using-superpowers`, `orchestrator`, and the current-stage skill.
+- `resume-current` / `switch-existing` loads recovery runtime files first, then the current-stage skill.
+- `ask` does not load workflow skills; ask one minimal clarification question.
+- Do not bulk-load all skills, all historical tasks, Gemini / Claude compatibility skills, or `workflow-team` unless an explicit trigger requires them.
+
 ## Writeback
 
 - Single-writer model: only the entry agent writes shared pointer files

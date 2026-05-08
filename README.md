@@ -75,6 +75,17 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 
 显式覆盖词优先：用户说“直接改”“快修”时偏 `quick`；用户说“走 workflow”“留痕”“review”“test”时偏 `workflow`。没有显式词时由入口 agent 自主判断，默认保持轻量。
 
+### 自动懒加载规则
+
+入口完成 `resume-current / switch-existing / new-task / inbox-first` 判定，以及 `new-task` 的 `quick | workflow | ask` 路由后，才加载下一层材料：
+
+- `quick`：只加载入口规则、用户偏好 / 必要配置，以及与本次请求直接相关的 skill 或 reference；不预读 orchestrator、全部 stage skill 或历史任务。
+- `workflow`：加载 `using-superpowers`、`orchestrator`，再按当前 stage 加载一个阶段 skill：`PLAN -> plan`、`PLAN_REVIEW -> review`、`IMPLEMENT -> implement`、`CODE_REVIEW -> review`、`TEST -> test`。
+- `resume-current` / `switch-existing`：先加载 `.assistant/运行时/恢复索引.md`、`.assistant/运行时/当前任务.md`、`运行时/tasks/<task-id>.md`；必要时只读当前任务的 `plan.md` frontmatter 判定 stage，再加载当前 stage skill。
+- `ask`：不加载 workflow skill，只问一个最小澄清问题。
+
+禁止 bulk-load 全部 skills、全部历史 `docs/tasks/*`、Gemini / Claude 兼容 skill 或 `workflow-team`。只有用户显式切换 backend、当前 stage frontmatter / workflow descriptor 命中、或 `$env:AIONUI_TEAM_MODE='1'` 等触发条件满足时，才加载这些兼容路径。
+
 ### 阶段与真相源
 
 以下阶段只适用于 `mode=workflow` 的新任务，`quick` 不创建阶段状态。

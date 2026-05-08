@@ -47,6 +47,18 @@ updated: YYYY-MM-DD
 6. 输入不足时才创建 `docs/tasks/<task-id>/spec.md`
 7. 不再维护 `current-flow.md`、`handoff.md`、`implementation-notes.md`、`review.md`
 
+## 自动懒加载规则
+
+orchestrator 只能在 `new-task mode=workflow` 或已确认的 resume/switch workflow 任务中加载。进入后按当前 stage 懒加载：
+
+- `PLAN`：只加载 `plan`
+- `PLAN_REVIEW`：只加载 `review`
+- `IMPLEMENT`：只加载 `implement`
+- `CODE_REVIEW`：只加载 `review`
+- `TEST`：默认只加载 `test`；只有显式切到 Gemini 的 TEST 阶段才加载 `gemini-designer-main`
+
+禁止 bulk-load 全部 skills、全部历史任务、Gemini / Claude 兼容 skill、`workflow-team`。`workflow-team` 仅在 `$env:AIONUI_TEAM_MODE='1'` 且 leader 明确选择 team mode 时加载。
+
 ## 调度规则
 
 - `PLAN`：调用 `plan` skill，补齐 Clarification 和 User Confirmation
