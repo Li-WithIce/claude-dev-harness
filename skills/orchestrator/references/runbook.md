@@ -2,12 +2,17 @@
 
 ## 1. Bootstrap
 
-1. 解析任务是 `resume-current`、`switch-existing` 还是 `new-task`
-2. 为新任务选择 `task_id`；未显式指定时，当前 `PLAN` 默认使用 `tool: codex`、`tool_profile: harness-default-codex`、`model: gpt-5.5/xhigh`
+1. 解析任务是 `resume-current`、`switch-existing`、`new-task` 还是 `inbox-first`
+2. 判定为 `new-task` 后先选择 `mode: quick | workflow | ask`
+   - `quick`：低风险、边界清楚、可当前对话直接完成和验证；不创建 `docs/tasks/<task-id>/`
+   - `workflow`：需要计划、留痕、review、test、多文件/跨模块协作或较高风险；进入 orchestrator
+   - `ask`：只有 quick/workflow 信号冲突或缺少关键判断信息时使用，只问一个最小问题
+3. 显式覆盖词：`直接改` / `快修` 偏 `quick`；`走 workflow` / `留痕` / `review` / `test` 偏 `workflow`
+4. 进入 workflow 后为新任务选择 `task_id`；未显式指定时，当前 `PLAN` 默认使用 `tool: codex`、`tool_profile: harness-default-codex`、`model: gpt-5.5/xhigh`
    可选：显式选择其他 `tool_profile` 和完整 `model`
    可选：在仓库里维护 `agent-configs/workflows/harness-lite.yaml`，为后续 stage 声明 `default_profile`
-3. 如无 `plan.md`，先创建 `docs/tasks/<task-id>/plan.md`
-4. 输入不足时再补 `docs/tasks/<task-id>/spec.md`
+5. 如无 `plan.md`，先创建 `docs/tasks/<task-id>/plan.md`
+6. 输入不足时再补 `docs/tasks/<task-id>/spec.md`
 
 ## 2. Execute by Stage
 

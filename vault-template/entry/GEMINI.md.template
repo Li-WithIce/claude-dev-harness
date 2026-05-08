@@ -4,6 +4,7 @@ Project-local lite workflow entrypoints:
 
 - Stage advance: `pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>` (Codex-only defaults; add `-Tool <claudecode|codex|gemini>` only to switch backend)
 - Artifact validation: `pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
+- New task routing: keep `resume-current / switch-existing / new-task / inbox-first` first; when the result is `new-task`, choose `mode: quick | workflow | ask`.
 
 These shims delegate to the managed harness repo scripts and always use the installed shared vault:
 
@@ -11,3 +12,5 @@ These shims delegate to the managed harness repo scripts and always use the inst
 - Vault root: `{VAULT_PATH}`
 
 `TEST -> DONE` also omits `-Tool`; non-DONE stages use the workflow descriptor when no explicit backend is passed.
+
+Mode hints: `directly edit` / `quick fix` / `直接改` / `快修` bias to `quick`; `workflow` / `留痕` / `review` / `test` bias to `workflow`. Use `ask` only when routing confidence is low.

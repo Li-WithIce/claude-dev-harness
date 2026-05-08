@@ -39,11 +39,13 @@ updated: YYYY-MM-DD
 
 ## 入口规则
 
-1. 先判断请求是 `resume-current`、`switch-existing` 还是 `new-task`
-2. 新任务先定 `task_id`；未显式指定时，当前 `PLAN` 默认写 `tool: codex`、`tool_profile: harness-default-codex`、`model: gpt-5.5/xhigh`
-3. 如果 `plan.md` 已存在，直接读 frontmatter 决定当前 `stage` 和 `tool`
-4. 输入不足时才创建 `docs/tasks/<task-id>/spec.md`
-5. 不再维护 `current-flow.md`、`handoff.md`、`implementation-notes.md`、`review.md`
+1. 先判断请求是 `resume-current`、`switch-existing`、`new-task` 还是 `inbox-first`
+2. 只有 `new-task mode=workflow` 才进入 orchestrator；`mode=quick` 由入口 agent 直接处理并验证，`mode=ask` 先问一个最小澄清问题
+3. `new-task` 的显式覆盖词：`直接改` / `快修` 偏 `quick`；`走 workflow` / `留痕` / `review` / `test` 偏 `workflow`
+4. 进入 workflow 后先定 `task_id`；未显式指定时，当前 `PLAN` 默认写 `tool: codex`、`tool_profile: harness-default-codex`、`model: gpt-5.5/xhigh`
+5. 如果 `plan.md` 已存在，直接读 frontmatter 决定当前 `stage` 和 `tool`
+6. 输入不足时才创建 `docs/tasks/<task-id>/spec.md`
+7. 不再维护 `current-flow.md`、`handoff.md`、`implementation-notes.md`、`review.md`
 
 ## 调度规则
 

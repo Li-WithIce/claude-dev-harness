@@ -1,6 +1,6 @@
 # Gate Rules
 
-lite workflow 只认 `docs/tasks/<task-id>/` 下的任务产物。
+lite workflow 只认 `docs/tasks/<task-id>/` 下的任务产物；这些 gate 只适用于 `new-task mode=workflow`，不约束 `mode=quick` 的直接处理。
 
 ## tool 规则
 

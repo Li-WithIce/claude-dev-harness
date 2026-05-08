@@ -9,6 +9,8 @@
 - `plan.md` 里的 append-only `Plan Review / Implementation Notes / Code Review`
 - `docs/tasks/<task-id>/test.md`
 
+本指南只约束 `new-task mode=workflow` 后的任务产物。`mode=quick` 默认不创建 `docs/tasks/<task-id>/`，只在当前对话内完成、验证并报告；若 quick 执行中发现需要留痕、review、test 或影响面扩大，应切换到 workflow。
+
 ## 通用原则
 
 - 只写当前 task 的差量信息，不重写全量背景。

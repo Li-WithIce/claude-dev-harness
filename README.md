@@ -36,9 +36,9 @@ pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\claude-d
 
 安装后的用户视角，日常基本只有 4 件事：
 
-1. 在目标工作区里直接发起开发任务，让入口文档把对话路由到 `using-superpowers -> orchestrator`；默认执行面是 Codex-only。
-2. 让当前阶段把产物写到 `docs/tasks/<task-id>/`。
-3. 阶段完成后，用 `.assistant/entry/advance-stage.ps1` 推进到下一阶段。
+1. 在目标工作区里直接发起开发任务，让入口文档先判定 `resume-current / switch-existing / new-task / inbox-first`；`new-task` 再轻量路由到 `quick / workflow / ask`。
+2. `quick` 直接完成并报告验证；`workflow` 才进入 `using-superpowers -> orchestrator` 并写 `docs/tasks/<task-id>/`。
+3. workflow 阶段完成后，用 `.assistant/entry/advance-stage.ps1` 推进到下一阶段。
 4. 会话中断后，说“继续”/“恢复”/`resume`，按 `.assistant/工作流/长会话恢复.md` 的顺序恢复。
 
 最常用命令：
@@ -65,7 +65,19 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 
 ## 真实任务流程
 
+### 新任务入口模式路由
+
+入口判定仍先保留四类结果：`resume-current`、`switch-existing`、`new-task`、`inbox-first`。只有判定为 `new-task` 后，才增加一层 `mode: quick | workflow | ask`。
+
+- `quick`：低风险、边界清楚、可在当前对话内直接完成和验证的小改动 / 简短回答；默认不创建 `docs/tasks/<task-id>/`，不改共享指针。
+- `workflow`：需要计划、留痕、review、test、多文件/跨模块协作、较高风险或用户明确要求可审计产物时，进入 `using-superpowers -> orchestrator`。
+- `ask`：只在 quick/workflow 置信度低、显式信号冲突或缺少关键判断信息时使用，并只问一个最小澄清问题。
+
+显式覆盖词优先：用户说“直接改”“快修”时偏 `quick`；用户说“走 workflow”“留痕”“review”“test”时偏 `workflow`。没有显式词时由入口 agent 自主判断，默认保持轻量。
+
 ### 阶段与真相源
+
+以下阶段只适用于 `mode=workflow` 的新任务，`quick` 不创建阶段状态。
 
 可执行阶段是：
 

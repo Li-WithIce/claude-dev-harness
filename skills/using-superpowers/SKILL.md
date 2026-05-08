@@ -57,13 +57,33 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 
 ## 开发任务优先路由
 
-当检测到**开发意图**时（开发、修 bug、重构、代码 review、测试验证、写 spec、写 plan、实现功能），**必须重新导向 orchestrator**：
+当检测到**开发意图**时（开发、修 bug、重构、代码 review、测试验证、写 spec、写 plan、实现功能），**必须先进入开发路由**：
 
-在导向之前，先判断请求类型：`resume-current` / `switch-existing` / `new-task`。不要把“分析结束后的继续聊天”当成开发任务入口。
+在导向之前，先判断请求类型：`resume-current` / `switch-existing` / `new-task` / `inbox-first`。不要把“分析结束后的继续聊天”当成开发任务入口。
 
 - **resume-current**：读 `运行时\当前任务.md` → 找 `docs/tasks/<task-id>/plan.md` frontmatter stage → 由 orchestrator 恢复
 - **switch-existing**：读 `运行时\中断任务.md` → 选定 task → 由 orchestrator 恢复
-- **new-task**：导向 `/orchestrator` 启动新任务，由 orchestrator 建 `docs/tasks/<task-id>/plan.md`
+- **inbox-first**：信息不足且无法判断归属时，先按共享记忆规则写入收件箱
+- **new-task**：先做 `mode` 路由，再决定是否导向 orchestrator
+
+### new-task mode routing
+
+`new-task` 后必须选择 `mode: quick | workflow | ask`。默认自主判断，只在低置信度时 `ask`。
+
+- **quick**：低风险、边界清楚、可在当前对话内直接完成和验证的小改动 / 简短回答。默认不创建 `docs/tasks/<task-id>/`，不改共享指针。
+- **workflow**：需要计划、留痕、review、test、多文件/跨模块协作、较高风险或用户明确要求可审计产物时，导向 `/orchestrator` 创建 `docs/tasks/<task-id>/plan.md`。
+- **ask**：只有 quick/workflow 信号冲突、验收或风险边界不足以判断时使用；只问一个最小澄清问题。
+
+显式覆盖关键词：
+
+- 偏 quick：`直接改`、`快修`、`小改一下`、`不用 workflow`、`别走流程`
+- 偏 workflow：`走 workflow`、`留痕`、`需要 review`、`需要 test`、`跑完整流程`、`写计划`
+
+默认判断：
+
+- 窄范围、单文件或文档小修、验收清楚、失败影响低、可立即验证时，默认 `quick`。
+- 需求仍在形成、影响面不清、需要用户确认验收、会改共享协议 / 脚本 / 多阶段产物、或需要独立 review/test 证据时，默认 `workflow`。
+- quick 执行中若发现影响面扩大或用户开始要求留痕 / review / test，停止扩大实现并切换到 workflow 或先确认。
 
 ### 当前开发流程（Harness Lite v2）
 
@@ -128,21 +148,21 @@ These thoughts mean STOP — you're rationalizing:
 
 | Thought | Reality |
 |---------|---------|
-| "这个改动很小，不需要 orchestrator" | 小改动走 fast-track 模式，仍需进入 orchestrator。 |
-| "先直接 implement，再补文档" | 文档驱动开发是纪律。先形成开发计划。 |
+| "这个改动很小，不需要判断流程" | 小改动可以走 quick，但必须先完成 `new-task` mode routing。 |
+| "先直接 implement，再补文档" | workflow 模式仍先形成计划；quick 模式只适用于边界清楚、可直接验证的低风险事项。 |
 | "没有技术方案评审，就得先补完整 spec" | 新流程只在输入不足时生成可选 `DELTA_SPEC`，不是默认回到全量需求流程。 |
-| "review/test 太慢，先提交" | 没有 review/test 的实现是未验证的实现。不可跳过。 |
+| "review/test 太慢，先提交" | 用户或风险要求 workflow 时，review/test 不可跳过。 |
 
 ## Skill Priority
 
 When multiple skills could apply, use this order:
 
-1. **开发主流程 skill 最优先**：开发任务先进入 orchestrator
+1. **开发主流程 skill 最优先**：开发任务先完成 `resume/switch/new/inbox` 判定；`new-task` 再选 `quick | workflow | ask`
 2. **流程型分支 skill 其次**：例如仅在输入不足时进入 `spec`
 3. **委派型 skill 再其次**：如 `codex`；显式 Gemini TEST 才使用 `gemini-designer-main`
 
-"做一个新功能" → orchestrator first, then PLAN / IMPLEMENT 阶段内按需调用其他 skill。
-"Fix this bug" → orchestrator first，再进入开发阶段 harness。
+"做一个新功能" → 先做 `new-task` mode routing；需要计划/留痕时进入 orchestrator。
+"Fix this bug" → 先判断 quick/workflow；低风险快修可 quick，需要 review/test 时进入 harness。
 
 ## Skill Types
 
