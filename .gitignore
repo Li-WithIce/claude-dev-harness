@@ -18,6 +18,7 @@ skills/.system/
 skills/*/.runtime/
 
 # Local workspace state
+.aionrs/
 .assistant/*
 !.assistant/工作流/
 .assistant/工作流/*
