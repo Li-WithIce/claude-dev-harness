@@ -244,8 +244,8 @@ stages:
     skills_whitelist: [review]
   TEST:
     role: tester
-    default_profile: harness-default-gemini
-    skills_whitelist: [test, gemini-designer-main]
+    default_profile: harness-default-codex
+    skills_whitelist: [test]
 "@
 }
 
@@ -459,6 +459,34 @@ stages:
         Add-Check 'B4 workflow-default falls back to descriptor stage default'
     } else {
         Add-Failure ("B4 workflow-default should resolve codex, got stdout=[{0}] stderr=[{1}]" -f $workflowDefaultResult.StdOut, $workflowDefaultResult.StdErr)
+    }
+
+    $taskWorkflowDefaultTest = 'workflow-descriptor-b4-test-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskWorkflowDefaultTestDir = Join-Path $taskBase $taskWorkflowDefaultTest
+    $createdTaskDirs += $taskWorkflowDefaultTestDir
+    New-Item -ItemType Directory -Path $taskWorkflowDefaultTestDir -Force | Out-Null
+    $codeReviewPass = @"
+### Run 1 · 2026-04-09 10:30 · runner: Codex
+- verdict: pass
+- findings: none
+- next: TEST
+"@
+    $workflowDefaultTestContent = New-PlanContent -TaskId $taskWorkflowDefaultTest -Stage 'CODE_REVIEW' -Tool 'gemini'
+    $workflowDefaultTestContent = [regex]::Replace($workflowDefaultTestContent, '(?m)^## Code Review\s*$', "## Code Review`r`n$codeReviewPass")
+    Write-Utf8Bom -Path (Join-Path $taskWorkflowDefaultTestDir 'plan.md') -Content $workflowDefaultTestContent
+    $workflowDefaultTestResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskWorkflowDefaultTest -VaultRoot $vaultRoot -RepoRoot $RepoRoot
+    $workflowDefaultTestPlan = Read-FileUtf8 -Path (Join-Path $taskWorkflowDefaultTestDir 'plan.md')
+    $workflowDefaultTestMirror = Read-FileUtf8 -Path (Join-Path $vaultRoot "运行时\tasks\$taskWorkflowDefaultTest.md")
+    $workflowDefaultTestManifest = Read-FileUtf8 -Path (Join-Path $taskWorkflowDefaultTestDir 'skill-manifest.json') | ConvertFrom-Json
+    if ($workflowDefaultTestResult.ExitCode -eq 0 -and
+        $workflowDefaultTestResult.StdOut -eq 'TEST | codex' -and
+        $workflowDefaultTestResult.StdErr -match 'resolved tool=codex via workflow-default' -and
+        (Assert-ArtifactHasProfileModel -PlanText $workflowDefaultTestPlan -MirrorText $workflowDefaultTestMirror -Profile 'harness-default-codex' -Model 'gpt-5.5/xhigh') -and
+        $workflowDefaultTestManifest.available_commands.Count -eq 1 -and
+        $workflowDefaultTestManifest.available_commands[0].name -eq 'test') {
+        Add-Check 'B4b CODE_REVIEW -> TEST workflow-default is Codex-only with test skill'
+    } else {
+        Add-Failure ("B4b TEST workflow-default should resolve codex/test, got stdout=[{0}] stderr=[{1}]" -f $workflowDefaultTestResult.StdOut, $workflowDefaultTestResult.StdErr)
     }
 
     Remove-WorkflowDescriptor -RepoRoot $RepoRoot

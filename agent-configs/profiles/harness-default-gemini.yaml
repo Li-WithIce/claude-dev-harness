@@ -8,4 +8,4 @@ enabled_skills:
   - gemini-designer-main
 disabled_builtin_skills: []
 context: |
-  Harness lite default Gemini profile. Prefer read-only evidence-based TEST output.
+  Harness lite optional Gemini profile. Use only when a task explicitly switches TEST or another compatible stage to Gemini.

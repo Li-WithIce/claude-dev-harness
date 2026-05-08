@@ -71,7 +71,7 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 
 - 唯一真相源：`docs/tasks/<task-id>/plan.md` frontmatter（`stage`、`tool`、`task_id`）
 - 终态标记：`DONE`，只写回 `plan.md` frontmatter，不是独立 stage
-- 默认执行面是 Codex-first：PLAN / PLAN_REVIEW / IMPLEMENT / CODE_REVIEW 使用 `harness-default-codex`，TEST 使用 `harness-default-gemini`
+- 默认执行面是 Codex-only：PLAN / PLAN_REVIEW / IMPLEMENT / CODE_REVIEW / TEST 都使用 `harness-default-codex`
 - 阶段推进：优先使用 `.assistant\entry\advance-stage.ps1 -TaskId <id>`；需要切换 backend 时再传 `-Tool <claudecode|codex|gemini>`
 - 非 `DONE` 推进的下一阶段 tool 解析顺序是：显式 `-Tool` → 显式 `-Profile` → `agent-configs/workflows/harness-lite.yaml` 的 `default_profile`
 - 只有在显式 `-Tool`、显式 `-Profile` 和 workflow `default_profile` 都缺失时，非 `DONE` 推进才会报 `requires -Tool`
@@ -97,7 +97,7 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 |------|-----------|------|
 | 1 | 开发主流程 | orchestrator → plan / implement / review / test |
 | 2 | 可选补充分支 | spec（仅在输入不足时生成 delta-spec） |
-| 3 | 可选委派 | codex（用户显式要求或当前 stage 分配 `tool: codex` 时）、gemini-designer-main（TEST 阶段） |
+| 3 | 可选委派 | codex（用户显式要求或当前 stage 分配 `tool: codex` 时）、gemini-designer-main（仅显式切到 Gemini 的 TEST 阶段） |
 
 规则：
 - `spec` 在新流程中是**可选 delta-spec 分支**，不是默认入口
@@ -139,7 +139,7 @@ When multiple skills could apply, use this order:
 
 1. **开发主流程 skill 最优先**：开发任务先进入 orchestrator
 2. **流程型分支 skill 其次**：例如仅在输入不足时进入 `spec`
-3. **委派型 skill 再其次**：如 `codex`、`gemini-designer-main`
+3. **委派型 skill 再其次**：如 `codex`；显式 Gemini TEST 才使用 `gemini-designer-main`
 
 "做一个新功能" → orchestrator first, then PLAN / IMPLEMENT 阶段内按需调用其他 skill。
 "Fix this bug" → orchestrator first，再进入开发阶段 harness。

@@ -51,8 +51,8 @@ updated: YYYY-MM-DD
 - `PLAN_REVIEW`：调用 `review` skill，写 `## Plan Review`
 - `IMPLEMENT`：调用 `implement` skill，写 `## Implementation Notes`
 - `CODE_REVIEW`：调用 `review` skill，写 `## Code Review`
-- `TEST`：调用 `test` 或 `gemini-designer-main`，写 `test.md`
-- 优先调用 repo `scripts/invoke-harness-skill.ps1` 发起 `review` / `test` / `gemini-designer-main` / `codex`；返回 `status=markdown-fallback` 时回退到原 Markdown skill 流程
+- `TEST`：默认调用 `test`，写 `test.md`；只有显式切到 Gemini 时才使用 `gemini-designer-main`
+- 优先调用 repo `scripts/invoke-harness-skill.ps1` 发起 `review` / `test` / `codex`；显式 Gemini 路径可发起 `gemini-designer-main`；返回 `status=markdown-fallback` 时回退到原 Markdown skill 流程
 - `implement` 不允许走 adapter；必须由主 agent / 人类直接执行
 
 **Team mode (documentation only)**: 当 leader 已设 `$env:AIONUI_TEAM_MODE='1'` 时，可调用 `skills/workflow-team/scripts/spawn-team.ps1` 起 5 role 团队；env 校验由 `spawn-team.ps1` 自身 fail-closed 强制。env 未设时维持单 agent 流程，所有 Phase 1-3 行为零变化；orchestrator skill 本身不新增任何读 env 的可执行分支。
@@ -62,7 +62,7 @@ updated: YYYY-MM-DD
 stage 只通过下面这条命令推进：
 
 ```powershell
-# Codex-first 默认路径：descriptor 为下一 stage 声明 default_profile 时可省略 -Tool/-Profile
+# Codex-only 默认路径：descriptor 为下一 stage 声明 default_profile 时可省略 -Tool/-Profile
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
 # 可选：同时绑定下一阶段 profile/model
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <codex> -Profile harness-default-codex -Model gpt-5.5/xhigh

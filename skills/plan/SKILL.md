@@ -164,7 +164,7 @@ updated: 2026-04-09
 ## Code Review
 ```
 
-Codex-first 默认 profile 写法如下；若显式切换 backend，必须换成匹配该 backend 的 profile/model：
+Codex-only 默认 profile 写法如下；若显式切换 backend，必须换成匹配该 backend 的 profile/model：
 
 ```yaml
 tool_profile: harness-default-codex

@@ -23,7 +23,7 @@ lite workflow 不维护自动推导矩阵；`tool` 仍是当前 stage 的显式 
 - `default_profile`
 - `skills_whitelist`
 
-当前 `harness-lite` descriptor 是 Codex-first：`PLAN`、`PLAN_REVIEW`、`IMPLEMENT`、`CODE_REVIEW` 默认使用 `harness-default-codex`；`TEST` 默认使用 `harness-default-gemini`。`harness-default-claude` 保留为显式切换选项。
+当前 `harness-lite` descriptor 是 Codex-only：`PLAN`、`PLAN_REVIEW`、`IMPLEMENT`、`CODE_REVIEW`、`TEST` 默认使用 `harness-default-codex`。`harness-default-claude` 与 `harness-default-gemini` 保留为显式切换选项。
 
 规则：
 

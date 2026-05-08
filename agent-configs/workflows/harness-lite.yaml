@@ -6,7 +6,7 @@
 # 详细条款见 `skills/workflow-team/SKILL.md` 的 `Auto Mode Propagation`。
 name: harness-lite
 version: 1
-# Codex-first: non-TEST stages default to harness-default-codex.
+# Codex-only default: every executable stage defaults to harness-default-codex.
 stages:
   PLAN:
     role: plan-author
@@ -30,5 +30,5 @@ stages:
     # 该注释不改变 YAML 实体字段，也不影响默认 stage 解析。
   TEST:
     role: tester
-    default_profile: harness-default-gemini
-    skills_whitelist: [test, gemini-designer-main]
+    default_profile: harness-default-codex
+    skills_whitelist: [test]

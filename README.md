@@ -36,7 +36,7 @@ pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\claude-d
 
 安装后的用户视角，日常基本只有 4 件事：
 
-1. 在目标工作区里直接发起开发任务，让入口文档把对话路由到 `using-superpowers -> orchestrator`；默认执行面是 Codex-first。
+1. 在目标工作区里直接发起开发任务，让入口文档把对话路由到 `using-superpowers -> orchestrator`；默认执行面是 Codex-only。
 2. 让当前阶段把产物写到 `docs/tasks/<task-id>/`。
 3. 阶段完成后，用 `.assistant/entry/advance-stage.ps1` 推进到下一阶段。
 4. 会话中断后，说“继续”/“恢复”/`resume`，按 `.assistant/工作流/长会话恢复.md` 的顺序恢复。
@@ -44,7 +44,7 @@ pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\claude-d
 最常用命令：
 
 ```powershell
-# Codex-first 默认路径：下一阶段已有 descriptor default_profile 时可省略 -Tool/-Profile
+# Codex-only 默认路径：下一阶段已有 descriptor default_profile 时可省略 -Tool/-Profile
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
 
 # 显式指定 profile，backend 从 profile.backend 解析
@@ -75,7 +75,7 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 
 `DONE` 不是单独执行阶段，而是 `plan.md` frontmatter 的终态标记。
 
-默认 descriptor 是 Codex-first：`PLAN`、`PLAN_REVIEW`、`IMPLEMENT`、`CODE_REVIEW` 都使用 `harness-default-codex`；`TEST` 使用 `harness-default-gemini`。`claudecode` 仍是合法 backend，但需要在任务 frontmatter 或推进命令中显式指定。
+默认 descriptor 是 Codex-only：`PLAN`、`PLAN_REVIEW`、`IMPLEMENT`、`CODE_REVIEW`、`TEST` 都使用 `harness-default-codex`。`claudecode` / `gemini` 仍是合法 backend，但需要在任务 frontmatter 或推进命令中显式指定。
 
 唯一阶段真相源始终是 `docs/tasks/<task-id>/plan.md` frontmatter：
 
@@ -325,7 +325,7 @@ pwsh -File .\scripts\check-shared-memory-layers.ps1 -VaultRoot <workspace-root>\
 pwsh -File .\scripts\invoke-harness-skill.ps1 -TaskId <task-id> -Stage PLAN_REVIEW -Skill review -Tool codex -WorkspaceRoot <workspace-root> -ArtifactRoot docs\tasks\<task-id> -Mode readonly -PayloadJson '{}'
 
 # per-task skills index
-pwsh -File .\scripts\generate-skills-index.ps1 -TaskId <task-id> -Stage TEST -BackendHint gemini
+pwsh -File .\scripts\generate-skills-index.ps1 -TaskId <task-id> -Stage TEST -BackendHint codex
 
 # team preset 导出与 team mode
 pwsh -File .\scripts\export-team-preset.ps1 -Workflow harness-lite -Output <tmp>\team.yaml

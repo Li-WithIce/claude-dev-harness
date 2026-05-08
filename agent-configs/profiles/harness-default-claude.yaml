@@ -13,4 +13,4 @@ enabled_skills:
   - spec
 disabled_builtin_skills: []
 context: |
-  Harness lite optional Claude Code profile. Use only when a task explicitly switches from the Codex-first default.
+  Harness lite optional Claude Code profile. Use only when a task explicitly switches away from the Codex-only default.

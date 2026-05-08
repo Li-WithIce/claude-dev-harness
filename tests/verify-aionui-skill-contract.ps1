@@ -673,7 +673,7 @@ try {
         $skillsIndexDoc -match '^<!-- generated at ' -and
         $skillsIndexDoc -match '# Skills available at TEST \(backend hint: kimi\)' -and
         $skillsIndexDoc -match '\*\*test\*\*' -and
-        $skillsIndexDoc -match '\*\*gemini-designer-main\*\*') {
+        $skillsIndexDoc -notmatch '\*\*gemini-designer-main\*\*') {
         Add-Check 'E1 generate-skills-index emits workflow-backed markdown with skill descriptions'
     } else {
         Add-Failure ("E1 generate-skills-index failed, got output=[{0}] doc=[{1}]" -f $e1Result.Text, $skillsIndexDoc)

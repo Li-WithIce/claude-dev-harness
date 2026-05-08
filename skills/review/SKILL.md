@@ -91,8 +91,7 @@ description: Use when the task is in PLAN_REVIEW or CODE_REVIEW and a new append
 
 推进规则：
 
-- `PLAN_REVIEW -> IMPLEMENT` / `PLAN` 与 `CODE_REVIEW -> IMPLEMENT` 默认走 workflow descriptor 的 `harness-default-codex`
-- `CODE_REVIEW -> TEST` 默认走 workflow descriptor 的 `harness-default-gemini`
+- `PLAN_REVIEW -> IMPLEMENT` / `PLAN`、`CODE_REVIEW -> IMPLEMENT` 与 `CODE_REVIEW -> TEST` 默认走 workflow descriptor 的 `harness-default-codex`
 - 如需切换 backend，推进时显式传 `-Tool`；如使用 profile，同步传 `-Profile <profile-name>` 和完整 `-Model <model-id>`，且 profile 的 backend 必须等于 `-Tool`
 - 推进命令默认是 `.assistant\entry\advance-stage.ps1 -TaskId <task-id>`
 

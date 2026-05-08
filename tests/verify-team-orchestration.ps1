@@ -271,7 +271,7 @@ try {
         'plan-reviewer' = [ordered]@{ backend = 'codex'; model = 'gpt-5.5/xhigh'; skills = @('review') }
         'implementer' = [ordered]@{ backend = 'codex'; model = 'gpt-5.5/xhigh'; skills = @('implement') }
         'code-reviewer' = [ordered]@{ backend = 'codex'; model = 'gpt-5.5/xhigh'; skills = @('review') }
-        'tester' = [ordered]@{ backend = 'gemini'; model = 'gemini-2.5-pro'; skills = @('test', 'gemini-designer-main') }
+        'tester' = [ordered]@{ backend = 'codex'; model = 'gpt-5.5/xhigh'; skills = @('test') }
     }
     $payloadOk = $true
     foreach ($payload in $o2Payloads) {

@@ -50,7 +50,7 @@ updated: YYYY-MM-DD
 
 若仓库启用了 `agent-configs/workflows/harness-lite.yaml`，它只为下一 stage 提供 `workflow-default` fallback，不改变 `plan.md` frontmatter 仍是唯一当前 stage 真相源。
 
-当前仓库的默认 descriptor 是 Codex-first：`PLAN`、`PLAN_REVIEW`、`IMPLEMENT`、`CODE_REVIEW` 都默认使用 `harness-default-codex`；`TEST` 默认使用 `harness-default-gemini`。如需 Claude Code 介入，必须在当前任务或推进命令里显式指定 `claudecode` / `harness-default-claude`。
+当前仓库的默认 descriptor 是 Codex-only：`PLAN`、`PLAN_REVIEW`、`IMPLEMENT`、`CODE_REVIEW`、`TEST` 都默认使用 `harness-default-codex`。如需 Claude Code 或 Gemini 介入，必须在当前任务或推进命令里显式指定对应 backend / profile。
 
 最小字段：
 

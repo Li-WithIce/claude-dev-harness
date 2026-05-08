@@ -37,8 +37,8 @@ stages:
     skills_whitelist: [review]
   TEST:
     role: tester
-    default_profile: harness-default-gemini
-    skills_whitelist: [test, gemini-designer-main]
+    default_profile: harness-default-codex
+    skills_whitelist: [test]
 ```
 
 这份 descriptor 可选放在 `agent-configs/workflows/harness-lite.yaml`，只为下一 stage 提供 `workflow-default` fallback；它不改变 `plan.md` frontmatter 仍是唯一当前 stage 真相源。
@@ -112,10 +112,9 @@ Do not call team_task_update to mutate task state.
 
 ```markdown
 <!-- generated at 2026-04-25T10:00:00.0000000Z -->
-# Skills available at TEST (backend hint: kimi)
+# Skills available at TEST (backend hint: codex)
 
 - **test** — ...
-- **gemini-designer-main** — ...
 ```
 
 ## plan.md skeleton
