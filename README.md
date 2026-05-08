@@ -36,7 +36,7 @@ pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\claude-d
 
 安装后的用户视角，日常基本只有 4 件事：
 
-1. 在目标工作区里直接发起开发任务，让入口文档把对话路由到 `using-superpowers -> orchestrator`。
+1. 在目标工作区里直接发起开发任务，让入口文档把对话路由到 `using-superpowers -> orchestrator`；默认执行面是 Codex-first。
 2. 让当前阶段把产物写到 `docs/tasks/<task-id>/`。
 3. 阶段完成后，用 `.assistant/entry/advance-stage.ps1` 推进到下一阶段。
 4. 会话中断后，说“继续”/“恢复”/`resume`，按 `.assistant/工作流/长会话恢复.md` 的顺序恢复。
@@ -44,8 +44,8 @@ pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\claude-d
 最常用命令：
 
 ```powershell
-# 非 DONE 阶段：显式指定 backend
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool claudecode
+# Codex-first 默认路径：下一阶段已有 descriptor default_profile 时可省略 -Tool/-Profile
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
 
 # 显式指定 profile，backend 从 profile.backend 解析
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Profile harness-default-codex
@@ -53,8 +53,8 @@ pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Profile harness
 # 显式指定 tool + profile + model
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool codex -Profile harness-default-codex -Model gpt-5.5/xhigh
 
-# 若 workflow descriptor 为下一阶段声明了 default_profile，可省略 -Tool/-Profile
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
+# 仍可显式切到其他合法 backend
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool claudecode
 
 # TEST -> DONE 可省略 -Tool
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
@@ -74,6 +74,8 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 ```
 
 `DONE` 不是单独执行阶段，而是 `plan.md` frontmatter 的终态标记。
+
+默认 descriptor 是 Codex-first：`PLAN`、`PLAN_REVIEW`、`IMPLEMENT`、`CODE_REVIEW` 都使用 `harness-default-codex`；`TEST` 使用 `harness-default-gemini`。`claudecode` 仍是合法 backend，但需要在任务 frontmatter 或推进命令中显式指定。
 
 唯一阶段真相源始终是 `docs/tasks/<task-id>/plan.md` frontmatter：
 

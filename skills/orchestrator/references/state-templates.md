@@ -21,7 +21,7 @@ version: 1
 stages:
   PLAN:
     role: plan-author
-    default_profile: harness-default-claude
+    default_profile: harness-default-codex
     skills_whitelist: [plan, using-superpowers]
   PLAN_REVIEW:
     role: plan-reviewer
@@ -29,7 +29,7 @@ stages:
     skills_whitelist: [review]
   IMPLEMENT:
     role: implementer
-    default_profile: harness-default-claude
+    default_profile: harness-default-codex
     skills_whitelist: [implement]
   CODE_REVIEW:
     role: code-reviewer
@@ -55,8 +55,8 @@ single_writer:
     - docs/tasks/<task-id>/
 members:
   - role: plan-author
-    backend: claudecode
-    model: claude-opus-4-7
+    backend: codex
+    model: gpt-5.5/xhigh
     skills_whitelist: [plan, using-superpowers]
     role_prompt_ref: agent-configs/role-prompts/plan-author.md
 ```

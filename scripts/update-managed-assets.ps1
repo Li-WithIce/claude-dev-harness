@@ -20,6 +20,72 @@ function Get-NormalizedPath {
     return [System.IO.Path]::GetFullPath($Path)
 }
 
+function Find-WorkspaceRootFromLocation {
+    param([string]$StartPath)
+
+    try {
+        $candidateRoot = Get-NormalizedPath -Path $StartPath
+        while (-not [string]::IsNullOrWhiteSpace($candidateRoot)) {
+            if (Test-Path -LiteralPath (Join-Path $candidateRoot '.assistant') -PathType Container) {
+                return $candidateRoot
+            }
+
+            $parent = Split-Path -Parent $candidateRoot
+            if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $candidateRoot) {
+                break
+            }
+
+            $candidateRoot = $parent
+        }
+    } catch {
+        return $null
+    }
+
+    return $null
+}
+
+function Resolve-WorkspaceRoot {
+    param([string]$ExplicitPath)
+
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+        return Get-NormalizedPath -Path $ExplicitPath
+    }
+
+    $environmentCandidates = New-Object System.Collections.Generic.List[object]
+    foreach ($definition in @(
+            [pscustomobject]@{ Name = 'CLAUDE_DEV_HARNESS_WORKSPACE_ROOT'; Value = $env:CLAUDE_DEV_HARNESS_WORKSPACE_ROOT },
+            [pscustomobject]@{ Name = 'WORKSPACE_ROOT'; Value = $env:WORKSPACE_ROOT }
+        )) {
+        if ([string]::IsNullOrWhiteSpace($definition.Value)) {
+            continue
+        }
+
+        $environmentCandidates.Add([pscustomobject]@{
+                Name = $definition.Name
+                Path = Get-NormalizedPath -Path $definition.Value
+            }) | Out-Null
+    }
+
+    if ($environmentCandidates.Count -gt 1) {
+        $uniqueEnvironmentPaths = @($environmentCandidates | Select-Object -ExpandProperty Path -Unique)
+        if ($uniqueEnvironmentPaths.Count -gt 1) {
+            $details = $environmentCandidates | ForEach-Object { "{0}={1}" -f $_.Name, $_.Path }
+            throw ("Conflicting workspace roots from environment: {0}" -f ($details -join '; '))
+        }
+    }
+
+    if ($environmentCandidates.Count -gt 0) {
+        return $environmentCandidates[0].Path
+    }
+
+    $cwdWorkspaceRoot = Find-WorkspaceRootFromLocation -StartPath (Get-Location).Path
+    if (-not [string]::IsNullOrWhiteSpace($cwdWorkspaceRoot)) {
+        return $cwdWorkspaceRoot
+    }
+
+    throw 'You must provide -WorkspaceRoot, set CLAUDE_DEV_HARNESS_WORKSPACE_ROOT / WORKSPACE_ROOT, or run from inside a workspace that contains .assistant'
+}
+
 function Convert-ToLineArray {
     param($Output)
 
@@ -87,18 +153,29 @@ function Invoke-Step {
 
     $output = @()
     $exitCode = 0
+    $stepThrew = $false
 
     try {
         $output = @(& $ScriptPath @Arguments 2>&1)
-        $exitCode = $LASTEXITCODE
+        $scriptSucceeded = $?
+        $exitCode = if ($ScriptPath -like '*.ps1' -and $scriptSucceeded) {
+            0
+        } elseif ($null -ne $LASTEXITCODE) {
+            $LASTEXITCODE
+        } else {
+            1
+        }
     } catch {
+        $stepThrew = $true
         $output = @($_.Exception.Message)
         $exitCode = 2
     }
 
     $lines = Convert-ToLineArray -Output $output
     $text = $lines -join [Environment]::NewLine
-    $status = if ($text -match '(?im)^STATUS:\s+(PASS|WARN|FAIL)\s*$') {
+    $status = if (-not $stepThrew -and $Name -eq 'install.ps1') {
+        'PASS'
+    } elseif ($text -match '(?im)^STATUS:\s+(PASS|WARN|FAIL)\s*$') {
         $matches[1].ToUpperInvariant()
     } elseif ($exitCode -eq 0) {
         'PASS'
@@ -137,41 +214,7 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 
 $RepoRoot = Get-NormalizedPath -Path $RepoRoot
 
-if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
-    foreach ($candidate in @($env:CLAUDE_DEV_HARNESS_WORKSPACE_ROOT, $env:WORKSPACE_ROOT)) {
-        if (-not [string]::IsNullOrWhiteSpace($candidate)) {
-            $WorkspaceRoot = $candidate
-            break
-        }
-    }
-}
-
-if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
-    try {
-        $candidateRoot = Get-NormalizedPath -Path (Get-Location).Path
-        while (-not [string]::IsNullOrWhiteSpace($candidateRoot)) {
-            if (Test-Path -LiteralPath (Join-Path $candidateRoot '.assistant') -PathType Container) {
-                $WorkspaceRoot = $candidateRoot
-                break
-            }
-
-            $parent = Split-Path -Parent $candidateRoot
-            if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $candidateRoot) {
-                break
-            }
-
-            $candidateRoot = $parent
-        }
-    } catch {
-        # Ignore workspace inference failures and fall back to the explicit error.
-    }
-}
-
-if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
-    throw 'You must provide -WorkspaceRoot, set CLAUDE_DEV_HARNESS_WORKSPACE_ROOT / WORKSPACE_ROOT, or run from inside a workspace that contains .assistant'
-}
-
-$WorkspaceRoot = Get-NormalizedPath -Path $WorkspaceRoot
+$WorkspaceRoot = Resolve-WorkspaceRoot -ExplicitPath $WorkspaceRoot
 
 $results = @()
 

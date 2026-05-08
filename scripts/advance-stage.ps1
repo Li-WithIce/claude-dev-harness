@@ -1084,6 +1084,8 @@ function New-CurrentTaskContent {
     当前主文档路径。
     .PARAMETER Tool
     当前阶段工具。
+    .PARAMETER EntryHost
+    当前阶段入口 host。
     .PARAMETER ToolProfile
     当前阶段 tool profile。
     .PARAMETER Model
@@ -1098,6 +1100,7 @@ function New-CurrentTaskContent {
         [string]$Status,
         [string]$CurrentDoc,
         [string]$Tool,
+        [string]$EntryHost,
         [string]$ToolProfile = "",
         [string]$Model = "",
         [string]$NextStep
@@ -1107,7 +1110,7 @@ function New-CurrentTaskContent {
         '---'
         ('updated: {0}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
         ('task_id: {0}' -f $TaskId)
-        'entry_host: claudecode'
+        ('entry_host: {0}' -f $EntryHost)
         'writer: advance-stage'
         '---'
         ''
@@ -1311,7 +1314,7 @@ $taskMirrorLines = @(
     "task_id: $TaskId"
     "stage: $nextStage"
     "tool: $nextTool"
-    "entry_host: claudecode"
+    "entry_host: $nextTool"
 )
 
 if (-not [string]::IsNullOrWhiteSpace($nextProfile)) {
@@ -1352,7 +1355,7 @@ Invoke-BestEffortRuntimeWrite -VaultRoot $VaultRoot -TaskId $TaskId -Step 'tasks
 }
 Invoke-BestEffortRuntimeWrite -VaultRoot $VaultRoot -TaskId $TaskId -Step 'current-task' -Action {
     Ensure-ParentDirectory -Path $currentPath
-    Write-Utf8Bom -Path $currentPath -Content (New-CurrentTaskContent -TaskId $TaskId -Status $nextStage -CurrentDoc $currentDoc -Tool $nextTool -ToolProfile $nextProfile -Model $nextModel -NextStep $nextStep)
+    Write-Utf8Bom -Path $currentPath -Content (New-CurrentTaskContent -TaskId $TaskId -Status $nextStage -CurrentDoc $currentDoc -Tool $nextTool -EntryHost $nextTool -ToolProfile $nextProfile -Model $nextModel -NextStep $nextStep)
 }
 Invoke-BestEffortRuntimeWrite -VaultRoot $VaultRoot -TaskId $TaskId -Step 'recovery-index' -Action {
     Ensure-ParentDirectory -Path $indexPath

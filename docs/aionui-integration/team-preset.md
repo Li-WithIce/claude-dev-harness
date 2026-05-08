@@ -20,8 +20,8 @@ single_writer:
     - docs/tasks/<task-id>/
 members:
   - role: plan-author
-    backend: claudecode
-    model: claude-opus-4-7
+    backend: codex
+    model: gpt-5.5/xhigh
     skills_whitelist: [plan, using-superpowers]
     role_prompt_ref: agent-configs/role-prompts/plan-author.md
 ```
@@ -50,8 +50,8 @@ members:
   "task_id": "<task-id>",
   "workflow": "harness-lite",
   "role": "plan-author",
-  "backend": "claudecode",
-  "model": "claude-opus-4-7",
+  "backend": "codex",
+  "model": "gpt-5.5/xhigh",
   "system_prompt": "<contents of role_prompt_ref>",
   "skills_whitelist": ["plan", "using-superpowers"],
   "members_read_only_path_prefixes": [".assistant/", "docs/tasks/<task-id>/"]

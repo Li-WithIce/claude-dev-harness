@@ -10,8 +10,8 @@ updated: __RENDER_AT_INSTALL__
 
 | 工具 | 说明 |
 |------|------|
-| Claude Code | 主开发 agent，记忆系统宿主 |
-| Codex | 自主编码 agent |
+| Codex | 默认开发 agent |
+| Claude Code | 可选开发 backend 与记忆 hooks 宿主 |
 | Gemini | 测试运行器 |
 
 ## 关键路径

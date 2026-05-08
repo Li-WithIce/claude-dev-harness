@@ -228,7 +228,7 @@ version: 1
 stages:
   PLAN:
     role: plan-author
-    default_profile: harness-default-claude
+    default_profile: harness-default-codex
     skills_whitelist: [plan, using-superpowers]
   PLAN_REVIEW:
     role: plan-reviewer
@@ -236,7 +236,7 @@ stages:
     skills_whitelist: [review]
   IMPLEMENT:
     role: implementer
-    default_profile: harness-default-claude
+    default_profile: harness-default-codex
     skills_whitelist: [implement]
   CODE_REVIEW:
     role: code-reviewer
@@ -345,7 +345,7 @@ name: harness-lite
 stages:
   PLAN:
     role: plan-author
-    default_profile: harness-default-claude
+    default_profile: harness-default-codex
     skills_whitelist: [plan, using-superpowers]
 "@
     $missingVersionResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskValid -RepoRoot $RepoRoot
@@ -377,7 +377,7 @@ version: 1
 stages:
   PLAN:
     role: plan-author
-    default_profile: harness-default-claude
+    default_profile: harness-default-codex
     skills_whitelist: [bogus-skill]
 "@
     $bogusSkillResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskValid -RepoRoot $RepoRoot

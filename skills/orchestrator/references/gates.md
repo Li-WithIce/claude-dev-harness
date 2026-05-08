@@ -4,7 +4,7 @@ lite workflow 只认 `docs/tasks/<task-id>/` 下的任务产物。
 
 ## tool 规则
 
-- 非 `DONE` 推进时，必须由用户显式指定下一阶段 `tool`
+- 非 `DONE` 推进时，优先使用显式 `-Tool` / `-Profile`；未显式指定时使用 workflow descriptor 的 Codex-first `default_profile`
 - `tool` 只允许：`claudecode`、`codex`、`gemini`
 - `DONE` 固定写 `tool: none`
 - 用户可在任意 stage 边界切换 tool

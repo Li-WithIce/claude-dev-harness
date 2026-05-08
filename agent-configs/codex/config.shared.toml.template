@@ -1,10 +1,10 @@
 # Managed by install.ps1
+# Host-managed config stays workspace-agnostic.
+# Active workspace is derived per invocation from explicit args, env, or cwd.
 # Only Harness-managed skills/path metadata belong in this block.
 # Keep user-owned [[skills.config]] entries outside this block.
 
 [managed.shared_paths]
-workspace_root = "{WORKSPACE_ROOT}"
-vault_path = "{VAULT_PATH}"
 skills_root = "{CODEX_HOME}\\skills"
 
 [[skills.config]]

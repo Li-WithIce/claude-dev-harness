@@ -6,10 +6,11 @@
 # 详细条款见 `skills/workflow-team/SKILL.md` 的 `Auto Mode Propagation`。
 name: harness-lite
 version: 1
+# Codex-first: non-TEST stages default to harness-default-codex.
 stages:
   PLAN:
     role: plan-author
-    default_profile: harness-default-claude
+    default_profile: harness-default-codex
     skills_whitelist: [plan, using-superpowers]
   PLAN_REVIEW:
     role: plan-reviewer
@@ -19,7 +20,7 @@ stages:
     # 旧任务保持 opt-in；未录入 4-dim score 时只输出 warning。
   IMPLEMENT:
     role: implementer
-    default_profile: harness-default-claude
+    default_profile: harness-default-codex
     skills_whitelist: [implement]
   CODE_REVIEW:
     role: code-reviewer

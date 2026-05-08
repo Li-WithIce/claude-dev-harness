@@ -13,4 +13,4 @@ enabled_skills:
   - spec
 disabled_builtin_skills: []
 context: |
-  Harness lite default Codex profile. Use Codex for implementation, review, and validation work inside the workspace.
+  Harness lite default Codex profile. Use Codex for planning, implementation, review, and validation work inside the workspace.

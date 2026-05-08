@@ -195,6 +195,24 @@ function Read-FileUtf8 {
     return Get-Content -LiteralPath $Path -Raw -Encoding utf8
 }
 
+function Get-BackupSafeName {
+    param([string]$Path)
+
+    $safeName = ($Path -replace '[:\\\/]+', '_').Trim('_')
+    if ($safeName.Length -le 80) {
+        return $safeName
+    }
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hashBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Path))
+    } finally {
+        $sha.Dispose()
+    }
+    $hash = ([System.BitConverter]::ToString($hashBytes)).Replace('-', '').Substring(0, 16).ToLowerInvariant()
+    return ("{0}_{1}" -f $safeName.Substring(0, 80).Trim('_'), $hash)
+}
+
 function Get-ExistingNewlineStyle {
     param([string]$Content)
 
@@ -211,6 +229,16 @@ function Get-ExistingNewlineStyle {
     }
 
     return "`r`n"
+}
+
+function Normalize-LoneCarriageReturns {
+    param([string]$Content)
+
+    if ($null -eq $Content) {
+        return $null
+    }
+
+    return [regex]::Replace($Content, "`r(?!`n)", "`r`n")
 }
 
 function Ensure-WorkspaceGitIgnoreEntries {
@@ -240,7 +268,8 @@ function Ensure-WorkspaceGitIgnoreEntries {
     $missingEntries = @(
         $requiredEntries | Where-Object { -not $normalizedLines.Contains($_) }
     )
-    if ($missingEntries.Count -eq 0) {
+    $missingManagedComment = -not $normalizedLines.Contains($managedComment)
+    if ($missingEntries.Count -eq 0 -and -not $missingManagedComment) {
         return
     }
 
@@ -248,7 +277,7 @@ function Ensure-WorkspaceGitIgnoreEntries {
 
     $newline = Get-ExistingNewlineStyle -Content $existingContent
     $appendedLines = New-Object System.Collections.Generic.List[string]
-    if (-not $normalizedLines.Contains($managedComment)) {
+    if ($missingManagedComment) {
         [void]$appendedLines.Add($managedComment)
     }
     foreach ($entry in $missingEntries) {
@@ -745,7 +774,7 @@ function Backup-IfNeeded {
             $record.link_target = $target
         } else {
             $record.item_type = if ($item.PSIsContainer) { 'directory' } else { 'file' }
-            $safeName = ($Path -replace '[:\\\/]+', '_').Trim('_')
+            $safeName = Get-BackupSafeName -Path $Path
             $backupPath = Join-Path $script:BackupRoot $safeName
             Ensure-Directory -Path (Split-Path -Parent $backupPath)
             Copy-Item -LiteralPath $Path -Destination $backupPath -Recurse -Force
@@ -999,6 +1028,7 @@ function Update-CodexConfig {
     )
 
     $existing = Read-FileUtf8 -Path $TargetPath
+    $existing = Normalize-LoneCarriageReturns -Content $existing
     $renderedManaged = Render-Content -Content (Read-FileUtf8 -Path $TemplatePath) -TargetPath $TargetPath
     $managedSkillPaths = Get-ManagedSkillPathsFromTomlContent -Content $renderedManaged
     $managedBlock = @(

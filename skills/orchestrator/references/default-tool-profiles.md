@@ -23,6 +23,8 @@ lite workflow 不维护自动推导矩阵；`tool` 仍是当前 stage 的显式 
 - `default_profile`
 - `skills_whitelist`
 
+当前 `harness-lite` descriptor 是 Codex-first：`PLAN`、`PLAN_REVIEW`、`IMPLEMENT`、`CODE_REVIEW` 默认使用 `harness-default-codex`；`TEST` 默认使用 `harness-default-gemini`。`harness-default-claude` 保留为显式切换选项。
+
 规则：
 
 - `plan.md` 可选写 `tool_profile: <name>` 和 `model: <full-model-id>`
@@ -33,7 +35,7 @@ lite workflow 不维护自动推导矩阵；`tool` 仍是当前 stage 的显式 
 ## 规则
 
 - `plan.md` frontmatter 的 `tool` 表示“当前 stage 由哪个工具继续”
-- 新任务进入首个 stage 前，必须由用户显式指定 `tool`
+- 新任务进入首个 stage 前，未显式指定时默认使用 `tool: codex` 与 `harness-default-codex`
 - 非 `DONE` 推进的 fallback 顺序固定为：显式 `-Tool` → 显式 `-Profile` → workflow descriptor `default_profile`
 - `cli-profile`：`-Tool` 为空、`-Profile` 非空时，先从 `profile.backend` 解析 tool，再沿用 Phase 1 profile/model 写回
 - `cli-tool + explicit -Profile/-Model`：继续沿用 Phase 1 语义与 mismatch rejection

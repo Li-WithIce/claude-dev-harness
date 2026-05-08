@@ -1,6 +1,5 @@
 ﻿[CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
     [string]$WorkspaceRoot,
     [string]$RepoRoot = "",
     [string]$Scope = "All",
@@ -64,6 +63,28 @@ function Render-TemplateContent {
     return $rendered
 }
 
+function Test-LineContentMatches {
+    param(
+        [string]$ExpectedContent,
+        [string]$ActualContent
+    )
+
+    $expectedLines = [regex]::Split($ExpectedContent.TrimEnd(), '\r?\n') | ForEach-Object { $_.TrimEnd() }
+    $actualLines = [regex]::Split($ActualContent.TrimEnd(), '\r?\n') | ForEach-Object { $_.TrimEnd() }
+
+    if ($expectedLines.Count -ne $actualLines.Count) {
+        return $false
+    }
+
+    for ($index = 0; $index -lt $expectedLines.Count; $index += 1) {
+        if ($expectedLines[$index] -ne $actualLines[$index]) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
 function Get-TomlQuotedPathValue {
     param([string]$Line)
 
@@ -106,6 +127,72 @@ function Get-JunctionTarget {
     return Get-NormalizedPath -Path $target
 }
 
+function Find-WorkspaceRootFromLocation {
+    param([string]$StartPath)
+
+    try {
+        $candidateRoot = Get-NormalizedPath -Path $StartPath
+        while (-not [string]::IsNullOrWhiteSpace($candidateRoot)) {
+            if (Test-Path -LiteralPath (Join-Path $candidateRoot '.assistant') -PathType Container) {
+                return $candidateRoot
+            }
+
+            $parent = Split-Path -Parent $candidateRoot
+            if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $candidateRoot) {
+                break
+            }
+
+            $candidateRoot = $parent
+        }
+    } catch {
+        return $null
+    }
+
+    return $null
+}
+
+function Resolve-WorkspaceRoot {
+    param([string]$ExplicitPath)
+
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+        return Get-NormalizedPath -Path $ExplicitPath
+    }
+
+    $environmentCandidates = New-Object System.Collections.Generic.List[object]
+    foreach ($definition in @(
+            [pscustomobject]@{ Name = 'CLAUDE_DEV_HARNESS_WORKSPACE_ROOT'; Value = $env:CLAUDE_DEV_HARNESS_WORKSPACE_ROOT },
+            [pscustomobject]@{ Name = 'WORKSPACE_ROOT'; Value = $env:WORKSPACE_ROOT }
+        )) {
+        if ([string]::IsNullOrWhiteSpace($definition.Value)) {
+            continue
+        }
+
+        $environmentCandidates.Add([pscustomobject]@{
+                Name = $definition.Name
+                Path = Get-NormalizedPath -Path $definition.Value
+            }) | Out-Null
+    }
+
+    if ($environmentCandidates.Count -gt 1) {
+        $uniqueEnvironmentPaths = @($environmentCandidates | Select-Object -ExpandProperty Path -Unique)
+        if ($uniqueEnvironmentPaths.Count -gt 1) {
+            $details = $environmentCandidates | ForEach-Object { "{0}={1}" -f $_.Name, $_.Path }
+            throw ("Conflicting workspace roots from environment: {0}" -f ($details -join '; '))
+        }
+    }
+
+    if ($environmentCandidates.Count -gt 0) {
+        return $environmentCandidates[0].Path
+    }
+
+    $cwdWorkspaceRoot = Find-WorkspaceRootFromLocation -StartPath (Get-Location).Path
+    if (-not [string]::IsNullOrWhiteSpace($cwdWorkspaceRoot)) {
+        return $cwdWorkspaceRoot
+    }
+
+    throw 'You must provide -WorkspaceRoot, set CLAUDE_DEV_HARNESS_WORKSPACE_ROOT / WORKSPACE_ROOT, or run from inside a workspace that contains .assistant'
+}
+
 function Assert-RenderedFile {
     param(
         [string]$Path,
@@ -128,6 +215,39 @@ function Assert-RenderedFile {
         Add-Error ("文件仍含未渲染占位符 {0}: {1}" -f $hit, $Path)
     } else {
         Add-Check ("已渲染: {0}" -f $Path)
+    }
+}
+
+function Assert-TemplateFileMatches {
+    param(
+        [string]$Path,
+        [string]$TemplatePath,
+        [string]$Label,
+        [switch]$EscapeForCode
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        Add-Error ("缺少 {0}: {1}" -f $Label, $Path)
+        return
+    }
+
+    $actualContent = Read-FileUtf8 -Path $Path
+    if ($null -eq $actualContent) {
+        Add-Error ("无法读取 {0}: {1}" -f $Label, $Path)
+        return
+    }
+
+    $templateContent = Read-FileUtf8 -Path $TemplatePath
+    if ($null -eq $templateContent) {
+        Add-Error ("无法读取 {0} 模板: {1}" -f $Label, $TemplatePath)
+        return
+    }
+
+    $renderedTemplate = Render-TemplateContent -Content $templateContent -EscapeForCode:$EscapeForCode
+    if (Test-LineContentMatches -ExpectedContent $renderedTemplate -ActualContent $actualContent) {
+        Add-Check ("{0} 内容与模板一致" -f $Label)
+    } else {
+        Add-Error ("{0} 与模板不一致（可能缺少、变更或多出额外行）" -f $Label)
     }
 }
 
@@ -340,7 +460,7 @@ if ([string]::IsNullOrWhiteSpace($effectiveUserProfile)) {
 }
 
 $RepoRoot = Get-NormalizedPath -Path $RepoRoot
-$WorkspaceRoot = Get-NormalizedPath -Path $WorkspaceRoot
+$WorkspaceRoot = Resolve-WorkspaceRoot -ExplicitPath $WorkspaceRoot
 $effectiveUserProfile = Get-NormalizedPath -Path $effectiveUserProfile
 $VaultPath = Join-Path $WorkspaceRoot '.assistant'
 $ClaudeHome = Join-Path $effectiveUserProfile '.claude'
@@ -382,6 +502,7 @@ foreach ($hookName in @('userpromptsubmit.js', 'posttooluse.js', 'stop.js')) {
 }
 
 Assert-RenderedFile -Path $CodexAgentsPath -ForbiddenTokens $ForbiddenTokens
+Assert-TemplateFileMatches -Path $CodexAgentsPath -TemplatePath (Join-Path $RepoRoot 'agent-configs\codex\AGENTS.md.template') -Label 'Codex AGENTS.md'
 Assert-RenderedFile -Path $WorkspaceAgentsPath -ForbiddenTokens $ForbiddenTokens
 Assert-RenderedFile -Path $WorkspaceGeminiPath -ForbiddenTokens $ForbiddenTokens
 Assert-GitIgnoreManagedEntries -Path $WorkspaceGitIgnorePath
@@ -426,6 +547,12 @@ if (Test-Path -LiteralPath $CodexSettingsPath -PathType Leaf) {
 
 if (Test-Path -LiteralPath $CodexConfigPath -PathType Leaf) {
     $codexConfig = Read-FileUtf8 -Path $CodexConfigPath
+    if ([regex]::IsMatch($codexConfig, "`r(?!`n)")) {
+        Add-Error 'Codex config.toml 存在孤立 CR 换行字节，可能导致 TOML 解析失败'
+    } else {
+        Add-Check 'Codex config.toml 未发现孤立 CR 换行字节'
+    }
+
     $managedBlockContent = Get-ManagedTomlBlockContent -Content $codexConfig
     if ($null -ne $managedBlockContent) {
         Add-Check 'Codex config.toml 已写入 managed block'
@@ -435,21 +562,7 @@ if (Test-Path -LiteralPath $CodexConfigPath -PathType Leaf) {
 
     $renderedManagedTemplate = Render-TemplateContent -Content (Read-FileUtf8 -Path (Join-Path $RepoRoot 'agent-configs\codex\config.shared.toml.template')) -EscapeForCode
     if ($null -ne $managedBlockContent) {
-        $expectedManagedLines = [regex]::Split($renderedManagedTemplate.TrimEnd(), '\r?\n') |
-            ForEach-Object { $_.TrimEnd() }
-        $managedBlockLines = [regex]::Split($managedBlockContent.TrimEnd(), '\r?\n') | ForEach-Object { $_.TrimEnd() }
-
-        $blockMatchesTemplate = $expectedManagedLines.Count -eq $managedBlockLines.Count
-        if ($blockMatchesTemplate) {
-            for ($index = 0; $index -lt $expectedManagedLines.Count; $index += 1) {
-                if ($expectedManagedLines[$index] -ne $managedBlockLines[$index]) {
-                    $blockMatchesTemplate = $false
-                    break
-                }
-            }
-        }
-
-        if ($blockMatchesTemplate) {
+        if (Test-LineContentMatches -ExpectedContent $renderedManagedTemplate -ActualContent $managedBlockContent) {
             Add-Check 'Codex config.toml managed block 内容与模板一致'
         } else {
             Add-Error 'Codex config.toml managed block 与模板不一致（可能缺少、变更或多出额外行）'

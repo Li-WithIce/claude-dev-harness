@@ -2,7 +2,7 @@
 
 Project-local lite workflow entrypoints:
 
-- Stage advance: `pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <claudecode|codex|gemini>`
+- Stage advance: `pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>` (Codex-first defaults; add `-Tool <claudecode|codex|gemini>` only to switch backend)
 - Artifact validation: `pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
 
 These shims delegate to the managed harness repo scripts and always use the installed shared vault:
@@ -10,4 +10,4 @@ These shims delegate to the managed harness repo scripts and always use the inst
 - Repo root: `{REPO_ROOT}`
 - Vault root: `{VAULT_PATH}`
 
-Only `TEST -> DONE` can omit `-Tool`.
+`TEST -> DONE` also omits `-Tool`; non-DONE stages use the workflow descriptor when no explicit backend is passed.

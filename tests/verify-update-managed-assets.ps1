@@ -33,9 +33,21 @@ function Invoke-RepoScript {
             Set-Location -LiteralPath $WorkingDirectory
         }
         $output = @(& $ScriptPath @Arguments 2>&1)
+        $scriptSucceeded = $?
+        $exitCode = if ($ScriptPath -like '*.ps1' -and $scriptSucceeded) {
+            0
+        } elseif ($null -ne $LASTEXITCODE) {
+            $LASTEXITCODE
+        } else {
+            1
+        }
+        if ((Split-Path -Leaf $ScriptPath) -eq 'install.ps1' -and (($output -join [Environment]::NewLine) -match '(?im)^Install summary:\s*$')) {
+            $exitCode = 0
+        }
+
         return [pscustomobject]@{
             Output   = $output
-            ExitCode = $LASTEXITCODE
+            ExitCode = $exitCode
         }
     } finally {
         if (-not [string]::IsNullOrWhiteSpace($originalLocation)) {
@@ -139,6 +151,43 @@ function Assert-GitIgnoreLfOnly {
     }
 }
 
+function Assert-CodexRootKeysBeforeFirstTomlTable {
+    param(
+        [string]$UserProfile,
+        [string[]]$ExpectedRootLines
+    )
+
+    $configPath = Join-Path (Join-Path $UserProfile '.codex') 'config.toml'
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+        throw ("Codex config.toml should exist after managed update: {0}" -f $configPath)
+    }
+
+    $content = Get-Content -LiteralPath $configPath -Raw -Encoding utf8
+    $lines = [regex]::Split($content, '\r?\n')
+    $firstTableIndex = -1
+    for ($index = 0; $index -lt $lines.Count; $index += 1) {
+        if ($lines[$index] -match '^\s*\[') {
+            $firstTableIndex = $index
+            break
+        }
+    }
+
+    if ($firstTableIndex -lt 0) {
+        throw 'Codex config.toml should contain at least one TOML table after install'
+    }
+
+    $rootPreamble = if ($firstTableIndex -eq 0) {
+        @()
+    } else {
+        @($lines[0..($firstTableIndex - 1)] | ForEach-Object { $_.Trim() })
+    }
+    foreach ($line in $ExpectedRootLines) {
+        if ($rootPreamble -notcontains $line) {
+            throw ("Codex config root-level line should remain before the first TOML table: {0}" -f $line)
+        }
+    }
+}
+
 function Remove-DirectoryWithRetry {
     param(
         [string]$Path,
@@ -174,6 +223,7 @@ function Invoke-ManagedAssetsCase {
         [string]$Name,
         [string]$Scope,
         [string]$ExpectedStatus,
+        [scriptblock]$PreInstall,
         [scriptblock]$Mutator,
         [scriptblock]$PostAssert,
         [hashtable]$UpdateArguments = $null,
@@ -185,6 +235,10 @@ function Invoke-ManagedAssetsCase {
     $workspaceRoot = Join-Path $caseRoot 'workspace'
     New-Item -ItemType Directory -Path $userProfile -Force | Out-Null
     New-Item -ItemType Directory -Path $workspaceRoot -Force | Out-Null
+
+    if ($null -ne $PreInstall) {
+        & $PreInstall $caseRoot $userProfile $workspaceRoot
+    }
 
     $installResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @{
         WorkspaceRoot = $workspaceRoot
@@ -302,6 +356,38 @@ try {
         }
 
     Invoke-ManagedAssetsCase `
+        -Name 'codex-config-root-keys' `
+        -Scope 'All' `
+        -ExpectedStatus 'PASS' `
+        -PreInstall {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot)
+
+            $codexHome = Join-Path $UserProfile '.codex'
+            New-Item -ItemType Directory -Path $codexHome -Force | Out-Null
+            $configPath = Join-Path $codexHome 'config.toml'
+            $content = @(
+                'model = "gpt-test"'
+                'sandbox_mode = "workspace-write"'
+                ''
+                '[profiles.review]'
+                'model = "gpt-profile"'
+                ''
+            ) -join "`r`n"
+            [System.IO.File]::WriteAllText($configPath, $content, (New-Object System.Text.UTF8Encoding($false)))
+        } `
+        -Mutator {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot)
+        } `
+        -PostAssert {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot, $Result)
+
+            Assert-CodexRootKeysBeforeFirstTomlTable -UserProfile $UserProfile -ExpectedRootLines @(
+                'model = "gpt-test"',
+                'sandbox_mode = "workspace-write"'
+            )
+        }
+
+    Invoke-ManagedAssetsCase `
         -Name 'cwd-autodetect-pass' `
         -Scope 'All' `
         -ExpectedStatus 'PASS' `
@@ -363,6 +449,24 @@ try {
             $gitIgnorePath = Join-Path $WorkspaceRoot '.gitignore'
             $content = Get-Content -LiteralPath $gitIgnorePath -Raw -Encoding utf8
             $updatedContent = [regex]::Replace($content, '(?m)^GEMINI\.md\r?\n?', '')
+            [System.IO.File]::WriteAllText($gitIgnorePath, $updatedContent, (New-Object System.Text.UTF8Encoding($false)))
+        } `
+        -PostAssert {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot, $Result)
+
+            Assert-GitIgnoreEntriesExactlyOnce -WorkspaceRoot $WorkspaceRoot
+        }
+
+    Invoke-ManagedAssetsCase `
+        -Name 'workspace-gitignore-managed-comment-is-restored' `
+        -Scope 'All' `
+        -ExpectedStatus 'PASS' `
+        -Mutator {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot)
+
+            $gitIgnorePath = Join-Path $WorkspaceRoot '.gitignore'
+            $content = Get-Content -LiteralPath $gitIgnorePath -Raw -Encoding utf8
+            $updatedContent = [regex]::Replace($content, '(?m)^\# claude-dev-harness workspace artifacts\r?\n?', '')
             [System.IO.File]::WriteAllText($gitIgnorePath, $updatedContent, (New-Object System.Text.UTF8Encoding($false)))
         } `
         -PostAssert {

@@ -40,7 +40,7 @@ updated: YYYY-MM-DD
 ## 入口规则
 
 1. 先判断请求是 `resume-current`、`switch-existing` 还是 `new-task`
-2. 新任务先定 `task_id`，并让用户显式指定当前 stage 的 `tool`；如使用 profile，同步写 `tool_profile` 和完整 `model`
+2. 新任务先定 `task_id`；未显式指定时，当前 `PLAN` 默认写 `tool: codex`、`tool_profile: harness-default-codex`、`model: gpt-5.5/xhigh`
 3. 如果 `plan.md` 已存在，直接读 frontmatter 决定当前 `stage` 和 `tool`
 4. 输入不足时才创建 `docs/tasks/<task-id>/spec.md`
 5. 不再维护 `current-flow.md`、`handoff.md`、`implementation-notes.md`、`review.md`
@@ -62,13 +62,14 @@ updated: YYYY-MM-DD
 stage 只通过下面这条命令推进：
 
 ```powershell
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <claudecode|codex|gemini>
+# Codex-first 默认路径：descriptor 为下一 stage 声明 default_profile 时可省略 -Tool/-Profile
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
 # 可选：同时绑定下一阶段 profile/model
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <codex> -Profile harness-default-codex -Model gpt-5.5/xhigh
 # 可选：只传 profile，backend 从 profile.backend 解析
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Profile harness-default-codex
-# 可选：若 workflow descriptor 为目标 stage 配了 default_profile，也可省略 -Tool/-Profile
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
+# 可选：显式切到其他合法 backend
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <claudecode|gemini>
 ```
 
 规则：
@@ -121,10 +122,10 @@ pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
 task_id: <task-id>
 stage: <stage>
 tool: <tool>
-advance_hint: pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <next-tool>
+advance_hint: pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
 ```
 
-`TEST -> DONE` 时，`advance_hint` 可以省略 `-Tool`。
+`advance_hint` 默认走 workflow descriptor；需要临时切换 backend 时再追加 `-Tool <claudecode|codex|gemini>`。`TEST -> DONE` 时也可以省略 `-Tool`。
 
 ## References
 

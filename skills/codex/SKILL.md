@@ -1,12 +1,13 @@
 ---
 name: codex
-description: Delegate coding tasks to Codex CLI for execution. Only invoke this skill when the user explicitly asks to use Codex — e.g., "用 codex 来做", "让 codex 执行", "ask codex to...", "codex 帮我写". Do not proactively delegate to Codex for general coding requests the user didn't specifically ask Codex to handle. Codex is an autonomous coding agent with the same tools as Claude (file read/write, grep, bash) — it explores the codebase and implements changes on its own. Claude's role is to understand the problem clearly and frame it well for Codex to execute.
+description: Delegate coding tasks to Codex CLI for execution. Invoke this skill when the user explicitly asks to use Codex, or when harness-lite frontmatter / workflow descriptor assigns the current stage to the `codex` backend. Codex is an autonomous coding agent with the same tools as Claude (file read/write, grep, bash) — it explores the codebase and implements changes on its own.
 ---
 
 ## Critical rules
 
 - Use the bundled shell script rather than calling `codex` CLI directly — the script handles output capture, session tracking, and real-time progress streaming correctly.
 - Run the script once per task. If it succeeds (exit code 0), read the output file and proceed. Don't re-run just because the output seems short — Codex often makes changes quietly without narrating every step.
+- In harness-lite, a stage assigned to `tool: codex` is enough authorization to use this skill; no extra user opt-in is required at that stage boundary.
 - Quote file paths containing `[`, `]`, spaces, or special characters (e.g. `--file "src/app/[locale]/page.tsx"`). Without quotes, zsh treats `[...]` as a glob pattern and fails with "no matches found".
 - **Keep the task prompt to the goal and constraints, not the implementation steps.** Aim for under ~500 words. Codex has the same tools as Claude and will explore the codebase itself — spelling out every file to change or every step tends to constrain it rather than help.
 - **Don't paste file contents into the prompt.** Use `--file` to point Codex to key files — it reads them directly at their current version. Pasting contents wastes tokens and risks passing stale code.
@@ -109,6 +110,7 @@ For multi-step projects, use `--session <id>` to continue with full conversation
 - `--reasoning <level>` — Reasoning effort: `low`, `medium`, `high` (default: `medium`). Use `high` for code review, debugging, complex refactoring, or root cause analysis.
 - `--sandbox <mode>` — Override sandbox policy (default: workspace-write via full-auto).
 - `--read-only` — Read-only mode for pure discussion/analysis, no file changes.
+- `--ephemeral` — Do not persist Codex session files; useful for one-shot smoke tests that do not need resume.
 
 ## Resume mode limitations
 

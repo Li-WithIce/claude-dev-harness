@@ -91,10 +91,10 @@ description: Use when the task is in PLAN_REVIEW or CODE_REVIEW and a new append
 
 推进规则：
 
-- `PLAN_REVIEW -> IMPLEMENT` 或 `PLAN_REVIEW -> PLAN` 前，必须让用户指定下一阶段 `tool`
-- `CODE_REVIEW -> TEST` 或 `CODE_REVIEW -> IMPLEMENT` 前，必须让用户指定下一阶段 `tool`
-- 如使用 profile，推进时同步传 `-Profile <profile-name>` 和完整 `-Model <model-id>`；profile 的 backend 必须等于 `-Tool`
-- 推进命令固定为 `.assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <next-tool>`
+- `PLAN_REVIEW -> IMPLEMENT` / `PLAN` 与 `CODE_REVIEW -> IMPLEMENT` 默认走 workflow descriptor 的 `harness-default-codex`
+- `CODE_REVIEW -> TEST` 默认走 workflow descriptor 的 `harness-default-gemini`
+- 如需切换 backend，推进时显式传 `-Tool`；如使用 profile，同步传 `-Profile <profile-name>` 和完整 `-Model <model-id>`，且 profile 的 backend 必须等于 `-Tool`
+- 推进命令默认是 `.assistant\entry\advance-stage.ps1 -TaskId <task-id>`
 
 ## 不要做的事
 

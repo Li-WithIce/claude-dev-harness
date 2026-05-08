@@ -188,18 +188,18 @@ if ($teamModeLiteral -eq '') {
 } else {
     `$env:AIONUI_TEAM_MODE = $teamModeLiteral
 }
-`$mockMode = $mockModeLiteral
-`$logPath = $logPathLiteral
+`$global:MockMode = $mockModeLiteral
+`$global:TeamSpawnLogPath = $logPathLiteral
 Remove-Item Function:\team_spawn_agent -ErrorAction SilentlyContinue
-if (`$mockMode -ne 'none') {
+if (`$global:MockMode -ne 'none') {
     `$global:CallCount = 0
     function global:team_spawn_agent {
         param([string]`$PayloadJson)
         `$global:CallCount += 1
-        if (-not [string]::IsNullOrWhiteSpace(`$logPath)) {
-            [System.IO.File]::AppendAllText(`$logPath, `$PayloadJson + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding(`$false)))
+        if (-not [string]::IsNullOrWhiteSpace(`$global:TeamSpawnLogPath)) {
+            [System.IO.File]::AppendAllText(`$global:TeamSpawnLogPath, `$PayloadJson + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding(`$false)))
         }
-        if (`$mockMode -eq 'fail-on-third' -and `$global:CallCount -eq 3) {
+        if (`$global:MockMode -eq 'fail-on-third' -and `$global:CallCount -eq 3) {
             throw 'mock failure on call 3'
         }
     }
@@ -267,9 +267,9 @@ try {
     }
 
     $expectedPayloads = [ordered]@{
-        'plan-author' = [ordered]@{ backend = 'claudecode'; model = 'claude-opus-4-7'; skills = @('plan', 'using-superpowers') }
+        'plan-author' = [ordered]@{ backend = 'codex'; model = 'gpt-5.5/xhigh'; skills = @('plan', 'using-superpowers') }
         'plan-reviewer' = [ordered]@{ backend = 'codex'; model = 'gpt-5.5/xhigh'; skills = @('review') }
-        'implementer' = [ordered]@{ backend = 'claudecode'; model = 'claude-opus-4-7'; skills = @('implement') }
+        'implementer' = [ordered]@{ backend = 'codex'; model = 'gpt-5.5/xhigh'; skills = @('implement') }
         'code-reviewer' = [ordered]@{ backend = 'codex'; model = 'gpt-5.5/xhigh'; skills = @('review') }
         'tester' = [ordered]@{ backend = 'gemini'; model = 'gemini-2.5-pro'; skills = @('test', 'gemini-designer-main') }
     }

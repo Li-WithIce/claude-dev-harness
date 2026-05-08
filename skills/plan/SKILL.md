@@ -18,7 +18,7 @@ PLAN 的唯一产物是 `docs/tasks/<task-id>/plan.md`。这个文件的 frontma
 - 路径固定：`docs/tasks/<task-id>/plan.md`
 - frontmatter 必须包含：`task_id`、`stage`、`tool`、`updated`；可选 `tool_profile` / `model` 只能放在 `tool` 与 `updated` 之间
 - `stage` 在 PLAN 内保持 `PLAN`；不要手改到下一阶段，推进只走 `.assistant\entry\advance-stage.ps1`
-- 新任务进入 PLAN 前，必须让用户显式指定当前 `tool`
+- 新任务进入 PLAN 前，未显式指定时默认使用 `tool: codex` + `harness-default-codex`
 - PLAN 阶段的 `tool` 只允许：`claudecode`、`codex`、`gemini`
 - 如使用 `tool_profile`，必须来自 `agent-configs/profiles/<name>.yaml`，且 profile `backend` 必须等于 `tool`
 - 如写 `model`，必须使用完整模型 ID，不写 `opus`、`pro`、`latest` 这类短别名
@@ -119,7 +119,9 @@ PLAN 的唯一产物是 `docs/tasks/<task-id>/plan.md`。这个文件的 frontma
 ---
 task_id: <task-id>
 stage: PLAN
-tool: claudecode
+tool: codex
+tool_profile: harness-default-codex
+model: gpt-5.5/xhigh
 updated: 2026-04-09
 ---
 # <Task Title>
@@ -162,11 +164,11 @@ updated: 2026-04-09
 ## Code Review
 ```
 
-如需启用 tool profile，在 `tool` 与 `updated` 之间插入：
+Codex-first 默认 profile 写法如下；若显式切换 backend，必须换成匹配该 backend 的 profile/model：
 
 ```yaml
-tool_profile: harness-default-claude
-model: claude-opus-4-7
+tool_profile: harness-default-codex
+model: gpt-5.5/xhigh
 ```
 
 `read_first:` / `convergence:` 都是 `## Plan` 段的可选 metadata-style 字段：
@@ -184,8 +186,8 @@ model: claude-opus-4-7
 2. 把 Clarification 补齐到能执行的粒度
 3. 写出精确文件路径、验证命令和风险
 4. 用户确认后，把 `User Confirmation` 改成 `confirmed`
-5. 推进到 `PLAN_REVIEW` 前，必须让用户指定下一阶段 `tool`；如指定 profile，同步传 `-Profile` 和完整 `-Model`
-6. 只在 gate 满足后执行 `.assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <next-tool>`
+5. 推进到 `PLAN_REVIEW` 前，默认使用 workflow descriptor 的 `harness-default-codex`；如需切换 backend，再让用户指定下一阶段 `tool`
+6. 只在 gate 满足后执行 `.assistant\entry\advance-stage.ps1 -TaskId <task-id>`；切换 backend 时追加 `-Tool <next-tool>`
 7. 如需单独排查文档问题，再手动运行 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
 
 ## TodoWrite Milestones

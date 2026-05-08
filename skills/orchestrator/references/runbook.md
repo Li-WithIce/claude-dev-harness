@@ -3,8 +3,8 @@
 ## 1. Bootstrap
 
 1. 解析任务是 `resume-current`、`switch-existing` 还是 `new-task`
-2. 为新任务选择 `task_id`，并让用户显式指定当前 stage 的 `tool`
-   可选：同时选择 `tool_profile` 和完整 `model`
+2. 为新任务选择 `task_id`；未显式指定时，当前 `PLAN` 默认使用 `tool: codex`、`tool_profile: harness-default-codex`、`model: gpt-5.5/xhigh`
+   可选：显式选择其他 `tool_profile` 和完整 `model`
    可选：在仓库里维护 `agent-configs/workflows/harness-lite.yaml`，为后续 stage 声明 `default_profile`
 3. 如无 `plan.md`，先创建 `docs/tasks/<task-id>/plan.md`
 4. 输入不足时再补 `docs/tasks/<task-id>/spec.md`
@@ -22,13 +22,13 @@
 当前 stage 完成后执行：
 
 ```powershell
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <claudecode|codex|gemini>
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
 # 可选 profile/model 绑定
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <codex> -Profile harness-default-codex -Model gpt-5.5/xhigh
 # 可选：只传 profile，backend 从 profile.backend 解析
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Profile harness-default-codex
-# 可选：若 workflow descriptor 为目标 stage 配了 default_profile，也可省略 -Tool/-Profile
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
+# 可选：显式切到其他合法 backend
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <claudecode|gemini>
 ```
 
 这个 workspace shim 会转调 repo 内的 `advance-stage.ps1`，并先自动运行 validator。

@@ -27,6 +27,8 @@ param(
 
     [switch]$FullAuto,
 
+    [switch]$Ephemeral,
+
     [Alias('o')]
     [string]$Output,
 
@@ -58,6 +60,7 @@ Options:
   -Sandbox <mode>              Sandbox mode override
   -ReadOnly                    Read-only sandbox (no file changes)
   -FullAuto                    Full-auto mode (default)
+  -Ephemeral                   Do not persist Codex session files (useful for one-shot smokes)
   -Output, -o <path>           Output file path
   -Help                        Show this help
 
@@ -358,6 +361,9 @@ if (-not [string]::IsNullOrEmpty($Session)) {
     # Resume mode: continue a previous session
     # Note: resume only supports -c/--config and --last flags (no --json, --sandbox, etc.)
     $codexArgs = @('exec', '--ignore-user-config', 'resume', '-c', "model_reasoning_effort=`"$Reasoning`"", '-c', 'skip_git_repo_check=true')
+    if ($Ephemeral) {
+        $codexArgs += '--ephemeral'
+    }
     $codexArgs += $Session
 } else {
     # New session
@@ -371,6 +377,9 @@ if (-not [string]::IsNullOrEmpty($Session)) {
     }
     if (-not [string]::IsNullOrEmpty($Model)) {
         $codexArgs += '-m', $Model
+    }
+    if ($Ephemeral) {
+        $codexArgs += '--ephemeral'
     }
 }
 
@@ -395,141 +404,121 @@ try {
     # Initialize json file
     Write-File-NoBOM -Path $jsonFile -Content ''
 
-    # Setup process with async reading for real-time output
-    # On Windows, codex is installed as a .ps1 script, so we need to use cmd.exe or pwsh to run it
+    # Use synchronous stdout reads for reliable JSON capture on Windows. PowerShell
+    # event jobs can drop fast final lines before the wrapper parses them.
     $psi = New-Object System.Diagnostics.ProcessStartInfo
-    if ($IsWindows -or $PSVersionTable.PSVersion.Major -le 5) {
-        # Use cmd.exe to run codex (works with .cmd/.ps1 wrappers)
+    $useCmdWrapper = $IsWindows -or $PSVersionTable.PSVersion.Major -le 5
+    if ($useCmdWrapper) {
+        $quotedPromptFile = '"' + $promptFile + '"'
+        $quotedStderrFile = '"' + $stderrFile + '"'
         $psi.FileName = 'cmd.exe'
-        $psi.Arguments = '/c codex ' + ($codexArgs -join ' ')
+        $psi.Arguments = '/c codex ' + ($codexArgs -join ' ') + ' < ' + $quotedPromptFile + ' 2> ' + $quotedStderrFile
     } else {
         $psi.FileName = 'codex'
         $psi.Arguments = $codexArgs -join ' '
     }
     $psi.WorkingDirectory = $Workspace
     $psi.UseShellExecute = $false
-    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardInput = -not $useCmdWrapper
     $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
+    $psi.RedirectStandardError = -not $useCmdWrapper
     $psi.CreateNoWindow = $true
     $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
-    $psi.StandardErrorEncoding = [System.Text.Encoding]::UTF8
+    if ($psi.RedirectStandardError) {
+        $psi.StandardErrorEncoding = [System.Text.Encoding]::UTF8
+    }
 
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = $psi
 
     # StringBuilder for collecting output
     $jsonOutput = New-Object System.Text.StringBuilder
-    $stderrOutput = New-Object System.Text.StringBuilder
-    $outputLock = New-Object Object
-
-    # Event handler script blocks
-    $jsonOutputRef = $jsonOutput
-    $stderrOutputRef = $stderrOutput
-
-    # Register event handlers for async reading
     $isResumeMode = -not [string]::IsNullOrEmpty($Session)
     $textOutput = New-Object System.Text.StringBuilder
-
-    $stdOutAction = {
-        param([object]$sender, [System.Diagnostics.DataReceivedEventArgs]$e)
-        if ($e.Data) {
-            $line = $e.Data
-            # Strip terminal artifacts
-            $line = $line -replace "`r", ''
-            $line = $line -replace [char]4, ''
-
-            if (-not [string]::IsNullOrEmpty($line)) {
-                if ($line.StartsWith('{')) {
-                    # JSON line (new session mode)
-                    [System.Threading.Monitor]::Enter($Event.MessageData)
-                    try {
-                        $Event.MessageData.AppendLine($line) | Out-Null
-                    } finally {
-                        [System.Threading.Monitor]::Exit($Event.MessageData)
-                    }
-
-                    # Print progress for relevant events
-                    if ($line -match '"item\.started"' -or $line -match '"item\.completed"') {
-                        if ($line -match '"item\.started"' -and $line -match '"command_execution"') {
-                            try {
-                                $json = $line | ConvertFrom-Json -ErrorAction SilentlyContinue
-                                $cmd = $json.item.command
-                                if ($cmd) {
-                                    $cmd = $cmd -replace '^/bin/(zsh|bash) (-lc|-c) ', ''
-                                    if ($cmd.Length -gt 100) { $cmd = $cmd.Substring(0, 100) }
-                                    Write-Host "[codex] > $cmd" -ForegroundColor Gray
-                                }
-                            } catch {}
-                        }
-                        if ($line -match '"item\.completed"' -and $line -match '"agent_message"') {
-                            try {
-                                $json = $line | ConvertFrom-Json -ErrorAction SilentlyContinue
-                                $text = $json.item.text
-                                if ($text) {
-                                    $preview = $text.Split("`n")[0]
-                                    if ($preview.Length -gt 120) { $preview = $preview.Substring(0, 120) }
-                                    Write-Host "[codex] $preview" -ForegroundColor Gray
-                                }
-                            } catch {}
-                        }
-                    }
-                } else {
-                    # Plain text line (resume mode)
-                    [System.Threading.Monitor]::Enter($Event.MessageData)
-                    try {
-                        $Event.MessageData.AppendLine($line) | Out-Null
-                    } finally {
-                        [System.Threading.Monitor]::Exit($Event.MessageData)
-                    }
-                    # Show progress for text output
-                    $preview = $line
-                    if ($preview.Length -gt 120) { $preview = $preview.Substring(0, 120) }
-                    Write-Host "[codex] $preview" -ForegroundColor Gray
-                }
-            }
-        }
-    }
-
-    $stdErrAction = {
-        param([object]$sender, [System.Diagnostics.DataReceivedEventArgs]$e)
-        if ($e.Data) {
-            [System.Threading.Monitor]::Enter($Event.MessageData)
-            try {
-                $Event.MessageData.AppendLine($e.Data) | Out-Null
-            } finally {
-                [System.Threading.Monitor]::Exit($Event.MessageData)
-            }
-            Write-Host $e.Data -ForegroundColor Yellow
-        }
-    }
-
-    # Register events - use textOutput for resume mode, jsonOutput for new session
-    $outputData = if ($isResumeMode) { $textOutput } else { $jsonOutput }
-    $stdOutEvent = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -Action $stdOutAction -MessageData $outputData
-    $stdErrEvent = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -Action $stdErrAction -MessageData $stderrOutput
+    $stderrText = ''
+    $stderrTask = $null
 
     try {
         # Start process
         $process.Start() | Out-Null
 
-        # Begin async reading
-        $process.BeginOutputReadLine()
-        $process.BeginErrorReadLine()
+        if (-not $useCmdWrapper) {
+            $stderrTask = $process.StandardError.ReadToEndAsync()
+        }
 
-        # Write prompt to stdin
-        $process.StandardInput.Write($prompt)
-        $process.StandardInput.Close()
+        if (-not $useCmdWrapper) {
+            # Non-Windows path still uses stdin directly.
+            $process.StandardInput.Write($prompt)
+            $process.StandardInput.Close()
+        }
 
-        # Wait for process to exit
+        while (($line = $process.StandardOutput.ReadLine()) -ne $null) {
+            # Strip terminal artifacts
+            $line = $line -replace "`r", ''
+            $line = $line -replace [char]4, ''
+
+            if ([string]::IsNullOrEmpty($line)) {
+                continue
+            }
+
+            if ($isResumeMode) {
+                $textOutput.AppendLine($line) | Out-Null
+                $preview = $line
+                if ($preview.Length -gt 120) { $preview = $preview.Substring(0, 120) }
+                Write-Host "[codex] $preview" -ForegroundColor Gray
+                continue
+            }
+
+            if (-not $line.StartsWith('{')) {
+                continue
+            }
+
+            $jsonOutput.AppendLine($line) | Out-Null
+
+            if ($line -match '"item\.started"' -and $line -match '"command_execution"') {
+                try {
+                    $json = $line | ConvertFrom-Json -ErrorAction SilentlyContinue
+                    $cmd = $json.item.command
+                    if ($cmd) {
+                        $cmd = $cmd -replace '^/bin/(zsh|bash) (-lc|-c) ', ''
+                        if ($cmd.Length -gt 100) { $cmd = $cmd.Substring(0, 100) }
+                        Write-Host "[codex] > $cmd" -ForegroundColor Gray
+                    }
+                } catch {}
+            }
+
+            if ($line -match '"item\.completed"' -and $line -match '"agent_message"') {
+                try {
+                    $json = $line | ConvertFrom-Json -ErrorAction SilentlyContinue
+                    $text = $json.item.text
+                    if ($text) {
+                        $preview = $text.Split("`n")[0]
+                        if ($preview.Length -gt 120) { $preview = $preview.Substring(0, 120) }
+                        Write-Host "[codex] $preview" -ForegroundColor Gray
+                    }
+                } catch {}
+            }
+        }
+
         $process.WaitForExit()
         $exitCode = $process.ExitCode
-
     } finally {
-        # Unregister events
-        Unregister-Event -SourceIdentifier $stdOutEvent.Name -ErrorAction SilentlyContinue
-        Unregister-Event -SourceIdentifier $stdErrEvent.Name -ErrorAction SilentlyContinue
+        if ($useCmdWrapper) {
+            if (Test-Path -LiteralPath $stderrFile -PathType Leaf) {
+                $stderrText = Get-Content -LiteralPath $stderrFile -Raw -Encoding utf8
+            }
+        } elseif ($null -ne $stderrTask) {
+            $stderrText = $stderrTask.GetAwaiter().GetResult()
+        }
         $process.Dispose()
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($stderrText)) {
+        foreach ($stderrLine in ($stderrText -split "`r?`n")) {
+            if (-not [string]::IsNullOrWhiteSpace($stderrLine)) {
+                Write-Host $stderrLine -ForegroundColor Yellow
+            }
+        }
     }
 
     # Process output based on mode
@@ -541,7 +530,6 @@ try {
         $textContent = $textOutput.ToString().Trim()
 
         # Check for errors
-        $stderrText = $stderrOutput.ToString()
         $hasValidOutput = -not [string]::IsNullOrWhiteSpace($textContent)
 
         if ($stderrText -match '\[ERROR\]' -and -not $hasValidOutput) {
@@ -566,7 +554,6 @@ try {
         Write-File-NoBOM -Path $jsonFile -Content $jsonText
 
         # Check for errors - but only fail if no valid output was received
-        $stderrText = $stderrOutput.ToString()
         $hasValidOutput = -not [string]::IsNullOrWhiteSpace($jsonText) -and $jsonText -match '"thread_id"'
 
         if ($stderrText -match '\[ERROR\]' -and -not $hasValidOutput) {

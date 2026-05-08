@@ -393,9 +393,10 @@ try {
         $planText -match "(?m)^tool:\s*codex\s*$" -and
         $taskMirror -match [regex]::Escape("- pointer: docs/tasks/$taskPlanSuccess/plan.md") -and
         $taskMirror -match "(?m)^tool:\s*codex\s*$" -and
-        $taskMirror -match "(?m)^entry_host:\s*claudecode\s*$" -and
+        $taskMirror -match "(?m)^entry_host:\s*codex\s*$" -and
         $taskMirror -match [regex]::Escape("- assigned_tool: codex") -and
         $currentTask -match [regex]::Escape("task_id: $taskPlanSuccess") -and
+        $currentTask -match "(?m)^entry_host:\s*codex\s*$" -and
         $currentTask -match [regex]::Escape(('| task_id | `{0}` |' -f $taskPlanSuccess)) -and
         $currentTask -match [regex]::Escape('| 状态 | PLAN_REVIEW |') -and
         $currentTask -match [regex]::Escape("| 当前文档 | docs/tasks/$taskPlanSuccess/plan.md |") -and
