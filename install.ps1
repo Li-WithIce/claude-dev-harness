@@ -905,190 +905,14 @@ function Sync-SkillsDirectory {
     }
 }
 
-function Get-TomlQuotedPathValue {
-    param([string]$Line)
-
-    if ([string]::IsNullOrWhiteSpace($Line)) {
-        return $null
-    }
-
-    if ($Line -notmatch '^\s*path\s*=') {
-        return $null
-    }
-
-    $rawValue = ($Line -replace '^\s*path\s*=\s*', '').Trim()
-    if ($rawValue.Length -lt 2) {
-        return $null
-    }
-
-    $quote = $rawValue[0]
-    $doubleQuote = [char]34
-    $singleQuote = [char]39
-    if (($quote -ne $doubleQuote -and $quote -ne $singleQuote) -or ($rawValue[$rawValue.Length - 1] -ne $quote)) {
-        return $null
-    }
-
-    return Get-NormalizedPath -Path $rawValue.Substring(1, $rawValue.Length - 2)
-}
-
-function Get-ManagedSkillPathsFromTomlContent {
-    param([string]$Content)
-
-    $paths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    if ([string]::IsNullOrWhiteSpace($Content)) {
-        return @()
-    }
-
-    foreach ($line in ($Content -split "`r?`n")) {
-        $path = Get-TomlQuotedPathValue -Line $line
-        if (-not [string]::IsNullOrWhiteSpace($path)) {
-            [void]$paths.Add($path)
-        }
-    }
-
-    return @($paths)
-}
-
-function Remove-ManagedSkillsConfigBlocks {
-    param(
-        [string]$Content,
-        [string[]]$ManagedSkillPaths
-    )
-
-    if ([string]::IsNullOrWhiteSpace($Content)) {
-        return ""
-    }
-
-    $managedSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($path in @($ManagedSkillPaths)) {
-        if (-not [string]::IsNullOrWhiteSpace($path)) {
-            [void]$managedSet.Add((Get-NormalizedPath -Path $path))
-        }
-    }
-
-    if ($managedSet.Count -eq 0) {
-        return $Content.Trim()
-    }
-
-    $lines = $Content -split "`r?`n"
-    $result = New-Object System.Collections.Generic.List[string]
-
-    for ($index = 0; $index -lt $lines.Count;) {
-        $line = $lines[$index]
-        if ($line -notmatch '^\[\[skills\.config\]\]\s*$') {
-            $result.Add($line)
-            $index += 1
-            continue
-        }
-
-        $block = New-Object System.Collections.Generic.List[string]
-        $block.Add($line)
-        $index += 1
-
-        while ($index -lt $lines.Count -and $lines[$index] -notmatch '^\[') {
-            $block.Add($lines[$index])
-            $index += 1
-        }
-
-        $blockPath = $null
-        foreach ($blockLine in $block) {
-            $blockPath = Get-TomlQuotedPathValue -Line $blockLine
-            if (-not [string]::IsNullOrWhiteSpace($blockPath)) {
-                break
-            }
-        }
-
-        if (-not [string]::IsNullOrWhiteSpace($blockPath) -and $managedSet.Contains($blockPath)) {
-            continue
-        }
-
-        foreach ($blockLine in $block) {
-            $result.Add($blockLine)
-        }
-    }
-
-    return ($result -join "`r`n").Trim()
-}
-
-function Remove-ManagedTomlBlock {
-    param([string]$Content)
-
-    if ([string]::IsNullOrWhiteSpace($Content)) {
-        return ""
-    }
-
-    $pattern = '(?ms)^\# >>> claude-dev-harness managed block >>>\r?\n.*?^\# <<< claude-dev-harness managed block <<<\r?\n?'
-    return ([regex]::Replace($Content, $pattern, '')).Trim()
-}
-
-function Remove-DuplicateRootTomlScalarKeys {
-    param(
-        [string]$Content,
-        [string[]]$Keys
-    )
-
-    if ([string]::IsNullOrWhiteSpace($Content) -or $Keys.Count -eq 0) {
-        return $Content
-    }
-
-    $keySet = New-Object System.Collections.Generic.HashSet[string]
-    foreach ($key in $Keys) {
-        if (-not [string]::IsNullOrWhiteSpace($key)) {
-            [void]$keySet.Add($key)
-        }
-    }
-
-    $seen = New-Object System.Collections.Generic.HashSet[string]
-    $result = New-Object System.Collections.Generic.List[string]
-    $lines = [regex]::Split($Content, '\r?\n')
-    $inRootPreamble = $true
-
-    foreach ($line in $lines) {
-        if ($inRootPreamble -and $line -match '^\s*\[') {
-            $inRootPreamble = $false
-        }
-
-        if ($inRootPreamble -and $line -match '^\s*([A-Za-z0-9_-]+)\s*=') {
-            $key = $Matches[1]
-            if ($keySet.Contains($key)) {
-                if ($seen.Contains($key)) {
-                    continue
-                }
-                [void]$seen.Add($key)
-            }
-        }
-
-        $result.Add($line)
-    }
-
-    return ($result -join "`r`n").Trim()
-}
-
-function Update-CodexConfig {
+function Update-CodexManagedConfig {
     param(
         [string]$TemplatePath,
-        [string]$TargetPath,
         [string]$ManagedTargetPath
     )
 
-    $existing = Read-FileUtf8 -Path $TargetPath
-    $existing = Normalize-LoneCarriageReturns -Content $existing
-    $renderedManaged = Render-Content -Content (Read-FileUtf8 -Path $TemplatePath) -TargetPath $TargetPath
-    $managedSkillPaths = Get-ManagedSkillPathsFromTomlContent -Content $renderedManaged
-
-    $sanitized = Remove-ManagedTomlBlock -Content $existing
-    $sanitized = Remove-ManagedSkillsConfigBlocks -Content $sanitized -ManagedSkillPaths $managedSkillPaths
-    $sanitized = Remove-DuplicateRootTomlScalarKeys -Content $sanitized -Keys @('model', 'model_reasoning_effort')
-
-    $newContent = if ([string]::IsNullOrWhiteSpace($sanitized)) {
-        ""
-    } else {
-        $sanitized.TrimEnd() + "`r`n"
-    }
+    $renderedManaged = Render-Content -Content (Read-FileUtf8 -Path $TemplatePath) -TargetPath $ManagedTargetPath
     $newManagedContent = $renderedManaged.Trim() + "`r`n"
-
-    Backup-IfNeeded -Path $TargetPath
-    Write-Utf8NoBom -Path $TargetPath -Content $newContent
 
     Backup-IfNeeded -Path $ManagedTargetPath
     Write-Utf8NoBom -Path $ManagedTargetPath -Content $newManagedContent
@@ -1274,7 +1098,6 @@ $claudeSettingsPath = Join-Path $claudeSettingsDir 'settings.local.json'
 $codexSettingsPath = Join-Path $codexSettingsDir 'settings.local.json'
 $claudeOverlayPath = Join-Path $claudeSettingsDir 'settings.local.user.json'
 $codexOverlayPath = Join-Path $codexSettingsDir 'settings.local.user.json'
-$codexConfigPath = Join-Path $CodexHome 'config.toml'
 $codexManagedConfigPath = Join-Path $CodexHome 'managed_config.toml'
 $claudeGlobalPath = Join-Path $ClaudeHome 'CLAUDE.md'
 $codexGlobalPath = Join-Path $CodexHome 'AGENTS.md'
@@ -1325,7 +1148,7 @@ try {
     Backup-IfNeeded -Path $codexSettingsPath
     Write-Utf8NoBom -Path $codexSettingsPath -Content $codexMergedSettingsJson
 
-    Update-CodexConfig -TemplatePath (Join-Path $RepoRoot 'agent-configs\codex\config.shared.toml.template') -TargetPath $codexConfigPath -ManagedTargetPath $codexManagedConfigPath
+    Update-CodexManagedConfig -TemplatePath (Join-Path $RepoRoot 'agent-configs\codex\config.shared.toml.template') -ManagedTargetPath $codexManagedConfigPath
 
     Sync-SkillsDirectory -HostSkillsPath $claudeSkillsPath -RepoSkillsPath $RepoSkillsPath
     Sync-SkillsDirectory -HostSkillsPath $codexSkillsPath -RepoSkillsPath $RepoSkillsPath

@@ -10,6 +10,6 @@
 
 边界：
 
-- `install.ps1` 将 Harness 托管配置写入 `managed_config.toml`，并从用户 `config.toml` 清理旧 managed block；不覆盖用户本地 model/provider/auth/project trust，也不删除用户已有的其他 `[[skills.config]]`
+- `install.ps1` 只将 Harness 托管配置写入 `managed_config.toml`；用户 `config.toml` 是私有配置面，不由 workflow 创建、清理或改写
 - `.toml` 模板必须通过 `tests/forbidden-path-prefixes.txt` 检查
 - 用户私有 provider / auth 留在本地

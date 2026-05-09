@@ -554,7 +554,7 @@ if (Test-Path -LiteralPath $CodexConfigPath -PathType Leaf) {
         $codexConfig = ""
     }
     if ([regex]::IsMatch($codexConfig, "`r(?!`n)")) {
-        Add-Error 'Codex config.toml 存在孤立 CR 换行字节，可能导致 TOML 解析失败'
+        Add-Warning 'Codex config.toml 存在孤立 CR 换行字节，可能导致 TOML 解析失败；该文件为用户私有配置，install.ps1 不会自动改写'
     } else {
         Add-Check 'Codex config.toml 未发现孤立 CR 换行字节'
     }
@@ -563,7 +563,7 @@ if (Test-Path -LiteralPath $CodexConfigPath -PathType Leaf) {
     if ($null -eq $managedBlockContent) {
         Add-Check 'Codex config.toml 未包含旧 managed block'
     } else {
-        Add-Error 'Codex config.toml 不应再包含 managed block；托管配置应写入 managed_config.toml'
+        Add-Warning 'Codex config.toml 仍包含旧 managed block；托管配置已写入 managed_config.toml，用户私有 config.toml 不会自动改写'
     }
 
     $configWithoutManagedBlock = [regex]::Replace(
@@ -576,12 +576,12 @@ if (Test-Path -LiteralPath $CodexConfigPath -PathType Leaf) {
         Where-Object { $configWithoutManagedBlock -match [regex]::Escape($_) } |
         Select-Object -First 1
     if ($null -ne $leakedManagedPath) {
-        Add-Error ("Codex config.toml 在 managed block 外仍残留 Harness 托管 skill path: {0}" -f $leakedManagedPath)
+        Add-Warning ("Codex config.toml 在 managed block 外仍残留 Harness 托管 skill path: {0}；用户私有 config.toml 不会自动改写" -f $leakedManagedPath)
     } else {
         Add-Check 'Codex config.toml 未在 managed block 外泄露 Harness 托管 skill path'
     }
 } else {
-    Add-Error ("缺少 Codex config.toml: {0}" -f $CodexConfigPath)
+    Add-Check ("Codex config.toml 不存在，按用户私有可选配置处理: {0}" -f $CodexConfigPath)
 }
 
 if (Test-Path -LiteralPath $CodexManagedConfigPath -PathType Leaf) {

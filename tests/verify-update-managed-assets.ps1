@@ -151,43 +151,42 @@ function Assert-GitIgnoreLfOnly {
     }
 }
 
-function Assert-CodexRootKeysBeforeFirstTomlTable {
+function Assert-CodexConfigContentEquals {
     param(
         [string]$UserProfile,
-        [string[]]$ExpectedRootLines
+        [string]$ExpectedContent
     )
 
     $configPath = Join-Path (Join-Path $UserProfile '.codex') 'config.toml'
     if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
-        throw ("Codex config.toml should exist after managed update: {0}" -f $configPath)
+        throw ("Codex config.toml should still exist when it existed before managed update: {0}" -f $configPath)
     }
 
     $content = Get-Content -LiteralPath $configPath -Raw -Encoding utf8
-    $lines = [regex]::Split($content, '\r?\n')
-    $firstTableIndex = -1
-    for ($index = 0; $index -lt $lines.Count; $index += 1) {
-        if ($lines[$index] -match '^\s*\[') {
-            $firstTableIndex = $index
-            break
-        }
+    if ($content -ne $ExpectedContent) {
+        throw 'Codex config.toml should not be modified by install/update-managed-assets'
+    }
+}
+
+function Assert-CodexConfigBytesEqual {
+    param(
+        [string]$UserProfile,
+        [byte[]]$ExpectedBytes
+    )
+
+    $configPath = Join-Path (Join-Path $UserProfile '.codex') 'config.toml'
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+        throw ("Codex config.toml should still exist when it existed before managed update: {0}" -f $configPath)
     }
 
-    if ($firstTableIndex -lt 0) {
-        throw 'Codex config.toml should contain at least one TOML table after install'
+    $actualBytes = [System.IO.File]::ReadAllBytes($configPath)
+    if ($actualBytes.Length -ne $ExpectedBytes.Length) {
+        throw ("Codex config.toml byte length should not change; expected {0}, got {1}" -f $ExpectedBytes.Length, $actualBytes.Length)
     }
 
-    $rootPreamble = if ($firstTableIndex -eq 0) {
-        @()
-    } else {
-        @($lines[0..($firstTableIndex - 1)] | ForEach-Object { $_.Trim() })
-    }
-    foreach ($line in $ExpectedRootLines) {
-        $matches = @($rootPreamble | Where-Object { $_ -eq $line })
-        if ($matches.Count -eq 0) {
-            throw ("Codex config root-level line should remain before the first TOML table: {0}" -f $line)
-        }
-        if ($matches.Count -gt 1) {
-            throw ("Codex config root-level line should not be duplicated before the first TOML table: {0}" -f $line)
+    for ($index = 0; $index -lt $ExpectedBytes.Length; $index += 1) {
+        if ($actualBytes[$index] -ne $ExpectedBytes[$index]) {
+            throw ("Codex config.toml bytes should not change; first mismatch at byte {0}" -f $index)
         }
     }
 }
@@ -392,7 +391,7 @@ try {
         }
 
     Invoke-ManagedAssetsCase `
-        -Name 'codex-config-root-keys' `
+        -Name 'codex-config-is-user-owned' `
         -Scope 'All' `
         -ExpectedStatus 'PASS' `
         -PreInstall {
@@ -421,17 +420,19 @@ try {
         -PostAssert {
             param($CaseRoot, $UserProfile, $WorkspaceRoot, $Result)
 
-            Assert-CodexRootKeysBeforeFirstTomlTable -UserProfile $UserProfile -ExpectedRootLines @(
-                'model = "gpt-test"',
-                'model_reasoning_effort = "xhigh"',
+            $expectedConfig = @(
+                'model = "gpt-test"'
+                'model_reasoning_effort = "xhigh"'
+                'model = "gpt-duplicate"'
+                'model_reasoning_effort = "low"'
                 'sandbox_mode = "workspace-write"'
-            )
-            $codexConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'config.toml'
-            Assert-ManagedTextContains -Path $codexConfigPath -Needle 'model = "gpt-profile"'
-            Assert-ManagedTextContains -Path $codexConfigPath -Needle 'model_reasoning_effort = "medium"'
-            Assert-ManagedTextNotContains -Path $codexConfigPath -Needle 'model = "gpt-duplicate"'
-            Assert-ManagedTextNotContains -Path $codexConfigPath -Needle 'model_reasoning_effort = "low"'
-            Assert-ManagedTextNotContains -Path $codexConfigPath -Needle 'skills\\using-superpowers\\SKILL.md'
+                ''
+                '[profiles.review]'
+                'model = "gpt-profile"'
+                'model_reasoning_effort = "medium"'
+                ''
+            ) -join "`r`n"
+            Assert-CodexConfigContentEquals -UserProfile $UserProfile -ExpectedContent $expectedConfig
 
             $codexManagedConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'managed_config.toml'
             Assert-ManagedTextContains -Path $codexManagedConfigPath -Needle 'skills\\entry-router\\SKILL.md'
@@ -455,6 +456,69 @@ try {
             Assert-ManagedTextNotContains -Path $vaultAgentsPath -Needle 'using-superpowers'
             Assert-ManagedTextContains -Path $vaultGeminiPath -Needle 'entry-router'
             Assert-ManagedTextNotContains -Path $vaultGeminiPath -Needle 'using-superpowers'
+        }
+
+    Invoke-ManagedAssetsCase `
+        -Name 'codex-config-legacy-managed-block-is-preserved' `
+        -Scope 'All' `
+        -ExpectedStatus 'WARN' `
+        -PreInstall {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot)
+
+            $codexHome = Join-Path $UserProfile '.codex'
+            New-Item -ItemType Directory -Path $codexHome -Force | Out-Null
+            $configPath = Join-Path $codexHome 'config.toml'
+            $content = @(
+                'model = "user-model"'
+                'sandbox_mode = "workspace-write"'
+                ''
+                '# >>> claude-dev-harness managed block >>>'
+                '[managed.shared_paths]'
+                'skills_root = "C:\\Users\\28796\\.codex\\skills"'
+                ''
+                '[[skills.config]]'
+                'path = "C:\\Users\\28796\\.codex\\skills\\using-superpowers\\SKILL.md"'
+                'enabled = false'
+                '# <<< claude-dev-harness managed block <<<'
+                ''
+                '[[skills.config]]'
+                'path = "C:\\user-owned\\custom-skill\\SKILL.md"'
+                'enabled = true'
+                ''
+            ) -join "`r`n"
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($content)
+            [System.IO.File]::WriteAllBytes($configPath, $bytes)
+        } `
+        -Mutator {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot)
+        } `
+        -PostAssert {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot, $Result)
+
+            $expectedContent = @(
+                'model = "user-model"'
+                'sandbox_mode = "workspace-write"'
+                ''
+                '# >>> claude-dev-harness managed block >>>'
+                '[managed.shared_paths]'
+                'skills_root = "C:\\Users\\28796\\.codex\\skills"'
+                ''
+                '[[skills.config]]'
+                'path = "C:\\Users\\28796\\.codex\\skills\\using-superpowers\\SKILL.md"'
+                'enabled = false'
+                '# <<< claude-dev-harness managed block <<<'
+                ''
+                '[[skills.config]]'
+                'path = "C:\\user-owned\\custom-skill\\SKILL.md"'
+                'enabled = true'
+                ''
+            ) -join "`r`n"
+            $expectedBytes = [System.Text.Encoding]::UTF8.GetBytes($expectedContent)
+            Assert-CodexConfigBytesEqual -UserProfile $UserProfile -ExpectedBytes $expectedBytes
+
+            $codexManagedConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'managed_config.toml'
+            Assert-ManagedTextContains -Path $codexManagedConfigPath -Needle '[[skills.config]]'
+            Assert-ManagedTextContains -Path $codexManagedConfigPath -Needle 'skills\\entry-router\\SKILL.md'
         }
 
     Invoke-ManagedAssetsCase `
@@ -500,7 +564,11 @@ try {
             [System.IO.File]::WriteAllText($codexManagedConfigPath, ($codexManagedConfig -replace 'entry-router', 'using-superpowers'), (New-Object System.Text.UTF8Encoding($false)))
 
             $codexConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'config.toml'
-            $codexConfig = Get-Content -LiteralPath $codexConfigPath -Raw -Encoding utf8
+            $codexConfig = if (Test-Path -LiteralPath $codexConfigPath -PathType Leaf) {
+                Get-Content -LiteralPath $codexConfigPath -Raw -Encoding utf8
+            } else {
+                ""
+            }
             if ($null -eq $codexConfig) {
                 $codexConfig = ""
             }
@@ -555,6 +623,25 @@ enabled = true
             if (-not $codexConfig.Contains('C:\\user-owned\\custom-skill\\SKILL.md')) {
                 throw 'Codex config update should preserve user-owned skills.config entries'
             }
+        }
+
+    Invoke-ManagedAssetsCase `
+        -Name 'codex-config-remains-absent' `
+        -Scope 'All' `
+        -ExpectedStatus 'PASS' `
+        -Mutator {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot)
+        } `
+        -PostAssert {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot, $Result)
+
+            $codexConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'config.toml'
+            if (Test-Path -LiteralPath $codexConfigPath -PathType Leaf) {
+                throw 'Codex config.toml should not be created by install/update-managed-assets'
+            }
+
+            $codexManagedConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'managed_config.toml'
+            Assert-ManagedTextContains -Path $codexManagedConfigPath -Needle 'skills\\entry-router\\SKILL.md'
         }
 
     Invoke-ManagedAssetsCase `
