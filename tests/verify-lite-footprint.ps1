@@ -231,7 +231,6 @@ $script:Failures = @()
 $expectedSkills = @(
     'codex',
     'entry-router',
-    'gemini-designer-main',
     'implement',
     'obsidian-memory',
     'orchestrator',
@@ -239,6 +238,7 @@ $expectedSkills = @(
     'review',
     'spec',
     'test',
+    'test-runner',
     'workflow-team'
 )
 
@@ -372,6 +372,7 @@ Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle 'artifac
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-claude.yaml' -Needle 'backend: claudecode'
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-codex.yaml' -Needle 'backend: codex'
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-gemini.yaml' -Needle 'backend: gemini'
+Assert-FileContains -Path 'agent-configs/profiles/harness-default-gemini.yaml' -Needle '  - test-runner'
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-codex.yaml' -Needle '  - entry-router'
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-claude.yaml' -Needle '  - entry-router'
 Assert-FileContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle 'default_profile: harness-default-codex'
@@ -380,7 +381,7 @@ Assert-FileNotContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle
 Assert-FileContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle 'skills_whitelist: [test]'
 Assert-FileContains -Path 'agent-configs/role-prompts/plan-author.md' -Needle 'Allowed skills: plan, entry-router'
 Assert-FileContains -Path 'agent-configs/role-prompts/tester.md' -Needle 'Allowed skills: test'
-Assert-FileNotContains -Path 'agent-configs/role-prompts/tester.md' -Needle 'Allowed skills: test, gemini-designer-main'
+Assert-FileNotContains -Path 'agent-configs/role-prompts/tester.md' -Needle 'Allowed skills: test, test-runner'
 Assert-FileContains -Path 'skills/spec/SKILL.md' -Needle '../orchestrator/references/lite-writing-guide.md'
 Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle '../orchestrator/references/lite-writing-guide.md'
 Assert-FileContains -Path 'skills/review/SKILL.md' -Needle '../orchestrator/references/lite-writing-guide.md'
@@ -415,6 +416,9 @@ Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '禁止 bulk-lo
 Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '直接改'
 Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '走 workflow'
 Assert-PathAbsent -Path 'skills/using-superpowers'
+Assert-PathAbsent -Path ('skills/' + 'gemini-designer' + '-main')
+Assert-FileContains -Path 'skills/test-runner/SKILL.md' -Needle 'name: test-runner'
+Assert-FileContains -Path 'skills/test-runner/SKILL.md' -Needle 'Gemini optional adapter'
 Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'new-task mode=workflow'
 Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle '按当前 stage 懒加载'
 Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'workflow-team` 仅在 `$env:AIONUI_TEAM_MODE=''1''`'
@@ -487,6 +491,7 @@ Assert-FileContains -Path 'vault-template/entry/advance-stage.ps1.template' -Nee
 Assert-FileContains -Path 'vault-template/entry/advance-stage.ps1.template' -Needle '[string]$Tool = ""'
 Assert-FileContains -Path 'vault-template/entry/validate-lite-artifacts.ps1.template' -Needle '{REPO_ROOT}\scripts\validate-lite-artifacts.ps1'
 Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle "'entry-router'"
+Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle "'test-runner'"
 Assert-FileContains -Path 'skills/obsidian-memory/scripts/check-shared-memory.ps1' -Needle "Join-Path (Join-Path `$workspaceRoot 'docs/tasks') `$TaskId"
 Assert-FileNotContains -Path 'skills/obsidian-memory/scripts/check-shared-memory.ps1' -Needle "Join-Path (Join-Path `$workspaceRoot 'docs') `$TaskId"
 Assert-FileNotContains -Path 'skills/obsidian-memory/scripts/repair-shared-memory.ps1' -Needle 'docs/tasks/none/plan.md'

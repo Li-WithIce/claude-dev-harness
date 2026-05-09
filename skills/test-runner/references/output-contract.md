@@ -1,6 +1,6 @@
 # Output Contract
 
-Gemini output must include:
+Test-runner output must include:
 
 - `# Test Report`
 - `## Summary`
@@ -16,7 +16,7 @@ Gemini output must include:
 
 ## Invalid Output Conditions
 
-Treat Gemini output as insufficient for TEST gate if any of the following is true:
+Treat adapter output as insufficient for TEST gate if any of the following is true:
 
 - API access failed
 - Output is not a valid markdown test report

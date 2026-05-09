@@ -128,7 +128,7 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 |------|-----------|------|
 | 1 | 开发主流程 | orchestrator → plan / implement / review / test |
 | 2 | 可选补充分支 | spec（仅在输入不足时生成 delta-spec） |
-| 3 | 可选委派 | codex（用户显式要求或当前 stage 分配 `tool: codex` 时）、gemini-designer-main（仅显式切到 Gemini 的 TEST 阶段） |
+| 3 | 可选委派 | codex（用户显式要求或当前 stage 分配 `tool: codex` 时）、test-runner（仅显式切到 Gemini 的 TEST 阶段） |
 
 规则：
 - `spec` 在新流程中是**可选 delta-spec 分支**，不是默认入口
@@ -170,7 +170,7 @@ When multiple skills could apply, use this order:
 
 1. **开发主流程 skill 最优先**：开发任务先完成 `resume/switch/new/inbox` 判定；`new-task` 再选 `quick | workflow | ask`
 2. **流程型分支 skill 其次**：例如仅在输入不足时进入 `spec`
-3. **委派型 skill 再其次**：如 `codex`；显式 Gemini TEST 才使用 `gemini-designer-main`
+3. **委派型 skill 再其次**：如 `codex`；显式 Gemini TEST 才使用 `test-runner`
 
 "做一个新功能" → 先做 `new-task` mode routing；需要计划/留痕时进入 orchestrator。
 "Fix this bug" → 先判断 quick/workflow；低风险快修可 quick，需要 review/test 时进入 harness。

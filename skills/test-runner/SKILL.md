@@ -1,16 +1,16 @@
 ---
-name: gemini-designer-main
-description: Use when Gemini is the selected TEST runner and the current task needs a read-only, evidence-based `docs/tasks/<task-id>/test.md`.
+name: test-runner
+description: Use when an explicit TEST-stage adapter should produce a read-only, evidence-based `docs/tasks/<task-id>/test.md`; Gemini is the current optional adapter.
 ---
 
-# Gemini Test Runner
+# Test Runner
 
-Gemini 是 TEST 阶段的只读 runner。它不改代码，只根据现有证据生成或更新 `docs/tasks/<task-id>/test.md`。
+`test-runner` 是 TEST 阶段的显式委派入口。默认 TEST 仍只加载 `test`；只有任务明确切到 Gemini TEST 路径时，才通过这里调用 Gemini optional adapter。它不改代码，只根据现有证据生成或更新 `docs/tasks/<task-id>/test.md`。
 
 ## 何时使用
 
 - `plan.md` frontmatter 的 `stage` 是 `TEST`
-- `plan.md` frontmatter 的 `tool` 是 `gemini`
+- `plan.md` frontmatter 的 `tool` 是 `gemini`，或调用方显式选择 Gemini adapter
 - 需要根据现有证据生成 `test.md`
 
 ## 输入
@@ -30,7 +30,7 @@ Gemini 是 TEST 阶段的只读 runner。它不改代码，只根据现有证据
 ## 工作方式
 
 1. 先确认当前任务在 `TEST`
-2. 显式把 `plan.md`、可选 `spec.md` 和真实证据通过 `--file` 传给 Gemini
+2. 显式把 `plan.md`、可选 `spec.md` 和真实证据通过 `--file` 传给所选 adapter
 3. 生成 `docs/tasks/<task-id>/test.md`
 4. 回读输出，确认格式和结论合法
 5. 只有结论为 `pass` 时才调用 `advance-stage.ps1`

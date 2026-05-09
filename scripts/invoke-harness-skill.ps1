@@ -29,7 +29,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$AllowedSkills = @('review', 'test', 'gemini-designer-main', 'codex')
+$AllowedSkills = @('review', 'test', 'test-runner', 'codex')
 $DeniedSkills = @('implement')
 
 function New-AdapterResult {
@@ -319,8 +319,8 @@ function Resolve-AdapterScriptPath {
         'codex' {
             return Join-Path $SkillRoot 'codex\scripts\ask_codex.ps1'
         }
-        'gemini-designer-main' {
-            return Join-Path $SkillRoot 'gemini-designer-main\scripts\invoke-gemini.ps1'
+        'test-runner' {
+            return Join-Path $SkillRoot 'test-runner\scripts\invoke-gemini.ps1'
         }
         default {
             return ''
@@ -622,7 +622,7 @@ try {
                     $exitCode = 1
                 }
             }
-            'gemini-designer-main' {
+            'test-runner' {
                 $skillRoot = Resolve-ActiveSkillDirs -TaskId $TaskId -WorkspaceRoot $resolvedWorkspace -ArtifactRoot $artifactDirectory -Tool $Tool -ToolProfileId $ToolProfileId
                 $scriptPath = Resolve-AdapterScriptPath -SkillRoot $skillRoot.Path -Skill $normalizedSkill
                 $parameters = [ordered]@{

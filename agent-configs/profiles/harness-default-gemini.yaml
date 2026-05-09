@@ -5,7 +5,7 @@ skills_dirs:
   - .gemini/skills
 enabled_skills:
   - test
-  - gemini-designer-main
+  - test-runner
 disabled_builtin_skills: []
 context: |
   Harness lite optional Gemini profile. Use only when a task explicitly switches TEST or another compatible stage to Gemini.

@@ -66,7 +66,7 @@ pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <claudecod
 ## 4. Skill Invocation Modes
 
 - 优先入口：`scripts/invoke-harness-skill.ps1`
-- adapter 白名单固定为：`review`、`test`、`gemini-designer-main`、`codex`；默认 TEST skill 集只使用 `test`
+- adapter 白名单固定为：`review`、`test`、`test-runner`、`codex`；默认 TEST skill 集只使用 `test`
 - `implement` 明确禁入 adapter；需要主 agent / 人类直接执行
 - `review` / `test` 当前是 stub：stdout 返回合法 JSON，`status=markdown-fallback`，stderr 提示回退到 Markdown skill 流
 - `codex` 只允许 `-Mode readonly`

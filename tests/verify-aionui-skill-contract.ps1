@@ -96,7 +96,7 @@ function New-IsolatedRepoFixture {
         'skills\plan',
         'skills\review',
         'skills\test',
-        'skills\gemini-designer-main'
+        'skills\test-runner'
     )) {
         Copy-RepoPathToFixture -SourceRoot $SourceRoot -FixtureRoot $fixtureRoot -RelativePath $relativePath
     }
@@ -358,7 +358,7 @@ function Write-MockGeminiSkill {
         [string]$Marker
     )
 
-    $scriptPath = Join-Path $SkillRoot 'gemini-designer-main\scripts\invoke-gemini.ps1'
+    $scriptPath = Join-Path $SkillRoot 'test-runner\scripts\invoke-gemini.ps1'
     New-Item -ItemType Directory -Path (Split-Path -Parent $scriptPath) -Force | Out-Null
     Write-Utf8Bom -Path $scriptPath -Content @"
 [CmdletBinding()]
@@ -408,7 +408,7 @@ function Write-ToolProfileDescriptor {
         'skills_dirs:'
     ) + $skillDirLines + @(
         'enabled_skills:',
-        '  - gemini-designer-main',
+        '  - test-runner',
         'disabled_builtin_skills: []',
         'context: |',
         '  Test-only profile descriptor for skill resolution coverage.'
@@ -534,7 +534,7 @@ try {
     Write-MockGeminiSkill -SkillRoot (Join-Path $userProfileB2 ($b2RelativeSkillsDir -replace '/', '\')) -Marker 'profile-aware-user'
     $env:USERPROFILE = $userProfileB2
     $payloadB2 = '{"prompt":"Summarize the current test evidence","model":"gemini-2.5-pro"}'
-    $b2Result = Invoke-Adapter -AdapterPath $adapterPath -TaskId $taskB2 -Stage 'TEST' -Skill 'gemini-designer-main' -Tool 'gemini' -ToolProfileId $b2ProfileId -WorkspaceRoot $workspaceB2 -ArtifactRoot $taskB2Dir -PayloadJson $payloadB2
+    $b2Result = Invoke-Adapter -AdapterPath $adapterPath -TaskId $taskB2 -Stage 'TEST' -Skill 'test-runner' -Tool 'gemini' -ToolProfileId $b2ProfileId -WorkspaceRoot $workspaceB2 -ArtifactRoot $taskB2Dir -PayloadJson $payloadB2
     $b2Json = Assert-SingleLineJson -JsonText $b2Result.StdOut -Label 'B2'
     $b2Record = Read-FileUtf8 -Path (Join-Path $workspaceB2 'gemini-call.json')
     if ($b2Result.ExitCode -eq 0 -and
@@ -558,14 +558,14 @@ try {
     $cleanupPaths += $workspaceB3
     New-Item -ItemType Directory -Path $workspaceB3 -Force | Out-Null
     $env:USERPROFILE = $userProfileB2
-    $b3Result = Invoke-Adapter -AdapterPath $adapterPath -TaskId $taskB3 -Stage 'TEST' -Skill 'gemini-designer-main' -Tool 'gemini' -WorkspaceRoot $workspaceB3 -ArtifactRoot $taskB3Dir -PayloadJson $payloadB2
+    $b3Result = Invoke-Adapter -AdapterPath $adapterPath -TaskId $taskB3 -Stage 'TEST' -Skill 'test-runner' -Tool 'gemini' -WorkspaceRoot $workspaceB3 -ArtifactRoot $taskB3Dir -PayloadJson $payloadB2
     $b3Json = Assert-SingleLineJson -JsonText $b3Result.StdOut -Label 'B3'
     $b3Record = Read-FileUtf8 -Path (Join-Path $workspaceB3 'gemini-call.json')
     if ($b3Result.ExitCode -ne 0 -and
         $null -ne $b3Json -and
         -not $b3Json.ok -and
         [string]::IsNullOrWhiteSpace($b3Record) -and
-        $b3Result.StdErr -match '\.gemini\\skills\\gemini-designer-main\\scripts\\invoke-gemini\.ps1') {
+        $b3Result.StdErr -match '\.gemini\\skills\\test-runner\\scripts\\invoke-gemini\.ps1') {
         Add-Check 'B3 gemini backend fallback still fails without ToolProfileId when only profile-specific skills_dirs contains the adapter'
     } else {
         Add-Failure ("B3 gemini backend fallback lock failed, got stdout=[{0}] stderr=[{1}] record=[{2}]" -f $b3Result.StdOut, $b3Result.StdErr, $b3Record)
@@ -675,7 +675,7 @@ try {
         $skillsIndexDoc -match '^<!-- generated at ' -and
         $skillsIndexDoc -match '# Skills available at TEST \(backend hint: kimi\)' -and
         $skillsIndexDoc -match '\*\*test\*\*' -and
-        $skillsIndexDoc -notmatch '\*\*gemini-designer-main\*\*') {
+        $skillsIndexDoc -notmatch '\*\*test-runner\*\*') {
         Add-Check 'E1 generate-skills-index emits workflow-backed markdown with skill descriptions'
     } else {
         Add-Failure ("E1 generate-skills-index failed, got output=[{0}] doc=[{1}]" -f $e1Result.Text, $skillsIndexDoc)

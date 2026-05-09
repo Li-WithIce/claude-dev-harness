@@ -55,7 +55,7 @@ orchestrator 只能在 `new-task mode=workflow` 或已确认的 resume/switch wo
 - `PLAN_REVIEW`：只加载 `review`
 - `IMPLEMENT`：只加载 `implement`
 - `CODE_REVIEW`：只加载 `review`
-- `TEST`：默认只加载 `test`；只有显式切到 Gemini 的 TEST 阶段才加载 `gemini-designer-main`
+- `TEST`：默认只加载 `test`；只有显式切到 Gemini 的 TEST 阶段才加载 `test-runner`
 
 禁止 bulk-load 全部 skills、全部历史任务、Gemini / Claude 兼容 skill、`workflow-team`。`workflow-team` 仅在 `$env:AIONUI_TEAM_MODE='1'` 且 leader 明确选择 team mode 时加载。
 
@@ -65,8 +65,8 @@ orchestrator 只能在 `new-task mode=workflow` 或已确认的 resume/switch wo
 - `PLAN_REVIEW`：调用 `review` skill，写 `## Plan Review`
 - `IMPLEMENT`：调用 `implement` skill，写 `## Implementation Notes`
 - `CODE_REVIEW`：调用 `review` skill，写 `## Code Review`
-- `TEST`：默认调用 `test`，写 `test.md`；只有显式切到 Gemini 时才使用 `gemini-designer-main`
-- 优先调用 repo `scripts/invoke-harness-skill.ps1` 发起 `review` / `test` / `codex`；显式 Gemini 路径可发起 `gemini-designer-main`；返回 `status=markdown-fallback` 时回退到原 Markdown skill 流程
+- `TEST`：默认调用 `test`，写 `test.md`；只有显式切到 Gemini 时才使用 `test-runner`
+- 优先调用 repo `scripts/invoke-harness-skill.ps1` 发起 `review` / `test` / `codex`；显式 Gemini 路径可发起 `test-runner`；返回 `status=markdown-fallback` 时回退到原 Markdown skill 流程
 - `implement` 不允许走 adapter；必须由主 agent / 人类直接执行
 
 **Team mode (documentation only)**: 当 leader 已设 `$env:AIONUI_TEAM_MODE='1'` 时，可调用 `skills/workflow-team/scripts/spawn-team.ps1` 起 5 role 团队；env 校验由 `spawn-team.ps1` 自身 fail-closed 强制。env 未设时维持单 agent 流程，所有 Phase 1-3 行为零变化；orchestrator skill 本身不新增任何读 env 的可执行分支。

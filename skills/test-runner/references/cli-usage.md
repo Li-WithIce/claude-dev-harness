@@ -1,5 +1,7 @@
 # CLI Usage
 
+These examples use the optional Gemini adapter under the canonical `test-runner` skill.
+
 ## Recommended Inputs
 
 - `docs/tasks/<task-id>/plan.md`
