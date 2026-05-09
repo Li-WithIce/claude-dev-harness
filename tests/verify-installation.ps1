@@ -472,6 +472,7 @@ $ClaudeHooksPath = Join-Path $ClaudeHome 'hooks-memory'
 $ClaudeSettingsPath = Join-Path (Join-Path $ClaudeHome '.claude') 'settings.local.json'
 $CodexSettingsPath = Join-Path (Join-Path $CodexHome '.claude') 'settings.local.json'
 $CodexConfigPath = Join-Path $CodexHome 'config.toml'
+$CodexManagedConfigPath = Join-Path $CodexHome 'managed_config.toml'
 $CodexAgentsPath = Join-Path $CodexHome 'AGENTS.md'
 $WorkspaceAgentsPath = Join-Path $WorkspaceRoot 'AGENTS.md'
 $WorkspaceGeminiPath = Join-Path $WorkspaceRoot 'GEMINI.md'
@@ -545,8 +546,13 @@ if (Test-Path -LiteralPath $CodexSettingsPath -PathType Leaf) {
     Add-Error ("缺少 Codex settings.local.json: {0}" -f $CodexSettingsPath)
 }
 
+$renderedManagedTemplate = Render-TemplateContent -Content (Read-FileUtf8 -Path (Join-Path $RepoRoot 'agent-configs\codex\config.shared.toml.template')) -EscapeForCode
+
 if (Test-Path -LiteralPath $CodexConfigPath -PathType Leaf) {
     $codexConfig = Read-FileUtf8 -Path $CodexConfigPath
+    if ($null -eq $codexConfig) {
+        $codexConfig = ""
+    }
     if ([regex]::IsMatch($codexConfig, "`r(?!`n)")) {
         Add-Error 'Codex config.toml 存在孤立 CR 换行字节，可能导致 TOML 解析失败'
     } else {
@@ -554,19 +560,10 @@ if (Test-Path -LiteralPath $CodexConfigPath -PathType Leaf) {
     }
 
     $managedBlockContent = Get-ManagedTomlBlockContent -Content $codexConfig
-    if ($null -ne $managedBlockContent) {
-        Add-Check 'Codex config.toml 已写入 managed block'
+    if ($null -eq $managedBlockContent) {
+        Add-Check 'Codex config.toml 未包含旧 managed block'
     } else {
-        Add-Error 'Codex config.toml 缺少 managed block'
-    }
-
-    $renderedManagedTemplate = Render-TemplateContent -Content (Read-FileUtf8 -Path (Join-Path $RepoRoot 'agent-configs\codex\config.shared.toml.template')) -EscapeForCode
-    if ($null -ne $managedBlockContent) {
-        if (Test-LineContentMatches -ExpectedContent $renderedManagedTemplate -ActualContent $managedBlockContent) {
-            Add-Check 'Codex config.toml managed block 内容与模板一致'
-        } else {
-            Add-Error 'Codex config.toml managed block 与模板不一致（可能缺少、变更或多出额外行）'
-        }
+        Add-Error 'Codex config.toml 不应再包含 managed block；托管配置应写入 managed_config.toml'
     }
 
     $configWithoutManagedBlock = [regex]::Replace(
@@ -585,6 +582,23 @@ if (Test-Path -LiteralPath $CodexConfigPath -PathType Leaf) {
     }
 } else {
     Add-Error ("缺少 Codex config.toml: {0}" -f $CodexConfigPath)
+}
+
+if (Test-Path -LiteralPath $CodexManagedConfigPath -PathType Leaf) {
+    $codexManagedConfig = Read-FileUtf8 -Path $CodexManagedConfigPath
+    if ([regex]::IsMatch($codexManagedConfig, "`r(?!`n)")) {
+        Add-Error 'Codex managed_config.toml 存在孤立 CR 换行字节，可能导致 TOML 解析失败'
+    } else {
+        Add-Check 'Codex managed_config.toml 未发现孤立 CR 换行字节'
+    }
+
+    if (Test-LineContentMatches -ExpectedContent $renderedManagedTemplate -ActualContent $codexManagedConfig) {
+        Add-Check 'Codex managed_config.toml 内容与模板一致'
+    } else {
+        Add-Error 'Codex managed_config.toml 与模板不一致（可能缺少、变更或多出额外行）'
+    }
+} else {
+    Add-Error ("缺少 Codex managed_config.toml: {0}" -f $CodexManagedConfigPath)
 }
 
 $forbiddenPatterns = Get-Content -LiteralPath (Join-Path $RepoRoot 'tests\forbidden-path-prefixes.txt') -Encoding utf8

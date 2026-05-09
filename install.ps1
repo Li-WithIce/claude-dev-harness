@@ -1021,33 +1021,77 @@ function Remove-ManagedTomlBlock {
     return ([regex]::Replace($Content, $pattern, '')).Trim()
 }
 
+function Remove-DuplicateRootTomlScalarKeys {
+    param(
+        [string]$Content,
+        [string[]]$Keys
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Content) -or $Keys.Count -eq 0) {
+        return $Content
+    }
+
+    $keySet = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($key in $Keys) {
+        if (-not [string]::IsNullOrWhiteSpace($key)) {
+            [void]$keySet.Add($key)
+        }
+    }
+
+    $seen = New-Object System.Collections.Generic.HashSet[string]
+    $result = New-Object System.Collections.Generic.List[string]
+    $lines = [regex]::Split($Content, '\r?\n')
+    $inRootPreamble = $true
+
+    foreach ($line in $lines) {
+        if ($inRootPreamble -and $line -match '^\s*\[') {
+            $inRootPreamble = $false
+        }
+
+        if ($inRootPreamble -and $line -match '^\s*([A-Za-z0-9_-]+)\s*=') {
+            $key = $Matches[1]
+            if ($keySet.Contains($key)) {
+                if ($seen.Contains($key)) {
+                    continue
+                }
+                [void]$seen.Add($key)
+            }
+        }
+
+        $result.Add($line)
+    }
+
+    return ($result -join "`r`n").Trim()
+}
+
 function Update-CodexConfig {
     param(
         [string]$TemplatePath,
-        [string]$TargetPath
+        [string]$TargetPath,
+        [string]$ManagedTargetPath
     )
 
     $existing = Read-FileUtf8 -Path $TargetPath
     $existing = Normalize-LoneCarriageReturns -Content $existing
     $renderedManaged = Render-Content -Content (Read-FileUtf8 -Path $TemplatePath) -TargetPath $TargetPath
     $managedSkillPaths = Get-ManagedSkillPathsFromTomlContent -Content $renderedManaged
-    $managedBlock = @(
-        '# >>> claude-dev-harness managed block >>>'
-        $renderedManaged.Trim()
-        '# <<< claude-dev-harness managed block <<<'
-    ) -join "`r`n"
 
     $sanitized = Remove-ManagedTomlBlock -Content $existing
     $sanitized = Remove-ManagedSkillsConfigBlocks -Content $sanitized -ManagedSkillPaths $managedSkillPaths
+    $sanitized = Remove-DuplicateRootTomlScalarKeys -Content $sanitized -Keys @('model', 'model_reasoning_effort')
 
     $newContent = if ([string]::IsNullOrWhiteSpace($sanitized)) {
-        $managedBlock + "`r`n"
+        ""
     } else {
-        $sanitized.TrimEnd() + "`r`n`r`n" + $managedBlock + "`r`n"
+        $sanitized.TrimEnd() + "`r`n"
     }
+    $newManagedContent = $renderedManaged.Trim() + "`r`n"
 
     Backup-IfNeeded -Path $TargetPath
     Write-Utf8NoBom -Path $TargetPath -Content $newContent
+
+    Backup-IfNeeded -Path $ManagedTargetPath
+    Write-Utf8NoBom -Path $ManagedTargetPath -Content $newManagedContent
 }
 
 function Merge-SystemSkills {
@@ -1231,6 +1275,7 @@ $codexSettingsPath = Join-Path $codexSettingsDir 'settings.local.json'
 $claudeOverlayPath = Join-Path $claudeSettingsDir 'settings.local.user.json'
 $codexOverlayPath = Join-Path $codexSettingsDir 'settings.local.user.json'
 $codexConfigPath = Join-Path $CodexHome 'config.toml'
+$codexManagedConfigPath = Join-Path $CodexHome 'managed_config.toml'
 $claudeGlobalPath = Join-Path $ClaudeHome 'CLAUDE.md'
 $codexGlobalPath = Join-Path $CodexHome 'AGENTS.md'
 $workspaceAgentsPath = Join-Path $WorkspaceRoot 'AGENTS.md'
@@ -1280,7 +1325,7 @@ try {
     Backup-IfNeeded -Path $codexSettingsPath
     Write-Utf8NoBom -Path $codexSettingsPath -Content $codexMergedSettingsJson
 
-    Update-CodexConfig -TemplatePath (Join-Path $RepoRoot 'agent-configs\codex\config.shared.toml.template') -TargetPath $codexConfigPath
+    Update-CodexConfig -TemplatePath (Join-Path $RepoRoot 'agent-configs\codex\config.shared.toml.template') -TargetPath $codexConfigPath -ManagedTargetPath $codexManagedConfigPath
 
     Sync-SkillsDirectory -HostSkillsPath $claudeSkillsPath -RepoSkillsPath $RepoSkillsPath
     Sync-SkillsDirectory -HostSkillsPath $codexSkillsPath -RepoSkillsPath $RepoSkillsPath

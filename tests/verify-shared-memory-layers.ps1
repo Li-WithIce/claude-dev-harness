@@ -274,6 +274,23 @@ try {
     } else {
         Add-Check 'L5 fails when runtime.lock.json omits the required entry_host field'
     }
+
+    $caseL6 = New-LayersFixture -CaseRoot (Join-Path $scratchRoot 'l6-rendered-vault-template')
+    $templateProtocolPath = Join-Path $script:RepoRoot 'vault-template\工作流\共享记忆协议.md'
+    $renderedProtocol = (Get-Content -LiteralPath $templateProtocolPath -Raw -Encoding utf8).
+        Replace('{REPO_ROOT}', $caseL6.RepoRoot).
+        Replace('{VAULT_PATH}', $caseL6.VaultRoot).
+        Replace('{CLAUDE_HOME}', 'C:\Users\fixture\.claude').
+        Replace('{CODEX_HOME}', 'C:\Users\fixture\.codex').
+        Replace('{GEMINI_HOME}', 'C:\Users\fixture\.gemini')
+    Write-Utf8Bom -Path (Join-Path $caseL6.VaultRoot '工作流\共享记忆协议.md') -Content $renderedProtocol
+    $resultL6 = Invoke-LayersCheck -RepoRoot $caseL6.RepoRoot -VaultRoot $caseL6.VaultRoot
+    $outputL6 = $resultL6.Output -join [Environment]::NewLine
+    if ($resultL6.ExitCode -ne 0 -or $outputL6 -notmatch [regex]::Escape('共享记忆协议引用了 docs/shared-memory-layers.md')) {
+        Add-Failure 'L6 should pass when 共享记忆协议.md is rendered from the vault template'
+    } else {
+        Add-Check 'L6 passes when 共享记忆协议.md is rendered from the vault template'
+    }
 } finally {
     Remove-DirectoryWithRetry -Path $scratchRoot
 }

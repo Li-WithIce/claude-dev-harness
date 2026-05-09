@@ -182,8 +182,12 @@ function Assert-CodexRootKeysBeforeFirstTomlTable {
         @($lines[0..($firstTableIndex - 1)] | ForEach-Object { $_.Trim() })
     }
     foreach ($line in $ExpectedRootLines) {
-        if ($rootPreamble -notcontains $line) {
+        $matches = @($rootPreamble | Where-Object { $_ -eq $line })
+        if ($matches.Count -eq 0) {
             throw ("Codex config root-level line should remain before the first TOML table: {0}" -f $line)
+        }
+        if ($matches.Count -gt 1) {
+            throw ("Codex config root-level line should not be duplicated before the first TOML table: {0}" -f $line)
         }
     }
 }
@@ -399,10 +403,14 @@ try {
             $configPath = Join-Path $codexHome 'config.toml'
             $content = @(
                 'model = "gpt-test"'
+                'model_reasoning_effort = "xhigh"'
+                'model = "gpt-duplicate"'
+                'model_reasoning_effort = "low"'
                 'sandbox_mode = "workspace-write"'
                 ''
                 '[profiles.review]'
                 'model = "gpt-profile"'
+                'model_reasoning_effort = "medium"'
                 ''
             ) -join "`r`n"
             [System.IO.File]::WriteAllText($configPath, $content, (New-Object System.Text.UTF8Encoding($false)))
@@ -415,11 +423,19 @@ try {
 
             Assert-CodexRootKeysBeforeFirstTomlTable -UserProfile $UserProfile -ExpectedRootLines @(
                 'model = "gpt-test"',
+                'model_reasoning_effort = "xhigh"',
                 'sandbox_mode = "workspace-write"'
             )
             $codexConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'config.toml'
-            Assert-ManagedTextContains -Path $codexConfigPath -Needle 'skills\\entry-router\\SKILL.md'
+            Assert-ManagedTextContains -Path $codexConfigPath -Needle 'model = "gpt-profile"'
+            Assert-ManagedTextContains -Path $codexConfigPath -Needle 'model_reasoning_effort = "medium"'
+            Assert-ManagedTextNotContains -Path $codexConfigPath -Needle 'model = "gpt-duplicate"'
+            Assert-ManagedTextNotContains -Path $codexConfigPath -Needle 'model_reasoning_effort = "low"'
             Assert-ManagedTextNotContains -Path $codexConfigPath -Needle 'skills\\using-superpowers\\SKILL.md'
+
+            $codexManagedConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'managed_config.toml'
+            Assert-ManagedTextContains -Path $codexManagedConfigPath -Needle 'skills\\entry-router\\SKILL.md'
+            Assert-ManagedTextNotContains -Path $codexManagedConfigPath -Needle 'skills\\using-superpowers\\SKILL.md'
 
             $codexAgentsPath = Join-Path (Join-Path $UserProfile '.codex') 'AGENTS.md'
             Assert-ManagedTextContains -Path $codexAgentsPath -Needle 'entry-router'
@@ -479,9 +495,16 @@ try {
                 [System.IO.File]::WriteAllText($path, ($content -replace 'entry-router', 'using-superpowers'), (New-Object System.Text.UTF8Encoding($false)))
             }
 
+            $codexManagedConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'managed_config.toml'
+            $codexManagedConfig = Get-Content -LiteralPath $codexManagedConfigPath -Raw -Encoding utf8
+            [System.IO.File]::WriteAllText($codexManagedConfigPath, ($codexManagedConfig -replace 'entry-router', 'using-superpowers'), (New-Object System.Text.UTF8Encoding($false)))
+
             $codexConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'config.toml'
             $codexConfig = Get-Content -LiteralPath $codexConfigPath -Raw -Encoding utf8
-            $codexConfig = ($codexConfig -replace 'entry-router', 'using-superpowers').TrimEnd() + @"
+            if ($null -eq $codexConfig) {
+                $codexConfig = ""
+            }
+            $codexConfig = $codexConfig.TrimEnd() + @"
 
 [[skills.config]]
 path = "C:\\user-owned\\custom-skill\\SKILL.md"
@@ -512,13 +535,22 @@ enabled = true
                 }
             }
 
+            $codexManagedConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'managed_config.toml'
+            $codexManagedConfig = Get-Content -LiteralPath $codexManagedConfigPath -Raw -Encoding utf8
+            if (-not $codexManagedConfig.Contains('skills\\entry-router\\SKILL.md')) {
+                throw 'Codex managed_config.toml should include entry-router skill path after update'
+            }
+            if ($codexManagedConfig.Contains('skills\\using-superpowers\\SKILL.md')) {
+                throw 'Codex managed_config.toml should remove the legacy using-superpowers skill path after update'
+            }
+
             $codexConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'config.toml'
             $codexConfig = Get-Content -LiteralPath $codexConfigPath -Raw -Encoding utf8
-            if (-not $codexConfig.Contains('skills\\entry-router\\SKILL.md')) {
-                throw 'Codex managed config should include entry-router skill path after update'
+            if ($codexConfig.Contains('skills\\entry-router\\SKILL.md')) {
+                throw 'Codex config.toml should not contain managed entry-router skill path after update'
             }
             if ($codexConfig.Contains('skills\\using-superpowers\\SKILL.md')) {
-                throw 'Codex managed config should remove the legacy using-superpowers skill path after update'
+                throw 'Codex config.toml should not contain the legacy using-superpowers skill path after update'
             }
             if (-not $codexConfig.Contains('C:\\user-owned\\custom-skill\\SKILL.md')) {
                 throw 'Codex config update should preserve user-owned skills.config entries'
