@@ -389,10 +389,10 @@ stages:
 
     Set-WorkflowDescriptor -RepoRoot $RepoRoot -Content ((Get-ValidWorkflowDescriptorContent).Replace('skills_whitelist: [plan, entry-router]', 'skills_whitelist: [plan, using-superpowers]'))
     $legacySkillResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskValid -RepoRoot $RepoRoot
-    if ($legacySkillResult.ExitCode -eq 0 -and (Assert-WarningsNone -Text $legacySkillResult.Text)) {
-        Add-Check 'A5 legacy using-superpowers remains accepted only as explicit workflow skill allowlist compatibility'
+    if ($legacySkillResult.ExitCode -eq 0 -and $legacySkillResult.Text -match 'references unsupported skill: using-superpowers') {
+        Add-Check 'A5 legacy using-superpowers is rejected as unsupported workflow skill'
     } else {
-        Add-Failure ("A5 legacy using-superpowers should be accepted without warnings, got: {0}" -f ($legacySkillResult.Output -join ' | '))
+        Add-Failure ("A5 legacy using-superpowers should warn as unsupported, got: {0}" -f ($legacySkillResult.Output -join ' | '))
     }
 
     Remove-WorkflowDescriptor -RepoRoot $RepoRoot

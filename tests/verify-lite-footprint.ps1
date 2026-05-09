@@ -188,13 +188,13 @@ function Get-RepoRelativePath {
     return [System.Uri]::UnescapeDataString($baseUri.MakeRelativeUri($targetUri).ToString()).Replace('/', '\')
 }
 
-function Assert-UsingSuperpowersActivePathAllowlist {
+function Assert-UsingSuperpowersRemovedFromActiveSurface {
     <#
     .SYNOPSIS
-    锁定默认入口面不再引用 using-superpowers。
+    锁定活跃入口面不再引用 using-superpowers。
     .DESCRIPTION
-    Phase 3 之后，旧名只能留在 legacy alias 本体、Codex disabled 兼容配置、
-    repository skill allowlist，以及测试自身的 legacy 锁点。
+    旧 alias 目录移除后，旧名只能留在历史 docs/tasks 记录或测试回归锁点；
+    入口、配置、脚本、skill 与模板不应再引用它。
     .OUTPUTS
     None。
     #>
@@ -204,44 +204,19 @@ function Assert-UsingSuperpowersActivePathAllowlist {
         'agent-configs',
         'scripts',
         'skills',
-        'tests',
         'vault-template',
         'docs/aionui-integration',
         'docs/team-write-authority.md',
         'docs/shared-memory-layers.md',
         'docs/工作流'
     )
-    $allowedPrefixes = @(
-        'agent-configs/codex/config.shared.toml.template:',
-        'scripts/validate-lite-artifacts.ps1:',
-        'skills/using-superpowers/SKILL.md:',
-        'tests/verify-aionui-skill-contract.ps1:',
-        'tests/verify-lite-footprint.ps1:',
-        'tests/verify-skill-manifest.ps1:',
-        'tests/verify-update-managed-assets.ps1:',
-        'tests/verify-workflow-descriptor.ps1:'
-    )
     $grepArgs = @('-C', $script:RepoRoot, 'grep', '-n', 'using-superpowers', '--') + $searchPaths
     $grepMatches = @(& git @grepArgs 2>$null | ForEach-Object { [string]$_ })
-    $unexpected = @()
-    foreach ($match in $grepMatches) {
-        $isAllowed = $false
-        foreach ($prefix in $allowedPrefixes) {
-            if ($match.StartsWith($prefix, [System.StringComparison]::Ordinal)) {
-                $isAllowed = $true
-                break
-            }
-        }
 
-        if (-not $isAllowed) {
-            $unexpected += $match
-        }
-    }
-
-    if ($unexpected.Count -eq 0) {
-        Add-Check 'active path grep only finds using-superpowers in explicit legacy allowlist'
+    if ($grepMatches.Count -eq 0) {
+        Add-Check 'active path grep has no using-superpowers references'
     } else {
-        Add-Failure ("using-superpowers leaked into active defaults: {0}" -f ($unexpected -join ' | '))
+        Add-Failure ("using-superpowers leaked into active surface: {0}" -f ($grepMatches -join ' | '))
     }
 }
 
@@ -264,8 +239,7 @@ $expectedSkills = @(
     'review',
     'spec',
     'test',
-    'workflow-team',
-    'using-superpowers'
+    'workflow-team'
 )
 
 $actualSkills = Get-ChildItem -LiteralPath (Join-Path $script:RepoRoot 'skills') -Directory |
@@ -440,14 +414,7 @@ Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle 'quick`：只�
 Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '禁止 bulk-load 全部 skills'
 Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '直接改'
 Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '走 workflow'
-Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle 'name: using-superpowers'
-Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle 'Legacy compatibility alias'
-Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle 'canonical entry skill is `entry-router`'
-Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle '../entry-router/SKILL.md'
-Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle 'Do not add this alias to `agent-configs/workflows/harness-lite.yaml`'
-Assert-FileNotContains -Path 'skills/using-superpowers/SKILL.md' -Needle '.assistant\entry\advance-stage.ps1'
-Assert-FileNotContains -Path 'skills/using-superpowers/SKILL.md' -Needle 'mode: quick | workflow | ask'
-Assert-FileNotContains -Path 'skills/using-superpowers/SKILL.md' -Needle '禁止 bulk-load 全部 skills'
+Assert-PathAbsent -Path 'skills/using-superpowers'
 Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'new-task mode=workflow'
 Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle '按当前 stage 懒加载'
 Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'workflow-team` 仅在 `$env:AIONUI_TEAM_MODE=''1''`'
@@ -499,7 +466,7 @@ Assert-FileContains -Path 'skills/obsidian-memory/SKILL.md' -Needle '记忆-约�
 Assert-FileContains -Path 'skills/obsidian-memory/SKILL.md' -Needle '记忆-问题.md'
 Assert-FileContains -Path 'skills/obsidian-memory/SKILL.md' -Needle '已合入 entry-router'
 Assert-FileContains -Path 'agent-configs/codex/config.shared.toml.template' -Needle 'skills\\entry-router\\SKILL.md'
-Assert-FileContains -Path 'agent-configs/codex/config.shared.toml.template' -Needle 'Legacy explicit compatibility path'
+Assert-FileNotContains -Path 'agent-configs/codex/config.shared.toml.template' -Needle 'using-superpowers'
 Assert-FileContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle '-Quality'
 Assert-FileContains -Path 'docs/工作流/quality-rubric.md' -Needle 'completeness'
 Assert-FileContains -Path 'docs/工作流/quality-rubric.md' -Needle 'consistency'
@@ -530,7 +497,7 @@ Assert-FileNotContains -Path 'skills/orchestrator/references/default-tool-profil
 Assert-FileNotContains -Path 'skills/plan/SKILL.md' -Needle '## Change Contract  (optional, opt-in)'
 Assert-FileNotContains -Path 'skills/orchestrator/references/state-templates.md' -Needle '## Change Contract  (optional, opt-in)'
 
-Assert-UsingSuperpowersActivePathAllowlist
+Assert-UsingSuperpowersRemovedFromActiveSurface
 
 $phaseDirs = @(Get-ChildItem -LiteralPath (Join-Path $script:RepoRoot 'skills') -Recurse -Directory -Filter 'phases')
 if ($phaseDirs.Count -eq 0) {

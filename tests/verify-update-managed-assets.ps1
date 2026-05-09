@@ -419,8 +419,7 @@ try {
             )
             $codexConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'config.toml'
             Assert-ManagedTextContains -Path $codexConfigPath -Needle 'skills\\entry-router\\SKILL.md'
-            Assert-ManagedTextContains -Path $codexConfigPath -Needle 'skills\\using-superpowers\\SKILL.md'
-            Assert-ManagedTextContains -Path $codexConfigPath -Needle 'Legacy explicit compatibility path'
+            Assert-ManagedTextNotContains -Path $codexConfigPath -Needle 'skills\\using-superpowers\\SKILL.md'
 
             $codexAgentsPath = Join-Path (Join-Path $UserProfile '.codex') 'AGENTS.md'
             Assert-ManagedTextContains -Path $codexAgentsPath -Needle 'entry-router'
@@ -518,8 +517,8 @@ enabled = true
             if (-not $codexConfig.Contains('skills\\entry-router\\SKILL.md')) {
                 throw 'Codex managed config should include entry-router skill path after update'
             }
-            if (-not $codexConfig.Contains('Legacy explicit compatibility path')) {
-                throw 'Codex managed config should preserve explicit legacy compatibility marker'
+            if ($codexConfig.Contains('skills\\using-superpowers\\SKILL.md')) {
+                throw 'Codex managed config should remove the legacy using-superpowers skill path after update'
             }
             if (-not $codexConfig.Contains('C:\\user-owned\\custom-skill\\SKILL.md')) {
                 throw 'Codex config update should preserve user-owned skills.config entries'
