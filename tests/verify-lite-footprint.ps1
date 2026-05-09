@@ -193,7 +193,7 @@ function Assert-UsingSuperpowersActivePathAllowlist {
     .SYNOPSIS
     锁定默认入口面不再引用 using-superpowers。
     .DESCRIPTION
-    Phase 2 之后，旧名只能留在 legacy skill 本体、Codex disabled 兼容配置、
+    Phase 3 之后，旧名只能留在 legacy alias 本体、Codex disabled 兼容配置、
     repository skill allowlist，以及测试自身的 legacy 锁点。
     .OUTPUTS
     None。
@@ -440,12 +440,14 @@ Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle 'quick`：只�
 Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '禁止 bulk-load 全部 skills'
 Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '直接改'
 Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '走 workflow'
-Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle '.assistant\entry\advance-stage.ps1'
-Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle 'mode: quick | workflow | ask'
-Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle 'quick`：只加载入口规则'
-Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle '禁止 bulk-load 全部 skills'
-Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle '直接改'
-Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle '走 workflow'
+Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle 'name: using-superpowers'
+Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle 'Legacy compatibility alias'
+Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle 'canonical entry skill is `entry-router`'
+Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle '../entry-router/SKILL.md'
+Assert-FileContains -Path 'skills/using-superpowers/SKILL.md' -Needle 'Do not add this alias to `agent-configs/workflows/harness-lite.yaml`'
+Assert-FileNotContains -Path 'skills/using-superpowers/SKILL.md' -Needle '.assistant\entry\advance-stage.ps1'
+Assert-FileNotContains -Path 'skills/using-superpowers/SKILL.md' -Needle 'mode: quick | workflow | ask'
+Assert-FileNotContains -Path 'skills/using-superpowers/SKILL.md' -Needle '禁止 bulk-load 全部 skills'
 Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'new-task mode=workflow'
 Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle '按当前 stage 懒加载'
 Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'workflow-team` 仅在 `$env:AIONUI_TEAM_MODE=''1''`'

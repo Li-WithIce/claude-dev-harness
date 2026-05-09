@@ -487,6 +487,7 @@ function Get-AllowedWorkflowSkills {
         'review',
         'spec',
         'test',
+        # Legacy alias retained for older explicit invocations; not a default workflow skill.
         'using-superpowers'
     )
 }
