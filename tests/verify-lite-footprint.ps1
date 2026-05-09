@@ -220,6 +220,38 @@ function Assert-UsingSuperpowersRemovedFromActiveSurface {
     }
 }
 
+function Assert-GeminiDesignerRemovedFromActiveSurface {
+    <#
+    .SYNOPSIS
+    锁定活跃入口面不再引用旧 Gemini designer 命名。
+    .DESCRIPTION
+    迁移到 test-runner 后，旧名只能留在历史 docs/tasks 记录或测试回归锁点；
+    入口、配置、脚本、skill 与模板不应再引用它。
+    .OUTPUTS
+    None。
+    #>
+
+    $searchPaths = @(
+        'README.md',
+        'agent-configs',
+        'scripts',
+        'skills',
+        'vault-template',
+        'docs/aionui-integration',
+        'docs/team-write-authority.md',
+        'docs/shared-memory-layers.md',
+        'docs/工作流'
+    )
+    $grepArgs = @('-C', $script:RepoRoot, 'grep', '-n', 'gemini-designer', '--') + $searchPaths
+    $grepMatches = @(& git @grepArgs 2>$null | ForEach-Object { [string]$_ })
+
+    if ($grepMatches.Count -eq 0) {
+        Add-Check 'active path grep has no gemini-designer references'
+    } else {
+        Add-Failure ("gemini-designer leaked into active surface: {0}" -f ($grepMatches -join ' | '))
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 }
@@ -505,6 +537,7 @@ Assert-FileNotContains -Path 'skills/plan/SKILL.md' -Needle '## Change Contract 
 Assert-FileNotContains -Path 'skills/orchestrator/references/state-templates.md' -Needle '## Change Contract  (optional, opt-in)'
 
 Assert-UsingSuperpowersRemovedFromActiveSurface
+Assert-GeminiDesignerRemovedFromActiveSurface
 
 $phaseDirs = @(Get-ChildItem -LiteralPath (Join-Path $script:RepoRoot 'skills') -Recurse -Directory -Filter 'phases')
 if ($phaseDirs.Count -eq 0) {

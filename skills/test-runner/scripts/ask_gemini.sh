@@ -114,13 +114,13 @@ if [[ -z "$api_key" ]]; then
   done
 fi
 
-if [[ -z "$api_key" && -f "$HOME/.config/gemini-designer/api_key" ]]; then
-  api_key="$(tr -d '[:space:]' < "$HOME/.config/gemini-designer/api_key")"
+if [[ -z "$api_key" && -f "$HOME/.config/test-runner/api_key" ]]; then
+  api_key="$(tr -d '[:space:]' < "$HOME/.config/test-runner/api_key")"
 fi
 
 if [[ -z "$api_key" ]]; then
   echo "[ERROR] No API key found." >&2
-  echo "Set ZENMUX_API_KEY, or add it to .env.local, or save to ~/.config/gemini-designer/api_key" >&2
+  echo "Set ZENMUX_API_KEY, or add it to .env.local, or save to ~/.config/test-runner/api_key" >&2
   exit 1
 fi
 
