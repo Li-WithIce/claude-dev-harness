@@ -115,6 +115,50 @@ function Assert-FileNotContains {
     }
 }
 
+function Remove-LinkTargets {
+    param([string]$Content)
+
+    $withoutMarkdownTargets = [regex]::Replace($Content, '\]\([^)]+\)', ']()')
+    return [regex]::Replace($withoutMarkdownTargets, 'https?://\S+', '')
+}
+
+function Assert-DirectoryVisibleTextNotContains {
+    <#
+    .SYNOPSIS
+    断言目录中文件的可见文本不包含指定文本。
+    .DESCRIPTION
+    用于锁定 active 模板目录级 legacy 文案；Markdown 链接 URL target 会被忽略，
+    避免把保留的历史 URL 当作可见品牌回归。
+    .PARAMETER Path
+    相对仓库根目录的目录路径。
+    .PARAMETER Needle
+    必须不存在的可见文本。
+    .OUTPUTS
+    None。
+    #>
+    param(
+        [string]$Path,
+        [string]$Needle
+    )
+
+    $fullPath = Join-Path $script:RepoRoot $Path
+    $hits = New-Object System.Collections.Generic.List[string]
+    foreach ($file in Get-ChildItem -LiteralPath $fullPath -Recurse -File) {
+        $relativePath = $file.FullName.Substring($script:RepoRoot.Length).TrimStart('\') -replace '\\', '/'
+        $content = Get-Content -LiteralPath $file.FullName -Raw -Encoding utf8
+        $visibleContent = Remove-LinkTargets -Content $content
+        if ($visibleContent.Contains($Needle)) {
+            [void]$hits.Add($relativePath)
+        }
+    }
+
+    if ($hits.Count -gt 0) {
+        Add-Failure ('{0} visible text should not contain `{1}`; hits: {2}' -f $Path, $Needle, ($hits -join ', '))
+    } else {
+        Add-Check ('{0} visible text does not contain `{1}`' -f $Path, $Needle)
+    }
+}
+
 function Assert-Utf8Bom {
     <#
     .SYNOPSIS
@@ -530,6 +574,9 @@ Assert-FileContains -Path 'skills/obsidian-memory/scripts/check-shared-memory.ps
 Assert-FileNotContains -Path 'skills/obsidian-memory/scripts/check-shared-memory.ps1' -Needle "Join-Path (Join-Path `$workspaceRoot 'docs') `$TaskId"
 Assert-FileNotContains -Path 'skills/obsidian-memory/scripts/repair-shared-memory.ps1' -Needle 'docs/tasks/none/plan.md'
 Assert-FileNotContains -Path 'README.md' -Needle 'claude-codex-gemini'
+Assert-DirectoryVisibleTextNotContains -Path 'vault-template' -Needle 'CC-Codex-Gemini Companion Starter'
+Assert-DirectoryVisibleTextNotContains -Path 'vault-template' -Needle 'CC-Codex-Gemini'
+Assert-DirectoryVisibleTextNotContains -Path 'vault-template' -Needle 'Gemini Companion'
 Assert-FileNotContains -Path 'skills/orchestrator/SKILL.md' -Needle 'claude-codex-gemini'
 Assert-FileNotContains -Path 'skills/orchestrator/SKILL.md' -Needle 'next_runner'
 Assert-FileNotContains -Path 'skills/orchestrator/references/default-tool-profiles.md' -Needle 'codex-gemini'
