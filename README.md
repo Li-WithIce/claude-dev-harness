@@ -104,6 +104,10 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 - `workflow`：复杂报告、网页原型、可审计交付先声明 Markdown source、HTML artifact、模板/样式边界和验证方式。
 - `ask`：缺少方向、用途、输出路径或样式边界时，只问一个澄清问题。
 
+`spec.md` / `plan.md` 是最需要人工审阅和介入的文档。若它们超过 160 行或含 8 个及以上 `##` 二级标题，且用户需要审阅/决策、Markdown 层次不够清晰，默认生成同目录 paired reading HTML（`plan.review.html` / `spec.review.html`，单一审阅文件可用 `review.html`）。该 HTML 使用固定模板，只增强阅读，不替代 Markdown；内容变更仍改 `spec.md` / `plan.md` 后重新生成。
+
+局部 HTML 增强只允许用于卡片、对比区、流程区、信息网格；不得输出完整页面，不得把 HTML 放进代码块，不得使用 `script`、`iframe` 或外部 JS。完整 HTML 页面只有用户明确要求或 paired reading HTML 触发时才生成。
+
 ### 阶段与真相源
 
 以下阶段只适用于 `mode=workflow` 的新任务，`quick` 不创建阶段状态。

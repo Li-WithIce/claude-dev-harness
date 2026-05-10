@@ -102,9 +102,11 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 
 - `quick`：小文档直接转换、生成或导入；Markdown 默认是 source of truth，HTML 是 generated artifact。
 - `workflow`：复杂交付先在 PLAN 中声明 Markdown source、HTML artifact 和验证方式，再按当前 stage 加载阶段 skill；`md-html` 作为相关 skill/reference 使用，不进入默认 stage whitelist。
+- `workflow` 中如 `spec.md` / `plan.md` 超过 160 行或含 8 个及以上 `##` 二级标题，且需要人工审阅/决策、Markdown 层次不够清晰，默认使用 fixed template 生成 paired reading HTML（`plan.review.html` / `spec.review.html` 或 `review.html`）。
 - `ask`：缺少方向、用途、输出路径或样式边界时，只问一个最小澄清问题。
 
 不要在同一轮同时自由编辑 Markdown 和 HTML。内容改动走 Markdown 后再生成 HTML；视觉改动走模板/样式规则后再生成 HTML；HTML -> Markdown 只承诺导入/审阅/归档，不承诺像素级还原。
+局部 HTML 增强只限卡片、对比区、流程区、信息网格；不输出完整页面，不把 HTML 放进代码块，不使用 `script`、`iframe` 或外部 JS。
 
 ### 当前开发流程（Harness Lite v2）
 

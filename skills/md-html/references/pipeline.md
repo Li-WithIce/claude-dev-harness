@@ -2,6 +2,32 @@
 
 本页记录可选工具链思路，参考 `huashu-md-html` 的 source/artifact 分层：Markdown 管内容和结构，HTML 管展示和发布。仓库不因此新增 runtime 依赖；只有目标环境已具备工具或任务显式允许安装时才使用。
 
+## 模式矩阵
+
+| 模式 | 适用场景 | 输出 |
+|---|---|---|
+| Markdown-only | 短文、纯内容编辑、结构清晰的 `spec.md` / `plan.md` | 只保留 Markdown |
+| Paired reading HTML | 超过 160 行或 8 个二级标题的长 `spec.md` / `plan.md`，且需要人工审阅/决策 | 同目录 `plan.review.html` / `spec.review.html` 或 `review.html` |
+| Local HTML enhancement | 局部卡片、对比区、流程区、信息网格需要更清晰呈现 | Markdown 内可直接渲染的裸 HTML 片段 |
+
+## Paired reading HTML
+
+适用：长 `spec.md` / `plan.md` 的固定模板阅读版。
+
+要求：
+
+- Markdown 是唯一内容 source；HTML 阅读版是派生产物。
+- 触发阈值固定为超过 160 行或 8 个及以上 `##` 二级标题，并且用户需要审阅/决策、Markdown 层次不够清晰。
+- 使用固定模板或稳定生成规则：标题、目录、主体宽度、二级标题分区、表格样式、代码块样式。
+- 默认不做完整网站设计，不加入品牌化视觉；目标只是更清晰。
+- 内容变更必须改 `spec.md` / `plan.md` 后重新生成 HTML。
+
+可选工具：
+
+- `pandoc --standalone --toc --template <template>`：适合固定模板阅读版。
+- 编辑器导出 / preview save：适合 quick，但需记录实际操作。
+- 简单本地脚本：适合仓库自带模板；脚本必须只读取 Markdown 并输出 HTML。
+
 ## Markdown -> HTML
 
 适用：发布、预览、视觉检查、交付 HTML report。
@@ -39,12 +65,38 @@
 - 不承诺像素级还原，不承诺保留脚本交互或 CSS 布局。
 - 导入报告应记录来源 URL / 文件、工具、时间、已知丢失项和人工抽查结果。
 
+## Local HTML enhancement
+
+适用：Markdown 局部表达不够清晰，但不需要完整 HTML 页面。
+
+允许：
+
+- 局部卡片。
+- 对比区。
+- 流程区。
+- 信息网格。
+
+禁止：
+
+- 完整 HTML 页面；Local HTML enhancement 模式不输出 `html` / `head` / `body` 外壳。
+- fenced code block 包住 HTML。
+- `script`、`iframe`、外部 JS。
+- 依赖外部 CSS/JS 才能理解内容。
+- 大面积替代 Markdown 正文。
+
+建议：
+
+- 使用少量 inline style 或简单语义标签。
+- 控制片段长度，保持可审阅。
+- 核心事实仍写在可读文本中，避免只靠视觉位置表达。
+
 ## 双向协作边界
 
 - 默认一轮只允许一个可编辑 source：Markdown。
 - 改内容：编辑 Markdown。
 - 改视觉：编辑模板、CSS、主题变量或生成规则。
 - 改发布壳：编辑模板或构建配置。
+- 改长文阅读体验：改 fixed reading template，再从 `spec.md` / `plan.md` 重新生成 HTML。
 - 临时 HTML hotfix：只在交付阻塞时使用，并立即把原因、差异和同步动作写入回报或任务记录。
 
 ## 验证建议
@@ -53,4 +105,6 @@
 - 语义抽查：HTML -> Markdown 后正文是否可读、是否遗漏关键段落。
 - 视觉抽查：Markdown -> HTML 后桌面视口和必要移动视口。
 - 可重复性：删除或忽略 generated HTML 后，使用记录命令重新生成。
+- 长文阅读版抽查：`spec.md` / `plan.md` 的标题、目录、决策点和表格在 HTML 中更清晰。
+- 局部增强抽查：没有完整页面外壳、代码块包裹、`script`、`iframe` 或外部 JS。
 - 漂移检查：确认内容变更不只存在于 HTML artifact。

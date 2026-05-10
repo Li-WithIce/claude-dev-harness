@@ -243,6 +243,9 @@ stages:
 - HTML -> Markdown 用于导入、审阅和归档；不承诺像素级还原。
 - 不要让 IMPLEMENT 在同一轮自由修改 Markdown 和 HTML 两份源；内容改动走 Markdown，视觉改动走模板/样式规则，然后重新生成 HTML。
 - 复杂任务建议把 Markdown source、HTML artifact、模板/样式说明列入 `artifacts:`，并在 `Verification` 写预览、导入或 repeatability 检查。
+- `spec.md` / `plan.md` 超过 160 行或含 8 个及以上 `##` 二级标题，且需要人工审阅/决策、Markdown 层次不够清晰时，默认生成同目录 paired reading HTML：`plan.review.html` / `spec.review.html`，单一审阅文件可用 `review.html`。
+- paired reading HTML 使用固定模板或稳定生成规则，只增强阅读，不替代 `spec.md` / `plan.md`。
+- Local HTML enhancement 只限局部卡片、对比区、流程区、信息网格；不输出完整页面，不把 HTML 放进代码块，不使用 `script`、`iframe` 或外部 JS。
 
 正确示例：
 
