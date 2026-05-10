@@ -308,6 +308,7 @@ $expectedSkills = @(
     'codex',
     'entry-router',
     'implement',
+    'md-html',
     'obsidian-memory',
     'orchestrator',
     'plan',
@@ -432,6 +433,9 @@ Assert-FileContains -Path 'README.md' -Needle 'tool_profile'
 Assert-FileContains -Path 'README.md' -Needle 'mode: quick | workflow | ask'
 Assert-FileContains -Path 'README.md' -Needle '自动懒加载规则'
 Assert-FileContains -Path 'README.md' -Needle '禁止 bulk-load 全部 skills'
+Assert-FileContains -Path 'README.md' -Needle 'md-html'
+Assert-FileContains -Path 'README.md' -Needle 'Markdown 默认是人类和 AI 共同编辑的 canonical source / source of truth'
+Assert-FileContains -Path 'README.md' -Needle 'HTML 默认是 generated display artifact'
 Assert-FileContains -Path 'README.md' -Needle 'resume-current'
 Assert-FileContains -Path 'README.md' -Needle '直接改'
 Assert-FileContains -Path 'README.md' -Needle '走 workflow'
@@ -453,6 +457,8 @@ Assert-FileContains -Path 'agent-configs/profiles/harness-default-gemini.yaml' -
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-gemini.yaml' -Needle '  - test-runner'
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-codex.yaml' -Needle '  - entry-router'
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-claude.yaml' -Needle '  - entry-router'
+Assert-FileContains -Path 'agent-configs/profiles/harness-default-codex.yaml' -Needle '  - md-html'
+Assert-FileContains -Path 'agent-configs/profiles/harness-default-claude.yaml' -Needle '  - md-html'
 Assert-FileContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle 'default_profile: harness-default-codex'
 Assert-FileContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle 'skills_whitelist: [plan, entry-router]'
 Assert-FileNotContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle 'skills_whitelist: [plan, using-superpowers]'
@@ -491,18 +497,36 @@ Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '.assistant\ent
 Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle 'mode: quick | workflow | ask'
 Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle 'quick`：只加载入口规则'
 Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '禁止 bulk-load 全部 skills'
+Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle 'md-html'
+Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle 'Markdown 默认是 source of truth'
+Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle 'HTML 是 generated artifact'
 Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '直接改'
 Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '走 workflow'
 Assert-PathAbsent -Path 'skills/using-superpowers'
 Assert-PathAbsent -Path ('skills/' + 'gemini-designer' + '-main')
+Assert-FileContains -Path 'skills/md-html/SKILL.md' -Needle 'name: md-html'
+Assert-FileContains -Path 'skills/md-html/SKILL.md' -Needle 'Markdown 是人类和 AI 共同编辑的 canonical source / source of truth'
+Assert-FileContains -Path 'skills/md-html/SKILL.md' -Needle 'HTML 是 generated display artifact'
+Assert-FileContains -Path 'skills/md-html/SKILL.md' -Needle '默认不允许同一轮同时自由编辑 Markdown 和 HTML'
+Assert-FileContains -Path 'skills/md-html/references/checklist.md' -Needle 'P0 Gate'
+Assert-FileContains -Path 'skills/md-html/references/checklist.md' -Needle 'P1 Gate'
+Assert-FileContains -Path 'skills/md-html/references/pipeline.md' -Needle 'markitdown'
+Assert-FileContains -Path 'skills/md-html/references/pipeline.md' -Needle '仓库不因此新增 runtime 依赖'
 Assert-FileContains -Path 'skills/test-runner/SKILL.md' -Needle 'name: test-runner'
 Assert-FileContains -Path 'skills/test-runner/SKILL.md' -Needle 'Gemini optional adapter'
 Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'new-task mode=workflow'
 Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle '按当前 stage 懒加载'
+Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'md-html'
+Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle '不新增 stage，也不进入默认 stage whitelist'
 Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'workflow-team` 仅在 `$env:AIONUI_TEAM_MODE=''1''`'
 Assert-FileContains -Path 'skills/orchestrator/references/runbook.md' -Needle 'mode: quick | workflow | ask'
 Assert-FileContains -Path 'skills/orchestrator/references/runbook.md' -Needle 'Lazy Loading'
+Assert-FileContains -Path 'skills/orchestrator/references/runbook.md' -Needle 'md-html'
+Assert-FileContains -Path 'skills/orchestrator/references/runbook.md' -Needle '不改变默认 PLAN/IMPLEMENT/REVIEW/TEST stage'
 Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'new-task mode=workflow'
+Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'Markdown / HTML artifact source boundary'
+Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'Markdown 默认是 source of truth'
+Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'HTML 默认是 generated display artifact'
 Assert-FileContains -Path 'skills/orchestrator/references/gates.md' -Needle 'new-task mode=workflow'
 Assert-FileContains -Path 'vault-template/工作流/任务识别协议.md' -Needle 'quick | workflow | ask'
 Assert-FileContains -Path 'vault-template/工作流/任务识别协议.md' -Needle '自动懒加载规则'
@@ -569,6 +593,7 @@ Assert-FileContains -Path 'vault-template/entry/advance-stage.ps1.template' -Nee
 Assert-FileContains -Path 'vault-template/entry/advance-stage.ps1.template' -Needle '[string]$Tool = ""'
 Assert-FileContains -Path 'vault-template/entry/validate-lite-artifacts.ps1.template' -Needle '{REPO_ROOT}\scripts\validate-lite-artifacts.ps1'
 Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle "'entry-router'"
+Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle "'md-html'"
 Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle "'test-runner'"
 Assert-FileContains -Path 'skills/obsidian-memory/scripts/check-shared-memory.ps1' -Needle "Join-Path (Join-Path `$workspaceRoot 'docs/tasks') `$TaskId"
 Assert-FileNotContains -Path 'skills/obsidian-memory/scripts/check-shared-memory.ps1' -Needle "Join-Path (Join-Path `$workspaceRoot 'docs') `$TaskId"

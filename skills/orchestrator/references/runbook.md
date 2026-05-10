@@ -19,6 +19,7 @@
 - `quick` 只加载入口规则、用户偏好 / 必要配置和直接相关 skill；不进入 orchestrator。
 - `workflow` 加载 `entry-router`、`orchestrator` 和当前 stage skill。
 - `resume-current` / `switch-existing` 先加载 `恢复索引.md`、`当前任务.md`、`运行时/tasks/<task-id>.md`，必要时只读当前任务 `plan.md` frontmatter，再加载当前 stage skill。
+- Markdown/HTML 互转、HTML report、网页 artifact、URL/HTML 提取 Markdown 或发布预览时，可额外加载 `md-html`；它不改变默认 PLAN/IMPLEMENT/REVIEW/TEST stage。
 - 禁止 bulk-load 全部 skills、全部历史任务、Gemini / Claude 兼容 skill、`workflow-team`；显式 backend、stage 或 team-mode 触发时除外。
 
 ## 2. Execute by Stage

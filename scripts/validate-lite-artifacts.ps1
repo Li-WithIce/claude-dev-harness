@@ -480,6 +480,7 @@ function Get-AllowedWorkflowSkills {
         'codex',
         'entry-router',
         'implement',
+        'md-html',
         'obsidian-memory',
         'orchestrator',
         'plan',

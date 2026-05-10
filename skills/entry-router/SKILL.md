@@ -96,6 +96,16 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 
 禁止 bulk-load 全部 skills、全部历史任务、Gemini / Claude 兼容 skill、`workflow-team`。只有显式 backend override、当前 stage/frontmatter 命中、或 `$env:AIONUI_TEAM_MODE='1'` 触发时才加载这些路径。
 
+### Markdown / HTML artifact route
+
+当用户明确要求 Markdown/HTML 互转、HTML 报告、网页 artifact、Markdown 发布预览、从 URL/HTML 提取 Markdown、或浏览器交付物时，按需加载 `md-html` skill。
+
+- `quick`：小文档直接转换、生成或导入；Markdown 默认是 source of truth，HTML 是 generated artifact。
+- `workflow`：复杂交付先在 PLAN 中声明 Markdown source、HTML artifact 和验证方式，再按当前 stage 加载阶段 skill；`md-html` 作为相关 skill/reference 使用，不进入默认 stage whitelist。
+- `ask`：缺少方向、用途、输出路径或样式边界时，只问一个最小澄清问题。
+
+不要在同一轮同时自由编辑 Markdown 和 HTML。内容改动走 Markdown 后再生成 HTML；视觉改动走模板/样式规则后再生成 HTML；HTML -> Markdown 只承诺导入/审阅/归档，不承诺像素级还原。
+
 ### 当前开发流程（Harness Lite v2）
 
 5 个可执行阶段：`PLAN → PLAN_REVIEW → IMPLEMENT → CODE_REVIEW → TEST`

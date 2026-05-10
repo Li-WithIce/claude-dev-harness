@@ -56,6 +56,7 @@ orchestrator 只能在 `new-task mode=workflow` 或已确认的 resume/switch wo
 - `IMPLEMENT`：只加载 `implement`
 - `CODE_REVIEW`：只加载 `review`
 - `TEST`：默认只加载 `test`；只有显式切到 Gemini 的 TEST 阶段才加载 `test-runner`
+- Markdown/HTML 互转、HTML 报告、网页 artifact、URL/HTML 提取 Markdown 或发布预览时，可额外加载 `md-html` 作为直接相关 skill；它说明 source/artifact 边界，不新增 stage，也不进入默认 stage whitelist。
 
 禁止 bulk-load 全部 skills、全部历史任务、Gemini / Claude 兼容 skill、`workflow-team`。`workflow-team` 仅在 `$env:AIONUI_TEAM_MODE='1'` 且 leader 明确选择 team mode 时加载。
 

@@ -11,6 +11,7 @@ enabled_skills:
   - review
   - test
   - spec
+  - md-html
 disabled_builtin_skills: []
 context: |
   Harness lite default Codex profile. Use Codex for every executable workflow stage inside the workspace.

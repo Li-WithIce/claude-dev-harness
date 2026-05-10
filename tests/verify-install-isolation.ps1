@@ -56,6 +56,18 @@ $workspaceRoot = Join-Path $caseRoot 'workspace'
 $userProfile = Join-Path $caseRoot 'user'
 New-Item -ItemType Directory -Path $workspaceRoot,$userProfile -Force | Out-Null
 
+$codexConfigPath = Join-Path $userProfile '.codex\config.toml'
+$codexConfigSentinel = @'
+# user-owned codex config
+model = "user-private-model"
+
+[projects.'D:\private-project']
+trust_level = "trusted"
+'@
+New-Item -ItemType Directory -Path (Split-Path -Parent $codexConfigPath) -Force | Out-Null
+Set-Content -LiteralPath $codexConfigPath -Value $codexConfigSentinel -Encoding utf8
+$codexConfigHashBefore = (Get-FileHash -LiteralPath $codexConfigPath -Algorithm SHA256).Hash
+
 $localSystemSkillPath = Join-Path $userProfile '.claude\skills\.system\custom-local-skill'
 New-Item -ItemType Directory -Path $localSystemSkillPath -Force | Out-Null
 Set-Content -LiteralPath (Join-Path $localSystemSkillPath 'SKILL.md') -Value '# local only' -Encoding utf8
@@ -82,6 +94,13 @@ if (-not (Test-Path -LiteralPath (Join-Path $localSystemSkillPath 'SKILL.md') -P
     $failures.Add('install.ps1 should preserve the original host-only local system skill') | Out-Null
 } else {
     $checks.Add('install.ps1 preserves the original host-only local system skill') | Out-Null
+}
+
+$codexConfigHashAfter = (Get-FileHash -LiteralPath $codexConfigPath -Algorithm SHA256).Hash
+if ($codexConfigHashAfter -ne $codexConfigHashBefore) {
+    $failures.Add('install.ps1 should not modify %USERPROFILE%\.codex\config.toml') | Out-Null
+} else {
+    $checks.Add('install.ps1 leaves %USERPROFILE%\.codex\config.toml unchanged') | Out-Null
 }
 
 $verifyResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $RepoRoot 'tests\verify-installation.ps1') -Arguments @{

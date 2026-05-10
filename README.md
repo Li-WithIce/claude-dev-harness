@@ -86,6 +86,24 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 
 禁止 bulk-load 全部 skills、全部历史 `docs/tasks/*`、Gemini / Claude 兼容 skill 或 `workflow-team`。只有用户显式切换 backend、当前 stage frontmatter / workflow descriptor 命中、或 `$env:AIONUI_TEAM_MODE='1'` 等触发条件满足时，才加载这些兼容路径。
 
+### Markdown / HTML artifact 能力
+
+当用户要求 Markdown/HTML 互转、HTML 报告、网页 artifact、Markdown 发布预览、或从 URL/HTML 提取 Markdown 时，入口按需加载 `md-html` skill；它不是默认开发 stage，也不进入 `agent-configs/workflows/harness-lite.yaml` 的 stage whitelist。
+
+核心边界：
+
+- Markdown 默认是人类和 AI 共同编辑的 canonical source / source of truth。
+- HTML 默认是 generated display artifact，用于浏览器预览、视觉检查、发布和交付。
+- HTML -> Markdown 用于导入、审阅和归档，不承诺像素级还原。
+- Markdown -> HTML 用于展示/发布/视觉交付，应可从同一 Markdown source 与样式规则重复生成。
+- 默认不在同一轮自由编辑 Markdown 和 HTML 两份源；内容改动走 Markdown 后再生成 HTML，视觉改动走模板/样式规则后再生成 HTML。
+
+路由建议：
+
+- `quick`：小文档直接转换、导入或生成。
+- `workflow`：复杂报告、网页原型、可审计交付先声明 Markdown source、HTML artifact、模板/样式边界和验证方式。
+- `ask`：缺少方向、用途、输出路径或样式边界时，只问一个澄清问题。
+
 ### 阶段与真相源
 
 以下阶段只适用于 `mode=workflow` 的新任务，`quick` 不创建阶段状态。
@@ -361,7 +379,7 @@ pwsh -File .\skills\workflow-team\scripts\spawn-team.ps1 -TaskId <task-id>
 
 截至当前仓库状态：
 
-- `skills/` 下有 `12` 个 workflow skills（含一个 legacy 兼容入口）
+- `skills/` 下有 `11` 个 workflow skills 和 1 个按需 artifact skill（`md-html`）
 - `scripts/` 下有 `16` 个 PowerShell 脚本
 - `runtime-hooks/claude/` 下有 `3` 个 hooks
 - `tests/` 下有 `24` 个 `verify-*.ps1` 回归脚本
@@ -375,6 +393,7 @@ pwsh -File .\skills\workflow-team\scripts\spawn-team.ps1 -TaskId <task-id>
 | `skills/plan` / `implement` / `review` / `test` | 各阶段写作与产物规则 |
 | `skills/workflow-team` | team preset bridge 与 auto / PreCompact 协议 |
 | `skills/obsidian-memory` | 共享记忆读写、repair、promotion |
+| `skills/md-html` | Markdown/HTML 互转、发布与导入边界 |
 | `agent-configs/profiles` | tool profile 描述符 |
 | `agent-configs/workflows/harness-lite.yaml` | workflow descriptor 与阶段注释协议 |
 | `vault-template/` | 新工作区 `.assistant` 骨架 |

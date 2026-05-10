@@ -234,6 +234,16 @@ stages:
 - 尽量带文件路径或模块名。
 - 控制在实现可直接消费的粒度。
 
+#### Markdown / HTML artifact source boundary
+
+当任务使用 `md-html` 生成或导入 Markdown/HTML 产物时，PLAN 应把 source 和 artifact 分开写清：
+
+- Markdown 默认是 source of truth；HTML 默认是 generated display artifact。
+- Markdown -> HTML 用于发布、预览、视觉检查和交付；应能从同一 Markdown source 与模板/样式规则重复生成。
+- HTML -> Markdown 用于导入、审阅和归档；不承诺像素级还原。
+- 不要让 IMPLEMENT 在同一轮自由修改 Markdown 和 HTML 两份源；内容改动走 Markdown，视觉改动走模板/样式规则，然后重新生成 HTML。
+- 复杂任务建议把 Markdown source、HTML artifact、模板/样式说明列入 `artifacts:`，并在 `Verification` 写预览、导入或 repeatability 检查。
+
 正确示例：
 
 ```markdown
