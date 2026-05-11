@@ -1,0 +1,233 @@
+﻿[CmdletBinding()]
+param(
+    [ValidateSet('quick', 'core', 'all')]
+    [string]$Suite = 'quick',
+
+    [string]$RepoRoot = '',
+
+    [string]$WorkspaceRoot = '',
+
+    [switch]$IncludeCachedDiff,
+
+    [switch]$VerboseOutput
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+function Resolve-RepoRoot {
+    param([string]$RequestedRoot)
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedRoot)) {
+        return (Resolve-Path -LiteralPath $RequestedRoot).Path
+    }
+
+    return (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+}
+
+function Resolve-Executable {
+    param(
+        [string[]]$Candidates,
+        [string]$Purpose
+    )
+
+    foreach ($candidate in $Candidates) {
+        $command = Get-Command $candidate -ErrorAction SilentlyContinue
+        if ($null -ne $command -and -not [string]::IsNullOrWhiteSpace($command.Source)) {
+            return $command.Source
+        }
+    }
+
+    throw ("Unable to locate executable for {0}: {1}" -f $Purpose, ($Candidates -join ', '))
+}
+
+function Quote-PowerShellLiteral {
+    param([string]$Value)
+
+    return "'" + ($Value -replace "'", "''") + "'"
+}
+
+function New-PowerShellEncodedArguments {
+    param(
+        [string]$ScriptPath,
+        [string[]]$ScriptArguments = @()
+    )
+
+    $tokens = New-Object System.Collections.Generic.List[string]
+    $tokens.Add('&')
+    $tokens.Add((Quote-PowerShellLiteral -Value $ScriptPath))
+
+    foreach ($argument in $ScriptArguments) {
+        if ($argument.StartsWith('-')) {
+            $tokens.Add($argument)
+        } else {
+            $tokens.Add((Quote-PowerShellLiteral -Value $argument))
+        }
+    }
+
+    $command = @"
+`$ErrorActionPreference = 'Stop'
+$($tokens -join ' ')
+if (`$global:LASTEXITCODE -is [int]) { exit `$global:LASTEXITCODE }
+exit 0
+"@
+
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+    return '-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ' + $encoded
+}
+
+function Invoke-QuietProcess {
+    param(
+        [string]$Name,
+        [string]$FilePath,
+        [string]$Arguments,
+        [string]$WorkingDirectory
+    )
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $FilePath
+    $psi.Arguments = $Arguments
+    $psi.WorkingDirectory = $WorkingDirectory
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $psi
+
+    $timer = [System.Diagnostics.Stopwatch]::StartNew()
+    [void]$process.Start()
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $timer.Stop()
+
+    return [pscustomobject]@{
+        Name = $Name
+        ExitCode = $process.ExitCode
+        StdOut = $stdoutTask.Result
+        StdErr = $stderrTask.Result
+        DurationSeconds = [math]::Round($timer.Elapsed.TotalSeconds, 2)
+    }
+}
+
+function Add-GitCheck {
+    param(
+        [System.Collections.Generic.List[object]]$Checks,
+        [string]$Name,
+        [string]$Arguments
+    )
+
+    $Checks.Add([pscustomobject]@{
+        Name = $Name
+        FilePath = $script:GitPath
+        Arguments = $Arguments
+    }) | Out-Null
+}
+
+function Add-PowerShellScriptCheck {
+    param(
+        [System.Collections.Generic.List[object]]$Checks,
+        [string]$Name,
+        [string]$ScriptPath,
+        [string[]]$Arguments = @()
+    )
+
+    $Checks.Add([pscustomobject]@{
+        Name = $Name
+        FilePath = $script:PowerShellPath
+        Arguments = (New-PowerShellEncodedArguments -ScriptPath $ScriptPath -ScriptArguments $Arguments)
+    }) | Out-Null
+}
+
+$repoRootResolved = Resolve-RepoRoot -RequestedRoot $RepoRoot
+$testsRoot = Join-Path $repoRootResolved 'tests'
+$script:GitPath = Resolve-Executable -Candidates @('git.exe', 'git') -Purpose 'git checks'
+$script:PowerShellPath = Resolve-Executable -Candidates @('pwsh.exe', 'pwsh', 'powershell.exe', 'powershell') -Purpose 'PowerShell validation'
+$checks = New-Object System.Collections.Generic.List[object]
+$skips = New-Object System.Collections.Generic.List[string]
+
+Add-GitCheck -Checks $checks -Name 'git diff --check' -Arguments 'diff --check'
+if ($IncludeCachedDiff) {
+    Add-GitCheck -Checks $checks -Name 'git diff --cached --check' -Arguments 'diff --cached --check'
+}
+
+$coreScripts = @(
+    'verify-lite-artifact-validator.ps1',
+    'verify-lite-footprint.ps1',
+    'verify-workflow-contracts.ps1',
+    'verify-workflow-descriptor.ps1',
+    'verify-shared-memory-layers.ps1',
+    'verify-skill-manifest.ps1',
+    'verify-aionui-skill-contract.ps1',
+    'verify-tool-profile.ps1'
+)
+
+if ($Suite -eq 'quick') {
+    $scriptNames = @('verify-lite-footprint.ps1')
+} elseif ($Suite -eq 'core') {
+    $scriptNames = $coreScripts
+} else {
+    $scriptNames = Get-ChildItem -LiteralPath $testsRoot -Filter 'verify-*.ps1' -File |
+        Where-Object { $_.Name -ne 'verify-installation.ps1' } |
+        Sort-Object Name |
+        Select-Object -ExpandProperty Name
+}
+
+foreach ($scriptName in $scriptNames) {
+    $scriptPath = Join-Path $testsRoot $scriptName
+    Add-PowerShellScriptCheck -Checks $checks -Name $scriptName -ScriptPath $scriptPath
+}
+
+if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+    $installScript = Join-Path $testsRoot 'verify-installation.ps1'
+    Add-PowerShellScriptCheck -Checks $checks -Name 'verify-installation.ps1' -ScriptPath $installScript -Arguments @(
+        '-WorkspaceRoot', $WorkspaceRoot,
+        '-RepoRoot', $repoRootResolved
+    )
+} elseif ($Suite -eq 'all') {
+    $skips.Add('verify-installation.ps1 requires -WorkspaceRoot and is not part of the default no-argument loop') | Out-Null
+}
+
+Write-Output ("Validation suite: {0}" -f $Suite)
+Write-Output ("RepoRoot: {0}" -f $repoRootResolved)
+Write-Output ("PowerShell host: {0}" -f $script:PowerShellPath)
+Write-Output ''
+
+foreach ($skip in $skips) {
+    Write-Output ("[SKIP] {0}" -f $skip)
+}
+
+$failures = New-Object System.Collections.Generic.List[object]
+foreach ($check in $checks) {
+    Write-Output ("[RUN ] {0}" -f $check.Name)
+    $result = Invoke-QuietProcess -Name $check.Name -FilePath $check.FilePath -Arguments $check.Arguments -WorkingDirectory $repoRootResolved
+    if ($result.ExitCode -eq 0) {
+        Write-Output ("[PASS] {0} ({1}s)" -f $result.Name, $result.DurationSeconds)
+        if ($VerboseOutput) {
+            if (-not [string]::IsNullOrWhiteSpace($result.StdOut)) { Write-Output $result.StdOut.TrimEnd() }
+            if (-not [string]::IsNullOrWhiteSpace($result.StdErr)) { [Console]::Error.WriteLine($result.StdErr.TrimEnd()) }
+        }
+    } else {
+        $failures.Add($result) | Out-Null
+        Write-Output ("[FAIL] {0} ({1}s, exit {2})" -f $result.Name, $result.DurationSeconds, $result.ExitCode)
+        if (-not [string]::IsNullOrWhiteSpace($result.StdOut)) {
+            Write-Output '--- stdout ---'
+            Write-Output $result.StdOut.TrimEnd()
+        }
+        if (-not [string]::IsNullOrWhiteSpace($result.StdErr)) {
+            Write-Output '--- stderr ---'
+            [Console]::Error.WriteLine($result.StdErr.TrimEnd())
+        }
+    }
+}
+
+Write-Output ''
+if ($failures.Count -gt 0) {
+    Write-Output ("STATUS: FAIL ({0} failed)" -f $failures.Count)
+    exit 1
+}
+
+Write-Output 'STATUS: PASS'
+exit 0

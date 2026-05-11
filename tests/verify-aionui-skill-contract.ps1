@@ -191,7 +191,7 @@ function Invoke-PowerShellWithStreams {
     $stderrPath = Join-Path $streamRoot 'stderr.txt'
 
     try {
-        $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $Arguments -Wait -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $Arguments -Wait -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
         $stdout = if (Test-Path -LiteralPath $stdoutPath -PathType Leaf) { [System.IO.File]::ReadAllText($stdoutPath) } else { '' }
         $stderr = if (Test-Path -LiteralPath $stderrPath -PathType Leaf) { [System.IO.File]::ReadAllText($stderrPath) } else { '' }
         if ($null -eq $stdout) { $stdout = '' }

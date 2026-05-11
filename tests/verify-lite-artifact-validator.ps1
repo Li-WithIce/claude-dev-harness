@@ -616,10 +616,10 @@ try {
         Where-Object { Test-Path (Join-Path $_.FullName 'plan.md') } |
         Sort-Object Name |
         Select-Object -ExpandProperty Name
-    if ($livePlanTasks.Count -eq 15) {
-        Add-Check 'live baseline still contains 15 plan-bearing tasks'
+    if ($livePlanTasks.Count -eq 18) {
+        Add-Check 'live baseline still contains 18 plan-bearing tasks'
     } else {
-        Add-Failure ("live baseline should contain 15 plan-bearing tasks, got {0}" -f $livePlanTasks.Count)
+        Add-Failure ("live baseline should contain 18 plan-bearing tasks, got {0}" -f $livePlanTasks.Count)
     }
 
     $expectedPassTasks = @(
@@ -636,6 +636,9 @@ try {
         'workflow-optimization-roadmap'
     )
     $expectedFailTasks = @(
+        '1cfa7b79',
+        '37ce4e15',
+        '85ff35b0',
         'harness-aionui-workflow-alignment',
         'phase2-workflow-descriptor',
         'review-probe-crossmatch',

@@ -413,25 +413,21 @@ pwsh -File .\tests\verify-installation.ps1 -WorkspaceRoot <workspace-root> -Repo
 ### 文档 / 协议核心验证
 
 ```powershell
-pwsh -File .\tests\verify-lite-artifact-validator.ps1
-pwsh -File .\tests\verify-lite-footprint.ps1
-pwsh -File .\tests\verify-workflow-contracts.ps1
-pwsh -File .\tests\verify-shared-memory-layers.ps1
+pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite core
 ```
+
+`scripts/run-validation.ps1` 是推荐的 quiet validation 入口：外层只启动一次 PowerShell；内部验证脚本用无窗口子进程串行执行，保留每个脚本独立 exit code，同时减少验收阶段反复弹出 PowerShell 窗口。
 
 ### 跑完整 verify 套件
 
 当前共有 `24` 个 `verify-*.ps1`；其中 `verify-installation.ps1` 需要显式传 `-WorkspaceRoot`。
 
 ```powershell
-# 先跑安装验证
-pwsh -File .\tests\verify-installation.ps1 -WorkspaceRoot <workspace-root> -RepoRoot D:\data\claude-dev-harness
+# 跑可直接执行的验证脚本；verify-installation.ps1 需要 WorkspaceRoot 时单独传入
+pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite all
 
-# 再顺跑其余 23 个
-Get-ChildItem .\tests -Filter 'verify-*.ps1' |
-  Where-Object Name -ne 'verify-installation.ps1' |
-  Sort-Object Name |
-  ForEach-Object { pwsh -NoProfile -ExecutionPolicy Bypass -File $_.FullName }
+# 连同安装验证一起跑
+pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite all -WorkspaceRoot <workspace-root>
 ```
 
 ## 维护提示

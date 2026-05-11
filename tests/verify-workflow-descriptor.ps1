@@ -147,7 +147,7 @@ function Invoke-AdvanceStageWithStreams {
     $stderrPath = Join-Path $streamRoot 'stderr.txt'
 
     try {
-        $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -Wait -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
         $stdout = (Read-FileUtf8 -Path $stdoutPath).Trim()
         $stderr = (Read-FileUtf8 -Path $stderrPath).Trim()
         $combined = @()

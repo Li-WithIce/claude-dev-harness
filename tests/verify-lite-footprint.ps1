@@ -354,6 +354,12 @@ if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'scripts/validate-lite-ar
     Add-Failure 'lite artifact validator should exist at scripts/validate-lite-artifacts.ps1'
 }
 
+if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'scripts/run-validation.ps1') -PathType Leaf) {
+    Add-Check 'quiet validation runner exists'
+} else {
+    Add-Failure 'quiet validation runner should exist at scripts/run-validation.ps1'
+}
+
 if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'skills/workflow-team/SKILL.md') -PathType Leaf) {
     Add-Check 'workflow-team skill exists'
 } else {
@@ -424,6 +430,9 @@ Assert-FileContains -Path 'vault-template/工作流/写回协议.md' -Needle 'do
 Assert-FileContains -Path 'vault-template/配置/敏感信息规范.md' -Needle 'docs/tasks/**'
 Assert-FileContains -Path 'README.md' -Needle 'skills/orchestrator/references/lite-writing-guide.md'
 Assert-FileContains -Path 'README.md' -Needle 'scripts/validate-lite-artifacts.ps1'
+Assert-FileContains -Path 'README.md' -Needle 'scripts/run-validation.ps1'
+Assert-FileContains -Path 'README.md' -Needle '-NoProfile -NonInteractive -File .\scripts\run-validation.ps1'
+Assert-FileContains -Path 'README.md' -Needle 'quiet validation'
 Assert-FileContains -Path 'README.md' -Needle 'export-team-preset.ps1'
 Assert-FileContains -Path 'README.md' -Needle 'AIONUI_TEAM_MODE'
 Assert-FileContains -Path 'README.md' -Needle '.assistant\entry\advance-stage.ps1'
@@ -454,6 +463,14 @@ Assert-FileContains -Path 'scripts/check-shared-memory-layers.ps1' -Needle 'deri
 Assert-FileContains -Path 'tests/verify-shared-memory-layers.ps1' -Needle 'runtime.lock.json'
 Assert-FileContains -Path 'scripts/advance-stage.ps1' -Needle '[string]$Tool = ""'
 Assert-FileContains -Path 'scripts/advance-stage.ps1' -Needle '[string]$Profile = ""'
+Assert-FileContains -Path 'scripts/run-validation.ps1' -Needle 'CreateNoWindow = $true'
+Assert-FileContains -Path 'scripts/run-validation.ps1' -Needle "ValidateSet('quick', 'core', 'all')"
+Assert-FileContains -Path 'scripts/run-validation.ps1' -Needle '-NoProfile -NonInteractive -ExecutionPolicy Bypass'
+Assert-FileContains -Path 'tests/verify-aionui-skill-contract.ps1' -Needle '-WindowStyle Hidden'
+Assert-FileContains -Path 'tests/verify-skill-manifest.ps1' -Needle '-WindowStyle Hidden'
+Assert-FileContains -Path 'tests/verify-workflow-descriptor.ps1' -Needle '-WindowStyle Hidden'
+Assert-FileContains -Path 'tests/verify-team-orchestration.ps1' -Needle '-WindowStyle Hidden'
+Assert-FileContains -Path 'tests/verify-team-preset.ps1' -Needle '-WindowStyle Hidden'
 Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle 'tool_profile'
 Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle '[switch]$Quality'
 Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle 'artifacts'

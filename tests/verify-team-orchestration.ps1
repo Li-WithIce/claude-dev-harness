@@ -101,7 +101,7 @@ function Invoke-PowerShellWithStreams {
 
     try {
         $shellPath = (Get-Process -Id $PID).Path
-        $process = Start-Process -FilePath $shellPath -ArgumentList $Arguments -Wait -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        $process = Start-Process -FilePath $shellPath -ArgumentList $Arguments -Wait -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
         $stdout = if (Test-Path -LiteralPath $stdoutPath -PathType Leaf) { [System.IO.File]::ReadAllText($stdoutPath) } else { '' }
         $stderr = if (Test-Path -LiteralPath $stderrPath -PathType Leaf) { [System.IO.File]::ReadAllText($stderrPath) } else { '' }
         if ($null -eq $stdout) { $stdout = '' }
