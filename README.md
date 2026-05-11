@@ -1,6 +1,6 @@
 # Harness Lite
 
-Windows 优先的单仓库开发 harness。它把 `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST -> DONE` 的任务流、共享记忆 `.assistant/`、以及 `docs/tasks/<task-id>/` 产物统一到同一套协议里，当前仓库状态已经包含 Phase 1-7 与 shared-memory v2 的主线能力。
+Windows 优先的单仓库开发 harness。它把 `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST` 的可执行阶段、`DONE` frontmatter 终态、共享记忆 `.assistant/`、以及 `docs/tasks/<task-id>/` 产物统一到同一套协议里，当前仓库状态已经包含 Phase 1-7 与 shared-memory v2 的主线能力。
 
 ## 这份 README 面向谁
 
@@ -23,13 +23,15 @@ pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\claude-d
 
 - 工作区入口文档：`AGENTS.md`、`GEMINI.md`
 - 工作区共享记忆：`.assistant/`
+- 工作区入口 shim：`.assistant/entry/AGENTS.md`、`.assistant/entry/GEMINI.md`
 - 工作区脚本 shim：`.assistant/entry/advance-stage.ps1`、`.assistant/entry/validate-lite-artifacts.ps1`
 - Claude Code hooks：`runtime-hooks/claude/*.js` 的安装副本
 
 宿主侧当前真实行为是：
 
 - repo `skills/` 会同步到 `%USERPROFILE%\.claude\skills` 与 `%USERPROFILE%\.codex\skills`
-- Claude / Codex 会写入各自的 `settings.local.json` / managed config
+- Claude / Codex 会写入各自的共享 `settings.local.json`；Codex 只写 Harness 托管的 `%USERPROFILE%\.codex\managed_config.toml`
+- 用户私有的 `%USERPROFILE%\.codex\config.toml` 不由安装脚本或 workflow 创建、清理或改写
 - Gemini 当前依赖工作区 `GEMINI.md` 入口，不会像 Claude/Codex 一样同步一份 host-level `skills` 目录
 
 ### 日常使用
@@ -384,7 +386,7 @@ pwsh -File .\skills\workflow-team\scripts\spawn-team.ps1 -TaskId <task-id>
 截至当前仓库状态：
 
 - `skills/` 下有 `11` 个 workflow skills 和 1 个按需 artifact skill（`md-html`）
-- `scripts/` 下有 `16` 个 PowerShell 脚本
+- `scripts/` 下有 `17` 个 PowerShell 脚本
 - `runtime-hooks/claude/` 下有 `3` 个 hooks
 - `tests/` 下有 `24` 个 `verify-*.ps1` 回归脚本
 
@@ -410,13 +412,23 @@ pwsh -File .\skills\workflow-team\scripts\spawn-team.ps1 -TaskId <task-id>
 pwsh -File .\tests\verify-installation.ps1 -WorkspaceRoot <workspace-root> -RepoRoot D:\data\claude-dev-harness
 ```
 
-### 文档 / 协议核心验证
+### quiet validation 三档
 
 ```powershell
+# 快速文档 / footprint 锁点：git diff --check + verify-lite-footprint.ps1
+pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite quick
+
+# 文档 / 协议核心验证
 pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite core
 ```
 
 `scripts/run-validation.ps1` 是推荐的 quiet validation 入口：外层只启动一次 PowerShell；内部验证脚本用无窗口子进程串行执行，保留每个脚本独立 exit code，同时减少验收阶段反复弹出 PowerShell 窗口。
+
+三档口径：
+
+- `quick`：只跑 `git diff --check` 和 `tests/verify-lite-footprint.ps1`，适合 README / 文档小修后的快速回归。
+- `core`：跑 `git diff --check` 加核心协议脚本，包括 artifact validator、footprint、workflow contracts / descriptor、shared-memory layers、skill manifest、AionUI skill contract、tool profile。
+- `all`：跑 `git diff --check` 加除 `verify-installation.ps1` 外所有 `tests/verify-*.ps1`；需要安装验证时额外传 `-WorkspaceRoot`。
 
 ### 跑完整 verify 套件
 
@@ -434,7 +446,7 @@ pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite all -W
 
 - 本仓库当前默认语言是中文；代码、命令、标识符保留英文
 - active `.ps1` 继续要求 UTF-8 BOM，`tests/verify-lite-footprint.ps1` 会锁这个约束
-- repo 根目录并不自带 `.assistant/entry/AGENTS.md`；那是安装到目标工作区后才生成的 shim
+- repo 根目录并不自带 live `.assistant/entry/AGENTS.md`；安装到目标工作区后会从 `vault-template/entry/AGENTS.md.template` 生成这个 shim
 - 如果你改了 workflow/validator/shared-memory 协议，优先同步：
   - `README.md`
   - `skills/orchestrator/references/lite-writing-guide.md`
