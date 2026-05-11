@@ -18,7 +18,7 @@ description: Use when a task involves Markdown/HTML conversion, HTML reports, we
 ## Source / Artifact 边界
 
 - Markdown 是人类和 AI 共同编辑的 canonical source / source of truth。
-- HTML 是 generated display artifact，用于预览、视觉检查、发布和交付。
+- HTML 是 generated display artifact，用于预览、视觉检查、发布和交付；长 `spec.md` / `plan.md` 的 paired reading HTML 应主动重组结构，不只是 Markdown 渲染。
 - HTML -> Markdown 是导入、审阅、归档路径，不承诺像素级还原。
 - Markdown -> HTML 是发布、预览路径，应可重复生成。
 - 默认不允许同一轮同时自由编辑 Markdown 和 HTML，避免双源漂移；改内容走 Markdown，改视觉走模板、样式规则或生成管线后再生成 HTML。
@@ -40,7 +40,9 @@ description: Use when a task involves Markdown/HTML conversion, HTML reports, we
 
 - 触发阈值：`spec.md` / `plan.md` 超过 160 行，或含 8 个及以上 `##` 二级标题。
 - 默认输出同目录固定模板阅读版：`plan.review.html` / `spec.review.html`；若任务目录只有一个待审阅 Markdown，也可用 `review.html`。
-- HTML 只做阅读增强：目录、段落宽度、标题层级、轻量分区、表格可读性；不追求花哨 UI。
+- HTML 做结构化审阅增强：summary、decision、risk、checkpoint、流程/架构、对比矩阵、信息卡片、折叠源章节等 visual blocks；不只是 Markdown 转 HTML。
+- 仓库内固定生成器是 `scripts/render-review-html.ps1`；它输出 source-of-truth banner、TOC、summary/decision/risk/checkpoint 区、流程/架构重组、局部 visual blocks、折叠源章节、表格滚动容器和代码块样式。
+- 默认产物是自包含 HTML fragment + inline CSS；不得包含 `script`、`iframe`、外部 JS、`doctype`、`html`、`head`、`body` 外壳。
 - HTML 阅读版是 generated artifact；不得成为内容真相源。
 
 ### Local HTML enhancement
@@ -66,7 +68,8 @@ description: Use when a task involves Markdown/HTML conversion, HTML reports, we
 - Markdown 输出必须优先保留标题层级、段落、列表、表格、链接、图片替代文本和代码块语义。
 - HTML 输出必须可从 Markdown 与模板/样式规则重复生成；不要把手工内容改动只留在 HTML。
 - 长 `spec.md` / `plan.md` 的 paired reading HTML 必须使用固定模板或稳定生成规则，优先清晰阅读，不重新设计页面。
-- 完整 HTML 页面只有用户明确要求或 paired reading HTML 触发时才生成；局部增强不得升级成完整页面。
+- 同一任务目录同时存在 `spec.md` 和 `plan.md` 时，不使用 `review.html`，必须输出 `spec.review.html` 或 `plan.review.html` 以避免覆盖和语义歧义。
+- 完整 HTML 页面只有用户明确要求时才生成；paired reading HTML 默认使用自包含 HTML fragment + inline CSS，局部增强不得升级成完整页面。
 - Local HTML enhancement 输出必须是局部片段，不得生成完整页面或把 HTML 包在 fenced code block 中。
 - 视觉调整应落在模板、CSS 或生成规则中，并重新生成 HTML。
 - 导入得到的 Markdown 应标注来源和不可还原项，例如脚本交互、布局细节、内联样式或动态内容。

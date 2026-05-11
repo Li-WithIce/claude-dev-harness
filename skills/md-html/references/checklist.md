@@ -15,6 +15,7 @@
 - `spec.md` / `plan.md` 超过 160 行，或含 8 个及以上 `##` 二级标题。
 - 用户需要人工审阅/决策，且 Markdown 查看层次不够清晰。
 - HTML 阅读版使用固定模板或稳定生成规则，建议路径为同目录 `plan.review.html` / `spec.review.html`，单一审阅文件也可用 `review.html`。
+- 仓库固定生成器为 `scripts/render-review-html.ps1`；最低结构合同是 source-of-truth banner、TOC、summary、decision、risk、checkpoint、流程/架构、对比矩阵、信息卡片、折叠源章节、宽表滚动容器、代码块语言保留、无 `script` / `iframe` / 外部 JS / `doctype` / `html` / `head` / `body`。
 - HTML 阅读版只增强阅读，不替代 `spec.md` / `plan.md`；内容改动仍回到 Markdown 后重新生成。
 
 ### Local HTML enhancement
@@ -34,8 +35,10 @@
 - Markdown -> HTML 产物无法从 source 与模板/样式重复生成。
 - HTML / URL -> Markdown 导入遗漏核心内容，且未记录缺口。
 - 输出路径会覆盖未声明文件。
+- 同目录同时存在 `spec.md` 和 `plan.md` 时输出 `review.html`。
 - paired reading HTML 被当成 `spec.md` / `plan.md` 的替代真相源。
 - Local HTML enhancement 使用 `script`、`iframe`、外部 JS、完整页面外壳，或被放进代码块。
+- paired reading HTML 退化为普通 Markdown 渲染，没有做 summary / decision / risk / checkpoint 等结构重组和 visual blocks。
 
 ## P1 Gate
 
@@ -67,14 +70,15 @@
 - Markdown 可由人类直接审阅，不依赖 HTML 才能理解内容。
 - 长段落、嵌套列表和宽表格没有变成难以维护的单行文本。
 - HTML 预览中的正文、标题、表格和代码块在目标视口下可读。
-- paired reading HTML 的目录、标题、分区和表格可读性优于原 Markdown 长文。
+- paired reading HTML 的 summary、决策、风险、checkpoint、流程/架构、对比矩阵、信息卡片和折叠源章节可读性优于原 Markdown 长文。
+- paired reading HTML 可通过 `pwsh -File .\scripts\render-review-html.ps1 -SourcePath <spec-or-plan.md>` 重复生成；行为回归由 `tests/verify-md-html-review-renderer.ps1` 覆盖。
 - 生成报告说明了 source path、artifact path 和检查方式。
 
 ## 视觉
 
 - HTML 是 generated display artifact，用于预览、视觉检查、发布和交付。
 - 视觉调整落在模板、CSS、主题变量或生成规则中，而不是只手改 HTML 正文。
-- paired reading HTML 使用固定模板，目标是更清晰，不重新设计 UI。
+- paired reading HTML 使用固定模板，目标是结构化审阅和多维表现，不重新设计 UI。
 - Local HTML enhancement 只做局部、克制、紧凑的可读性增强。
 - 交付前至少检查一个桌面视口；有移动交付要求时补移动视口。
 - 不承诺 HTML -> Markdown 像素级还原；视觉差异只作为导入记录或模板改进输入。

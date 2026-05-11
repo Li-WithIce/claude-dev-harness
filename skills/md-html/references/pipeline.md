@@ -18,15 +18,18 @@
 
 - Markdown 是唯一内容 source；HTML 阅读版是派生产物。
 - 触发阈值固定为超过 160 行或 8 个及以上 `##` 二级标题，并且用户需要审阅/决策、Markdown 层次不够清晰。
-- 使用固定模板或稳定生成规则：标题、目录、主体宽度、二级标题分区、表格样式、代码块样式。
-- 默认不做完整网站设计，不加入品牌化视觉；目标只是更清晰。
+- 使用固定模板或稳定生成规则：source banner、TOC、summary、decision、risk、checkpoint、流程/架构、对比矩阵、信息卡片、折叠源章节、表格样式、代码块样式。
+- 当前仓库固定生成器：`scripts/render-review-html.ps1`。默认 `spec.md -> spec.review.html`、`plan.md -> plan.review.html`；同目录同时存在 `spec.md` 和 `plan.md` 时拒绝 `review.html`。
+- 默认不做完整网站设计，不加入品牌化视觉；目标是把长文重组为审阅视图，而不是普通 Markdown 渲染。
+- 默认输出自包含 HTML fragment + inline CSS；不得包含 `script`、`iframe`、外部 JS、`doctype`、`html`、`head`、`body` 外壳。
 - 内容变更必须改 `spec.md` / `plan.md` 后重新生成 HTML。
 
 可选工具：
 
-- `pandoc --standalone --toc --template <template>`：适合固定模板阅读版。
+- `scripts/render-review-html.ps1 -SourcePath <spec-or-plan.md> -OutputPath <review.html> -Force`：仓库默认 paired reading HTML 路径，输出结构重组后的 fragment。
+- `pandoc --standalone --toc --template <template>`：仅适合用户明确要求完整 HTML 页面时使用。
 - 编辑器导出 / preview save：适合 quick，但需记录实际操作。
-- 简单本地脚本：适合仓库自带模板；脚本必须只读取 Markdown 并输出 HTML。
+- 简单本地脚本：适合仓库自带模板；本仓库优先使用 `pwsh -File .\scripts\render-review-html.ps1 -SourcePath <spec-or-plan.md>`，脚本只读取 Markdown 并输出 HTML artifact。
 
 ## Markdown -> HTML
 
@@ -105,6 +108,7 @@
 - 语义抽查：HTML -> Markdown 后正文是否可读、是否遗漏关键段落。
 - 视觉抽查：Markdown -> HTML 后桌面视口和必要移动视口。
 - 可重复性：删除或忽略 generated HTML 后，使用记录命令重新生成。
-- 长文阅读版抽查：`spec.md` / `plan.md` 的标题、目录、决策点和表格在 HTML 中更清晰。
+- 长文阅读版抽查：`spec.md` / `plan.md` 的 summary、决策、风险、checkpoint、流程/架构、对比矩阵和折叠源章节在 HTML 中更清晰。
+- 结构合同抽查：source banner、TOC、visual block 标记、H2/H3 锚点、表格滚动容器、代码块语言、无 `script` / `iframe` / 外部 JS / `doctype` / `html` / `head` / `body`。
 - 局部增强抽查：没有完整页面外壳、代码块包裹、`script`、`iframe` 或外部 JS。
 - 漂移检查：确认内容变更不只存在于 HTML artifact。

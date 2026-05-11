@@ -95,7 +95,7 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 核心边界：
 
 - Markdown 默认是人类和 AI 共同编辑的 canonical source / source of truth。
-- HTML 默认是 generated display artifact，用于浏览器预览、视觉检查、发布和交付。
+- HTML 默认是 generated display artifact，用于浏览器预览、视觉检查、发布和交付；长 `spec.md` / `plan.md` 的审阅版应做结构重组，不只是 Markdown 渲染。
 - HTML -> Markdown 用于导入、审阅和归档，不承诺像素级还原。
 - Markdown -> HTML 用于展示/发布/视觉交付，应可从同一 Markdown source 与样式规则重复生成。
 - 默认不在同一轮自由编辑 Markdown 和 HTML 两份源；内容改动走 Markdown 后再生成 HTML，视觉改动走模板/样式规则后再生成 HTML。
@@ -106,9 +106,11 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 - `workflow`：复杂报告、网页原型、可审计交付先声明 Markdown source、HTML artifact、模板/样式边界和验证方式。
 - `ask`：缺少方向、用途、输出路径或样式边界时，只问一个澄清问题。
 
-`spec.md` / `plan.md` 是最需要人工审阅和介入的文档。若它们超过 160 行或含 8 个及以上 `##` 二级标题，且用户需要审阅/决策、Markdown 层次不够清晰，默认生成同目录 paired reading HTML（`plan.review.html` / `spec.review.html`，单一审阅文件可用 `review.html`）。该 HTML 使用固定模板，只增强阅读，不替代 Markdown；内容变更仍改 `spec.md` / `plan.md` 后重新生成。
+`spec.md` / `plan.md` 是最需要人工审阅和介入的文档。若它们超过 160 行或含 8 个及以上 `##` 二级标题，且用户需要审阅/决策、Markdown 层次不够清晰，默认生成同目录 paired reading HTML（`plan.review.html` / `spec.review.html`，单一审阅文件可用 `review.html`）。该 HTML 使用固定模板，主动重组 summary、decision、risk、checkpoint、流程/架构、对比矩阵、信息卡片和折叠源章节，不替代 Markdown；内容变更仍改 `spec.md` / `plan.md` 后重新生成。
 
-局部 HTML 增强只允许用于卡片、对比区、流程区、信息网格；不得输出完整页面，不得把 HTML 放进代码块，不得使用 `script`、`iframe` 或外部 JS。完整 HTML 页面只有用户明确要求或 paired reading HTML 触发时才生成。
+仓库提供固定生成器：`pwsh -File .\scripts\render-review-html.ps1 -SourcePath .\docs\tasks\<task-id>\spec.md`。生成器只读取 Markdown，输出自包含 HTML fragment + inline CSS，并带 visual block 标记；当同目录同时存在 `spec.md` 与 `plan.md` 时，`review.html` 会被拒绝，需使用 `spec.review.html` / `plan.review.html`。
+
+局部 HTML 增强只允许用于卡片、对比区、流程区、信息网格；不得输出完整页面，不得把 HTML 放进代码块，不得使用 `script`、`iframe` 或外部 JS。paired reading HTML 默认不含 `doctype`、`html`、`head`、`body` 外壳；完整 HTML 页面只有用户明确要求时才生成。
 
 ### 阶段与真相源
 
@@ -386,9 +388,9 @@ pwsh -File .\skills\workflow-team\scripts\spawn-team.ps1 -TaskId <task-id>
 截至当前仓库状态：
 
 - `skills/` 下有 `11` 个 workflow skills 和 1 个按需 artifact skill（`md-html`）
-- `scripts/` 下有 `17` 个 PowerShell 脚本
+- `scripts/` 下有 `18` 个 PowerShell 脚本
 - `runtime-hooks/claude/` 下有 `3` 个 hooks
-- `tests/` 下有 `24` 个 `verify-*.ps1` 回归脚本
+- `tests/` 下有 `26` 个 `verify-*.ps1` 回归脚本
 
 关键组件分布：
 
@@ -427,12 +429,12 @@ pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite core
 三档口径：
 
 - `quick`：只跑 `git diff --check` 和 `tests/verify-lite-footprint.ps1`，适合 README / 文档小修后的快速回归。
-- `core`：跑 `git diff --check` 加核心协议脚本，包括 artifact validator、footprint、workflow contracts / descriptor、shared-memory layers、skill manifest、AionUI skill contract、tool profile。
+- `core`：跑 `git diff --check` 加核心协议脚本，包括 artifact validator、footprint、workflow contracts / descriptor、shared-memory layers、review HTML renderer、skill manifest、AionUI skill contract、tool profile。
 - `all`：跑 `git diff --check` 加除 `verify-installation.ps1` 外所有 `tests/verify-*.ps1`；需要安装验证时额外传 `-WorkspaceRoot`。
 
 ### 跑完整 verify 套件
 
-当前共有 `24` 个 `verify-*.ps1`；其中 `verify-installation.ps1` 需要显式传 `-WorkspaceRoot`。
+当前共有 `26` 个 `verify-*.ps1`；其中 `verify-installation.ps1` 需要显式传 `-WorkspaceRoot`。
 
 ```powershell
 # 跑可直接执行的验证脚本；verify-installation.ps1 需要 WorkspaceRoot 时单独传入

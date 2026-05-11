@@ -156,9 +156,11 @@ if ($IncludeCachedDiff) {
 $coreScripts = @(
     'verify-lite-artifact-validator.ps1',
     'verify-lite-footprint.ps1',
+    'verify-md-html-review-renderer.ps1',
     'verify-workflow-contracts.ps1',
     'verify-workflow-descriptor.ps1',
     'verify-shared-memory-layers.ps1',
+    'verify-render-review-html.ps1',
     'verify-skill-manifest.ps1',
     'verify-aionui-skill-contract.ps1',
     'verify-tool-profile.ps1'
