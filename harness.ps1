@@ -193,7 +193,7 @@ function Resolve-WorkspaceRoot {
         }
     }
 
-    foreach ($candidate in @($env:CLAUDE_DEV_HARNESS_WORKSPACE_ROOT, $env:WORKSPACE_ROOT)) {
+    foreach ($candidate in @($env:DEV_HARNESS_WORKSPACE_ROOT, $env:CLAUDE_DEV_HARNESS_WORKSPACE_ROOT, $env:WORKSPACE_ROOT)) {
         if (-not [string]::IsNullOrWhiteSpace($candidate)) {
             return [pscustomobject]@{
                 Path   = (Get-NormalizedPath -Path $candidate)

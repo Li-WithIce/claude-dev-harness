@@ -160,6 +160,7 @@ function Resolve-WorkspaceRoot {
 
     $environmentCandidates = New-Object System.Collections.Generic.List[object]
     foreach ($definition in @(
+            [pscustomobject]@{ Name = 'DEV_HARNESS_WORKSPACE_ROOT'; Value = $env:DEV_HARNESS_WORKSPACE_ROOT },
             [pscustomobject]@{ Name = 'CLAUDE_DEV_HARNESS_WORKSPACE_ROOT'; Value = $env:CLAUDE_DEV_HARNESS_WORKSPACE_ROOT },
             [pscustomobject]@{ Name = 'WORKSPACE_ROOT'; Value = $env:WORKSPACE_ROOT }
         )) {
@@ -190,7 +191,7 @@ function Resolve-WorkspaceRoot {
         return $cwdWorkspaceRoot
     }
 
-    throw 'You must provide -WorkspaceRoot, set CLAUDE_DEV_HARNESS_WORKSPACE_ROOT / WORKSPACE_ROOT, or run from inside a workspace that contains .assistant'
+    throw 'You must provide -WorkspaceRoot, set DEV_HARNESS_WORKSPACE_ROOT / WORKSPACE_ROOT, or run from inside a workspace that contains .assistant'
 }
 
 function Assert-RenderedFile {
@@ -266,7 +267,7 @@ function Assert-GitIgnoreManagedEntries {
     }
 
     $lines = [regex]::Split($content, '\r?\n') | ForEach-Object { $_.Trim() }
-    foreach ($entry in @('# claude-dev-harness workspace artifacts', '.assistant/', 'AGENTS.md', 'GEMINI.md', '.claude')) {
+    foreach ($entry in @('# dev-harness workspace artifacts', '.assistant/', 'AGENTS.md', 'GEMINI.md', '.claude')) {
         $matches = @($lines | Where-Object { $_ -eq $entry })
         if ($matches.Count -eq 1) {
             Add-Check (".gitignore 包含且仅包含一条 [{0}]" -f $entry)
@@ -332,7 +333,7 @@ function Get-ManagedTomlBlockContent {
 
     $match = [regex]::Match(
         $Content,
-        '(?ms)^\# >>> claude-dev-harness managed block >>>\r?\n(.*?)^\# <<< claude-dev-harness managed block <<<\r?\n?'
+        '(?ms)^\# >>> (?<marker>dev-harness|claude-dev-harness) managed block >>>\r?\n(.*?)^\# <<< \k<marker> managed block <<<\r?\n?'
     )
     if (-not $match.Success) {
         return $null
@@ -465,9 +466,11 @@ $effectiveUserProfile = Get-NormalizedPath -Path $effectiveUserProfile
 $VaultPath = Join-Path $WorkspaceRoot '.assistant'
 $ClaudeHome = Join-Path $effectiveUserProfile '.claude'
 $CodexHome = Join-Path $effectiveUserProfile '.codex'
+$AgentsHome = Join-Path $effectiveUserProfile '.agents'
 $RepoSkillsPath = Join-Path $RepoRoot 'skills'
 $ClaudeSkillsPath = Join-Path $ClaudeHome 'skills'
 $CodexSkillsPath = Join-Path $CodexHome 'skills'
+$AgentsSkillsPath = Join-Path $AgentsHome 'skills'
 $ClaudeHooksPath = Join-Path $ClaudeHome 'hooks-memory'
 $ClaudeSettingsPath = Join-Path (Join-Path $ClaudeHome '.claude') 'settings.local.json'
 $CodexSettingsPath = Join-Path (Join-Path $CodexHome '.claude') 'settings.local.json'
@@ -497,6 +500,7 @@ $script:Errors = @()
 
 Assert-ManagedSkillLinks -HostLabel 'Claude' -HostSkillsPath $ClaudeSkillsPath -RepoSkillsPath $RepoSkillsPath
 Assert-ManagedSkillLinks -HostLabel 'Codex' -HostSkillsPath $CodexSkillsPath -RepoSkillsPath $RepoSkillsPath
+Assert-ManagedSkillLinks -HostLabel 'Agents' -HostSkillsPath $AgentsSkillsPath -RepoSkillsPath $RepoSkillsPath
 
 foreach ($hookName in @('userpromptsubmit.js', 'posttooluse.js', 'stop.js')) {
     Assert-RenderedFile -Path (Join-Path $ClaudeHooksPath $hookName) -ForbiddenTokens $ForbiddenTokens
@@ -568,7 +572,7 @@ if (Test-Path -LiteralPath $CodexConfigPath -PathType Leaf) {
 
     $configWithoutManagedBlock = [regex]::Replace(
         $codexConfig,
-        '(?ms)^\# >>> claude-dev-harness managed block >>>\r?\n.*?^\# <<< claude-dev-harness managed block <<<\r?\n?',
+        '(?ms)^\# >>> (?<marker>dev-harness|claude-dev-harness) managed block >>>\r?\n.*?^\# <<< \k<marker> managed block <<<\r?\n?',
         ''
     )
     $managedSkillPaths = Get-TomlSkillConfigPaths -Content $renderedManagedTemplate

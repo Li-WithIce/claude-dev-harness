@@ -251,7 +251,8 @@ function Ensure-WorkspaceGitIgnoreEntries {
         'GEMINI.md',
         '.claude'
     )
-    $managedComment = '# claude-dev-harness workspace artifacts'
+    $managedComment = '# dev-harness workspace artifacts'
+    $legacyManagedComment = '# claude-dev-harness workspace artifacts'
 
     $existingContent = Read-FileUtf8 -Path $gitIgnorePath
     $existingLines = if ($null -eq $existingContent) {
@@ -265,17 +266,41 @@ function Ensure-WorkspaceGitIgnoreEntries {
         [void]$normalizedLines.Add($line.Trim())
     }
 
+    $hasManagedComment = $normalizedLines.Contains($managedComment)
+    $hasLegacyManagedComment = $normalizedLines.Contains($legacyManagedComment)
     $missingEntries = @(
         $requiredEntries | Where-Object { -not $normalizedLines.Contains($_) }
     )
-    $missingManagedComment = -not $normalizedLines.Contains($managedComment)
-    if ($missingEntries.Count -eq 0 -and -not $missingManagedComment) {
+    if ($missingEntries.Count -eq 0 -and $hasManagedComment -and -not $hasLegacyManagedComment) {
         return
     }
 
     Backup-IfNeeded -Path $gitIgnorePath
 
     $newline = Get-ExistingNewlineStyle -Content $existingContent
+    $workingContent = if ($null -eq $existingContent) { '' } else { $existingContent }
+    if ($hasLegacyManagedComment) {
+        if ($hasManagedComment) {
+            $workingContent = [regex]::Replace($workingContent, '(?im)^\s*\# claude-dev-harness workspace artifacts\s*\r?\n?', '')
+        } else {
+            $workingContent = [regex]::Replace($workingContent, '(?im)^\s*\# claude-dev-harness workspace artifacts\s*$', $managedComment)
+        }
+
+        $existingLines = if ([string]::IsNullOrWhiteSpace($workingContent)) {
+            @()
+        } else {
+            [regex]::Split($workingContent, '\r?\n')
+        }
+        $normalizedLines = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($line in $existingLines) {
+            [void]$normalizedLines.Add($line.Trim())
+        }
+        $missingEntries = @(
+            $requiredEntries | Where-Object { -not $normalizedLines.Contains($_) }
+        )
+    }
+
+    $missingManagedComment = -not $normalizedLines.Contains($managedComment)
     $appendedLines = New-Object System.Collections.Generic.List[string]
     if ($missingManagedComment) {
         [void]$appendedLines.Add($managedComment)
@@ -287,7 +312,7 @@ function Ensure-WorkspaceGitIgnoreEntries {
     $trimmedExisting = if ($null -eq $existingContent) {
         ''
     } else {
-        $existingContent.TrimEnd([char[]]@("`r", "`n"))
+        $workingContent.TrimEnd([char[]]@("`r", "`n"))
     }
 
     $updatedContent = if ([string]::IsNullOrWhiteSpace($trimmedExisting)) {
@@ -1058,6 +1083,7 @@ $WorkspaceRoot = Get-NormalizedPath -Path $WorkspaceRoot
 $VaultPath = Join-Path $WorkspaceRoot '.assistant'
 $ClaudeHome = Join-Path $env:USERPROFILE '.claude'
 $CodexHome = Join-Path $env:USERPROFILE '.codex'
+$AgentsHome = Join-Path $env:USERPROFILE '.agents'
 $GeminiHome = Join-Path $env:USERPROFILE '.gemini'
 $RepoSkillsPath = Join-Path $RepoRoot 'skills'
 $BackupRoot = Join-Path $RepoRoot ('backups\install-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + "-$PID")
@@ -1082,6 +1108,7 @@ $script:Manifest = [ordered]@{
     vault_path = $VaultPath
     claude_home = $ClaudeHome
     codex_home = $CodexHome
+    agents_home = $AgentsHome
     gemini_home = $GeminiHome
     backup_root = $BackupRoot
     generated_repo_system_path = $null
@@ -1091,6 +1118,7 @@ $script:ManifestPath = Join-Path $BackupRoot 'install-manifest.json'
 
 $claudeSkillsPath = Join-Path $ClaudeHome 'skills'
 $codexSkillsPath = Join-Path $CodexHome 'skills'
+$agentsSkillsPath = Join-Path $AgentsHome 'skills'
 $claudeHooksPath = Join-Path $ClaudeHome 'hooks-memory'
 $claudeSettingsDir = Join-Path $ClaudeHome '.claude'
 $codexSettingsDir = Join-Path $CodexHome '.claude'
@@ -1107,6 +1135,7 @@ $workspaceGeminiPath = Join-Path $WorkspaceRoot 'GEMINI.md'
 try {
     Ensure-Directory -Path $ClaudeHome
     Ensure-Directory -Path $CodexHome
+    Ensure-Directory -Path $AgentsHome
     Ensure-Directory -Path $claudeSettingsDir
     Ensure-Directory -Path $codexSettingsDir
     Ensure-Directory -Path $WorkspaceRoot
@@ -1152,6 +1181,7 @@ try {
 
     Sync-SkillsDirectory -HostSkillsPath $claudeSkillsPath -RepoSkillsPath $RepoSkillsPath
     Sync-SkillsDirectory -HostSkillsPath $codexSkillsPath -RepoSkillsPath $RepoSkillsPath
+    Sync-SkillsDirectory -HostSkillsPath $agentsSkillsPath -RepoSkillsPath $RepoSkillsPath
 
     Save-InstallManifestSnapshot
     Write-Utf8NoBom -Path (Join-Path (Join-Path $RepoRoot 'backups') 'active-install.json') -Content (ConvertTo-ManifestJsonDocument -Value ([ordered]@{
@@ -1168,6 +1198,7 @@ try {
     Write-Output ('- vault_path: {0}' -f $VaultPath)
     Write-Output ('- claude_skills_root: {0}' -f $claudeSkillsPath)
     Write-Output ('- codex_skills_root: {0}' -f $codexSkillsPath)
+    Write-Output ('- agents_skills_root: {0}' -f $agentsSkillsPath)
     Write-Output ('- managed_skill_source: {0}' -f $RepoSkillsPath)
     Write-Output ('- backup_root: {0}' -f $BackupRoot)
     Write-Output ''

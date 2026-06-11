@@ -81,7 +81,7 @@ function Assert-GitIgnoreEntriesExactlyOnce {
     param(
         [string]$WorkspaceRoot,
         [string[]]$Entries = @(
-            '# claude-dev-harness workspace artifacts',
+            '# dev-harness workspace artifacts',
             '.assistant/',
             'AGENTS.md',
             'GEMINI.md',
@@ -705,13 +705,36 @@ enabled = true
 
             $gitIgnorePath = Join-Path $WorkspaceRoot '.gitignore'
             $content = Get-Content -LiteralPath $gitIgnorePath -Raw -Encoding utf8
-            $updatedContent = [regex]::Replace($content, '(?m)^\# claude-dev-harness workspace artifacts\r?\n?', '')
+            $updatedContent = [regex]::Replace($content, '(?m)^\# dev-harness workspace artifacts\r?\n?', '')
             [System.IO.File]::WriteAllText($gitIgnorePath, $updatedContent, (New-Object System.Text.UTF8Encoding($false)))
         } `
         -PostAssert {
             param($CaseRoot, $UserProfile, $WorkspaceRoot, $Result)
 
             Assert-GitIgnoreEntriesExactlyOnce -WorkspaceRoot $WorkspaceRoot
+        }
+
+    Invoke-ManagedAssetsCase `
+        -Name 'workspace-gitignore-legacy-managed-comment-is-migrated' `
+        -Scope 'All' `
+        -ExpectedStatus 'PASS' `
+        -Mutator {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot)
+
+            $gitIgnorePath = Join-Path $WorkspaceRoot '.gitignore'
+            $content = Get-Content -LiteralPath $gitIgnorePath -Raw -Encoding utf8
+            $updatedContent = [regex]::Replace($content, '(?m)^\# dev-harness workspace artifacts$', '# claude-dev-harness workspace artifacts')
+            [System.IO.File]::WriteAllText($gitIgnorePath, $updatedContent, (New-Object System.Text.UTF8Encoding($false)))
+        } `
+        -PostAssert {
+            param($CaseRoot, $UserProfile, $WorkspaceRoot, $Result)
+
+            Assert-GitIgnoreEntriesExactlyOnce -WorkspaceRoot $WorkspaceRoot
+            $gitIgnorePath = Join-Path $WorkspaceRoot '.gitignore'
+            $content = Get-Content -LiteralPath $gitIgnorePath -Raw -Encoding utf8
+            if ($content.Contains('# claude-dev-harness workspace artifacts')) {
+                throw 'legacy .gitignore managed comment should be migrated to dev-harness'
+            }
         }
 
     Invoke-ManagedAssetsCase `
@@ -732,7 +755,7 @@ enabled = true
 
             Assert-GitIgnoreEntriesExactlyOnce -WorkspaceRoot $WorkspaceRoot
             Assert-GitIgnoreEntriesExactlyOnce -WorkspaceRoot $WorkspaceRoot -Entries @('# user sentinel', 'node_modules/', '*.log')
-            Assert-GitIgnoreOrderedEntries -WorkspaceRoot $WorkspaceRoot -Entries @('# user sentinel', 'node_modules/', '*.log', '# claude-dev-harness workspace artifacts', '.assistant/', 'AGENTS.md')
+            Assert-GitIgnoreOrderedEntries -WorkspaceRoot $WorkspaceRoot -Entries @('# user sentinel', 'node_modules/', '*.log', '# dev-harness workspace artifacts', '.assistant/', 'AGENTS.md')
         }
 
     Invoke-ManagedAssetsCase `

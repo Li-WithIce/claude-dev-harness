@@ -27,7 +27,7 @@ function Resolve-ObsidianMemoryScript {
     }
 
     $isRuntimeTouching = $ScriptName -in $script:RuntimeTouchingScripts
-    $allowAgentHomeFallback = $env:CLAUDE_DEV_HARNESS_ALLOW_AGENT_HOME -eq '1'
+    $allowAgentHomeFallback = $env:DEV_HARNESS_ALLOW_AGENT_HOME -eq '1' -or $env:CLAUDE_DEV_HARNESS_ALLOW_AGENT_HOME -eq '1'
     if ($isRuntimeTouching -and -not $allowAgentHomeFallback) {
         throw "Missing obsidian-memory script in repo (agent-home fallback disabled for runtime-touching scripts): $ScriptName"
     }

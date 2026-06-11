@@ -200,12 +200,16 @@ function Resolve-SharedMemoryVaultRoot {
     $fallback = New-CandidateBucket
 
     Add-CandidateToBucket -Bucket $tierA -Value $VaultRoot
+    Add-CandidateToBucket -Bucket $tierA -Value $env:DEV_HARNESS_VAULT_PATH
     Add-CandidateToBucket -Bucket $tierA -Value $env:CLAUDE_DEV_HARNESS_VAULT_PATH
     Add-CandidateToBucket -Bucket $tierA -Value $env:OBSIDIAN_SHARED_VAULT
     Add-CandidateToBucket -Bucket $tierA -Value (Get-FlowSharedVaultRoot -OrchestratorFlowPath $OrchestratorFlowPath)
 
     if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
         Add-CandidateToBucket -Bucket $tierB -Value (Join-Path $WorkspaceRoot '.assistant')
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:DEV_HARNESS_WORKSPACE_ROOT)) {
+        Add-CandidateToBucket -Bucket $tierB -Value (Join-Path $env:DEV_HARNESS_WORKSPACE_ROOT '.assistant')
     }
     if (-not [string]::IsNullOrWhiteSpace($env:CLAUDE_DEV_HARNESS_WORKSPACE_ROOT)) {
         Add-CandidateToBucket -Bucket $tierB -Value (Join-Path $env:CLAUDE_DEV_HARNESS_WORKSPACE_ROOT '.assistant')
@@ -245,5 +249,5 @@ function Resolve-SharedMemoryVaultRoot {
         return $fallback.Items[0]
     }
 
-    throw 'Unable to resolve shared memory vault root. Pass -VaultRoot, set CLAUDE_DEV_HARNESS_VAULT_PATH, or provide -OrchestratorFlowPath.'
+    throw 'Unable to resolve shared memory vault root. Pass -VaultRoot, set DEV_HARNESS_VAULT_PATH, or provide -OrchestratorFlowPath.'
 }

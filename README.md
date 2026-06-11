@@ -1,4 +1,4 @@
-# Harness Lite
+# Dev Harness
 
 Windows 优先的单仓库开发 harness。它把 `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST` 的可执行阶段、`DONE` frontmatter 终态、共享记忆 `.assistant/`、以及 `docs/tasks/<task-id>/` 产物统一到同一套协议里，当前仓库状态已经包含 Phase 1-7 与 shared-memory v2 的主线能力。
 
@@ -16,7 +16,7 @@ Windows 优先的单仓库开发 harness。它把 `PLAN -> PLAN_REVIEW -> IMPLEM
 pwsh -File .\harness.ps1 -WorkspaceRoot D:\my-project
 
 # 直接安装
-pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\claude-dev-harness
+pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\dev-harness
 ```
 
 安装完成后，目标工作区会得到：
@@ -29,7 +29,7 @@ pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\claude-d
 
 宿主侧当前真实行为是：
 
-- repo `skills/` 会同步到 `%USERPROFILE%\.claude\skills` 与 `%USERPROFILE%\.codex\skills`
+- repo `skills/` 会同步到 `%USERPROFILE%\.claude\skills`、`%USERPROFILE%\.codex\skills` 与 `%USERPROFILE%\.agents\skills`
 - Claude / Codex 会写入各自的共享 `settings.local.json`；Codex 只写 Harness 托管的 `%USERPROFILE%\.codex\managed_config.toml`
 - 用户私有的 `%USERPROFILE%\.codex\config.toml` 不由安装脚本或 workflow 创建、清理或改写
 - Gemini 当前依赖工作区 `GEMINI.md` 入口，不会像 Claude/Codex 一样同步一份 host-level `skills` 目录
@@ -411,7 +411,7 @@ pwsh -File .\skills\workflow-team\scripts\spawn-team.ps1 -TaskId <task-id>
 ### 安装验证
 
 ```powershell
-pwsh -File .\tests\verify-installation.ps1 -WorkspaceRoot <workspace-root> -RepoRoot D:\data\claude-dev-harness
+pwsh -File .\tests\verify-installation.ps1 -WorkspaceRoot <workspace-root> -RepoRoot D:\data\dev-harness
 ```
 
 ### quiet validation 三档

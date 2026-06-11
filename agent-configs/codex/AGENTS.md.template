@@ -1,6 +1,6 @@
 # Shared Memory
 
-- Active workspace resolution: explicit `-WorkspaceRoot` -> `CLAUDE_DEV_HARNESS_WORKSPACE_ROOT` -> `WORKSPACE_ROOT` -> current working directory inside an installed workspace
+- Active workspace resolution: explicit `-WorkspaceRoot` -> `DEV_HARNESS_WORKSPACE_ROOT` -> `WORKSPACE_ROOT` -> current working directory inside an installed workspace
 - Shared memory vault: use the active workspace's `.assistant`
 - Once resolved, treat the active workspace's local `AGENTS.md` and `.assistant` as the source of truth
 - Default language: 中文

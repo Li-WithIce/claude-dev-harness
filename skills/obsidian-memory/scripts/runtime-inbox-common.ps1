@@ -72,6 +72,10 @@ function Get-EntryHostValue {
     #>
     param([string]$EntryHost = '')
 
+    if (-not [string]::IsNullOrWhiteSpace($env:DEV_HARNESS_ENTRY_HOST)) {
+        return $env:DEV_HARNESS_ENTRY_HOST.Trim()
+    }
+
     if (-not [string]::IsNullOrWhiteSpace($env:CLAUDE_DEV_HARNESS_ENTRY_HOST)) {
         return $env:CLAUDE_DEV_HARNESS_ENTRY_HOST.Trim()
     }
@@ -316,7 +320,7 @@ function Resolve-WorkspaceRoot {
         return [System.IO.Path]::GetFullPath($WorkspaceRoot)
     }
 
-    foreach ($candidate in @($env:CLAUDE_DEV_HARNESS_WORKSPACE_ROOT, $env:WORKSPACE_ROOT)) {
+    foreach ($candidate in @($env:DEV_HARNESS_WORKSPACE_ROOT, $env:CLAUDE_DEV_HARNESS_WORKSPACE_ROOT, $env:WORKSPACE_ROOT)) {
         if (-not [string]::IsNullOrWhiteSpace($candidate)) {
             return [System.IO.Path]::GetFullPath($candidate)
         }

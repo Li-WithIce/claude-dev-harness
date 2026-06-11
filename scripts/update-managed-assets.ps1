@@ -53,6 +53,7 @@ function Resolve-WorkspaceRoot {
 
     $environmentCandidates = New-Object System.Collections.Generic.List[object]
     foreach ($definition in @(
+            [pscustomobject]@{ Name = 'DEV_HARNESS_WORKSPACE_ROOT'; Value = $env:DEV_HARNESS_WORKSPACE_ROOT },
             [pscustomobject]@{ Name = 'CLAUDE_DEV_HARNESS_WORKSPACE_ROOT'; Value = $env:CLAUDE_DEV_HARNESS_WORKSPACE_ROOT },
             [pscustomobject]@{ Name = 'WORKSPACE_ROOT'; Value = $env:WORKSPACE_ROOT }
         )) {
@@ -83,7 +84,7 @@ function Resolve-WorkspaceRoot {
         return $cwdWorkspaceRoot
     }
 
-    throw 'You must provide -WorkspaceRoot, set CLAUDE_DEV_HARNESS_WORKSPACE_ROOT / WORKSPACE_ROOT, or run from inside a workspace that contains .assistant'
+    throw 'You must provide -WorkspaceRoot, set DEV_HARNESS_WORKSPACE_ROOT / WORKSPACE_ROOT, or run from inside a workspace that contains .assistant'
 }
 
 function Convert-ToLineArray {

@@ -5,7 +5,7 @@ status: decided
 created: 2026-04-23
 revised: 2026-04-23
 source: D:\data\eo-skills-main
-scope: claude-dev-harness workflow upgrade
+scope: dev-harness workflow upgrade
 supersedes: 2026-04-23 初版（Phase 0-5 全量方案）
 ---
 
