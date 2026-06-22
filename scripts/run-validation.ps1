@@ -67,6 +67,9 @@ function New-PowerShellEncodedArguments {
 
     $command = @"
 `$ErrorActionPreference = 'Stop'
+[Console]::InputEncoding = [System.Text.UTF8Encoding]::new(`$false)
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(`$false)
+`$OutputEncoding = [Console]::OutputEncoding
 $($tokens -join ' ')
 if (`$global:LASTEXITCODE -is [int]) { exit `$global:LASTEXITCODE }
 exit 0
@@ -91,6 +94,8 @@ function Invoke-QuietProcess {
     $psi.UseShellExecute = $false
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
+    $psi.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $psi.StandardErrorEncoding = [System.Text.UTF8Encoding]::new($false)
     $psi.CreateNoWindow = $true
 
     $process = New-Object System.Diagnostics.Process
@@ -154,6 +159,7 @@ if ($IncludeCachedDiff) {
 }
 
 $coreScripts = @(
+    'verify-context-preflight.ps1',
     'verify-lite-artifact-validator.ps1',
     'verify-lite-footprint.ps1',
     'verify-md-html-review-renderer.ps1',

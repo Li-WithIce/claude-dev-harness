@@ -359,6 +359,18 @@ if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'scripts/run-validation.p
     Add-Failure 'quiet validation runner should exist at scripts/run-validation.ps1'
 }
 
+if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'scripts/context-preflight.ps1') -PathType Leaf) {
+    Add-Check 'context preflight helper exists'
+} else {
+    Add-Failure 'context preflight helper should exist at scripts/context-preflight.ps1'
+}
+
+if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'tests/verify-context-preflight.ps1') -PathType Leaf) {
+    Add-Check 'context preflight regression exists'
+} else {
+    Add-Failure 'context preflight regression should exist at tests/verify-context-preflight.ps1'
+}
+
 if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'skills/workflow-team/SKILL.md') -PathType Leaf) {
     Add-Check 'workflow-team skill exists'
 } else {
@@ -491,6 +503,13 @@ Assert-FileContains -Path 'scripts/advance-stage.ps1' -Needle '[string]$Profile 
 Assert-FileContains -Path 'scripts/run-validation.ps1' -Needle 'CreateNoWindow = $true'
 Assert-FileContains -Path 'scripts/run-validation.ps1' -Needle "ValidateSet('quick', 'core', 'all')"
 Assert-FileContains -Path 'scripts/run-validation.ps1' -Needle '-NoProfile -NonInteractive -ExecutionPolicy Bypass'
+Assert-FileContains -Path 'scripts/run-validation.ps1' -Needle 'StandardOutputEncoding'
+Assert-FileContains -Path 'scripts/run-validation.ps1' -Needle 'verify-context-preflight.ps1'
+Assert-FileContains -Path 'scripts/context-preflight.ps1' -Needle 'advisory-only'
+Assert-FileContains -Path 'scripts/context-preflight.ps1' -Needle 'advance-stage'
+Assert-FileContains -Path 'scripts/context-preflight.ps1' -Needle 'skills_whitelist'
+Assert-FileContains -Path 'tests/verify-context-preflight.ps1' -Needle 'matching phase'
+Assert-FileContains -Path 'docs/工作流/context-manifest-artifact.md' -Needle 'scripts/context-preflight.ps1'
 Assert-FileContains -Path 'scripts/run-validation.ps1' -Needle 'verify-md-html-review-renderer.ps1'
 Assert-FileContains -Path 'scripts/render-review-html.ps1' -Needle 'data-visual-block="summary"'
 Assert-FileContains -Path 'scripts/render-review-html.ps1' -Needle 'data-visual-block="decision-grid"'

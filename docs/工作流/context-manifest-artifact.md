@@ -89,6 +89,18 @@ contexts:
 - 不作为 validator hard gate。validator 只通过既有 artifact drift advisory 间接提示声明产物是否存在，不解析本文件 schema。
 - 不自动注入。任何 phase-aware injection 都必须另开 `trellis-context-injection-feasibility` 评估任务。
 
+## Optional Preflight
+
+可选使用只读 helper 查看某个阶段建议读取的上下文：
+
+```powershell
+pwsh -NoProfile -File scripts/context-preflight.ps1 -TaskId <task-id> -Phase IMPLEMENT
+```
+
+`scripts/context-preflight.ps1` 只打印 `context-manifest.yaml` 中匹配 phase 的 `file`、`reason`、`required` 和 `notes`，不会读取文件内容、不会写入 `.assistant/运行时`、不会调用 `advance-stage.ps1`，也不会改变 lazy loading、`skills_whitelist`、workflow descriptor、skill manifest 或 validator hard gate。
+
+manifest 缺失、phase 无匹配、建议文件不存在都只是 advisory warning，正常返回 exit code 0；参数缺失或非法 repo root 才属于调用错误。
+
 ## Review Checklist
 
 PLAN_REVIEW / CODE_REVIEW 抽查：
