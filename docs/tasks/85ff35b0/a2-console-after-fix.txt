@@ -1,7 +1,0 @@
-[preflight] codex version: codex-cli 0.125.0
-Reading prompt from stdin...
-[codex] 我会先在当前工作区创建 `smoke-write.txt`，内容严格写成一行 `smoke-ok`，然后核对结果并向你确认。
-[codex] 已创建 [smoke-write.txt](D:/data/claude-dev-harness/.tmp/85ff35b0-smoke-fixture-2/smoke-write.txt)，内容为一行 `smoke-ok`。
-2026-05-07T02:20:22.593550Z ERROR codex_core::session: failed to record rollout items: thread 019e003c-45bb-76a1-a02d-15aeb23be336 not found
-session_id=019e003c-45bb-76a1-a02d-15aeb23be336
-output_path=D:\data\claude-dev-harness\docs\tasks\85ff35b0\a2-output-after-fix.md

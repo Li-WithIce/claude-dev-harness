@@ -42,3 +42,7 @@ Microsoft/
 /.claude/
 /.codex/
 /.codedb-mcp/
+
+# dev-harness workspace artifacts
+.assistant/
+.claude

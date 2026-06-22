@@ -1,2 +1,0 @@
-[preflight] codex version: codex-cli 0.125.0
-{"status":"preflight_failed","suggestion":"Install jq from https://jqlang.github.io/jq/download/","tool":"jq","reason":"Command \u0027jq\u0027 not found in PATH"}

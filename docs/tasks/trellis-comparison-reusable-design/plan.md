@@ -9,7 +9,7 @@ updated: 2026-06-22
 ## Clarification
 - work_type: doc
 - 验收标准:
-  1. 基于用户提供的 harness 现状报告、仓库内既有 CodeStable / Maestro / AionUi 对标文档，以及公开 Trellis / CodeTrellis 资料，产出一份可审阅的对比设计。
+  1. 基于用户提供的 harness 现状报告、当前协议事实源，以及公开 Trellis / CodeTrellis 资料，产出一份可审阅的对比设计。
   2. 明确区分外部 Trellis 事实、本仓库现状、推断和建议，避免把外部假设写成 harness 事实。
   3. 抽取可复用方案，并按 `adopt now` / `adapt` / `defer` / `reject` 分类。
   4. 本轮仅新增任务文档与运行时 mirror；不修改脚本、skills、validator、安装资产或现有脏工作树内容。
@@ -42,7 +42,7 @@ updated: 2026-06-22
 - note: `affected_paths` 只列 repo artifact；shared vault runtime mirror 不作为 repo 变更契约的一部分。同目录 `gap-analysis.md` 的 frontmatter `task_id` 为 `83e9ed91`（属另一 task 的产物，物理误放于本目录），不纳入本 task 契约，待确认归属或移动；`skill-manifest.json` 为生成物，不计入。
 
 ## Plan
-- read_first: [docs/tasks/codestable-workflow-benchmark/comparison.md, docs/tasks/claude-maestro-workflow-benchmark/maestro-flow-analysis.md, docs/tasks/workflow-optimization-roadmap/plan.md, docs/tasks/phase6-quality-score-hard-constraints/plan.md, docs/tasks/phase7-runtime-hooks-artifact-declaration/plan.md, docs/tasks/aionui-workflow-gap-analysis/analysis.md]
+- read_first: [docs/README.md, docs/shared-memory-layers.md, docs/team-write-authority.md, docs/工作流/task-entity-artifact.md, docs/工作流/context-manifest-artifact.md, docs/工作流/single-writer-precompact.md]
 - convergence:
   - `Select-String -Path docs/tasks/trellis-comparison-reusable-design/trellis-reusable-design.md -Pattern 'adopt now|adapt|defer|reject'`
   - `Select-String -Path docs/tasks/trellis-comparison-reusable-design/trellis-reusable-design.md -Pattern 'Trellis 事实|harness 现状|可复用方案|不引入'`
@@ -76,7 +76,7 @@ updated: 2026-06-22
   - P2: 字段口径不一致——Clarification「受影响目录」列 5 项（含 3 个 `.assistant/运行时/` mirror），`Change Contract.affected_paths` 只列 2 个 repo artifact。差异本身合理（`.assistant/运行时/*` 被 `.gitignore:27` 忽略，属 vault 写回而非 repo 变更），但 plan 未点明，读者需自行推断。建议显式说明「runtime mirror 不计入 `affected_paths`」。此点与设计文档 B3 headless drift advisory 想规范的 affected_paths/artifacts/diff 口径问题自指相关。
   - P3: IMPLEMENT 交付边界未声明——产物 `trellis-reusable-design.md` 已成稿（status: draft，内容完整），但 TODO 1-4 描述的是 draft 阶段已完成的设计产出，未写明 IMPLEMENT 阶段动作。建议补一条收尾动作（如「按 review findings 定稿，status draft→final」），避免 IMPLEMENT 无明确交付边界。
 - reviewer 抽查证据:
-  - read_first 6 份文档全部存在；validator `scripts/validate-lite-artifacts.ps1 -TaskId trellis-comparison-reusable-design` STATUS: PASS（0 error / 0 warning）。
+  - read_first 6 份当前协议文档全部存在；validator `scripts/validate-lite-artifacts.ps1 -TaskId trellis-comparison-reusable-design` STATUS: PASS（0 error / 0 warning）。
   - convergence 两条 `Select-String` 可执行且命中：`adopt now|adapt|defer|reject` ×5、`Trellis 事实|harness 现状|可复用方案|不引入` ×8。
   - git 抽查：仅新增 task 目录（untracked），`.assistant/运行时` mirror 三件套（task / 当前任务 / 恢复索引）已正确写回 PLAN_REVIEW，符合「仅新增任务文档与运行时 mirror」边界。
   - 设计产物事实分层清晰（Trellis 三层 / harness 现状 / 推断建议分开），adopt/adapt/defer/reject 四类齐全，满足验收标准 2、3。

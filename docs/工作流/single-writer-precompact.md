@@ -9,7 +9,7 @@
   - `.assistant/运行时/tasks/<task-id>.md`
   - `.assistant/运行时/当前任务.md`
   - `.assistant/运行时/恢复索引.md`
-- Phase 7 的 PreCompact 只是 leader/worker 的协议化自检，不是新的内核 hook，也不是新的写入器。
+- PreCompact 只是 leader/worker 的协议化自检，不是新的内核 hook，也不是新的写入器。
 - 本文只描述 PreCompact 场景；shared-memory 主合同仍以 `docs/shared-memory-layers.md`、`vault-template/工作流/共享记忆协议.md`、`vault-template/工作流/写回协议.md` 为准。
 
 ## PreCompact 触发的两类动作

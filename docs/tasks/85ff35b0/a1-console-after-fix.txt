@@ -1,8 +1,0 @@
-[preflight] codex version: codex-cli 0.125.0
-Reading prompt from stdin...
-[codex] 按你的请求直接运行 `echo hello`，我先执行命令并返回结果。
-[codex] > "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'echo hello'
-[codex] 输出是：
-2026-05-07T02:19:53.445232Z ERROR codex_core::session: failed to record rollout items: thread 019e003b-d8cd-7070-8075-6864484197b3 not found
-session_id=019e003b-d8cd-7070-8075-6864484197b3
-output_path=D:\data\claude-dev-harness\docs\tasks\85ff35b0\a1-output-after-fix.md

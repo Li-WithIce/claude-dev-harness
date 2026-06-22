@@ -40,14 +40,14 @@ Trellis 对 harness 最值得借鉴的不是“再建一套 `.trellis/` 目录�
 
 ### harness 现状源
 
-本轮沿用以下本仓库事实：
+清理后，后续优化只沿用以下当前协议事实源：
 
-- `docs/tasks/codestable-workflow-benchmark/comparison.md`
-- `docs/tasks/claude-maestro-workflow-benchmark/maestro-flow-analysis.md`
-- `docs/tasks/workflow-optimization-roadmap/plan.md`
-- `docs/tasks/phase6-quality-score-hard-constraints/plan.md`
-- `docs/tasks/phase7-runtime-hooks-artifact-declaration/plan.md`
-- `docs/tasks/aionui-workflow-gap-analysis/analysis.md`
+- `docs/README.md`
+- `docs/shared-memory-layers.md`
+- `docs/team-write-authority.md`
+- `docs/工作流/task-entity-artifact.md`
+- `docs/工作流/context-manifest-artifact.md`
+- `docs/工作流/single-writer-precompact.md`
 - 用户提供的 `harness-analyst` 只读现状报告
 
 ## 2. 机制级对照
@@ -126,7 +126,7 @@ Trellis 的 parent / subtask 关系适合补足 harness 单 task 视角的短板
 - 只表达拆分、依赖、完成判据和对应 task_id。
 - 不驱动 `advance-stage.ps1`，也不更新 `.assistant/运行时/当前任务.md`。
 
-这与既有 CodeStable borrowing 结论一致：roadmap / items 可以是 artifact，但不能成为 stage truth。
+当前结论是：roadmap / items 可以是 artifact，但不能成为 stage truth。
 
 #### B3. Headless drift detection
 
@@ -203,18 +203,18 @@ Trellis 的 workspace memory / LLM wiki 与 harness `.assistant` 功能重叠。
 
 | 优先级 | 任务候选 | 类型 | 产出 | 备注 |
 |---|---|---|---|---|
-| P1 | `trellis-finish-boundary-checklist` | doc / skill polish | 更新 `skills/test/SKILL.md`、`skills/review/SKILL.md` | 低风险，直接补 artifact / handoff 抽查。 |
+| P1 | `finish-boundary-checklist` | doc / skill polish | 更新 `skills/test/SKILL.md`、`skills/review/SKILL.md` | 低风险，直接补 artifact / handoff 抽查。 |
 | P2 | `context-taxonomy-writing-rules` | doc | 更新 `.assistant/工作流/项目约定.md` 或 `docs/工作流/context-taxonomy.md` | 需要注意单写者和 vault 写回边界。 |
 | P3 | `task-entity-artifact-design` | plan | 新增可选 `task-entity.md/yaml` 设计，不实现 validator | 先给大型任务试用，不进入 frontmatter。 |
 | P4 | `artifact-drift-advisory` | enhance | validator warning 或独立脚本 | 依赖 `artifacts:` 已稳定使用。 |
 | P5 | `debug-case-artifact-template` | doc | `case.md` 模板 + bug task 写作规则 | 适合真实 bug 修复 dogfood。 |
-| P6 | `subtask-roadmap-artifact` | plan | `subtasks.yaml` / `docs/roadmaps/<slug>/items.yaml` | 与 CodeStable roadmap borrowing 合并评估。 |
+| P6 | `subtask-roadmap-artifact` | plan | `subtasks.yaml` / `docs/roadmaps/<slug>/items.yaml` | 作为后续独立评估项。 |
 
 ## 5. 与既有路线图的合并关系
 
-- `work_type`、bug/refactor 模板、reflection checks 已在 CodeStable borrowing 路线里覆盖；Trellis 不需要重复开一组。
-- `read_first`、`convergence`、`artifacts` 已由 Phase 6/7 路线图覆盖；Trellis 只补“怎么消费这些字段”。
-- `artifact registry` 在 Maestro 对比里已有结论；Trellis 的 task entity 只应作为轻量 metadata artifact，不做中央 registry。
+- `work_type`、bug/refactor 模板、reflection checks 不需要在 Trellis 路线里重复开一组。
+- `read_first`、`convergence`、`artifacts` 已由当前协议覆盖；Trellis 只补“怎么消费这些字段”。
+- `artifact registry` 不进入当前轻量路线；Trellis 的 task entity 只应作为轻量 metadata artifact，不做中央 registry。
 - AionUi gap 已裁定 live multi-agent smoke 暂缓；Trellis role workflow 不改变这个判断。
 
 ## 6. Guardrails
@@ -227,7 +227,7 @@ Trellis 的 workspace memory / LLM wiki 与 harness `.assistant` 功能重叠。
 
 ## 7. 最终建议
 
-下一步最值得做的是 `trellis-finish-boundary-checklist`：它能直接封住 `artifacts:` 声明与真实产出脱钩的问题，改动面小，和现有 Phase 7 计划完全一致。其次是 `task-entity-artifact-design`，用于把大型任务的 branch / PR / subtask / requirement links 统一放在 task artifact，而不是把 `plan.md` frontmatter 扩成杂货架。
+下一步最值得做的是 `finish-boundary-checklist`：它能直接封住 `artifacts:` 声明与真实产出脱钩的问题，改动面小。其次是 `task-entity-artifact-design`，用于把大型任务的 branch / PR / subtask / requirement links 统一放在 task artifact，而不是把 `plan.md` frontmatter 扩成杂货架。
 
 ## 8. 后续：基于源码的事实修正（指针）
 

@@ -92,7 +92,7 @@ discussion_inputs:
 5. `trellis-context-injection-feasibility`：评估 Codex/Claude host hook 能否做 phase-aware 注入，先出可行性结论。
 
 **P3（后评估，按需）**
-6. `subtask-roadmap-artifact`：`subtasks.yaml` / `docs/roadmaps/<slug>/items.yaml`，与 CodeStable roadmap borrowing 合并评估。
+6. `subtask-roadmap-artifact`：`subtasks.yaml` / `docs/roadmaps/<slug>/items.yaml`，作为后续独立评估项。
 7. `session-summary / case-artifact`：长 debug/incident 任务的可选 `case.md` 证据 bundle。
 
 ## 6. 明确不做事项（本轮及可预见周期内）

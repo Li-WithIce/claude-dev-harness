@@ -147,7 +147,7 @@ function Invoke-Validator {
     .SYNOPSIS
     调用 lite artifact validator。
     .DESCRIPTION
-    用单独的 powershell.exe 进程执行脚本，确保 exit code 和真实 CLI 行为一致。
+    用单独的 pwsh 进程执行脚本，确保 exit code 和当前验证基线一致。
     .PARAMETER ValidatorPath
     validator 脚本路径。
     .PARAMETER TaskId
@@ -175,7 +175,14 @@ function Invoke-Validator {
         $command += '-Quality'
     }
 
-    $output = @(& powershell.exe @command 2>&1 | ForEach-Object { [string]$_ })
+    $runnerCommand = Get-Command pwsh -ErrorAction SilentlyContinue
+    $runner = if ($null -ne $runnerCommand) {
+        $runnerCommand.Source
+    } else {
+        'powershell.exe'
+    }
+
+    $output = @(& $runner @command 2>&1 | ForEach-Object { [string]$_ })
     [pscustomobject]@{
         ExitCode = $LASTEXITCODE
         Output = $output
@@ -367,7 +374,7 @@ function Assert-TaskSetEquals {
     .SYNOPSIS
     比较实际 task 集合与预期快照。
     .DESCRIPTION
-    Phase 6 需要把 live 15-task baseline 的 PASS/FAIL 集合锁成可复跑回归。
+    当前 live baseline 只锁定保留下来的任务 artifact 集合，避免历史路线图影响回归。
     .PARAMETER Label
     集合标签。
     .PARAMETER Actual
@@ -685,41 +692,21 @@ try {
         Where-Object { Test-Path (Join-Path $_.FullName 'plan.md') } |
         Sort-Object Name |
         Select-Object -ExpandProperty Name
-    if ($livePlanTasks.Count -eq 25) {
-        Add-Check 'live baseline still contains 25 plan-bearing tasks'
+    if ($livePlanTasks.Count -eq 6) {
+        Add-Check 'live baseline contains only 6 current plan-bearing tasks'
     } else {
-        Add-Failure ("live baseline should contain 25 plan-bearing tasks, got {0}" -f $livePlanTasks.Count)
+        Add-Failure ("live baseline should contain 6 current plan-bearing tasks, got {0}" -f $livePlanTasks.Count)
     }
 
     $expectedPassTasks = @(
         'artifact-drift-advisory',
-        'codestable-borrowing-roadmap',
         'context-manifest-advisory',
-        'eo-lite-enhancement',
         'finish-boundary-checklist',
-        'overview-maintenance-enhancement',
-        'phase3-acp-skill-alignment',
-        'phase4-team-preset-bridge',
-        'phase5-doc-protocol-hardening',
-        'phase6-quality-score-hard-constraints',
-        'phase7-runtime-hooks-artifact-declaration',
-        'shared-memory-v2-live-migration',
-        'shared-memory-v2-optimization',
         'task-entity-artifact-design',
-        'trellis-adoption-roadmap',
         'trellis-comparison-reusable-design',
-        'trellis-context-injection-feasibility',
-        'workflow-optimization-roadmap'
+        'trellis-context-injection-feasibility'
     )
-    $expectedFailTasks = @(
-        '1cfa7b79',
-        '37ce4e15',
-        '85ff35b0',
-        'harness-aionui-workflow-alignment',
-        'phase2-workflow-descriptor',
-        'review-probe-crossmatch',
-        'review-probe-misordered'
-    )
+    $expectedFailTasks = @()
 
     $livePassesDefault = @()
     $liveFailsDefault = @()
@@ -735,11 +722,27 @@ try {
     Assert-TaskSetEquals -Label 'live default PASS set' -Actual $livePassesDefault -Expected $expectedPassTasks
     Assert-TaskSetEquals -Label 'live default FAIL set' -Actual $liveFailsDefault -Expected $expectedFailTasks
 
-    $legacyQualityResult = Invoke-Validator -ValidatorPath (Join-Path $SourceRoot 'scripts\validate-lite-artifacts.ps1') -TaskId 'phase4-team-preset-bridge' -RepoRoot $SourceRoot -Quality
-    if ($legacyQualityResult.ExitCode -eq 0 -and ($legacyQualityResult.Output -join "`n") -match 'Plan Review Run 1 未录入 4-dim score') {
-        Add-Check 'live legacy task stays warning-only in -Quality mode'
+    $retiredLiveTasks = @(
+        @(
+            'codestable-borrowing-roadmap',
+            'eo-lite-enhancement',
+            'overview-maintenance-enhancement',
+            'phase2-workflow-descriptor',
+            'phase3-acp-skill-alignment',
+            'phase4-team-preset-bridge',
+            'phase5-doc-protocol-hardening',
+            'phase6-quality-score-hard-constraints',
+            'phase7-runtime-hooks-artifact-declaration',
+            'shared-memory-v2-live-migration',
+            'shared-memory-v2-optimization',
+            'trellis-adoption-roadmap',
+            'workflow-optimization-roadmap'
+        ) | Where-Object { $livePlanTasks -contains $_ }
+    )
+    if ($retiredLiveTasks.Count -eq 0) {
+        Add-Check 'retired historical plan tasks are absent from live baseline'
     } else {
-        Add-Failure ("live legacy task should stay warning-only in -Quality mode, got: {0}" -f ($legacyQualityResult.Output -join ' | '))
+        Add-Failure ("retired historical plan tasks should not remain in live baseline: {0}" -f ($retiredLiveTasks -join ', '))
     }
 
     $livePassesQuality = @()

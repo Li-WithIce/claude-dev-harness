@@ -1,5 +1,0 @@
-[preflight] codex version: codex-cli 0.125.0
-[codex] OK
-Reading prompt from stdin...
-session_id=019e068c-3810-7c13-a0a2-3d41dffaf963
-output_path=D:\data\claude-dev-harness\docs\tasks\59a651ca\ask-codex-ephemeral-output.md
