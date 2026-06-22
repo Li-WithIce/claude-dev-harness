@@ -267,7 +267,7 @@ function Assert-GitIgnoreManagedEntries {
     }
 
     $lines = [regex]::Split($content, '\r?\n') | ForEach-Object { $_.Trim() }
-    foreach ($entry in @('# dev-harness workspace artifacts', '.assistant/', 'AGENTS.md', 'GEMINI.md', '.claude')) {
+    foreach ($entry in @('# dev-harness workspace artifacts', '.assistant/', 'AGENTS.md', '.claude')) {
         $matches = @($lines | Where-Object { $_ -eq $entry })
         if ($matches.Count -eq 1) {
             Add-Check (".gitignore 包含且仅包含一条 [{0}]" -f $entry)
@@ -478,20 +478,17 @@ $CodexConfigPath = Join-Path $CodexHome 'config.toml'
 $CodexManagedConfigPath = Join-Path $CodexHome 'managed_config.toml'
 $CodexAgentsPath = Join-Path $CodexHome 'AGENTS.md'
 $WorkspaceAgentsPath = Join-Path $WorkspaceRoot 'AGENTS.md'
-$WorkspaceGeminiPath = Join-Path $WorkspaceRoot 'GEMINI.md'
 $WorkspaceGitIgnorePath = Join-Path $WorkspaceRoot '.gitignore'
 $WorkspaceEntryAgentsPath = Join-Path $VaultPath 'entry\AGENTS.md'
-$WorkspaceEntryGeminiPath = Join-Path $VaultPath 'entry\GEMINI.md'
 $WorkspaceAdvanceStageShimPath = Join-Path $VaultPath 'entry\advance-stage.ps1'
 $WorkspaceValidateArtifactsShimPath = Join-Path $VaultPath 'entry\validate-lite-artifacts.ps1'
-$ForbiddenTokens = @('{REPO_ROOT}', '{WORKSPACE_ROOT}', '{VAULT_PATH}', '{CLAUDE_HOME}', '{CODEX_HOME}', '{GEMINI_HOME}')
+$ForbiddenTokens = @('{REPO_ROOT}', '{WORKSPACE_ROOT}', '{VAULT_PATH}', '{CLAUDE_HOME}', '{CODEX_HOME}')
 $script:RenderTokens = [ordered]@{
     '{REPO_ROOT}' = $RepoRoot
     '{WORKSPACE_ROOT}' = $WorkspaceRoot
     '{VAULT_PATH}' = $VaultPath
     '{CLAUDE_HOME}' = $ClaudeHome
     '{CODEX_HOME}' = $CodexHome
-    '{GEMINI_HOME}' = (Join-Path $effectiveUserProfile '.gemini')
 }
 
 $script:Checks = @()
@@ -509,10 +506,8 @@ foreach ($hookName in @('userpromptsubmit.js', 'posttooluse.js', 'stop.js')) {
 Assert-RenderedFile -Path $CodexAgentsPath -ForbiddenTokens $ForbiddenTokens
 Assert-TemplateFileMatches -Path $CodexAgentsPath -TemplatePath (Join-Path $RepoRoot 'agent-configs\codex\AGENTS.md.template') -Label 'Codex AGENTS.md'
 Assert-RenderedFile -Path $WorkspaceAgentsPath -ForbiddenTokens $ForbiddenTokens
-Assert-RenderedFile -Path $WorkspaceGeminiPath -ForbiddenTokens $ForbiddenTokens
 Assert-GitIgnoreManagedEntries -Path $WorkspaceGitIgnorePath
 Assert-RenderedFile -Path $WorkspaceEntryAgentsPath -ForbiddenTokens $ForbiddenTokens
-Assert-RenderedFile -Path $WorkspaceEntryGeminiPath -ForbiddenTokens $ForbiddenTokens
 Assert-RenderedFile -Path $WorkspaceAdvanceStageShimPath -ForbiddenTokens $ForbiddenTokens
 Assert-RenderedFile -Path $WorkspaceValidateArtifactsShimPath -ForbiddenTokens $ForbiddenTokens
 

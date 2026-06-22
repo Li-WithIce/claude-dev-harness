@@ -2,7 +2,7 @@
 
 Project-local lite workflow entrypoints:
 
-- Stage advance: `pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>` (Codex-only defaults; add `-Tool <claudecode|codex|gemini>` only to switch backend)
+- Stage advance: `pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>` (Codex-only defaults; add `-Tool <claudecode|codex>` only to switch backend)
 - Artifact validation: `pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
 - New task routing: keep `resume-current / switch-existing / new-task / inbox-first` first; when the result is `new-task`, choose `mode: quick | workflow | ask`.
 
@@ -21,4 +21,4 @@ Lazy loading:
 - `workflow`: load `entry-router`, `orchestrator`, then exactly one current-stage skill (`plan`, `review`, `implement`, or `test`).
 - `resume-current` / `switch-existing`: load `.assistant\运行时\恢复索引.md`, `.assistant\运行时\当前任务.md`, `运行时\tasks\<task-id>.md`, then the current-stage skill.
 - `ask`: do not load workflow skills; ask one minimal clarification question.
-- Do not bulk-load all skills, all historical `docs/tasks/*`, Gemini / Claude compatibility skills, or `workflow-team` unless an explicit backend, stage, or team-mode trigger requires it.
+- Do not bulk-load all skills, all historical `docs/tasks/*`, Claude compatibility skills, or `workflow-team` unless an explicit backend, stage, or team-mode trigger requires it.

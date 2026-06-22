@@ -6,7 +6,7 @@
 ---
 task_id: <task-id>
 stage: PLAN | PLAN_REVIEW | IMPLEMENT | CODE_REVIEW | TEST | DONE
-tool: claudecode | codex | gemini | none
+tool: claudecode | codex | none
 tool_profile: <optional profile name>
 model: <optional full model id>
 updated: YYYY-MM-DD

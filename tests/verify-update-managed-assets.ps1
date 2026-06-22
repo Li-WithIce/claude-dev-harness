@@ -84,7 +84,6 @@ function Assert-GitIgnoreEntriesExactlyOnce {
             '# dev-harness workspace artifacts',
             '.assistant/',
             'AGENTS.md',
-            'GEMINI.md',
             '.claude'
         )
     )
@@ -451,11 +450,8 @@ try {
             Assert-ManagedTextNotContains -Path $workspaceAgentsPath -Needle 'using-superpowers'
 
             $vaultAgentsPath = Join-Path $WorkspaceRoot '.assistant\entry\AGENTS.md'
-            $vaultGeminiPath = Join-Path $WorkspaceRoot '.assistant\entry\GEMINI.md'
             Assert-ManagedTextContains -Path $vaultAgentsPath -Needle 'entry-router'
             Assert-ManagedTextNotContains -Path $vaultAgentsPath -Needle 'using-superpowers'
-            Assert-ManagedTextContains -Path $vaultGeminiPath -Needle 'entry-router'
-            Assert-ManagedTextNotContains -Path $vaultGeminiPath -Needle 'using-superpowers'
         }
 
     Invoke-ManagedAssetsCase `
@@ -550,8 +546,7 @@ try {
                 (Join-Path (Join-Path $UserProfile '.claude') 'CLAUDE.md'),
                 (Join-Path (Join-Path $UserProfile '.codex') 'AGENTS.md'),
                 (Join-Path $WorkspaceRoot 'AGENTS.md'),
-                (Join-Path (Join-Path (Join-Path $WorkspaceRoot '.assistant') 'entry') 'AGENTS.md'),
-                (Join-Path (Join-Path (Join-Path $WorkspaceRoot '.assistant') 'entry') 'GEMINI.md')
+                (Join-Path (Join-Path (Join-Path $WorkspaceRoot '.assistant') 'entry') 'AGENTS.md')
             )
 
             foreach ($path in $managedTextFiles) {
@@ -587,8 +582,7 @@ enabled = true
                 (Join-Path (Join-Path $UserProfile '.claude') 'CLAUDE.md'),
                 (Join-Path (Join-Path $UserProfile '.codex') 'AGENTS.md'),
                 (Join-Path $WorkspaceRoot 'AGENTS.md'),
-                (Join-Path (Join-Path (Join-Path $WorkspaceRoot '.assistant') 'entry') 'AGENTS.md'),
-                (Join-Path (Join-Path (Join-Path $WorkspaceRoot '.assistant') 'entry') 'GEMINI.md')
+                (Join-Path (Join-Path (Join-Path $WorkspaceRoot '.assistant') 'entry') 'AGENTS.md')
             )
 
             foreach ($path in $managedTextFiles) {
@@ -687,7 +681,7 @@ enabled = true
 
             $gitIgnorePath = Join-Path $WorkspaceRoot '.gitignore'
             $content = Get-Content -LiteralPath $gitIgnorePath -Raw -Encoding utf8
-            $updatedContent = [regex]::Replace($content, '(?m)^GEMINI\.md\r?\n?', '')
+            $updatedContent = [regex]::Replace($content, '(?m)^AGENTS\.md\r?\n?', '')
             [System.IO.File]::WriteAllText($gitIgnorePath, $updatedContent, (New-Object System.Text.UTF8Encoding($false)))
         } `
         -PostAssert {
@@ -746,7 +740,7 @@ enabled = true
 
             $gitIgnorePath = Join-Path $WorkspaceRoot '.gitignore'
             $content = Get-Content -LiteralPath $gitIgnorePath -Raw -Encoding utf8
-            $updatedContent = [regex]::Replace($content, '(?m)^GEMINI\.md\r?\n?', '')
+            $updatedContent = [regex]::Replace($content, '(?m)^AGENTS\.md\r?\n?', '')
             $updatedContent = "# user sentinel`r`nnode_modules/`r`n*.log`r`n`r`n" + $updatedContent.TrimStart([char[]]@("`r", "`n"))
             [System.IO.File]::WriteAllText($gitIgnorePath, $updatedContent, (New-Object System.Text.UTF8Encoding($false)))
         } `
@@ -767,7 +761,7 @@ enabled = true
 
             $gitIgnorePath = Join-Path $WorkspaceRoot '.gitignore'
             $content = Get-Content -LiteralPath $gitIgnorePath -Raw -Encoding utf8
-            $updatedContent = [regex]::Replace($content, '(?m)^GEMINI\.md\r?\n?', '')
+            $updatedContent = [regex]::Replace($content, '(?m)^AGENTS\.md\r?\n?', '')
             $updatedContent = [regex]::Replace($updatedContent, "`r`n", "`n")
             [System.IO.File]::WriteAllText($gitIgnorePath, $updatedContent, (New-Object System.Text.UTF8Encoding($false)))
         } `

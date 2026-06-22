@@ -35,4 +35,4 @@ Claude 是显式兼容 host，仍先调用 `/entry-router`，但后续读取面�
 - `workflow` 加载 `entry-router`、`orchestrator` 和当前 stage skill。
 - `resume-current` / `switch-existing` 先加载恢复运行时文件，再加载当前 stage skill。
 - `ask` 不加载 workflow skill，只问一个最小澄清问题。
-- 禁止 bulk-load 全部 skills、全部历史任务、Gemini / Claude 兼容 skill 或 `workflow-team`，除非显式 backend、stage 或 team-mode 触发。
+- 禁止 bulk-load 全部 skills、全部历史任务、Claude 兼容 skill 或 `workflow-team`，除非显式 backend、stage 或 team-mode 触发。

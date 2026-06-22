@@ -248,7 +248,6 @@ function Ensure-WorkspaceGitIgnoreEntries {
     $requiredEntries = @(
         '.assistant/',
         'AGENTS.md',
-        'GEMINI.md',
         '.claude'
     )
     $managedComment = '# dev-harness workspace artifacts'
@@ -1084,7 +1083,6 @@ $VaultPath = Join-Path $WorkspaceRoot '.assistant'
 $ClaudeHome = Join-Path $env:USERPROFILE '.claude'
 $CodexHome = Join-Path $env:USERPROFILE '.codex'
 $AgentsHome = Join-Path $env:USERPROFILE '.agents'
-$GeminiHome = Join-Path $env:USERPROFILE '.gemini'
 $RepoSkillsPath = Join-Path $RepoRoot 'skills'
 $BackupRoot = Join-Path $RepoRoot ('backups\install-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + "-$PID")
 
@@ -1096,7 +1094,6 @@ $script:RawRenderTokens = [ordered]@{
     '{VAULT_PATH}' = $VaultPath
     '{CLAUDE_HOME}' = $ClaudeHome
     '{CODEX_HOME}' = $CodexHome
-    '{GEMINI_HOME}' = $GeminiHome
     '__RENDER_AT_INSTALL__' = (Get-Date -Format 'yyyy-MM-dd')
 }
 $script:BackupRoot = $BackupRoot
@@ -1109,7 +1106,6 @@ $script:Manifest = [ordered]@{
     claude_home = $ClaudeHome
     codex_home = $CodexHome
     agents_home = $AgentsHome
-    gemini_home = $GeminiHome
     backup_root = $BackupRoot
     generated_repo_system_path = $null
     backups = @()
@@ -1130,7 +1126,6 @@ $codexManagedConfigPath = Join-Path $CodexHome 'managed_config.toml'
 $claudeGlobalPath = Join-Path $ClaudeHome 'CLAUDE.md'
 $codexGlobalPath = Join-Path $CodexHome 'AGENTS.md'
 $workspaceAgentsPath = Join-Path $WorkspaceRoot 'AGENTS.md'
-$workspaceGeminiPath = Join-Path $WorkspaceRoot 'GEMINI.md'
 
 try {
     Ensure-Directory -Path $ClaudeHome
@@ -1156,9 +1151,6 @@ try {
 
     Backup-IfNeeded -Path $workspaceAgentsPath
     Install-RenderedFile -SourcePath (Join-Path $RepoRoot 'agent-configs\workspace\AGENTS.md.template') -TargetPath $workspaceAgentsPath
-
-    Backup-IfNeeded -Path $workspaceGeminiPath
-    Install-RenderedFile -SourcePath (Join-Path $RepoRoot 'agent-configs\workspace\GEMINI.md.template') -TargetPath $workspaceGeminiPath
 
     Backup-IfNeeded -Path $claudeHooksPath
     Remove-PathIfExists -Path $claudeHooksPath

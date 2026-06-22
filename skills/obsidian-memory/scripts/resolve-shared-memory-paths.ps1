@@ -128,12 +128,10 @@ function Get-DefaultAgentRoots {
 
     Add-AgentRoot -Value $env:CLAUDE_HOME
     Add-AgentRoot -Value $env:CODEX_HOME
-    Add-AgentRoot -Value $env:GEMINI_HOME
 
     if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
         Add-AgentRoot -Value (Join-Path $env:USERPROFILE '.claude')
         Add-AgentRoot -Value (Join-Path $env:USERPROFILE '.codex')
-        Add-AgentRoot -Value (Join-Path $env:USERPROFILE '.gemini')
     }
 
     return @($candidates)

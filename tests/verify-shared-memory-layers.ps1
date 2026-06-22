@@ -281,8 +281,7 @@ try {
         Replace('{REPO_ROOT}', $caseL6.RepoRoot).
         Replace('{VAULT_PATH}', $caseL6.VaultRoot).
         Replace('{CLAUDE_HOME}', 'C:\Users\fixture\.claude').
-        Replace('{CODEX_HOME}', 'C:\Users\fixture\.codex').
-        Replace('{GEMINI_HOME}', 'C:\Users\fixture\.gemini')
+        Replace('{CODEX_HOME}', 'C:\Users\fixture\.codex')
     Write-Utf8Bom -Path (Join-Path $caseL6.VaultRoot '工作流\共享记忆协议.md') -Content $renderedProtocol
     $resultL6 = Invoke-LayersCheck -RepoRoot $caseL6.RepoRoot -VaultRoot $caseL6.VaultRoot
     $outputL6 = $resultL6.Output -join [Environment]::NewLine

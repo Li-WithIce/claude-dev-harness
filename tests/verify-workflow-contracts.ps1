@@ -512,7 +512,7 @@ try {
     $taskTestMissingHandoffDir = Join-Path $taskBase $taskTestMissingHandoff
     $createdTaskDirs += $taskTestMissingHandoffDir
     New-Item -ItemType Directory -Path $taskTestMissingHandoffDir -Force | Out-Null
-    Write-Utf8Bom -Path (Join-Path $taskTestMissingHandoffDir "plan.md") -Content (New-PlanContent -TaskId $taskTestMissingHandoff -Stage "TEST" -Tool "gemini")
+    Write-Utf8Bom -Path (Join-Path $taskTestMissingHandoffDir "plan.md") -Content (New-PlanContent -TaskId $taskTestMissingHandoff -Stage "TEST" -Tool "codex")
     Write-Utf8Bom -Path (Join-Path $taskTestMissingHandoffDir "test.md") -Content (New-TestReport -Conclusion "pass" -IncludeHandoff $false)
     $missingHandoffMessage = Invoke-AdvanceFailure -ScriptPath $scriptPath -TaskId $taskTestMissingHandoff -VaultRoot $vaultRoot
     if ($missingHandoffMessage -match "TEST requires Handoff" -or
@@ -526,7 +526,7 @@ try {
     $taskTestPassDir = Join-Path $taskBase $taskTestPass
     $createdTaskDirs += $taskTestPassDir
     New-Item -ItemType Directory -Path $taskTestPassDir -Force | Out-Null
-    Write-Utf8Bom -Path (Join-Path $taskTestPassDir "plan.md") -Content (New-PlanContent -TaskId $taskTestPass -Stage "TEST" -Tool "gemini")
+    Write-Utf8Bom -Path (Join-Path $taskTestPassDir "plan.md") -Content (New-PlanContent -TaskId $taskTestPass -Stage "TEST" -Tool "codex")
     Write-Utf8Bom -Path (Join-Path $taskTestPassDir "test.md") -Content (New-TestReport -Conclusion "pass")
     $testAdvance = Invoke-AdvanceSuccess -ScriptPath $scriptPath -TaskId $taskTestPass -VaultRoot $vaultRoot
     $testPlanText = Get-Content -LiteralPath (Join-Path $taskTestPassDir "plan.md") -Raw -Encoding utf8

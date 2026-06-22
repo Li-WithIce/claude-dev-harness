@@ -6,7 +6,6 @@ lite workflow 不维护自动推导矩阵；`tool` 仍是当前 stage 的显式 
 
 - `claudecode`
 - `codex`
-- `gemini`
 - `none`：只允许用于 `DONE`
 
 ## 默认 profile
@@ -15,7 +14,6 @@ lite workflow 不维护自动推导矩阵；`tool` 仍是当前 stage 的显式 
 
 - `harness-default-claude`：`backend: claudecode`
 - `harness-default-codex`：`backend: codex`
-- `harness-default-gemini`：`backend: gemini`
 
 可选 workflow descriptor 位于 `agent-configs/workflows/harness-lite.yaml`，每个 stage 只声明：
 
@@ -23,7 +21,7 @@ lite workflow 不维护自动推导矩阵；`tool` 仍是当前 stage 的显式 
 - `default_profile`
 - `skills_whitelist`
 
-当前 `harness-lite` descriptor 是 Codex-only：`PLAN`、`PLAN_REVIEW`、`IMPLEMENT`、`CODE_REVIEW`、`TEST` 默认使用 `harness-default-codex`。`harness-default-claude` 与 `harness-default-gemini` 保留为显式切换选项。
+当前 `harness-lite` descriptor 是 Codex-only：`PLAN`、`PLAN_REVIEW`、`IMPLEMENT`、`CODE_REVIEW`、`TEST` 默认使用 `harness-default-codex`。`harness-default-claude` 保留为显式切换选项。
 
 规则：
 
@@ -47,7 +45,7 @@ lite workflow 不维护自动推导矩阵；`tool` 仍是当前 stage 的显式 
 ## skills_dirs 消费面
 
 - Phase 3 里，`skills_dirs` 只服务于 `scripts/invoke-harness-skill.ps1` 的 skill 查找语义
-- 解析顺序是：task-level `skills_dir`（保留字段，当前忽略） -> project-level `.assistant/skills` -> user-level active profile/backend 对应的 `skills_dirs`（例如 `%USERPROFILE%\.claude\skills`、`%USERPROFILE%\.codex\skills`、`%USERPROFILE%\.gemini\skills`）
+- 解析顺序是：task-level `skills_dir`（保留字段，当前忽略） -> project-level `.assistant/skills` -> user-level active profile/backend 对应的 `skills_dirs`（例如 `%USERPROFILE%\.claude\skills`、`%USERPROFILE%\.codex\skills`）
 - `install.ps1` / `uninstall.ps1` 不读取 `skills_dirs`，也不受 active profile 影响
 - `scripts/generate-skills-index.ps1` 和 `docs/tasks/<task-id>/skill-manifest.json` 只消费 workflow whitelist + repo 内 `skills/<id>/SKILL.md` 描述，不反向改 profile
 

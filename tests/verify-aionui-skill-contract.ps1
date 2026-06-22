@@ -95,8 +95,7 @@ function New-IsolatedRepoFixture {
         'skills\entry-router',
         'skills\plan',
         'skills\review',
-        'skills\test',
-        'skills\test-runner'
+        'skills\test'
     )) {
         Copy-RepoPathToFixture -SourceRoot $SourceRoot -FixtureRoot $fixtureRoot -RelativePath $relativePath
     }
@@ -352,44 +351,6 @@ Write-Output ('output_path={0}' -f `$Output)
 "@
 }
 
-function Write-MockGeminiSkill {
-    param(
-        [string]$SkillRoot,
-        [string]$Marker
-    )
-
-    $scriptPath = Join-Path $SkillRoot 'test-runner\scripts\invoke-gemini.ps1'
-    New-Item -ItemType Directory -Path (Split-Path -Parent $scriptPath) -Force | Out-Null
-    Write-Utf8Bom -Path $scriptPath -Content @"
-[CmdletBinding()]
-param(
-    [string]`$Workspace,
-    [string]`$Prompt,
-    [string]`$OutputFormat = 'text',
-    [string]`$ApprovalMode = 'plan',
-    [string]`$Model
-)
-
-Set-StrictMode -Version Latest
-`$ErrorActionPreference = 'Stop'
-`$record = [ordered]@{
-    marker = '$Marker'
-    workspace = `$Workspace
-    prompt = `$Prompt
-    output_format = `$OutputFormat
-    approval_mode = `$ApprovalMode
-    model = `$Model
-}
-`$recordPath = Join-Path `$Workspace 'gemini-call.json'
-[System.IO.File]::WriteAllText(`$recordPath, ((`$record | ConvertTo-Json -Depth 5 -Compress)), (New-Object System.Text.UTF8Encoding(`$false)))
-[pscustomobject]@{
-    ok = `$true
-    exit_code = 0
-    stdout = 'mock gemini output'
-} | ConvertTo-Json -Compress -Depth 5
-"@
-}
-
 function Write-ToolProfileDescriptor {
     param(
         [string]$ProfilesRoot,
@@ -408,7 +369,7 @@ function Write-ToolProfileDescriptor {
         'skills_dirs:'
     ) + $skillDirLines + @(
         'enabled_skills:',
-        '  - test-runner',
+        '  - test',
         'disabled_builtin_skills: []',
         'context: |',
         '  Test-only profile descriptor for skill resolution coverage.'
@@ -517,58 +478,6 @@ try {
         Add-Check 'B1 codex adapter delegates readonly calls and preserves payload passthrough'
     } else {
         Add-Failure ("B1 codex delegation failed, got stdout=[{0}] stderr=[{1}] record=[{2}]" -f $b1Result.StdOut, $b1Result.StdErr, $b1Record)
-    }
-
-    $taskB2 = 'skill-contract-b2-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
-    $taskB2Dir = Join-Path $taskBase $taskB2
-    New-Item -ItemType Directory -Path $taskB2Dir -Force | Out-Null
-    Write-Utf8Bom -Path (Join-Path $taskB2Dir 'plan.md') -Content (New-PlanContent -TaskId $taskB2 -Stage 'TEST' -Tool 'gemini')
-    $workspaceB2 = Join-Path ([System.IO.Path]::GetTempPath()) ('skill-contract-workspace-b2-' + [guid]::NewGuid().ToString('N'))
-    $userProfileB2 = Join-Path ([System.IO.Path]::GetTempPath()) ('skill-contract-user-b2-' + [guid]::NewGuid().ToString('N'))
-    $cleanupPaths += @($workspaceB2, $userProfileB2)
-    New-Item -ItemType Directory -Path $workspaceB2 -Force | Out-Null
-    New-Item -ItemType Directory -Path $userProfileB2 -Force | Out-Null
-    $b2ProfileId = 'harness-test-gemini-profile-aware'
-    $b2RelativeSkillsDir = 'custom-hosts/gemini-profile-aware-skills'
-    Write-ToolProfileDescriptor -ProfilesRoot (Join-Path $fixtureRoot 'agent-configs\profiles') -Name $b2ProfileId -Backend 'gemini' -Model 'gemini-2.5-pro' -SkillDirs @($b2RelativeSkillsDir)
-    Write-MockGeminiSkill -SkillRoot (Join-Path $userProfileB2 ($b2RelativeSkillsDir -replace '/', '\')) -Marker 'profile-aware-user'
-    $env:USERPROFILE = $userProfileB2
-    $payloadB2 = '{"prompt":"Summarize the current test evidence","model":"gemini-2.5-pro"}'
-    $b2Result = Invoke-Adapter -AdapterPath $adapterPath -TaskId $taskB2 -Stage 'TEST' -Skill 'test-runner' -Tool 'gemini' -ToolProfileId $b2ProfileId -WorkspaceRoot $workspaceB2 -ArtifactRoot $taskB2Dir -PayloadJson $payloadB2
-    $b2Json = Assert-SingleLineJson -JsonText $b2Result.StdOut -Label 'B2'
-    $b2Record = Read-FileUtf8 -Path (Join-Path $workspaceB2 'gemini-call.json')
-    if ($b2Result.ExitCode -eq 0 -and
-        $null -ne $b2Json -and
-        $b2Json.ok -and
-        $b2Json.status -eq 'delegated' -and
-        ($b2Json.handoff -eq 'mock gemini output') -and
-        $b2Record -match '"marker":"profile-aware-user"' -and
-        $b2Record -match '"approval_mode":"plan"' -and
-        $b2Record -match '"output_format":"json"') {
-        Add-Check 'B2 gemini adapter resolves ToolProfileId-specific user-level skills outside backend default roots'
-    } else {
-        Add-Failure ("B2 gemini delegation failed, got stdout=[{0}] stderr=[{1}] record=[{2}]" -f $b2Result.StdOut, $b2Result.StdErr, $b2Record)
-    }
-
-    $taskB3 = 'skill-contract-b3-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
-    $taskB3Dir = Join-Path $taskBase $taskB3
-    New-Item -ItemType Directory -Path $taskB3Dir -Force | Out-Null
-    Write-Utf8Bom -Path (Join-Path $taskB3Dir 'plan.md') -Content (New-PlanContent -TaskId $taskB3 -Stage 'TEST' -Tool 'gemini')
-    $workspaceB3 = Join-Path ([System.IO.Path]::GetTempPath()) ('skill-contract-workspace-b3-' + [guid]::NewGuid().ToString('N'))
-    $cleanupPaths += $workspaceB3
-    New-Item -ItemType Directory -Path $workspaceB3 -Force | Out-Null
-    $env:USERPROFILE = $userProfileB2
-    $b3Result = Invoke-Adapter -AdapterPath $adapterPath -TaskId $taskB3 -Stage 'TEST' -Skill 'test-runner' -Tool 'gemini' -WorkspaceRoot $workspaceB3 -ArtifactRoot $taskB3Dir -PayloadJson $payloadB2
-    $b3Json = Assert-SingleLineJson -JsonText $b3Result.StdOut -Label 'B3'
-    $b3Record = Read-FileUtf8 -Path (Join-Path $workspaceB3 'gemini-call.json')
-    if ($b3Result.ExitCode -ne 0 -and
-        $null -ne $b3Json -and
-        -not $b3Json.ok -and
-        [string]::IsNullOrWhiteSpace($b3Record) -and
-        $b3Result.StdErr -match '\.gemini\\skills\\test-runner\\scripts\\invoke-gemini\.ps1') {
-        Add-Check 'B3 gemini backend fallback still fails without ToolProfileId when only profile-specific skills_dirs contains the adapter'
-    } else {
-        Add-Failure ("B3 gemini backend fallback lock failed, got stdout=[{0}] stderr=[{1}] record=[{2}]" -f $b3Result.StdOut, $b3Result.StdErr, $b3Record)
     }
 
     $taskC1 = 'skill-contract-c1-' + [guid]::NewGuid().ToString('N').Substring(0, 8)

@@ -50,6 +50,10 @@ pass
 ## Handoff
 - delivery: 交付摘要
 - follow_up: 后续动作；无则写 none
+- artifact: 声明的 artifact 是否已经存在或交付；没有则说明原因
+- drift: 是否发现 artifact / diff drift；没有则写 none
+- follow_up_decision: 是否需要把未完成事项拆成新任务；没有则写 none
+- memory_spec_update: 是否需要 memory / spec update；没有则写 none
 - current_state: 当前阶段与关键产物路径   # optional
 - key_decisions:                              # optional
   - decision: 跨会话必须保留的决策
@@ -58,7 +62,11 @@ pass
   - 恢复后第一组动作
 ```
 
-`delivery` 与 `follow_up` 是最低必填；`current_state`、`key_decisions`、`next_actions` 为 opt-in 密度扩展，推荐长任务填写。旧格式 Handoff（只含 delivery/follow_up）继续通过 validator。格式契约以 `../orchestrator/references/lite-writing-guide.md` 为单一真相源。
+`delivery` 与 `follow_up` 是 validator 最低必填；`artifact`、`drift`、`follow_up_decision`、`memory_spec_update` 是新任务的 finish boundary 写作要求，用来记录产物是否存在或已交付、是否存在 artifact / diff drift、follow-up 是否需要拆新任务、是否需要 memory / spec update。`current_state`、`key_decisions`、`next_actions` 为 opt-in 密度扩展，推荐长任务填写。旧格式 Handoff（只含 delivery/follow_up）继续通过 validator。格式契约以 `../orchestrator/references/lite-writing-guide.md` 为单一真相源。
+
+若 `Plan.artifacts` 声明了 `docs/tasks/<task-id>/task-entity.yaml`，TEST/Handoff 需要在 `artifact` 或 `drift` 中说明该 Task entity advisory artifact 是否已交付，以及是否发现 stage/status/verdict/tool/current pointer 类 second truth 风险。TEST 不解析 task entity schema，也不把它当作阶段状态来源。
+
+若 `Plan.artifacts` 声明了 `docs/tasks/<task-id>/context-manifest.yaml`，TEST/Handoff 需要在 `artifact` 或 `drift` 中说明该 Context Manifest advisory artifact 是否已交付，以及是否发现覆盖 `read_first:`、lazy loading、`skills_whitelist`、workflow descriptor 或自动注入的 second truth 风险。TEST 不解析 context manifest schema，也不把它当作加载或注入来源。
 
 ## work_type 条件化验证
 
@@ -83,11 +91,12 @@ pass
 1. 读取 `plan.md` 和可选 `spec.md`
 2. 收集真实测试证据
 3. 按证据写 `test.md`
-4. 确认 `Conclusion` 和 `Handoff` 合法
-5. 只有结论为 `pass` 时再执行 `.assistant\entry\advance-stage.ps1 -TaskId <task-id>` 进入 `DONE`
-6. `TEST -> DONE` 不需要再指定下一阶段 `tool`
-7. `DONE` 会清除 `tool_profile` / `model`，因为终态固定为 `tool: none`
-8. 如需单独排查文档问题，再手动运行 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
+4. 若声明了 `task-entity.yaml` 或 `context-manifest.yaml`，抽查文件存在性和 advisory-only 边界，并把结论写入 Handoff
+5. 确认 `Conclusion` 和 `Handoff` 合法
+6. 只有结论为 `pass` 时再执行 `.assistant\entry\advance-stage.ps1 -TaskId <task-id>` 进入 `DONE`
+7. `TEST -> DONE` 不需要再指定下一阶段 `tool`
+8. `DONE` 会清除 `tool_profile` / `model`，因为终态固定为 `tool: none`
+9. 如需单独排查文档问题，再手动运行 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
 
 ## 不要做的事
 

@@ -315,7 +315,6 @@ $expectedSkills = @(
     'review',
     'spec',
     'test',
-    'test-runner',
     'workflow-team'
 )
 
@@ -418,7 +417,6 @@ Assert-FileContains -Path '.gitignore' -Needle '!.assistant/运行时/记忆-问
 Assert-FileContains -Path '.gitignore' -Needle 'skills/*/.runtime/'
 Assert-FileContains -Path '.gitignore' -Needle 'agent-configs/workspace/entry/'
 Assert-FileContains -Path '.gitignore' -Needle '/.codex/'
-Assert-FileContains -Path '.gitignore' -Needle '/.gemini/'
 Assert-FileContains -Path 'docs/shared-memory-layers.md' -Needle '## Layers'
 Assert-FileContains -Path 'docs/shared-memory-layers.md' -Needle '## Writeback Ladder'
 Assert-FileContains -Path 'docs/shared-memory-layers.md' -Needle '## Forbidden Reverse Edges'
@@ -437,7 +435,7 @@ Assert-FileContains -Path 'README.md' -Needle 'export-team-preset.ps1'
 Assert-FileContains -Path 'README.md' -Needle 'AIONUI_TEAM_MODE'
 Assert-FileContains -Path 'README.md' -Needle '.assistant\entry\advance-stage.ps1'
 Assert-FileContains -Path 'README.md' -Needle '.assistant\entry\validate-lite-artifacts.ps1'
-Assert-FileContains -Path 'README.md' -Needle 'tool: claudecode | codex | gemini | none'
+Assert-FileContains -Path 'README.md' -Needle 'tool: claudecode | codex | none'
 Assert-FileContains -Path 'README.md' -Needle 'tool_profile'
 Assert-FileContains -Path 'README.md' -Needle 'mode: quick | workflow | ask'
 Assert-FileContains -Path 'README.md' -Needle '自动懒加载规则'
@@ -485,8 +483,6 @@ Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle '[switch
 Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle 'artifacts'
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-claude.yaml' -Needle 'backend: claudecode'
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-codex.yaml' -Needle 'backend: codex'
-Assert-FileContains -Path 'agent-configs/profiles/harness-default-gemini.yaml' -Needle 'backend: gemini'
-Assert-FileContains -Path 'agent-configs/profiles/harness-default-gemini.yaml' -Needle '  - test-runner'
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-codex.yaml' -Needle '  - entry-router'
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-claude.yaml' -Needle '  - entry-router'
 Assert-FileContains -Path 'agent-configs/profiles/harness-default-codex.yaml' -Needle '  - md-html'
@@ -579,8 +575,6 @@ Assert-FileContains -Path 'skills/md-html/references/pipeline.md' -Needle '结�
 Assert-FileContains -Path 'skills/md-html/references/pipeline.md' -Needle '`doctype`、`html`、`head`、`body`'
 Assert-FileContains -Path 'skills/md-html/references/pipeline.md' -Needle 'Local HTML enhancement 模式不输出 `html` / `head` / `body` 外壳'
 Assert-FileContains -Path 'skills/md-html/references/pipeline.md' -Needle '`script`、`iframe`、外部 JS'
-Assert-FileContains -Path 'skills/test-runner/SKILL.md' -Needle 'name: test-runner'
-Assert-FileContains -Path 'skills/test-runner/SKILL.md' -Needle 'Gemini optional adapter'
 Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'new-task mode=workflow'
 Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle '按当前 stage 懒加载'
 Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'md-html'
@@ -614,10 +608,6 @@ Assert-FileContains -Path 'vault-template/entry/AGENTS.md.template' -Needle 'mod
 Assert-FileContains -Path 'vault-template/entry/AGENTS.md.template' -Needle 'Lazy loading:'
 Assert-FileContains -Path 'vault-template/entry/AGENTS.md.template' -Needle '`workflow`: load `entry-router`, `orchestrator`'
 Assert-FileContains -Path 'vault-template/entry/AGENTS.md.template' -Needle '`ask`: do not load workflow skills; ask one minimal clarification question.'
-Assert-FileContains -Path 'vault-template/entry/GEMINI.md.template' -Needle 'mode: quick | workflow | ask'
-Assert-FileContains -Path 'vault-template/entry/GEMINI.md.template' -Needle 'Lazy loading:'
-Assert-FileContains -Path 'vault-template/entry/GEMINI.md.template' -Needle '`workflow`: load `entry-router`, `orchestrator`'
-Assert-FileContains -Path 'vault-template/entry/GEMINI.md.template' -Needle '`ask`: do not load workflow skills; ask one minimal clarification question.'
 Assert-FileContains -Path 'agent-configs/codex/AGENTS.md.template' -Needle 'Do not bulk-load all skills'
 Assert-FileContains -Path 'agent-configs/codex/AGENTS.md.template' -Needle '`workflow` loads `entry-router`, `orchestrator`'
 Assert-FileContains -Path 'agent-configs/codex/AGENTS.md.template' -Needle '`ask` does not load workflow skills; ask one minimal clarification question.'
@@ -668,7 +658,6 @@ Assert-FileContains -Path 'vault-template/entry/advance-stage.ps1.template' -Nee
 Assert-FileContains -Path 'vault-template/entry/validate-lite-artifacts.ps1.template' -Needle '{REPO_ROOT}\scripts\validate-lite-artifacts.ps1'
 Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle "'entry-router'"
 Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle "'md-html'"
-Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle "'test-runner'"
 Assert-FileContains -Path 'skills/obsidian-memory/scripts/check-shared-memory.ps1' -Needle "Join-Path (Join-Path `$workspaceRoot 'docs/tasks') `$TaskId"
 Assert-FileNotContains -Path 'skills/obsidian-memory/scripts/check-shared-memory.ps1' -Needle "Join-Path (Join-Path `$workspaceRoot 'docs') `$TaskId"
 Assert-FileNotContains -Path 'skills/obsidian-memory/scripts/repair-shared-memory.ps1' -Needle 'docs/tasks/none/plan.md'

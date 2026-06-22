@@ -19,7 +19,7 @@
 - `workflow` loads `entry-router`, `orchestrator`, and the current-stage skill.
 - `resume-current` / `switch-existing` loads recovery runtime files first, then the current-stage skill.
 - `ask` does not load workflow skills; ask one minimal clarification question.
-- Do not bulk-load all skills, all historical tasks, Gemini / Claude compatibility skills, or `workflow-team` unless an explicit trigger requires them.
+- Do not bulk-load all skills, all historical tasks, Claude compatibility skills, or `workflow-team` unless an explicit trigger requires them.
 
 ## Writeback
 

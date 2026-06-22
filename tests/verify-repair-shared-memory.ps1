@@ -249,7 +249,7 @@ $expiredLock = [ordered]@{
     writer    = "stale-writer"
     task_id   = "sample-task"
     locked_at = ([datetimeoffset]::UtcNow.AddMinutes(-31)).ToString("o")
-    entry_host = "gemini"
+    entry_host = "codex"
 } | ConvertTo-Json -Depth 3
 Set-Content -LiteralPath $expiredFixture.LockPath -Value $expiredLock -Encoding utf8
 $expiredResult = Invoke-Repair -VaultRoot $expiredFixture.AssistantRoot

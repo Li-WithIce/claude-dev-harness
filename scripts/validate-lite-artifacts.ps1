@@ -14,11 +14,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $script:AllowedStages = @("PLAN", "PLAN_REVIEW", "IMPLEMENT", "CODE_REVIEW", "TEST", "DONE")
-$script:AllowedTools = @("claudecode", "codex", "gemini")
+$script:AllowedTools = @("claudecode", "codex")
 $script:AllowedFrontmatterFields = @("task_id", "stage", "tool", "tool_profile", "model", "updated")
 $script:RequiredFrontmatterFields = @("task_id", "stage", "tool", "updated")
 $script:OptionalFrontmatterFields = @("tool_profile", "model")
-$script:ModelAliasPattern = '^(opus|sonnet|haiku|pro|flash|default|latest|codex|gemini|claude|gpt)$'
+$script:ModelAliasPattern = '^(opus|sonnet|haiku|default|latest|codex|claude|gpt)$'
 $script:PlanSections = @(
     "Clarification",
     "User Confirmation",
@@ -463,6 +463,260 @@ function Get-TopLevelPlanBullets {
     }
 }
 
+function Normalize-RepoRelativePath {
+    <#
+    .SYNOPSIS
+    规范化仓库相对路径。
+    .DESCRIPTION
+    Artifact drift advisory 只比较 repo-relative path；统一斜杠和开头的 ./。
+    .PARAMETER Path
+    原始路径。
+    .OUTPUTS
+    String。
+    #>
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return ""
+    }
+
+    $normalized = $Path.Trim().Trim('"').Trim("'") -replace '\\', '/'
+    while ($normalized.StartsWith('./')) {
+        $normalized = $normalized.Substring(2)
+    }
+
+    return $normalized.TrimStart('/')
+}
+
+function Test-RepoPathCoveredByDeclaration {
+    <#
+    .SYNOPSIS
+    判断 changed path 是否被声明路径覆盖。
+    .DESCRIPTION
+    支持文件精确匹配和目录前缀匹配；不引入 glob 语义。
+    .PARAMETER ChangedPath
+    git diff 返回的 repo-relative path。
+    .PARAMETER DeclaredPath
+    artifacts 或 affected_paths 中的 repo-relative path。
+    .OUTPUTS
+    Boolean。
+    #>
+    param(
+        [string]$ChangedPath,
+        [string]$DeclaredPath
+    )
+
+    $changed = Normalize-RepoRelativePath -Path $ChangedPath
+    $declared = (Normalize-RepoRelativePath -Path $DeclaredPath).TrimEnd('/')
+    if ([string]::IsNullOrWhiteSpace($changed) -or [string]::IsNullOrWhiteSpace($declared)) {
+        return $false
+    }
+
+    return ($changed -eq $declared -or $changed.StartsWith(("{0}/" -f $declared)))
+}
+
+function Test-RepoRelativePathExists {
+    <#
+    .SYNOPSIS
+    检查 repo-relative path 是否存在。
+    .DESCRIPTION
+    支持文件和目录；路径只按仓库内相对路径解析。
+    .PARAMETER RepoRoot
+    仓库根目录。
+    .PARAMETER RelativePath
+    repo-relative path。
+    .OUTPUTS
+    Boolean。
+    #>
+    param(
+        [string]$RepoRoot,
+        [string]$RelativePath
+    )
+
+    $normalized = Normalize-RepoRelativePath -Path $RelativePath
+    if ([string]::IsNullOrWhiteSpace($normalized)) {
+        return $false
+    }
+
+    $localPath = Join-Path $RepoRoot ($normalized -replace '/', [System.IO.Path]::DirectorySeparatorChar)
+    return (Test-Path -LiteralPath $localPath)
+}
+
+function Get-ChangeContractAffectedPaths {
+    <#
+    .SYNOPSIS
+    解析 Change Contract affected_paths。
+    .DESCRIPTION
+    复用 validator 当前的最小 YAML block-list 形态；只返回非空、非占位路径。
+    .PARAMETER SectionContent
+    Change Contract section 正文。
+    .OUTPUTS
+    String[]。
+    #>
+    param([string]$SectionContent)
+
+    $pathEntries = @()
+    $lines = @($SectionContent -split "\r?\n")
+    $inAffectedPaths = $false
+    foreach ($line in $lines) {
+        if ($line -match '^-\s*affected_paths:\s*$') {
+            $inAffectedPaths = $true
+            continue
+        }
+
+        if (-not $inAffectedPaths) {
+            continue
+        }
+
+        if ($line -match '^-\s*.+?:') {
+            break
+        }
+
+        if ($line -match '^\s{2,}-\s+(.+?)\s*$') {
+            $pathEntries += (Normalize-RepoRelativePath -Path $matches[1])
+        }
+    }
+
+    return @($pathEntries | Where-Object { $_ -and $_ -ne '<path>' } | Select-Object -Unique)
+}
+
+function Get-GitChangedPathsForAudit {
+    <#
+    .SYNOPSIS
+    读取 git 工作树变化路径。
+    .DESCRIPTION
+    覆盖 unstaged、staged 和 untracked files；不可用时返回 skipped，调用方只发 warning。
+    .PARAMETER RepoRoot
+    仓库根目录。
+    .OUTPUTS
+    PSCustomObject。
+    #>
+    param([string]$RepoRoot)
+
+    if ($null -eq (Get-Command git -ErrorAction SilentlyContinue)) {
+        return [pscustomobject]@{
+            Success = $false
+            Reason = "git command is unavailable"
+            Paths = @()
+        }
+    }
+
+    $inside = @(& git -C $RepoRoot rev-parse --is-inside-work-tree 2>$null | ForEach-Object { [string]$_ })
+    if ($LASTEXITCODE -ne 0 -or ($inside -join '').Trim() -ne 'true') {
+        return [pscustomobject]@{
+            Success = $false
+            Reason = "not a git worktree"
+            Paths = @()
+        }
+    }
+
+    $paths = @()
+    foreach ($args in @(
+        @('diff', '--name-only'),
+        @('diff', '--cached', '--name-only'),
+        @('ls-files', '--others', '--exclude-standard')
+    )) {
+        $output = @(& git -C $RepoRoot @args 2>$null | ForEach-Object { [string]$_ })
+        if ($LASTEXITCODE -ne 0) {
+            return [pscustomobject]@{
+                Success = $false
+                Reason = ("git {0} failed" -f ($args -join ' '))
+                Paths = @()
+            }
+        }
+
+        foreach ($path in $output) {
+            $normalized = Normalize-RepoRelativePath -Path $path
+            if (-not [string]::IsNullOrWhiteSpace($normalized)) {
+                $paths += $normalized
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Success = $true
+        Reason = ""
+        Paths = @($paths | Select-Object -Unique | Sort-Object)
+    }
+}
+
+function Assert-ArtifactDriftAdvisory {
+    <#
+    .SYNOPSIS
+    执行 artifact drift advisory。
+    .DESCRIPTION
+    仅在 IMPLEMENT 及后续阶段运行；所有 drift 结果都进入 Warnings，不改变 exit code。
+    .PARAMETER Stage
+    当前任务 stage。
+    .PARAMETER RepoRoot
+    仓库根目录。
+    .PARAMETER Artifacts
+    Plan.artifacts paths。
+    .PARAMETER AffectedPaths
+    Change Contract affected_paths。
+    .OUTPUTS
+    None。
+    #>
+    param(
+        [string]$Stage,
+        [string]$RepoRoot,
+        [string[]]$Artifacts,
+        [string[]]$AffectedPaths
+    )
+
+    if ($Stage -notin @('IMPLEMENT', 'CODE_REVIEW', 'TEST', 'DONE')) {
+        Add-Check "artifact drift advisory skipped before IMPLEMENT"
+        return
+    }
+
+    $artifactPaths = @($Artifacts | ForEach-Object { Normalize-RepoRelativePath -Path $_ } | Where-Object { $_ } | Select-Object -Unique)
+    $affectedPathItems = @($AffectedPaths | ForEach-Object { Normalize-RepoRelativePath -Path $_ } | Where-Object { $_ } | Select-Object -Unique)
+    if ($artifactPaths.Count -eq 0 -and $affectedPathItems.Count -eq 0) {
+        Add-Check "artifact drift advisory skipped because artifacts and affected_paths are absent"
+        return
+    }
+
+    $gitState = Get-GitChangedPathsForAudit -RepoRoot $RepoRoot
+    if (-not $gitState.Success) {
+        Add-Warning ("artifact drift audit skipped: {0}" -f $gitState.Reason)
+        return
+    }
+
+    foreach ($artifact in $artifactPaths) {
+        if (-not (Test-RepoRelativePathExists -RepoRoot $RepoRoot -RelativePath $artifact)) {
+            Add-Warning ("artifact drift: declared artifact is missing: {0}" -f $artifact)
+        }
+    }
+
+    $declaredPaths = @($artifactPaths + $affectedPathItems | Select-Object -Unique)
+    foreach ($changedPath in $gitState.Paths) {
+        $covered = $false
+        foreach ($declaredPath in $declaredPaths) {
+            if (Test-RepoPathCoveredByDeclaration -ChangedPath $changedPath -DeclaredPath $declaredPath) {
+                $covered = $true
+                break
+            }
+        }
+
+        if (-not $covered) {
+            Add-Warning ("artifact drift: changed path is not declared in artifacts or affected_paths: {0}" -f $changedPath)
+        }
+    }
+
+    foreach ($artifact in $artifactPaths) {
+        if (Test-RepoRelativePathExists -RepoRoot $RepoRoot -RelativePath $artifact) {
+            continue
+        }
+
+        foreach ($affectedPath in $affectedPathItems) {
+            if ($artifact -eq $affectedPath) {
+                Add-Warning ("artifact drift: path appears in both artifacts and affected_paths but does not exist: {0}" -f $artifact)
+                break
+            }
+        }
+    }
+}
+
 function Get-AllowedWorkflowSkills {
     <#
     .SYNOPSIS
@@ -486,8 +740,7 @@ function Get-AllowedWorkflowSkills {
         'plan',
         'review',
         'spec',
-        'test',
-        'test-runner'
+        'test'
     )
 }
 
@@ -1182,6 +1435,7 @@ function Assert-PlanContract {
 
     $sectionNames = @($sections | ForEach-Object { $_.Name })
     $changeContracts = @($sections | Where-Object { $_.Name -eq 'Change Contract' })
+    $affectedPaths = @()
     if ($changeContracts.Count -gt 1) {
         Add-Failure "plan.md should contain at most one Change Contract section"
     } elseif ($changeContracts.Count -eq 1) {
@@ -1196,6 +1450,7 @@ function Assert-PlanContract {
 
         $changeContract = $changeContracts[0]
         Assert-ChangeContract -SectionContent $changeContract.Content
+        $affectedPaths = @(Get-ChangeContractAffectedPaths -SectionContent $changeContract.Content)
     }
 
     $clarification = Get-SectionContent -Sections $sections -Name 'Clarification'
@@ -1216,6 +1471,7 @@ function Assert-PlanContract {
 
     $planBody = Get-SectionContent -Sections $sections -Name 'Plan'
     $planMetadata = Get-TopLevelPlanBullets -Content $planBody
+    Assert-ArtifactDriftAdvisory -Stage $fields['stage'] -RepoRoot $RepoRoot -Artifacts $planMetadata.ArtifactsItems -AffectedPaths $affectedPaths
     if ($planMetadata.OrdinaryBullets.Count -gt 0) {
         Add-Check "Plan contains actionable bullets"
     } else {

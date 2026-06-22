@@ -30,7 +30,7 @@
 ---
 task_id: <task-id>
 stage: PLAN | PLAN_REVIEW | IMPLEMENT | CODE_REVIEW | TEST | DONE
-tool: claudecode | codex | gemini | none
+tool: claudecode | codex | none
 tool_profile: harness-default-codex
 model: gpt-5.5/xhigh
 updated: YYYY-MM-DD
@@ -39,7 +39,7 @@ updated: YYYY-MM-DD
 
 规则：
 
-- 非 `DONE` 阶段时，`tool` 只能是 `claudecode`、`codex`、`gemini`
+- 非 `DONE` 阶段时，`tool` 只能是 `claudecode`、`codex`
 - `DONE` 只能写 `tool: none`
 - `tool` 表示“当前 stage 由哪个 backend 继续”，即使用 profile 也必须显式保留
 - `tool_profile` 指向 `agent-configs/profiles/<name>.yaml`
@@ -52,7 +52,7 @@ updated: YYYY-MM-DD
 
 若仓库启用了 `agent-configs/workflows/harness-lite.yaml`，它只为下一 stage 提供 `workflow-default` fallback，不改变 `plan.md` frontmatter 仍是唯一当前 stage 真相源。
 
-当前仓库的默认 descriptor 是 Codex-only：`PLAN`、`PLAN_REVIEW`、`IMPLEMENT`、`CODE_REVIEW`、`TEST` 都默认使用 `harness-default-codex`。如需 Claude Code 或 Gemini 介入，必须在当前任务或推进命令里显式指定对应 backend / profile。
+当前仓库的默认 descriptor 是 Codex-only：`PLAN`、`PLAN_REVIEW`、`IMPLEMENT`、`CODE_REVIEW`、`TEST` 都默认使用 `harness-default-codex`。如需 Claude Code 介入，必须在当前任务或推进命令里显式指定对应 backend / profile。
 
 最小字段：
 
@@ -77,6 +77,27 @@ stages:
 - `docs/tasks/<task-id>/skill-manifest.json`：由 `advance-stage.ps1` 在成功推进后 best-effort 生成；不是新的真相源，也不写入 `.assistant/`
 - `docs/tasks/<task-id>/skills-index.md`：由 `scripts/generate-skills-index.ps1` 生成，给嵌入消费端或非原生 backend 展示当前 stage 的可用 skills
 - invocation trace 只允许以单行 `- invocation: ...` 追加到已有 `### Run N` 块内部；目标 section 没有 Run block 时必须跳过，不能新建 section 或 bare 顶层 bullet
+
+### Task Entity Artifact（可选）
+
+- `docs/tasks/<task-id>/task-entity.yaml` 是可选 advisory-only 元数据产物，用来记录 owner、priority、branch、PR、父子任务、相关文件、外部引用、meta 和 notes。
+- 只有大型、跨分支、有父子任务或外部 issue/PR 关联的任务建议启用；旧任务不需要回填。
+- 启用时必须把 `docs/tasks/<task-id>/task-entity.yaml` 写入 `## Plan` 的 `artifacts:` inline array，方便 IMPLEMENT、CODE_REVIEW 和 TEST/Handoff 检查交付状态。
+- `plan.md` frontmatter 仍是唯一 stage truth；`task-entity.yaml` 不参与 `advance-stage.ps1`、runtime pointer、team board、validator hard gate 或 skill manifest 生成。
+- forbidden fields: `stage`、`status`、`verdict`、`tool`、`current_phase`、`next_action`、`active_task`、`current_pointer`、`handoff_conclusion`、`done`。
+- validator 只通过既有 artifact drift advisory 间接提示声明产物是否存在，不解析 `task-entity.yaml` schema，也不因字段内容改变 exit code。
+- 若 `task-entity.yaml` 与 `plan.md`、team board 或 runtime mirror 出现 second truth 风险，CODE_REVIEW 应退回修正文档边界或要求 TEST/Handoff 明确记录。
+
+### Context Manifest Artifact（可选）
+
+- `docs/tasks/<task-id>/context-manifest.yaml` 是可选 advisory-only 上下文清单，用来记录某个 phase 应读取的 file、reason、required 和 notes。
+- 只有多阶段、大量事实源、跨任务研究或后续恢复成本高的任务建议启用；旧任务不需要回填。
+- 启用时必须把 `docs/tasks/<task-id>/context-manifest.yaml` 写入 `## Plan` 的 `artifacts:` inline array，方便 IMPLEMENT、CODE_REVIEW 和 TEST/Handoff 检查交付状态。
+- `plan.md read_first:` 仍是 Plan 顶部的最小入口清单；`context-manifest.yaml` 只补阶段化原因说明，不替代 `read_first:`。
+- `context-manifest.yaml` 不覆盖 lazy loading、`skills_whitelist`、workflow descriptor、stage skill、runtime pointer、team board、validator hard gate 或 skill manifest 生成。
+- forbidden fields: `stage`、`status`、`verdict`、`tool`、`current_phase`、`next_action`、`active_task`、`current_pointer`、`skills_whitelist`、`auto_inject`、`injector`、`load_by_default`、`workflow_state`。
+- validator 只通过既有 artifact drift advisory 间接提示声明产物是否存在，不解析 `context-manifest.yaml` schema，也不因字段内容改变 exit code。
+- 若 `context-manifest.yaml` 与 `read_first:`、lazy loading、`skills_whitelist` 或 workflow descriptor 出现 second truth 风险，CODE_REVIEW 应退回修正文档边界或要求 TEST/Handoff 明确记录。
 
 ### 必备 section
 
@@ -229,6 +250,9 @@ stages:
 - `artifacts:` 必须使用 inline-array 语法，且至少列 1 条非空路径
 - 示例顺序固定为 `read_first:` → `convergence:` → `artifacts:`；validator 不强制顺序，但文档示例与人工写作都按这个顺序
 - `artifacts:` 表示任务产出物声明；不要和 `## Change Contract` 里的 `affected_paths` 混用
+- `artifacts:` 是交付产物清单，`affected_paths` 是变更面清单；PLAN_REVIEW 应检查二者和非目标、verification 是否自洽，但旧任务缺少这些 opt-in 字段仍合法
+- Artifact drift audit 是 advisory-only：validator 只在 `IMPLEMENT` 及之后阶段把声明 artifact 缺失、未声明 changed path、明显角色混淆写入 `Warnings:`，不写 `Errors:`，不改变 exit code。
+- `PLAN` / `PLAN_REVIEW` 阶段不得因为未来 artifact 尚未创建而 warning；缺少 `artifacts:` 或 `Change Contract` 的旧任务继续合法。
 - 不需要时整段删除即可；不要把它们插到普通 TODO 中途
 - 每一项都是可执行动作，不写抽象口号。
 - 尽量带文件路径或模块名。
@@ -350,6 +374,7 @@ front_keywords: [shared-memory, long-session, recovery]
 - 没有 findings 时写 `- findings: none`，不要写空 severity 标题。
 - 只在真的有问题时使用 `P0/P1/P2/P3`。
 - Phase 3 adapter 的 invocation trace 只能追加到现有 run 末尾，不能手写到 section 顶层
+- PLAN_REVIEW / CODE_REVIEW 应把 artifact、affected_paths、实际 diff、Implementation Notes 和后续 Handoff 的 finish boundary 作为人工审查点；这是 append-only review 写作规则，不新增 stage，也不把 drift 升为 validator hard gate。
 
 ### Implementation Notes
 
@@ -419,6 +444,10 @@ pass
 ## Handoff
 - delivery: 交付摘要
 - follow_up: 后续动作；无则写 none
+- artifact: 声明的 artifact 是否已经存在或交付；没有则说明原因
+- drift: 是否发现 artifact / diff drift；没有则写 none
+- follow_up_decision: 是否需要把未完成事项拆成新任务；没有则写 none
+- memory_spec_update: 是否需要 memory / spec update；没有则写 none
 - current_state: 当前阶段与关键产物路径
 - key_decisions:
   - decision: 跨会话必须保留的决策
@@ -432,8 +461,9 @@ pass
 - `## Conclusion` 下第一行必须且只能是 `pass`、`fail`、`blocked`。
 - `## Handoff` 必须存在。
 - `delivery` 与 `follow_up` 是最低必填，validator 只校验这两条。
+- 新任务的 finish boundary 应在 `## Handoff` 记录 4 项判断：artifact 是否存在或已交付、是否存在 artifact / diff drift、follow-up 是否需要拆新任务、是否需要 memory / spec update。
 - `current_state`、`key_decisions`、`next_actions` 为 opt-in 密度扩展，推荐长任务填写；不写不影响 validator。
-- 旧格式 Handoff（只含 delivery/follow_up）继续通过校验。
+- 旧格式 Handoff（只含 delivery/follow_up）继续通过校验；validator 仍只硬校验既有最低字段，不要求旧任务回填 finish boundary。
 - 不要把 review 发现写成独立 `review.md`。
 
 ## SKILL.md 拆分守则

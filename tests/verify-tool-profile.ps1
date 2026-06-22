@@ -218,7 +218,7 @@ function Test-FullModelId {
         return $false
     }
 
-    return ($normalized -notmatch '^(opus|sonnet|haiku|pro|flash|default|latest|codex|gemini|claude|gpt)$')
+    return ($normalized -notmatch '^(opus|sonnet|haiku|default|latest|codex|claude|gpt)$')
 }
 
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
@@ -243,8 +243,7 @@ $createdTaskDirs = @()
 try {
     $expectedProfiles = @(
         @{ Name = 'harness-default-claude'; Backend = 'claudecode' },
-        @{ Name = 'harness-default-codex'; Backend = 'codex' },
-        @{ Name = 'harness-default-gemini'; Backend = 'gemini' }
+        @{ Name = 'harness-default-codex'; Backend = 'codex' }
     )
 
     foreach ($profile in $expectedProfiles) {

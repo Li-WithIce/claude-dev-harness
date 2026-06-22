@@ -21,9 +21,9 @@ pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\dev-harn
 
 安装完成后，目标工作区会得到：
 
-- 工作区入口文档：`AGENTS.md`、`GEMINI.md`
+- 工作区入口文档：`AGENTS.md`
 - 工作区共享记忆：`.assistant/`
-- 工作区入口 shim：`.assistant/entry/AGENTS.md`、`.assistant/entry/GEMINI.md`
+- 工作区入口 shim：`.assistant/entry/AGENTS.md`
 - 工作区脚本 shim：`.assistant/entry/advance-stage.ps1`、`.assistant/entry/validate-lite-artifacts.ps1`
 - Claude Code hooks：`runtime-hooks/claude/*.js` 的安装副本
 
@@ -32,7 +32,6 @@ pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\dev-harn
 - repo `skills/` 会同步到 `%USERPROFILE%\.claude\skills`、`%USERPROFILE%\.codex\skills` 与 `%USERPROFILE%\.agents\skills`
 - Claude / Codex 会写入各自的共享 `settings.local.json`；Codex 只写 Harness 托管的 `%USERPROFILE%\.codex\managed_config.toml`
 - 用户私有的 `%USERPROFILE%\.codex\config.toml` 不由安装脚本或 workflow 创建、清理或改写
-- Gemini 当前依赖工作区 `GEMINI.md` 入口，不会像 Claude/Codex 一样同步一份 host-level `skills` 目录
 
 ### 日常使用
 
@@ -86,7 +85,7 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 - `resume-current` / `switch-existing`：先加载 `.assistant/运行时/恢复索引.md`、`.assistant/运行时/当前任务.md`、`运行时/tasks/<task-id>.md`；必要时只读当前任务的 `plan.md` frontmatter 判定 stage，再加载当前 stage skill。
 - `ask`：不加载 workflow skill，只问一个最小澄清问题。
 
-禁止 bulk-load 全部 skills、全部历史 `docs/tasks/*`、Gemini / Claude 兼容 skill 或 `workflow-team`。只有用户显式切换 backend、当前 stage frontmatter / workflow descriptor 命中、或 `$env:AIONUI_TEAM_MODE='1'` 等触发条件满足时，才加载这些兼容路径。
+禁止 bulk-load 全部 skills、全部历史 `docs/tasks/*`、Claude 兼容 skill 或 `workflow-team`。只有用户显式切换 backend、当前 stage frontmatter / workflow descriptor 命中、或 `$env:AIONUI_TEAM_MODE='1'` 等触发条件满足时，才加载这些兼容路径。
 
 ### Markdown / HTML artifact 能力
 
@@ -124,7 +123,7 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 
 `DONE` 不是单独执行阶段，而是 `plan.md` frontmatter 的终态标记。
 
-默认 descriptor 是 Codex-only：`PLAN`、`PLAN_REVIEW`、`IMPLEMENT`、`CODE_REVIEW`、`TEST` 都使用 `harness-default-codex`。`claudecode` / `gemini` 仍是合法 backend，但需要在任务 frontmatter 或推进命令中显式指定。
+默认 descriptor 是 Codex-only：`PLAN`、`PLAN_REVIEW`、`IMPLEMENT`、`CODE_REVIEW`、`TEST` 都使用 `harness-default-codex`。`claudecode` 仍是合法 backend，但需要在任务 frontmatter 或推进命令中显式指定。
 
 唯一阶段真相源始终是 `docs/tasks/<task-id>/plan.md` frontmatter：
 
@@ -132,7 +131,7 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 ---
 task_id: <task-id>
 stage: PLAN | PLAN_REVIEW | IMPLEMENT | CODE_REVIEW | TEST | DONE
-tool: claudecode | codex | gemini | none
+tool: claudecode | codex | none
 tool_profile: <optional profile id>
 model: <optional full model id>
 updated: YYYY-MM-DD
@@ -141,7 +140,7 @@ updated: YYYY-MM-DD
 
 当前仓库的真实约束：
 
-- 非 `DONE` 阶段时，`tool` 只能是 `claudecode`、`codex`、`gemini`
+- 非 `DONE` 阶段时，`tool` 只能是 `claudecode`、`codex`
 - `DONE` 固定写 `tool: none`
 - `tool_profile` 是可选当前阶段元数据，不是下一阶段的黏性 fallback
 - `model` 必须是完整模型 ID，不接受 `pro`、`latest` 这类短别名

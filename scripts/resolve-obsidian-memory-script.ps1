@@ -37,8 +37,7 @@ function Resolve-ObsidianMemoryScript {
     } else {
         @(
             (Join-Path $env:USERPROFILE '.claude'),
-            (Join-Path $env:USERPROFILE '.codex'),
-            (Join-Path $env:USERPROFILE '.gemini')
+            (Join-Path $env:USERPROFILE '.codex')
         )
     }
 

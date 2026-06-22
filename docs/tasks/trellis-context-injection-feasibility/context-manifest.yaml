@@ -1,0 +1,33 @@
+schema_version: context-manifest/v1
+summary: "Context reads for the Trellis context injection feasibility task. Advisory only; does not drive loading or injection."
+contexts:
+  - phase: PLAN_REVIEW
+    file: docs/tasks/trellis-context-injection-feasibility/plan.md
+    reason: "Review the task boundary, non-goals, affected paths, and verification commands before approving implementation."
+    required: true
+    notes: "Do not treat this manifest as a source of stage or tool truth."
+  - phase: IMPLEMENT
+    file: docs/tasks/trellis-comparison-reusable-design/trellis-source-based-corrections.md
+    reason: "Primary source for the finding that Trellis context injection is a runtime engine rather than only a taxonomy."
+    required: true
+    notes: "Use as factual input; do not import Trellis runtime paths or hooks."
+  - phase: IMPLEMENT
+    file: docs/工作流/context-manifest-artifact.md
+    reason: "Defines the current dev-harness context manifest boundary and forbidden fields."
+    required: true
+    notes: "The manifest remains advisory-only and must not replace read_first."
+  - phase: IMPLEMENT
+    file: skills/orchestrator/references/lite-writing-guide.md
+    reason: "Defines writing rules for read_first, artifacts, lazy loading, skills_whitelist, and second truth boundaries."
+    required: true
+    notes: "Use only for boundary checks; do not modify in this task."
+  - phase: CODE_REVIEW
+    file: docs/tasks/trellis-context-injection-feasibility/context-injection-feasibility.md
+    reason: "Check the feasibility conclusion and ensure adopt/adapt/defer/reject recommendations stay inside plan boundaries."
+    required: true
+    notes: "Confirm no automatic injection, descriptor rewrite, or second truth was introduced."
+  - phase: TEST
+    file: docs/tasks/trellis-context-injection-feasibility/context-manifest.yaml
+    reason: "Verify the dogfood context manifest exists and contains only advisory context metadata."
+    required: true
+    notes: "Forbidden fields remain absent; validation is still indirect through artifact declaration."

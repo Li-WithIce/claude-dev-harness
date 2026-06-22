@@ -221,9 +221,6 @@ function Get-DefaultUserSkillDir {
         'codex' {
             return '.codex\skills'
         }
-        'gemini' {
-            return '.gemini\skills'
-        }
         default {
             return '.claude\skills'
         }
@@ -318,9 +315,6 @@ function Resolve-AdapterScriptPath {
     switch ($Skill) {
         'codex' {
             return Join-Path $SkillRoot 'codex\scripts\ask_codex.ps1'
-        }
-        'test-runner' {
-            return Join-Path $SkillRoot 'test-runner\scripts\invoke-gemini.ps1'
         }
         default {
             return ''
@@ -619,40 +613,6 @@ try {
                 } else {
                     $errors = if ($diagnostics.Count -gt 0) { $diagnostics } else { @("codex adapter exited with code $($invocation.ExitCode)") }
                     $result = New-AdapterResult -Ok $false -Status 'error' -ArtifactPaths $artifactPaths -Errors $errors
-                    $exitCode = 1
-                }
-            }
-            'test-runner' {
-                $skillRoot = Resolve-ActiveSkillDirs -TaskId $TaskId -WorkspaceRoot $resolvedWorkspace -ArtifactRoot $artifactDirectory -Tool $Tool -ToolProfileId $ToolProfileId
-                $scriptPath = Resolve-AdapterScriptPath -SkillRoot $skillRoot.Path -Skill $normalizedSkill
-                $parameters = [ordered]@{
-                    Workspace = $resolvedWorkspace
-                    Prompt = [string](Get-PayloadProperty -Payload $payload -Name 'prompt')
-                    OutputFormat = 'json'
-                    ApprovalMode = 'plan'
-                    Model = [string](Get-PayloadProperty -Payload $payload -Name 'model')
-                }
-
-                $invocation = Invoke-ExternalPowerShellScript -ScriptPath $scriptPath -Parameters $parameters
-                $joinedOutput = ($invocation.Output -join "`n").Trim()
-                $parsed = $null
-                if (-not [string]::IsNullOrWhiteSpace($joinedOutput)) {
-                    $parsed = $joinedOutput | ConvertFrom-Json
-                }
-
-                if ($invocation.ExitCode -eq 0 -and $null -ne $parsed -and $parsed.ok) {
-                    $handoff = if ([string]::IsNullOrWhiteSpace([string]$parsed.stdout)) { '' } else { [string]$parsed.stdout }
-                    $result = New-AdapterResult -Ok $true -Status 'delegated' -Handoff $handoff
-                } else {
-                    $message = if ($null -ne $parsed -and $parsed.stdout) {
-                        [string]$parsed.stdout
-                    } elseif (-not [string]::IsNullOrWhiteSpace($joinedOutput)) {
-                        $joinedOutput
-                    } else {
-                        "gemini adapter exited with code $($invocation.ExitCode)"
-                    }
-                    Write-Diagnostic $message
-                    $result = New-AdapterResult -Ok $false -Status 'error' -Errors @($message)
                     $exitCode = 1
                 }
             }

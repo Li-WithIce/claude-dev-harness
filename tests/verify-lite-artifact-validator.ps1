@@ -111,6 +111,37 @@ function New-IsolatedRepoFixture {
     return $fixtureRoot
 }
 
+function Initialize-GitFixture {
+    param([string]$FixtureRoot)
+
+    if ($null -eq (Get-Command git -ErrorAction SilentlyContinue)) {
+        return $false
+    }
+
+    & git -C $FixtureRoot init -q 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        return $false
+    }
+
+    & git -C $FixtureRoot config user.email 'harness-lite@example.invalid' 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        return $false
+    }
+
+    & git -C $FixtureRoot config user.name 'Harness Lite Test' 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        return $false
+    }
+
+    & git -C $FixtureRoot add -A 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        return $false
+    }
+
+    & git -C $FixtureRoot commit -q --allow-empty -m 'baseline' 2>$null
+    return ($LASTEXITCODE -eq 0)
+}
+
 function Invoke-Validator {
     <#
     .SYNOPSIS
@@ -371,6 +402,12 @@ $taskBase = Join-Path $RepoRoot 'docs\tasks'
 $script:Checks = @()
 $script:Failures = @()
 $createdTaskDirs = @()
+$gitFixtureReady = Initialize-GitFixture -FixtureRoot $RepoRoot
+if ($gitFixtureReady) {
+    Add-Check 'git fixture initialized for artifact drift tests'
+} else {
+    Add-Failure 'git fixture should initialize for artifact drift tests'
+}
 
 try {
     $taskValid = 'lite-validator-valid-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
@@ -516,16 +553,16 @@ try {
     $futureArtifactsResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskArtifactsFutureValid -RepoRoot $RepoRoot
     if ($futureArtifactsResult.ExitCode -eq 0 -and
         ($futureArtifactsResult.Output -join "`n") -match 'Plan artifacts metadata is legal' -and
-        ($futureArtifactsResult.Output -join "`n") -notmatch '(?i)artifact.+exist|artifact.+missing|artifact.+not found') {
-        Add-Check 'artifacts metadata does not require existing paths'
+        ($futureArtifactsResult.Output -join "`n") -notmatch '(?ms)Warnings:\s*- artifact drift') {
+        Add-Check 'PLAN stage future artifact does not warn'
     } else {
-        Add-Failure ("artifacts should not require existing paths, got: {0}" -f ($futureArtifactsResult.Output -join ' | '))
+        Add-Failure ("PLAN stage future artifact should not warn, got: {0}" -f ($futureArtifactsResult.Output -join ' | '))
     }
 
-    $taskArtifactsCrossValid = 'lite-validator-artifacts-cross-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
-    $taskArtifactsCrossValidDir = Join-Path $taskBase $taskArtifactsCrossValid
-    $createdTaskDirs += $taskArtifactsCrossValidDir
-    New-Item -ItemType Directory -Path $taskArtifactsCrossValidDir -Force | Out-Null
+    $taskArtifactsDriftWarning = 'lite-validator-artifacts-drift-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskArtifactsDriftWarningDir = Join-Path $taskBase $taskArtifactsDriftWarning
+    $createdTaskDirs += $taskArtifactsDriftWarningDir
+    New-Item -ItemType Directory -Path $taskArtifactsDriftWarningDir -Force | Out-Null
     $crossArtifactsBody = @"
 - artifacts: [docs/outputs/generated-contract.md]
 - 更新 ``scripts/validate-lite-artifacts.ps1``
@@ -536,14 +573,46 @@ try {
   - scripts/validate-lite-artifacts.ps1
   - skills/plan/SKILL.md
 "@
-    Write-Utf8Bom -Path (Join-Path $taskArtifactsCrossValidDir 'plan.md') -Content (New-PlanContent -TaskId $taskArtifactsCrossValid -Stage 'PLAN' -Tool 'codex' -ChangeContractBody $crossChangeContract -PlanSectionBody $crossArtifactsBody)
-    $crossArtifactsResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskArtifactsCrossValid -RepoRoot $RepoRoot
+    Write-Utf8Bom -Path (Join-Path $taskArtifactsDriftWarningDir 'plan.md') -Content (New-PlanContent -TaskId $taskArtifactsDriftWarning -Stage 'IMPLEMENT' -Tool 'codex' -ChangeContractBody $crossChangeContract -PlanSectionBody $crossArtifactsBody)
+    $crossArtifactsResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskArtifactsDriftWarning -RepoRoot $RepoRoot
     if ($crossArtifactsResult.ExitCode -eq 0 -and
         ($crossArtifactsResult.Output -join "`n") -match 'Plan artifacts metadata is legal' -and
-        ($crossArtifactsResult.Output -join "`n") -notmatch '(?i)artifacts.+affected_paths|affected_paths.+artifacts|cross.?check|overlap') {
-        Add-Check 'artifacts metadata is not cross-validated against affected_paths'
+        ($crossArtifactsResult.Output -join "`n") -match 'artifact drift: declared artifact is missing: docs/outputs/generated-contract.md') {
+        Add-Check 'IMPLEMENT stage missing artifact is warning-only'
     } else {
-        Add-Failure ("artifacts should not be cross-validated against affected_paths, got: {0}" -f ($crossArtifactsResult.Output -join ' | '))
+        Add-Failure ("IMPLEMENT stage missing artifact should warn without failing, got: {0}" -f ($crossArtifactsResult.Output -join ' | '))
+    }
+
+    $taskUntrackedDrift = 'lite-validator-untracked-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskUntrackedDriftDir = Join-Path $taskBase $taskUntrackedDrift
+    $createdTaskDirs += $taskUntrackedDriftDir
+    New-Item -ItemType Directory -Path $taskUntrackedDriftDir -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $RepoRoot 'docs\outputs') -Force | Out-Null
+    Write-Utf8Bom -Path (Join-Path $RepoRoot 'docs\outputs\untracked-drift.md') -Content "# Untracked drift`r`n"
+    $untrackedPlanBody = @"
+- artifacts: [scripts/validate-lite-artifacts.ps1]
+- 更新 ``scripts/validate-lite-artifacts.ps1``
+"@
+    Write-Utf8Bom -Path (Join-Path $taskUntrackedDriftDir 'plan.md') -Content (New-PlanContent -TaskId $taskUntrackedDrift -Stage 'IMPLEMENT' -Tool 'codex' -ChangeContractBody $crossChangeContract -PlanSectionBody $untrackedPlanBody)
+    $untrackedResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskUntrackedDrift -RepoRoot $RepoRoot
+    if ($untrackedResult.ExitCode -eq 0 -and
+        ($untrackedResult.Output -join "`n") -match 'artifact drift: changed path is not declared in artifacts or affected_paths: docs/outputs/untracked-drift.md') {
+        Add-Check 'untracked changed path is warning-only'
+    } else {
+        Add-Failure ("untracked changed path should warn without failing, got: {0}" -f ($untrackedResult.Output -join ' | '))
+    }
+
+    $taskLegacyNoMetadata = 'lite-validator-legacy-nometa-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskLegacyNoMetadataDir = Join-Path $taskBase $taskLegacyNoMetadata
+    $createdTaskDirs += $taskLegacyNoMetadataDir
+    New-Item -ItemType Directory -Path $taskLegacyNoMetadataDir -Force | Out-Null
+    Write-Utf8Bom -Path (Join-Path $taskLegacyNoMetadataDir 'plan.md') -Content (New-PlanContent -TaskId $taskLegacyNoMetadata -Stage 'IMPLEMENT' -Tool 'codex')
+    $legacyNoMetadataResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskLegacyNoMetadata -RepoRoot $RepoRoot
+    if ($legacyNoMetadataResult.ExitCode -eq 0 -and
+        ($legacyNoMetadataResult.Output -join "`n") -match 'artifact drift advisory skipped because artifacts and affected_paths are absent') {
+        Add-Check 'legacy task without artifacts or Change Contract remains legal'
+    } else {
+        Add-Failure ("legacy task without artifacts or Change Contract should stay legal, got: {0}" -f ($legacyNoMetadataResult.Output -join ' | '))
     }
 
     $taskMetadataPositionInvalid = 'lite-validator-planmeta-position-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
@@ -616,15 +685,18 @@ try {
         Where-Object { Test-Path (Join-Path $_.FullName 'plan.md') } |
         Sort-Object Name |
         Select-Object -ExpandProperty Name
-    if ($livePlanTasks.Count -eq 18) {
-        Add-Check 'live baseline still contains 18 plan-bearing tasks'
+    if ($livePlanTasks.Count -eq 25) {
+        Add-Check 'live baseline still contains 25 plan-bearing tasks'
     } else {
-        Add-Failure ("live baseline should contain 18 plan-bearing tasks, got {0}" -f $livePlanTasks.Count)
+        Add-Failure ("live baseline should contain 25 plan-bearing tasks, got {0}" -f $livePlanTasks.Count)
     }
 
     $expectedPassTasks = @(
+        'artifact-drift-advisory',
         'codestable-borrowing-roadmap',
+        'context-manifest-advisory',
         'eo-lite-enhancement',
+        'finish-boundary-checklist',
         'overview-maintenance-enhancement',
         'phase3-acp-skill-alignment',
         'phase4-team-preset-bridge',
@@ -633,6 +705,10 @@ try {
         'phase7-runtime-hooks-artifact-declaration',
         'shared-memory-v2-live-migration',
         'shared-memory-v2-optimization',
+        'task-entity-artifact-design',
+        'trellis-adoption-roadmap',
+        'trellis-comparison-reusable-design',
+        'trellis-context-injection-feasibility',
         'workflow-optimization-roadmap'
     )
     $expectedFailTasks = @(

@@ -19,8 +19,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $ValidStages = @("PLAN", "PLAN_REVIEW", "IMPLEMENT", "CODE_REVIEW", "TEST", "DONE")
-$ValidTools = @("claudecode", "codex", "gemini")
-$ModelAliasPattern = '^(opus|sonnet|haiku|pro|flash|default|latest|codex|gemini|claude|gpt)$'
+$ValidTools = @("claudecode", "codex")
+$ModelAliasPattern = '^(opus|sonnet|haiku|default|latest|codex|claude|gpt)$'
 
 if (-not $VaultRoot) {
     throw "Set OBSIDIAN_VAULT or pass -VaultRoot."
@@ -1000,7 +1000,7 @@ function Resolve-AssignedTool {
     }
 
     if ([string]::IsNullOrWhiteSpace($Tool)) {
-        throw ("Advancing to {0} requires -Tool (claudecode | codex | gemini)." -f $Stage)
+        throw ("Advancing to {0} requires -Tool (claudecode | codex)." -f $Stage)
     }
 
     $normalized = $Tool.Trim().ToLowerInvariant()

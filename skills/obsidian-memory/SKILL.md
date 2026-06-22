@@ -8,7 +8,7 @@ description: Use when a task needs shared Obsidian memory, session recovery, run
 > **已合入 entry-router**：核心读取顺序、写回规则和 guardrails 已内联到 `entry-router` skill 中。
 > 本文件保留为详细参考文档，无需在每次对话中单独调用。
 
-Claude、Codex、Gemini 共用同一份 Obsidian 记忆仓库：
+Claude、Codex 共用同一份 Obsidian 记忆仓库：
 `{VAULT_PATH}`
 
 ## When to Use
@@ -27,7 +27,7 @@ Claude、Codex、Gemini 共用同一份 Obsidian 记忆仓库：
 ## Writeback
 
 - 单写者：只有当前入口 host 写 `当前任务.md`、`中断任务.md`、`上次会话.md`、`恢复索引.md`
-- Codex / Gemini 若不是当前入口 host，只写 `docs/tasks/<task-id>/*` 和 `运行时\tasks\<task-id>.md`
+- Codex 若不是当前入口 host，只写 `docs/tasks/<task-id>/*` 和 `运行时\tasks\<task-id>.md`
 - 多步骤任务开始、切换或继续：当前入口 host 更新 `运行时\当前任务.md`（共享指针） + `运行时\tasks\<task-id>.md`
 - 任务暂停或待续：当前入口 host 同步更新 `运行时\tasks\<task-id>.md` 和 `运行时\中断任务.md`
 - 阶段完成：当前入口 host 更新 `运行时\上次会话.md` 并刷新 `运行时\恢复索引.md`
@@ -54,7 +54,7 @@ Claude、Codex、Gemini 共用同一份 Obsidian 记忆仓库：
 
 - 共享真相源只在 `{VAULT_PATH}`
 - `当前任务.md` 只是共享指针，不承载完整任务细节
-- 不在 `.claude`、`.codex`、`.gemini` 下创建平行 runtime note
+- 不在 `.claude`、`.codex` 下创建平行 runtime note
 - 不在 `MEMORY.md`、`配置\*.md`、`配置\引导状态.md` 记录当前任务
 - 长期记忆提升前必须得到用户确认
 

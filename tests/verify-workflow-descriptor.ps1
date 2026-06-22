@@ -479,7 +479,7 @@ stages:
 - findings: none
 - next: TEST
 "@
-    $workflowDefaultTestContent = New-PlanContent -TaskId $taskWorkflowDefaultTest -Stage 'CODE_REVIEW' -Tool 'gemini'
+    $workflowDefaultTestContent = New-PlanContent -TaskId $taskWorkflowDefaultTest -Stage 'CODE_REVIEW' -Tool 'claudecode'
     $workflowDefaultTestContent = [regex]::Replace($workflowDefaultTestContent, '(?m)^## Code Review\s*$', "## Code Review`r`n$codeReviewPass")
     Write-Utf8Bom -Path (Join-Path $taskWorkflowDefaultTestDir 'plan.md') -Content $workflowDefaultTestContent
     $workflowDefaultTestResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskWorkflowDefaultTest -VaultRoot $vaultRoot -RepoRoot $RepoRoot
@@ -605,7 +605,7 @@ stages:
     $taskF2Dir = Join-Path $taskBase $taskF2
     $createdTaskDirs += $taskF2Dir
     New-Item -ItemType Directory -Path $taskF2Dir -Force | Out-Null
-    Write-Utf8Bom -Path (Join-Path $taskF2Dir 'plan.md') -Content (New-PlanContent -TaskId $taskF2 -Stage 'PLAN' -Tool 'gemini' -ExtraFrontmatter @('tool_profile: harness-default-gemini', 'model: gemini-2.5-pro'))
+    Write-Utf8Bom -Path (Join-Path $taskF2Dir 'plan.md') -Content (New-PlanContent -TaskId $taskF2 -Stage 'PLAN' -Tool 'claudecode' -ExtraFrontmatter @('tool_profile: harness-default-claude', 'model: claude-opus-4-8'))
     $f2Result = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskF2 -VaultRoot $vaultRoot -RepoRoot $RepoRoot
     $f2Plan = Read-FileUtf8 -Path (Join-Path $taskF2Dir 'plan.md')
     $f2Mirror = Read-FileUtf8 -Path (Join-Path $vaultRoot "运行时\tasks\$taskF2.md")

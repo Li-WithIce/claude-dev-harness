@@ -33,7 +33,6 @@ skills/*/.runtime/
 vault-template/.obsidian/workspace.json
 agent-configs/workspace/entry/
 AGENTS.md
-GEMINI.md
 
 # OS / runtime noise
 Thumbs.db
@@ -42,4 +41,4 @@ Microsoft/
 /.idea/
 /.claude/
 /.codex/
-/.gemini/
+/.codedb-mcp/

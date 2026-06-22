@@ -21,7 +21,7 @@ orchestrator 只负责 lite workflow：`PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE
 ---
 task_id: <task-id>
 stage: PLAN | PLAN_REVIEW | IMPLEMENT | CODE_REVIEW | TEST | DONE
-tool: claudecode | codex | gemini | none
+tool: claudecode | codex | none
 tool_profile: <optional profile name>
 model: <optional full model id>
 updated: YYYY-MM-DD
@@ -30,7 +30,7 @@ updated: YYYY-MM-DD
 
 规则：
 
-- 非 `DONE` 阶段时，`tool` 只能是 `claudecode`、`codex`、`gemini`
+- 非 `DONE` 阶段时，`tool` 只能是 `claudecode`、`codex`
 - `DONE` 只能写 `tool: none`
 - `tool` 表示“当前 stage 由哪个工具继续”，仍是显式 backend 字段
 - `tool_profile` 与 `model` 是 opt-in；存在 `tool_profile` 时，profile 的 `backend` 必须等于 `tool`
@@ -55,11 +55,11 @@ orchestrator 只能在 `new-task mode=workflow` 或已确认的 resume/switch wo
 - `PLAN_REVIEW`：只加载 `review`
 - `IMPLEMENT`：只加载 `implement`
 - `CODE_REVIEW`：只加载 `review`
-- `TEST`：默认只加载 `test`；只有显式切到 Gemini 的 TEST 阶段才加载 `test-runner`
+- `TEST`：只加载 `test`
 - Markdown/HTML 互转、HTML 报告、网页 artifact、URL/HTML 提取 Markdown 或发布预览时，可额外加载 `md-html` 作为直接相关 skill；它说明 source/artifact 边界，不新增 stage，也不进入默认 stage whitelist。
 - `spec.md` / `plan.md` 超过 160 行或 8 个二级标题、且需要人工审阅/决策时，`md-html` 可生成 fixed template paired reading HTML；该产物不替代 Markdown 真相源。
 
-禁止 bulk-load 全部 skills、全部历史任务、Gemini / Claude 兼容 skill、`workflow-team`。`workflow-team` 仅在 `$env:AIONUI_TEAM_MODE='1'` 且 leader 明确选择 team mode 时加载。
+禁止 bulk-load 全部 skills、全部历史任务、Claude 兼容 skill、`workflow-team`。`workflow-team` 仅在 `$env:AIONUI_TEAM_MODE='1'` 且 leader 明确选择 team mode 时加载。
 
 ## 调度规则
 
@@ -67,8 +67,8 @@ orchestrator 只能在 `new-task mode=workflow` 或已确认的 resume/switch wo
 - `PLAN_REVIEW`：调用 `review` skill，写 `## Plan Review`
 - `IMPLEMENT`：调用 `implement` skill，写 `## Implementation Notes`
 - `CODE_REVIEW`：调用 `review` skill，写 `## Code Review`
-- `TEST`：默认调用 `test`，写 `test.md`；只有显式切到 Gemini 时才使用 `test-runner`
-- 优先调用 repo `scripts/invoke-harness-skill.ps1` 发起 `review` / `test` / `codex`；显式 Gemini 路径可发起 `test-runner`；返回 `status=markdown-fallback` 时回退到原 Markdown skill 流程
+- `TEST`：调用 `test`，写 `test.md`
+- 优先调用 repo `scripts/invoke-harness-skill.ps1` 发起 `review` / `test` / `codex`；返回 `status=markdown-fallback` 时回退到原 Markdown skill 流程
 - `implement` 不允许走 adapter；必须由主 agent / 人类直接执行
 
 **Team mode (documentation only)**: 当 leader 已设 `$env:AIONUI_TEAM_MODE='1'` 时，可调用 `skills/workflow-team/scripts/spawn-team.ps1` 起 5 role 团队；env 校验由 `spawn-team.ps1` 自身 fail-closed 强制。env 未设时维持单 agent 流程，所有 Phase 1-3 行为零变化；orchestrator skill 本身不新增任何读 env 的可执行分支。
@@ -85,7 +85,7 @@ pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <codex> -P
 # 可选：只传 profile，backend 从 profile.backend 解析
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Profile harness-default-codex
 # 可选：显式切到其他合法 backend
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <claudecode|gemini>
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <claudecode>
 ```
 
 规则：
@@ -141,7 +141,7 @@ tool: <tool>
 advance_hint: pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
 ```
 
-`advance_hint` 默认走 workflow descriptor；需要临时切换 backend 时再追加 `-Tool <claudecode|codex|gemini>`。`TEST -> DONE` 时也可以省略 `-Tool`。
+`advance_hint` 默认走 workflow descriptor；需要临时切换 backend 时再追加 `-Tool <claudecode|codex>`。`TEST -> DONE` 时也可以省略 `-Tool`。
 
 ## References
 

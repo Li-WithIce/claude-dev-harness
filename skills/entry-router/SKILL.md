@@ -50,7 +50,7 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 ### Guardrails
 
 - 共享真相源只在 `.assistant`
-- 不在 `.claude`、`.codex`、`.gemini` 下创建平行 runtime note
+- 不在 `.claude`、`.codex` 下创建平行 runtime note
 - 不在 `MEMORY.md`、`配置\*.md`、`配置\引导状态.md` 记录当前任务
 - 长期记忆提升前必须得到用户确认
 - 详细规则参考：`obsidian-memory` skill（已降级为参考文档）
@@ -94,7 +94,7 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 - `resume-current` / `switch-existing`：先加载 `运行时\恢复索引.md`、`运行时\当前任务.md`、`运行时\tasks\<task-id>.md`；必要时只读当前任务 `plan.md` frontmatter 判定 stage，再加载当前 stage skill。
 - `ask`：不加载 workflow skill，只问一个最小澄清问题。
 
-禁止 bulk-load 全部 skills、全部历史任务、Gemini / Claude 兼容 skill、`workflow-team`。只有显式 backend override、当前 stage/frontmatter 命中、或 `$env:AIONUI_TEAM_MODE='1'` 触发时才加载这些路径。
+禁止 bulk-load 全部 skills、全部历史任务、Claude 兼容 skill、`workflow-team`。只有显式 backend override、当前 stage/frontmatter 命中、或 `$env:AIONUI_TEAM_MODE='1'` 触发时才加载这些路径。
 
 ### Markdown / HTML artifact route
 
@@ -115,7 +115,7 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 - 唯一真相源：`docs/tasks/<task-id>/plan.md` frontmatter（`stage`、`tool`、`task_id`）
 - 终态标记：`DONE`，只写回 `plan.md` frontmatter，不是独立 stage
 - 默认执行面是 Codex-only：PLAN / PLAN_REVIEW / IMPLEMENT / CODE_REVIEW / TEST 都使用 `harness-default-codex`
-- 阶段推进：优先使用 `.assistant\entry\advance-stage.ps1 -TaskId <id>`；需要切换 backend 时再传 `-Tool <claudecode|codex|gemini>`
+- 阶段推进：优先使用 `.assistant\entry\advance-stage.ps1 -TaskId <id>`；需要切换 backend 时再传 `-Tool <claudecode|codex>`
 - 非 `DONE` 推进的下一阶段 tool 解析顺序是：显式 `-Tool` → 显式 `-Profile` → `agent-configs/workflows/harness-lite.yaml` 的 `default_profile`
 - 只有在显式 `-Tool`、显式 `-Profile` 和 workflow `default_profile` 都缺失时，非 `DONE` 推进才会报 `requires -Tool`
 - 用户可以在任意 stage 边界切换不同工具继续同一个 task
@@ -140,7 +140,7 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 |------|-----------|------|
 | 1 | 开发主流程 | orchestrator → plan / implement / review / test |
 | 2 | 可选补充分支 | spec（仅在输入不足时生成 delta-spec） |
-| 3 | 可选委派 | codex（用户显式要求或当前 stage 分配 `tool: codex` 时）、test-runner（仅显式切到 Gemini 的 TEST 阶段） |
+| 3 | 可选委派 | codex（用户显式要求或当前 stage 分配 `tool: codex` 时） |
 
 规则：
 - `spec` 在新流程中是**可选 delta-spec 分支**，不是默认入口
@@ -182,7 +182,7 @@ When multiple skills could apply, use this order:
 
 1. **开发主流程 skill 最优先**：开发任务先完成 `resume/switch/new/inbox` 判定；`new-task` 再选 `quick | workflow | ask`
 2. **流程型分支 skill 其次**：例如仅在输入不足时进入 `spec`
-3. **委派型 skill 再其次**：如 `codex`；显式 Gemini TEST 才使用 `test-runner`
+3. **委派型 skill 再其次**：如 `codex`
 
 "做一个新功能" → 先做 `new-task` mode routing；需要计划/留痕时进入 orchestrator。
 "Fix this bug" → 先判断 quick/workflow；低风险快修可 quick，需要 review/test 时进入 harness。

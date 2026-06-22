@@ -1,0 +1,35 @@
+# Optional task entity artifact.
+# Copy to docs/tasks/<task-id>/task-entity.yaml and list it in plan.md artifacts.
+# Advisory-only: this file must not drive stage, status, tool, review verdict, or current pointer.
+
+schema_version: task-entity/v1
+summary: ""
+owner: ""
+priority: ""
+branch: ""
+base_branch: ""
+worktree_path: ""
+pr_url: ""
+commit: ""
+parent: ""
+children: []
+related_files: []
+external_refs:
+  issues: []
+  docs: []
+meta:
+  linear_id: ""
+  jira_ticket: ""
+notes: []
+
+# forbidden fields:
+# - stage
+# - status
+# - verdict
+# - tool
+# - current_phase
+# - next_action
+# - active_task
+# - current_pointer
+# - handoff_conclusion
+# - done

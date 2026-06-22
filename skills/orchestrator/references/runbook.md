@@ -21,7 +21,7 @@
 - `resume-current` / `switch-existing` 先加载 `恢复索引.md`、`当前任务.md`、`运行时/tasks/<task-id>.md`，必要时只读当前任务 `plan.md` frontmatter，再加载当前 stage skill。
 - Markdown/HTML 互转、HTML report、网页 artifact、URL/HTML 提取 Markdown 或发布预览时，可额外加载 `md-html`；它不改变默认 PLAN/IMPLEMENT/REVIEW/TEST stage。
 - 长 `spec.md` / `plan.md` 超过 160 行或 8 个二级标题，且需要人工审阅/决策、Markdown 层次不够清晰时，默认声明 paired reading HTML artifact（`plan.review.html` / `spec.review.html` 或 `review.html`），并保留 Markdown 为 source。
-- 禁止 bulk-load 全部 skills、全部历史任务、Gemini / Claude 兼容 skill、`workflow-team`；显式 backend、stage 或 team-mode 触发时除外。
+- 禁止 bulk-load 全部 skills、全部历史任务、Claude 兼容 skill、`workflow-team`；显式 backend、stage 或 team-mode 触发时除外。
 
 ## 2. Execute by Stage
 
@@ -42,7 +42,7 @@ pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <codex> -P
 # 可选：只传 profile，backend 从 profile.backend 解析
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Profile harness-default-codex
 # 可选：显式切到其他合法 backend
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <claudecode|gemini>
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <claudecode>
 ```
 
 这个 workspace shim 会转调 repo 内的 `advance-stage.ps1`，并先自动运行 validator。

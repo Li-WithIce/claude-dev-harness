@@ -19,10 +19,12 @@ PLAN 的唯一产物是 `docs/tasks/<task-id>/plan.md`。这个文件的 frontma
 - frontmatter 必须包含：`task_id`、`stage`、`tool`、`updated`；可选 `tool_profile` / `model` 只能放在 `tool` 与 `updated` 之间
 - `stage` 在 PLAN 内保持 `PLAN`；不要手改到下一阶段，推进只走 `.assistant\entry\advance-stage.ps1`
 - 新任务进入 PLAN 前，未显式指定时默认使用 `tool: codex` + `harness-default-codex`
-- PLAN 阶段的 `tool` 只允许：`claudecode`、`codex`、`gemini`
+- PLAN 阶段的 `tool` 只允许：`claudecode`、`codex`
 - 如使用 `tool_profile`，必须来自 `agent-configs/profiles/<name>.yaml`，且 profile `backend` 必须等于 `tool`
 - 如写 `model`，必须使用完整模型 ID，不写 `opus`、`pro`、`latest` 这类短别名
 - `spec.md` 只是可选附件，路径为 `docs/tasks/<task-id>/spec.md`
+- `task-entity.yaml` 只是可选 advisory artifact，路径为 `docs/tasks/<task-id>/task-entity.yaml`；不得写 stage/status/verdict/tool/current pointer 类字段
+- `context-manifest.yaml` 只是可选 advisory artifact，路径为 `docs/tasks/<task-id>/context-manifest.yaml`；不得覆盖 lazy loading、`skills_whitelist`、workflow descriptor 或自动注入
 - 必须保留 append-only sections：`## Plan Review`、`## Implementation Notes`、`## Code Review`
 
 ## PLAN gate 必备内容
@@ -113,6 +115,31 @@ PLAN 的唯一产物是 `docs/tasks/<task-id>/plan.md`。这个文件的 frontma
 
 `change_type` 必须在枚举内；`affected_paths` 至少一条非占位条目。不需要时整段删除即可，validator 自动跳过。详见 `../orchestrator/references/lite-writing-guide.md`。
 
+### 可选 Task Entity Artifact
+
+大型、跨分支、有父子任务或外部 issue/PR 关联的任务，可以在 PLAN 阶段创建 `docs/tasks/<task-id>/task-entity.yaml`。它只记录 owner、priority、branch、base_branch、pr_url、parent、children、related_files、external_refs、meta 和 notes 等任务元数据。
+
+启用规则：
+
+- 必须把 `docs/tasks/<task-id>/task-entity.yaml` 加入 `## Plan` 的 `artifacts:` inline array。
+- 不要在 `task-entity.yaml` 写 `stage`、`status`、`verdict`、`tool`、`current_phase`、`next_action`、`active_task`、`current_pointer`、`handoff_conclusion` 或 `done`。
+- 不要让它驱动 `advance-stage.ps1`、runtime mirror、team board、validator hard gate 或 skill manifest。
+- 旧任务不需要回填；当前任务不需要时不要新建空文件。
+- 发现 task entity 会制造 second truth 风险时，优先删减字段或回到 PLAN 调整边界。
+
+### 可选 Context Manifest Artifact
+
+多阶段、大量事实源、跨任务研究或后续恢复成本高的任务，可以在 PLAN 阶段创建 `docs/tasks/<task-id>/context-manifest.yaml`。它只记录 phase、file、reason、required 和 notes 等上下文读取建议。
+
+启用规则：
+
+- 必须把 `docs/tasks/<task-id>/context-manifest.yaml` 加入 `## Plan` 的 `artifacts:` inline array。
+- 不要在 `context-manifest.yaml` 写 `stage`、`status`、`verdict`、`tool`、`current_phase`、`next_action`、`active_task`、`current_pointer`、`skills_whitelist`、`auto_inject`、`injector`、`load_by_default` 或 `workflow_state`。
+- 不要让它驱动 `advance-stage.ps1`、runtime mirror、team board、validator hard gate、skill manifest、lazy loading、`skills_whitelist` 或 workflow descriptor。
+- `read_first:` 仍是 Plan 顶部的最小入口清单；context manifest 只在复杂任务中补充阶段化原因说明。
+- 旧任务不需要回填；当前任务不需要时不要新建空文件。
+- 发现 context manifest 会制造 second truth 或自动注入风险时，优先删减字段或回到 PLAN 调整边界。
+
 ## 推荐骨架
 
 ```markdown
@@ -178,6 +205,8 @@ model: gpt-5.5/xhigh
 - `convergence:` 下面至少列 1 条可抽查的 criterion
 - `artifacts:` 也是同一 metadata 块中的可选字段，示例顺序固定为 `read_first -> convergence -> artifacts`
 - `artifacts:` 必须使用 inline-array 语法，且至少列 1 条任务产出路径
+- 启用 Task entity 时，`artifacts:` 需要包含 `docs/tasks/<task-id>/task-entity.yaml`；它仍是 advisory 交付物，不是阶段状态
+- 启用 Context Manifest 时，`artifacts:` 需要包含 `docs/tasks/<task-id>/context-manifest.yaml`；它仍是 advisory 交付物，不是加载或注入配置
 - 不需要时整段删除即可；不要把它们混到普通 TODO bullets 中
 
 ## 工作方式
