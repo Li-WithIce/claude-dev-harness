@@ -127,6 +127,19 @@ PLAN 的唯一产物是 `docs/tasks/<task-id>/plan.md`。这个文件的 frontma
 - 旧任务不需要回填；当前任务不需要时不要新建空文件。
 - 发现 task entity 会制造 second truth 风险时，优先删减字段或回到 PLAN 调整边界。
 
+### 可选 Subtask Roadmap Artifact
+
+大型 roadmap、父子任务拆分或依赖较多的任务，可以在 PLAN 阶段声明 `docs/tasks/<task-id>/subtasks.yaml` 或 `docs/roadmaps/<slug>/items.yaml`。它只保存拆分项、依赖、完成判据、相关 artifact 和 open gaps，方便拆分、复核和恢复。
+
+启用规则：
+
+- 适用于 parent/child task、跨多个 `docs/tasks/<task-id>/` 的 roadmap，或需要清晰依赖关系的大型计划；不要为普通单任务创建空 roadmap。
+- 必须把实际创建的 `docs/tasks/<task-id>/subtasks.yaml` 或 `docs/roadmaps/<slug>/items.yaml` 加入 `## Plan` 的 `artifacts:` inline array。
+- 不要在 roadmap artifact 写 `stage`、`status`、`verdict`、`tool`、`current_phase`、`next_action`、`active_task`、`current_pointer`、`handoff_conclusion` 或 `done`。
+- 不要让它驱动 `advance-stage.ps1`、runtime mirror、team board、queue/scheduler、validator hard gate、workflow descriptor、skill manifest、PR 自动化或 worktree 自动化。
+- `task-entity.yaml` 记录单任务 metadata；subtask roadmap 记录拆分、依赖和完成判据。两者都不能替代 `plan.md` / `test.md`。
+- 旧任务不需要回填；当前任务不需要时不要新建空文件。
+
 ### 可选 Context Manifest Artifact
 
 多阶段、大量事实源、跨任务研究或后续恢复成本高的任务，可以在 PLAN 阶段创建 `docs/tasks/<task-id>/context-manifest.yaml`。它只记录 phase、file、reason、required 和 notes 等上下文读取建议。
@@ -219,6 +232,7 @@ model: gpt-5.5/xhigh
 - `artifacts:` 也是同一 metadata 块中的可选字段，示例顺序固定为 `read_first -> convergence -> artifacts`
 - `artifacts:` 必须使用 inline-array 语法，且至少列 1 条任务产出路径
 - 启用 Task entity 时，`artifacts:` 需要包含 `docs/tasks/<task-id>/task-entity.yaml`；它仍是 advisory 交付物，不是阶段状态
+- 启用 Subtask Roadmap 时，`artifacts:` 需要包含实际创建的 `docs/tasks/<task-id>/subtasks.yaml` 或 `docs/roadmaps/<slug>/items.yaml`；它仍是 advisory 拆分清单，不是调度器或阶段状态
 - 启用 Context Manifest 时，`artifacts:` 需要包含 `docs/tasks/<task-id>/context-manifest.yaml`；它仍是 advisory 交付物，不是加载或注入配置
 - 启用 Case Artifact 时，`artifacts:` 需要包含 `docs/tasks/<task-id>/case.md`；它仍是 advisory 证据包，不是验证结论或阶段状态
 - 不需要时整段删除即可；不要把它们混到普通 TODO bullets 中

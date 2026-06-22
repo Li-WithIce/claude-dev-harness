@@ -407,6 +407,18 @@ if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'vault-template/模板/ca
     Add-Failure 'case artifact template should exist at vault-template/模板/case.md'
 }
 
+if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'docs/工作流/subtask-roadmap-artifact.md') -PathType Leaf) {
+    Add-Check 'subtask roadmap workflow doc exists'
+} else {
+    Add-Failure 'subtask roadmap workflow doc should exist at docs/工作流/subtask-roadmap-artifact.md'
+}
+
+if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'vault-template/模板/subtasks.yaml') -PathType Leaf) {
+    Add-Check 'subtask roadmap template exists'
+} else {
+    Add-Failure 'subtask roadmap template should exist at vault-template/模板/subtasks.yaml'
+}
+
 if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'scripts/check-shared-memory-layers.ps1') -PathType Leaf) {
     Add-Check 'shared memory layers checker exists'
 } else {
@@ -517,16 +529,26 @@ Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'convergence'
 Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'artifacts:'
 Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'Case Artifact'
 Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'docs/tasks/<task-id>/case.md'
+Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'Subtask Roadmap'
+Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'docs/tasks/<task-id>/subtasks.yaml'
+Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'docs/roadmaps/<slug>/items.yaml'
 Assert-FileContains -Path 'skills/review/SKILL.md' -Needle 'read_first'
 Assert-FileContains -Path 'skills/review/SKILL.md' -Needle 'case.md'
 Assert-FileContains -Path 'skills/review/SKILL.md' -Needle 'case artifact'
+Assert-FileContains -Path 'skills/review/SKILL.md' -Needle 'subtasks.yaml'
+Assert-FileContains -Path 'skills/review/SKILL.md' -Needle 'subtask roadmap'
 Assert-FileContains -Path 'skills/test/SKILL.md' -Needle 'case.md'
 Assert-FileContains -Path 'skills/test/SKILL.md' -Needle 'Case Artifact advisory evidence bundle'
+Assert-FileContains -Path 'skills/test/SKILL.md' -Needle 'subtasks.yaml'
+Assert-FileContains -Path 'skills/test/SKILL.md' -Needle 'Subtask Roadmap advisory artifact'
 Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'read_first'
 Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'convergence'
 Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'artifacts:'
 Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'Case Artifact'
 Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'docs/tasks/<task-id>/case.md'
+Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'Subtask Roadmap'
+Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'docs/tasks/<task-id>/subtasks.yaml'
+Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'docs/roadmaps/<slug>/items.yaml'
 Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'SKILL.md 拆分守则'
 Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle '.assistant\entry\validate-lite-artifacts.ps1'
 Assert-FileContains -Path 'skills/implement/SKILL.md' -Needle '.assistant\entry\validate-lite-artifacts.ps1'
@@ -620,6 +642,14 @@ Assert-FileContains -Path 'docs/工作流/case-artifact.md' -Needle 'advisory-on
 Assert-FileContains -Path 'docs/工作流/case-artifact.md' -Needle 'second task truth source'
 Assert-FileContains -Path 'docs/工作流/case-artifact.md' -Needle 'validator hard gate'
 Assert-FileContains -Path 'vault-template/模板/case.md' -Needle '# Case Artifact'
+Assert-FileContains -Path 'docs/工作流/subtask-roadmap-artifact.md' -Needle 'subtasks.yaml'
+Assert-FileContains -Path 'docs/工作流/subtask-roadmap-artifact.md' -Needle 'docs/roadmaps/<slug>/items.yaml'
+Assert-FileContains -Path 'docs/工作流/subtask-roadmap-artifact.md' -Needle 'advisory-only'
+Assert-FileContains -Path 'docs/工作流/subtask-roadmap-artifact.md' -Needle 'second task truth source'
+Assert-FileContains -Path 'docs/工作流/subtask-roadmap-artifact.md' -Needle 'advance-stage.ps1'
+Assert-FileContains -Path 'vault-template/模板/subtasks.yaml' -Needle 'schema_version: 1'
+Assert-FileContains -Path 'vault-template/模板/subtasks.yaml' -Needle 'depends_on'
+Assert-FileContains -Path 'vault-template/模板/subtasks.yaml' -Needle 'forbidden'
 Assert-FileContains -Path 'skills/orchestrator/references/gates.md' -Needle 'new-task mode=workflow'
 Assert-FileContains -Path 'vault-template/工作流/任务识别协议.md' -Needle 'quick | workflow | ask'
 Assert-FileContains -Path 'vault-template/工作流/任务识别协议.md' -Needle '自动懒加载规则'

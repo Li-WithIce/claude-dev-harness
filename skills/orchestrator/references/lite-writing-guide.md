@@ -88,6 +88,17 @@ stages:
 - validator 只通过既有 artifact drift advisory 间接提示声明产物是否存在，不解析 `task-entity.yaml` schema，也不因字段内容改变 exit code。
 - 若 `task-entity.yaml` 与 `plan.md`、team board 或 runtime mirror 出现 second truth 风险，CODE_REVIEW 应退回修正文档边界或要求 TEST/Handoff 明确记录。
 
+### Subtask Roadmap Artifact（可选）
+
+- `docs/tasks/<task-id>/subtasks.yaml` 或 `docs/roadmaps/<slug>/items.yaml` 是大型 roadmap、父子任务拆分或依赖较多任务的可选 advisory-only 拆分清单，用来记录 item、task_id、depends_on、acceptance、artifacts、notes 和 open gaps。
+- 适用于 parent/child task、跨多个 `docs/tasks/<task-id>/` 的 roadmap，或需要清晰依赖关系的大型计划；普通单任务不需要创建空文件。
+- 启用时必须把实际创建路径写入 `## Plan` 的 `artifacts:` inline array，方便 IMPLEMENT、CODE_REVIEW 和 TEST/Handoff 检查交付状态。
+- `task-entity.yaml` 记录单任务 metadata；subtask roadmap 记录拆分、依赖和完成判据。两者都不替代 `plan.md` frontmatter、append-only review run 或 `test.md` 结论。
+- subtask roadmap artifact 不参与 `advance-stage.ps1`、runtime pointer、team board、queue/scheduler、validator hard gate、workflow descriptor、skill manifest、PR 自动化或 worktree 自动化。
+- forbidden fields: `stage`、`status`、`verdict`、`tool`、`current_phase`、`next_action`、`active_task`、`current_pointer`、`handoff_conclusion`、`done`。避免 item-level `state`、`progress`、`percent` 或 `complete` 字段，除非后续任务另行定义 advisory-only 口径。
+- validator 只通过既有 artifact drift advisory 间接提示声明产物是否存在，不解析 `subtasks.yaml` 或 roadmap schema，也不因字段内容改变 exit code。
+- 若 subtask roadmap 与 `plan.md`、`test.md`、team board 或 runtime mirror 出现 second truth 风险，CODE_REVIEW 应退回修正文档边界或要求 TEST/Handoff 明确记录。
+
 ### Context Manifest Artifact（可选）
 
 - `docs/tasks/<task-id>/context-manifest.yaml` 是可选 advisory-only 上下文清单，用来记录某个 phase 应读取的 file、reason、required 和 notes。
@@ -262,6 +273,7 @@ stages:
 - 示例顺序固定为 `read_first:` → `convergence:` → `artifacts:`；validator 不强制顺序，但文档示例与人工写作都按这个顺序
 - `artifacts:` 表示任务产出物声明；不要和 `## Change Contract` 里的 `affected_paths` 混用
 - `artifacts:` 是交付产物清单，`affected_paths` 是变更面清单；PLAN_REVIEW 应检查二者和非目标、verification 是否自洽，但旧任务缺少这些 opt-in 字段仍合法
+- 启用 Subtask Roadmap 时，`artifacts:` 需要包含实际创建的 `docs/tasks/<task-id>/subtasks.yaml` 或 `docs/roadmaps/<slug>/items.yaml`；它仍是 advisory 拆分清单，不是调度器或阶段状态
 - 启用 Case Artifact 时，`artifacts:` 需要包含 `docs/tasks/<task-id>/case.md`；它仍是 advisory 证据包，不是验证结论或阶段状态
 - Artifact drift audit 是 advisory-only：validator 只在 `IMPLEMENT` 及之后阶段把声明 artifact 缺失、未声明 changed path、明显角色混淆写入 `Warnings:`，不写 `Errors:`，不改变 exit code。
 - `PLAN` / `PLAN_REVIEW` 阶段不得因为未来 artifact 尚未创建而 warning；缺少 `artifacts:` 或 `Change Contract` 的旧任务继续合法。

@@ -66,6 +66,8 @@ pass
 
 若 `Plan.artifacts` 声明了 `docs/tasks/<task-id>/task-entity.yaml`，TEST/Handoff 需要在 `artifact` 或 `drift` 中说明该 Task entity advisory artifact 是否已交付，以及是否发现 stage/status/verdict/tool/current pointer 类 second truth 风险。TEST 不解析 task entity schema，也不把它当作阶段状态来源。
 
+若 `Plan.artifacts` 声明了 `docs/tasks/<task-id>/subtasks.yaml` 或 `docs/roadmaps/<slug>/items.yaml`，TEST/Handoff 需要在 `artifact` 或 `drift` 中说明该 Subtask Roadmap advisory artifact 是否已交付，是否覆盖 parent/child、depends_on、acceptance、artifacts 和 open gaps，以及是否发现替代 `advance-stage.ps1`、team board、`test.md` 结论或 Handoff 的 second truth 风险。TEST 不解析 roadmap schema，也不把它当作阶段状态来源。
+
 若 `Plan.artifacts` 声明了 `docs/tasks/<task-id>/context-manifest.yaml`，TEST/Handoff 需要在 `artifact` 或 `drift` 中说明该 Context Manifest advisory artifact 是否已交付，以及是否发现覆盖 `read_first:`、lazy loading、`skills_whitelist`、workflow descriptor 或自动注入的 second truth 风险。TEST 不解析 context manifest schema，也不把它当作加载或注入来源。
 
 若 `Plan.artifacts` 声明了 `docs/tasks/<task-id>/case.md`，TEST/Handoff 需要在 `artifact` 或 `drift` 中说明该 Case Artifact advisory evidence bundle 是否已交付，是否覆盖复现、时间线、证据、命令、环境和 open gaps，以及是否发现替代 `test.md` 结论或 Handoff 的 second truth 风险。TEST 不解析 case schema，也不把它当作阶段状态来源。
@@ -93,7 +95,7 @@ pass
 1. 读取 `plan.md` 和可选 `spec.md`
 2. 收集真实测试证据
 3. 按证据写 `test.md`
-4. 若声明了 `task-entity.yaml`、`context-manifest.yaml` 或 `case.md`，抽查文件存在性和 advisory-only 边界，并把结论写入 Handoff
+4. 若声明了 `task-entity.yaml`、`subtasks.yaml`、roadmap `items.yaml`、`context-manifest.yaml` 或 `case.md`，抽查文件存在性和 advisory-only 边界，并把结论写入 Handoff
 5. 确认 `Conclusion` 和 `Handoff` 合法
 6. 只有结论为 `pass` 时再执行 `.assistant\entry\advance-stage.ps1 -TaskId <task-id>` 进入 `DONE`
 7. `TEST -> DONE` 不需要再指定下一阶段 `tool`

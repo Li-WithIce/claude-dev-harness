@@ -1,0 +1,26 @@
+schema_version: 1
+summary: "..."
+owner: "..."
+items:
+  - id: "item-1"
+    task_id: ""
+    title: "..."
+    type: "task"
+    depends_on: []
+    acceptance:
+      - "..."
+    artifacts:
+      - "docs/tasks/<task-id>/plan.md"
+    notes: ""
+    open_gaps: []
+forbidden:
+  - stage
+  - status
+  - verdict
+  - tool
+  - current_phase
+  - next_action
+  - active_task
+  - current_pointer
+  - handoff_conclusion
+  - done

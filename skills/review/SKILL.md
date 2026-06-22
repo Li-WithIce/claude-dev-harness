@@ -53,6 +53,8 @@ description: Use when the task is in PLAN_REVIEW or CODE_REVIEW and a new append
 - `artifacts:`、`affected_paths`、`read_first:` 与 `convergence:` 是否足以让 IMPLEMENT 和后续 TEST/Handoff 检查产物存在性、artifact/diff drift、follow-up 和 memory/spec update 判断
 - 若 PLAN 启用 `docs/tasks/<task-id>/task-entity.yaml`，检查它是否写入 `artifacts:`，且定位为 Task entity advisory artifact，不含 `stage`、`status`、`verdict`、`tool`、`current_phase`、`next_action`、`active_task`、`current_pointer` 等 forbidden fields
 - 检查 task entity 是否只记录 owner/priority/branch/PR/parent/children/related_files/external_refs/meta/notes，没有把 stage/status、handoff conclusion 或当前 pointer 变成 second truth
+- 若 PLAN 启用 `docs/tasks/<task-id>/subtasks.yaml` 或 `docs/roadmaps/<slug>/items.yaml`，检查它是否写入 `artifacts:`，且定位为 Subtask Roadmap advisory artifact，不含 `stage`、`status`、`verdict`、`tool`、`current_phase`、`next_action`、`active_task`、`current_pointer` 等 forbidden fields
+- 检查 subtask roadmap artifact 是否只记录 item、task_id、depends_on、acceptance、artifacts、notes 和 open gaps，没有替代 `advance-stage.ps1`、team board、`test.md` 结论或 Handoff
 - 若 PLAN 启用 `docs/tasks/<task-id>/context-manifest.yaml`，检查它是否写入 `artifacts:`，且定位为 Context Manifest advisory artifact，不含 `stage`、`status`、`verdict`、`tool`、`current_phase`、`next_action`、`active_task`、`current_pointer`、`skills_whitelist`、`auto_inject` 等 forbidden fields
 - 检查 context manifest 是否只记录 phase/file/reason/required/notes，没有覆盖 `read_first:`、lazy loading、`skills_whitelist`、workflow descriptor 或自动注入机制，没有把上下文清单变成 second truth
 - 若 PLAN 启用 `docs/tasks/<task-id>/case.md`，检查它是否写入 `artifacts:`，且定位为 Case Artifact advisory evidence bundle，不含 `stage`、`status`、`verdict`、`tool`、`current_phase`、`next_action`、`active_task`、`current_pointer` 等 forbidden fields
@@ -67,6 +69,7 @@ description: Use when the task is in PLAN_REVIEW or CODE_REVIEW and a new append
 - 实际 diff 是否落在 `Change Contract.affected_paths` 可解释范围内，声明的 `Plan.artifacts` 是否已经创建或在 `Implementation Notes` 中解释未交付原因
 - 是否存在 artifact/diff drift：例如改了未声明路径、声明产物缺失、产物和变更面角色混淆；命中时用现有 finding 退回或要求 TEST 明确记录
 - 若声明了 `task-entity.yaml`，确认文件已交付、字段仍为 advisory metadata，且没有新增 stage/status/verdict/tool/current pointer 等 second truth 字段；发现边界漂移时退回 IMPLEMENT 或要求补文档
+- 若声明了 `subtasks.yaml` 或 `docs/roadmaps/<slug>/items.yaml`，确认文件已交付、字段仍为 advisory breakdown，且没有新增 stage/status/verdict/tool/current pointer、team board state 或 Handoff conclusion 等 second truth 字段；发现它替代调度器、`test.md` 或缺少关键依赖/完成判据时退回 IMPLEMENT 或要求 TEST 明确记录
 - 若声明了 `context-manifest.yaml`，确认文件已交付、字段仍为 advisory metadata，且没有新增 stage/status/verdict/tool/current pointer、`skills_whitelist` 或 auto injection 等 second truth 字段；发现 lazy loading / workflow descriptor 边界漂移时退回 IMPLEMENT 或要求补文档
 - 若声明了 `case.md`，确认文件已交付、字段仍为 advisory evidence，且没有新增 stage/status/verdict/tool/current pointer 或 Handoff conclusion 等 second truth 字段；发现它替代 `test.md` 或缺少关键调查证据时退回 IMPLEMENT 或要求 TEST 明确记录
 - 抽查实现是否命中 reflection 风险：过大文件继续塞逻辑、计划外抽象、邻近顺手重构、未声明新概念、症状补丁替代根因修复

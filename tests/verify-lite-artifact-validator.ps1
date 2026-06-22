@@ -692,10 +692,10 @@ try {
         Where-Object { Test-Path (Join-Path $_.FullName 'plan.md') } |
         Sort-Object Name |
         Select-Object -ExpandProperty Name
-    if ($livePlanTasks.Count -eq 7) {
-        Add-Check 'live baseline contains only 7 current plan-bearing tasks'
+    if ($livePlanTasks.Count -eq 8) {
+        Add-Check 'live baseline contains only 8 current plan-bearing tasks'
     } else {
-        Add-Failure ("live baseline should contain 7 current plan-bearing tasks, got {0}" -f $livePlanTasks.Count)
+        Add-Failure ("live baseline should contain 8 current plan-bearing tasks, got {0}" -f $livePlanTasks.Count)
     }
 
     $expectedPassTasks = @(
@@ -703,6 +703,7 @@ try {
         'context-manifest-advisory',
         'finish-boundary-checklist',
         'session-case-artifact',
+        'subtask-roadmap-artifact',
         'task-entity-artifact-design',
         'trellis-comparison-reusable-design',
         'trellis-context-injection-feasibility'
