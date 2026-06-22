@@ -395,6 +395,18 @@ if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'docs/工作流/single-wr
     Add-Failure 'single-writer precompact doc should exist at docs/工作流/single-writer-precompact.md'
 }
 
+if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'docs/工作流/case-artifact.md') -PathType Leaf) {
+    Add-Check 'case artifact workflow doc exists'
+} else {
+    Add-Failure 'case artifact workflow doc should exist at docs/工作流/case-artifact.md'
+}
+
+if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'vault-template/模板/case.md') -PathType Leaf) {
+    Add-Check 'case artifact template exists'
+} else {
+    Add-Failure 'case artifact template should exist at vault-template/模板/case.md'
+}
+
 if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'scripts/check-shared-memory-layers.ps1') -PathType Leaf) {
     Add-Check 'shared memory layers checker exists'
 } else {
@@ -503,10 +515,18 @@ Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'references/lit
 Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'read_first'
 Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'convergence'
 Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'artifacts:'
+Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'Case Artifact'
+Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'docs/tasks/<task-id>/case.md'
 Assert-FileContains -Path 'skills/review/SKILL.md' -Needle 'read_first'
+Assert-FileContains -Path 'skills/review/SKILL.md' -Needle 'case.md'
+Assert-FileContains -Path 'skills/review/SKILL.md' -Needle 'case artifact'
+Assert-FileContains -Path 'skills/test/SKILL.md' -Needle 'case.md'
+Assert-FileContains -Path 'skills/test/SKILL.md' -Needle 'Case Artifact advisory evidence bundle'
 Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'read_first'
 Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'convergence'
 Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'artifacts:'
+Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'Case Artifact'
+Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'docs/tasks/<task-id>/case.md'
 Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'SKILL.md 拆分守则'
 Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle '.assistant\entry\validate-lite-artifacts.ps1'
 Assert-FileContains -Path 'skills/implement/SKILL.md' -Needle '.assistant\entry\validate-lite-artifacts.ps1'
@@ -595,6 +615,11 @@ Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md'
 Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle '超过 160 行或含 8 个及以上 `##` 二级标题'
 Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'paired reading HTML 使用固定模板'
 Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'Local HTML enhancement 只限局部卡片、对比区、流程区、信息网格'
+Assert-FileContains -Path 'docs/工作流/case-artifact.md' -Needle 'case.md'
+Assert-FileContains -Path 'docs/工作流/case-artifact.md' -Needle 'advisory-only'
+Assert-FileContains -Path 'docs/工作流/case-artifact.md' -Needle 'second task truth source'
+Assert-FileContains -Path 'docs/工作流/case-artifact.md' -Needle 'validator hard gate'
+Assert-FileContains -Path 'vault-template/模板/case.md' -Needle '# Case Artifact'
 Assert-FileContains -Path 'skills/orchestrator/references/gates.md' -Needle 'new-task mode=workflow'
 Assert-FileContains -Path 'vault-template/工作流/任务识别协议.md' -Needle 'quick | workflow | ask'
 Assert-FileContains -Path 'vault-template/工作流/任务识别协议.md' -Needle '自动懒加载规则'

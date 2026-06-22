@@ -99,6 +99,17 @@ stages:
 - validator 只通过既有 artifact drift advisory 间接提示声明产物是否存在，不解析 `context-manifest.yaml` schema，也不因字段内容改变 exit code。
 - 若 `context-manifest.yaml` 与 `read_first:`、lazy loading、`skills_whitelist` 或 workflow descriptor 出现 second truth 风险，CODE_REVIEW 应退回修正文档边界或要求 TEST/Handoff 明确记录。
 
+### Case Artifact（可选）
+
+- `docs/tasks/<task-id>/case.md` 是长 debug、incident 或复杂 bug 调查任务的可选 advisory-only 证据包，用来记录复现、时间线、日志/命令证据、环境、调查结论和 open gaps。
+- 适用于 `work_type: bug`，或 incident/debug 类 `work_type: explore | maintenance` 任务；普通小修不需要创建空文件。
+- 启用时必须把 `docs/tasks/<task-id>/case.md` 写入 `## Plan` 的 `artifacts:` inline array，方便 IMPLEMENT、CODE_REVIEW 和 TEST/Handoff 检查交付状态。
+- `case.md` 不替代 `test.md`；最终验证结论、Handoff、delivery / follow_up 仍只写在 `test.md`。
+- `case.md` 不参与 `advance-stage.ps1`、runtime pointer、team board、validator hard gate、workflow descriptor 或 skill manifest。
+- forbidden fields: `stage`、`status`、`verdict`、`tool`、`current_phase`、`next_action`、`active_task`、`current_pointer`、`handoff_conclusion`、`done`。
+- validator 只通过既有 artifact drift advisory 间接提示声明产物是否存在，不解析 `case.md` schema，也不因字段内容改变 exit code。
+- 若 `case.md` 与 `plan.md`、`test.md`、team board 或 runtime mirror 出现 second truth 风险，CODE_REVIEW 应退回修正文档边界或要求 TEST/Handoff 明确记录。
+
 ### 必备 section
 
 推荐顺序固定为：
@@ -251,6 +262,7 @@ stages:
 - 示例顺序固定为 `read_first:` → `convergence:` → `artifacts:`；validator 不强制顺序，但文档示例与人工写作都按这个顺序
 - `artifacts:` 表示任务产出物声明；不要和 `## Change Contract` 里的 `affected_paths` 混用
 - `artifacts:` 是交付产物清单，`affected_paths` 是变更面清单；PLAN_REVIEW 应检查二者和非目标、verification 是否自洽，但旧任务缺少这些 opt-in 字段仍合法
+- 启用 Case Artifact 时，`artifacts:` 需要包含 `docs/tasks/<task-id>/case.md`；它仍是 advisory 证据包，不是验证结论或阶段状态
 - Artifact drift audit 是 advisory-only：validator 只在 `IMPLEMENT` 及之后阶段把声明 artifact 缺失、未声明 changed path、明显角色混淆写入 `Warnings:`，不写 `Errors:`，不改变 exit code。
 - `PLAN` / `PLAN_REVIEW` 阶段不得因为未来 artifact 尚未创建而 warning；缺少 `artifacts:` 或 `Change Contract` 的旧任务继续合法。
 - 不需要时整段删除即可；不要把它们插到普通 TODO 中途

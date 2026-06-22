@@ -55,6 +55,8 @@ description: Use when the task is in PLAN_REVIEW or CODE_REVIEW and a new append
 - 检查 task entity 是否只记录 owner/priority/branch/PR/parent/children/related_files/external_refs/meta/notes，没有把 stage/status、handoff conclusion 或当前 pointer 变成 second truth
 - 若 PLAN 启用 `docs/tasks/<task-id>/context-manifest.yaml`，检查它是否写入 `artifacts:`，且定位为 Context Manifest advisory artifact，不含 `stage`、`status`、`verdict`、`tool`、`current_phase`、`next_action`、`active_task`、`current_pointer`、`skills_whitelist`、`auto_inject` 等 forbidden fields
 - 检查 context manifest 是否只记录 phase/file/reason/required/notes，没有覆盖 `read_first:`、lazy loading、`skills_whitelist`、workflow descriptor 或自动注入机制，没有把上下文清单变成 second truth
+- 若 PLAN 启用 `docs/tasks/<task-id>/case.md`，检查它是否写入 `artifacts:`，且定位为 Case Artifact advisory evidence bundle，不含 `stage`、`status`、`verdict`、`tool`、`current_phase`、`next_action`、`active_task`、`current_pointer` 等 forbidden fields
+- 检查 case artifact 是否只记录复现、时间线、日志/命令证据、环境、调查结论和 open gaps，没有替代 `test.md` 的验证结论或 Handoff
 - reviewer 必须按 `read_first:` 抽查 IMPLEMENT 是否真读了，按 `convergence:` 抽查每条 criterion 是否可执行
 
 ### CODE_REVIEW
@@ -66,6 +68,7 @@ description: Use when the task is in PLAN_REVIEW or CODE_REVIEW and a new append
 - 是否存在 artifact/diff drift：例如改了未声明路径、声明产物缺失、产物和变更面角色混淆；命中时用现有 finding 退回或要求 TEST 明确记录
 - 若声明了 `task-entity.yaml`，确认文件已交付、字段仍为 advisory metadata，且没有新增 stage/status/verdict/tool/current pointer 等 second truth 字段；发现边界漂移时退回 IMPLEMENT 或要求补文档
 - 若声明了 `context-manifest.yaml`，确认文件已交付、字段仍为 advisory metadata，且没有新增 stage/status/verdict/tool/current pointer、`skills_whitelist` 或 auto injection 等 second truth 字段；发现 lazy loading / workflow descriptor 边界漂移时退回 IMPLEMENT 或要求补文档
+- 若声明了 `case.md`，确认文件已交付、字段仍为 advisory evidence，且没有新增 stage/status/verdict/tool/current pointer 或 Handoff conclusion 等 second truth 字段；发现它替代 `test.md` 或缺少关键调查证据时退回 IMPLEMENT 或要求 TEST 明确记录
 - 抽查实现是否命中 reflection 风险：过大文件继续塞逻辑、计划外抽象、邻近顺手重构、未声明新概念、症状补丁替代根因修复
 - 若命中 reflection 风险，确认最新 `Implementation Notes - risks:` 或 `- next:` 已说明理由、取舍和验证；未说明或超出 PLAN 时用现有 P1/P2 finding 退回 IMPLEMENT
 - 若 `work_type: bug`，确认实现证据能对应复现问题、根因定位和修复验证；未覆盖影响面回归时应退回补证据

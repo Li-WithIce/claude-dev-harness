@@ -140,6 +140,19 @@ PLAN 的唯一产物是 `docs/tasks/<task-id>/plan.md`。这个文件的 frontma
 - 旧任务不需要回填；当前任务不需要时不要新建空文件。
 - 发现 context manifest 会制造 second truth 或自动注入风险时，优先删减字段或回到 PLAN 调整边界。
 
+### 可选 Case Artifact
+
+长 debug、incident 或复杂 bug 调查任务，可以在 PLAN 阶段声明 `docs/tasks/<task-id>/case.md`。它只保存复现、时间线、日志/命令证据、环境和调查结论，方便恢复和复核。
+
+启用规则：
+
+- 适用于 `work_type: bug`，或 incident/debug 类 `work_type: explore | maintenance` 任务；不要为普通小修创建空 `case.md`。
+- 必须把 `docs/tasks/<task-id>/case.md` 加入 `## Plan` 的 `artifacts:` inline array。
+- 不要在 `case.md` 写 `stage`、`status`、`verdict`、`tool`、`current_phase`、`next_action`、`active_task`、`current_pointer`、`handoff_conclusion` 或 `done`。
+- 不要让它驱动 `advance-stage.ps1`、runtime mirror、team board、validator hard gate、workflow descriptor 或 skill manifest。
+- `case.md` 不替代 `test.md`；最终验证结论和 Handoff 仍只写在 `test.md`。
+- 旧任务不需要回填；当前任务不需要时不要新建空文件。
+
 ## 推荐骨架
 
 ```markdown
@@ -207,6 +220,7 @@ model: gpt-5.5/xhigh
 - `artifacts:` 必须使用 inline-array 语法，且至少列 1 条任务产出路径
 - 启用 Task entity 时，`artifacts:` 需要包含 `docs/tasks/<task-id>/task-entity.yaml`；它仍是 advisory 交付物，不是阶段状态
 - 启用 Context Manifest 时，`artifacts:` 需要包含 `docs/tasks/<task-id>/context-manifest.yaml`；它仍是 advisory 交付物，不是加载或注入配置
+- 启用 Case Artifact 时，`artifacts:` 需要包含 `docs/tasks/<task-id>/case.md`；它仍是 advisory 证据包，不是验证结论或阶段状态
 - 不需要时整段删除即可；不要把它们混到普通 TODO bullets 中
 
 ## 工作方式
