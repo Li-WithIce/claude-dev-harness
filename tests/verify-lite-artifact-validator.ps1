@@ -566,6 +566,33 @@ try {
         Add-Failure ("PLAN stage future artifact should not warn, got: {0}" -f ($futureArtifactsResult.Output -join ' | '))
     }
 
+    $taskUnicodeDrift = 'lite-validator-unicode-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskUnicodeDriftDir = Join-Path $taskBase $taskUnicodeDrift
+    $createdTaskDirs += $taskUnicodeDriftDir
+    New-Item -ItemType Directory -Path $taskUnicodeDriftDir -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $RepoRoot 'docs\工作流') -Force | Out-Null
+    Write-Utf8Bom -Path (Join-Path $RepoRoot 'docs\工作流\unicode-drift.md') -Content "# Unicode drift`r`n"
+    $unicodePlanBody = @"
+- artifacts: [docs/工作流/unicode-drift.md]
+- 更新 ``docs/工作流/unicode-drift.md``
+"@
+    $unicodeChangeContract = @"
+- change_type: enhance
+- affected_paths:
+  - docs/tasks
+  - docs/工作流/unicode-drift.md
+"@
+    Write-Utf8Bom -Path (Join-Path $taskUnicodeDriftDir 'plan.md') -Content (New-PlanContent -TaskId $taskUnicodeDrift -Stage 'IMPLEMENT' -Tool 'codex' -ChangeContractBody $unicodeChangeContract -PlanSectionBody $unicodePlanBody)
+    $unicodeDriftResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskUnicodeDrift -RepoRoot $RepoRoot
+    $unicodeDriftOutput = $unicodeDriftResult.Output -join "`n"
+    if ($unicodeDriftResult.ExitCode -eq 0 -and
+        $unicodeDriftOutput -match 'Plan artifacts metadata is legal' -and
+        $unicodeDriftOutput -notmatch 'artifact drift: changed path is not declared') {
+        Add-Check 'non-ASCII declared changed path is not drift warning'
+    } else {
+        Add-Failure ("non-ASCII declared changed path should not warn as undeclared, got: {0}" -f ($unicodeDriftResult.Output -join ' | '))
+    }
+
     $taskArtifactsDriftWarning = 'lite-validator-artifacts-drift-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     $taskArtifactsDriftWarningDir = Join-Path $taskBase $taskArtifactsDriftWarning
     $createdTaskDirs += $taskArtifactsDriftWarningDir
@@ -692,14 +719,15 @@ try {
         Where-Object { Test-Path (Join-Path $_.FullName 'plan.md') } |
         Sort-Object Name |
         Select-Object -ExpandProperty Name
-    if ($livePlanTasks.Count -eq 8) {
-        Add-Check 'live baseline contains only 8 current plan-bearing tasks'
+    if ($livePlanTasks.Count -eq 9) {
+        Add-Check 'live baseline contains only 9 current plan-bearing tasks'
     } else {
-        Add-Failure ("live baseline should contain 8 current plan-bearing tasks, got {0}" -f $livePlanTasks.Count)
+        Add-Failure ("live baseline should contain 9 current plan-bearing tasks, got {0}" -f $livePlanTasks.Count)
     }
 
     $expectedPassTasks = @(
         'artifact-drift-advisory',
+        'artifact-drift-path-normalization',
         'context-manifest-advisory',
         'finish-boundary-checklist',
         'session-case-artifact',

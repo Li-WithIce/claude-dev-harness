@@ -601,7 +601,7 @@ function Get-GitChangedPathsForAudit {
         }
     }
 
-    $inside = @(& git -C $RepoRoot rev-parse --is-inside-work-tree 2>$null | ForEach-Object { [string]$_ })
+    $inside = @(& git -C $RepoRoot -c core.quotePath=false rev-parse --is-inside-work-tree 2>$null | ForEach-Object { [string]$_ })
     if ($LASTEXITCODE -ne 0 -or ($inside -join '').Trim() -ne 'true') {
         return [pscustomobject]@{
             Success = $false
@@ -616,7 +616,7 @@ function Get-GitChangedPathsForAudit {
         @('diff', '--cached', '--name-only'),
         @('ls-files', '--others', '--exclude-standard')
     )) {
-        $output = @(& git -C $RepoRoot @args 2>$null | ForEach-Object { [string]$_ })
+        $output = @(& git -C $RepoRoot -c core.quotePath=false @args 2>$null | ForEach-Object { [string]$_ })
         if ($LASTEXITCODE -ne 0) {
             return [pscustomobject]@{
                 Success = $false
