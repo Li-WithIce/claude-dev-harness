@@ -12,7 +12,9 @@ param(
 
     [string]$VaultRoot = $Env:OBSIDIAN_VAULT,
 
-    [string]$RepoRoot = ""
+    [string]$RepoRoot = "",
+
+    [string]$WorkspaceRoot = ""
 )
 
 Set-StrictMode -Version Latest
@@ -31,8 +33,13 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 } else {
     $repoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
 }
-$planPath = Join-Path $repoRoot "docs/tasks/$TaskId/plan.md"
-$testPath = Join-Path $repoRoot "docs/tasks/$TaskId/test.md"
+if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+    $workspaceRoot = $repoRoot
+} else {
+    $workspaceRoot = [System.IO.Path]::GetFullPath($WorkspaceRoot)
+}
+$planPath = Join-Path $workspaceRoot "docs/tasks/$TaskId/plan.md"
+$testPath = Join-Path $workspaceRoot "docs/tasks/$TaskId/test.md"
 $tasksDir = Join-Path $VaultRoot "运行时/tasks"
 $taskMirrorPath = Join-Path $tasksDir "$TaskId.md"
 $indexPath = Join-Path $VaultRoot "运行时/恢复索引.md"
@@ -54,18 +61,21 @@ function Invoke-LiteArtifactValidator {
     .PARAMETER TaskId
     任务 ID。
     .PARAMETER RepoRoot
-    仓库根目录。
+    harness 工具仓库根目录。
+    .PARAMETER WorkspaceRoot
+    当前项目根目录，任务 artifact 从这里读取。
     .OUTPUTS
     None。
     #>
     param(
         [string]$ValidatorPath,
         [string]$TaskId,
-        [string]$RepoRoot
+        [string]$RepoRoot,
+        [string]$WorkspaceRoot
     )
 
     $shellPath = (Get-Process -Id $PID).Path
-    $output = @(& $shellPath -NoProfile -File $ValidatorPath -TaskId $TaskId -RepoRoot $RepoRoot 2>&1 | ForEach-Object { [string]$_ })
+    $output = @(& $shellPath -NoProfile -File $ValidatorPath -TaskId $TaskId -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot 2>&1 | ForEach-Object { [string]$_ })
     if ($LASTEXITCODE -eq 0) {
         return
     }
@@ -404,7 +414,7 @@ function Get-ToolProfile {
     .DESCRIPTION
     只解析 Phase 1 需要的顶层 scalar 字段：name/backend/model。
     .PARAMETER RepoRoot
-    仓库根目录。
+    harness 工具仓库根目录。
     .PARAMETER Name
     profile 名称。
     .OUTPUTS
@@ -738,7 +748,9 @@ function Write-SkillManifest {
     .DESCRIPTION
     Phase 3 manifest 只在成功推进后 best-effort 生成，失败由调用方降级为 stderr 诊断。
     .PARAMETER RepoRoot
-    仓库根目录。
+    harness 工具仓库根目录。
+    .PARAMETER WorkspaceRoot
+    当前项目根目录，skill-manifest 写入这里的 docs/tasks。
     .PARAMETER TaskId
     任务 ID。
     .PARAMETER Stage
@@ -750,12 +762,13 @@ function Write-SkillManifest {
     #>
     param(
         [string]$RepoRoot,
+        [string]$WorkspaceRoot,
         [string]$TaskId,
         [string]$Stage,
         [string]$Tool
     )
 
-    $manifestPath = Join-Path $RepoRoot ("docs/tasks/{0}/skill-manifest.json" -f $TaskId)
+    $manifestPath = Join-Path $WorkspaceRoot ("docs/tasks/{0}/skill-manifest.json" -f $TaskId)
     $manifest = [ordered]@{
         version = 1
         task_id = $TaskId
@@ -1208,7 +1221,7 @@ if ($stage -eq 'DONE') {
     throw "Unsupported plan tool: $currentTool"
 }
 
-Invoke-LiteArtifactValidator -ValidatorPath $validatorPath -TaskId $TaskId -RepoRoot $repoRoot
+Invoke-LiteArtifactValidator -ValidatorPath $validatorPath -TaskId $TaskId -RepoRoot $repoRoot -WorkspaceRoot $workspaceRoot
 
 $today = Get-Date -Format "yyyy-MM-dd"
 $nextStage = switch ($stage) {
@@ -1364,7 +1377,7 @@ Invoke-BestEffortRuntimeWrite -VaultRoot $VaultRoot -TaskId $TaskId -Step 'recov
 
 Write-Output "$nextStage | $nextTool"
 try {
-    Write-SkillManifest -RepoRoot $repoRoot -TaskId $TaskId -Stage $nextStage -Tool $nextTool
+    Write-SkillManifest -RepoRoot $repoRoot -WorkspaceRoot $workspaceRoot -TaskId $TaskId -Stage $nextStage -Tool $nextTool
 } catch {
     [Console]::Error.WriteLine("skill-manifest write skipped: $($_.Exception.Message)")
 }

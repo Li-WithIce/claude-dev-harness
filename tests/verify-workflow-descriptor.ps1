@@ -98,10 +98,22 @@ function Invoke-Validator {
     param(
         [string]$ValidatorPath,
         [string]$TaskId,
-        [string]$RepoRoot
+        [string]$RepoRoot,
+        [string]$WorkspaceRoot = ""
     )
 
-    $output = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ValidatorPath -TaskId $TaskId -RepoRoot $RepoRoot 2>&1 | ForEach-Object { [string]$_ })
+    $arguments = @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', $ValidatorPath,
+        '-TaskId', $TaskId,
+        '-RepoRoot', $RepoRoot
+    )
+    if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+        $arguments += @('-WorkspaceRoot', $WorkspaceRoot)
+    }
+
+    $output = @(& powershell.exe @arguments 2>&1 | ForEach-Object { [string]$_ })
     [pscustomobject]@{
         ExitCode = $LASTEXITCODE
         Output = $output
@@ -115,6 +127,7 @@ function Invoke-AdvanceStageWithStreams {
         [string]$TaskId,
         [string]$VaultRoot,
         [string]$RepoRoot,
+        [string]$WorkspaceRoot = "",
         [string]$Tool = "",
         [string]$Profile = "",
         [string]$Model = ""
@@ -128,6 +141,10 @@ function Invoke-AdvanceStageWithStreams {
         '-VaultRoot', $VaultRoot,
         '-RepoRoot', $RepoRoot
     )
+
+    if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+        $arguments += @('-WorkspaceRoot', $WorkspaceRoot)
+    }
 
     if (-not [string]::IsNullOrWhiteSpace($Tool)) {
         $arguments += @('-Tool', $Tool)
@@ -322,6 +339,7 @@ $vaultRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('harness-workflow-desc
 $script:Checks = @()
 $script:Failures = @()
 $createdTaskDirs = @()
+$createdWorkspaceRoots = @()
 
 New-Item -ItemType Directory -Path (Join-Path $vaultRoot '运行时\tasks') -Force | Out-Null
 
@@ -404,6 +422,39 @@ stages:
     }
 
     Set-WorkflowDescriptor -RepoRoot $RepoRoot -Content (Get-ValidWorkflowDescriptorContent)
+
+    $workspaceRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('harness-workflow-descriptor-workspace-' + [guid]::NewGuid().ToString('N'))
+    $createdWorkspaceRoots += $workspaceRoot
+    $workspaceTaskBase = Join-Path $workspaceRoot 'docs\tasks'
+    New-Item -ItemType Directory -Path $workspaceTaskBase -Force | Out-Null
+    $taskWorkspace = 'workflow-descriptor-workspace-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskWorkspaceDir = Join-Path $workspaceTaskBase $taskWorkspace
+    New-Item -ItemType Directory -Path $taskWorkspaceDir -Force | Out-Null
+    Write-Utf8Bom -Path (Join-Path $taskWorkspaceDir 'plan.md') -Content (New-PlanContent -TaskId $taskWorkspace -Stage 'PLAN' -Tool 'claudecode')
+    $workspaceAdvanceResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskWorkspace -VaultRoot $vaultRoot -RepoRoot $RepoRoot -WorkspaceRoot $workspaceRoot
+    $workspacePlan = Read-FileUtf8 -Path (Join-Path $taskWorkspaceDir 'plan.md')
+    $workspaceMirror = Read-FileUtf8 -Path (Join-Path $vaultRoot "运行时\tasks\$taskWorkspace.md")
+    $workspaceManifestPath = Join-Path $taskWorkspaceDir 'skill-manifest.json'
+    $repoTaskPath = Join-Path $taskBase $taskWorkspace
+    $repoManifestPath = Join-Path $repoTaskPath 'skill-manifest.json'
+    $workspaceManifest = if (Test-Path -LiteralPath $workspaceManifestPath -PathType Leaf) {
+        Read-FileUtf8 -Path $workspaceManifestPath | ConvertFrom-Json
+    } else {
+        $null
+    }
+    if ($workspaceAdvanceResult.ExitCode -eq 0 -and
+        $workspaceAdvanceResult.StdOut -eq 'PLAN_REVIEW | codex' -and
+        $workspacePlan -match '(?m)^stage:\s*PLAN_REVIEW\s*$' -and
+        $workspaceMirror -match [regex]::Escape("- pointer: docs/tasks/$taskWorkspace/plan.md") -and
+        $null -ne $workspaceManifest -and
+        $workspaceManifest.available_commands.Count -eq 1 -and
+        $workspaceManifest.available_commands[0].name -eq 'review' -and
+        -not (Test-Path -LiteralPath $repoTaskPath) -and
+        -not (Test-Path -LiteralPath $repoManifestPath)) {
+        Add-Check 'advance-stage reads and writes task artifacts in WorkspaceRoot while using RepoRoot for workflow config'
+    } else {
+        Add-Failure ("WorkspaceRoot advance should update only workspace artifacts, got stdout=[{0}] stderr=[{1}]" -f $workspaceAdvanceResult.StdOut, $workspaceAdvanceResult.StdErr)
+    }
 
     $taskCliTool = 'workflow-descriptor-b1-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     $taskCliToolDir = Join-Path $taskBase $taskCliTool
@@ -640,6 +691,10 @@ stages:
 } finally {
     foreach ($taskDir in $createdTaskDirs) {
         Remove-DirectoryWithRetry -Path $taskDir
+    }
+
+    foreach ($workspaceRoot in $createdWorkspaceRoots) {
+        Remove-DirectoryWithRetry -Path $workspaceRoot
     }
 
     Remove-DirectoryWithRetry -Path $vaultRoot

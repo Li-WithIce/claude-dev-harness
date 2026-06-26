@@ -1,0 +1,85 @@
+﻿---
+task_id: clarification-interrogation-protocol
+stage: DONE
+tool: none
+updated: 2026-06-23
+---
+# Clarification Interrogation Protocol
+
+## Clarification
+- work_type: doc
+- 验收标准: harness-lite 入口和 PLAN 写作规则明确吸收“澄清 / 拷问 / 头脑风暴 / 需求确认 / 方案压力测试 / 边界确认”等同族触发词；触发后进入现有 `PLAN -> ## Clarification` 协议或 `ask` 最小澄清，不新增 stage、runtime、validator hard gate 或第二 truth。
+- 非目标: 不引入 `.trellis/`、独立拷问 runtime、自动注入、dashboard、PR automation、queue/scheduler、新 workflow stage；不修改 `advance-stage.ps1` 阶段拓扑；不把 Clarification 协议升级成 validator hard failure。
+- 受影响目录: `skills/entry-router/SKILL.md`、`skills/plan/SKILL.md`、`skills/review/SKILL.md`、`skills/orchestrator/references/lite-writing-guide.md`、`vault-template/entry/AGENTS.md.template`、`vault-template/工作流/任务识别协议.md`、`agent-configs/*/*template`、`README.md`、`docs/tasks/README.md`、`tests/verify-lite-artifact-validator.ps1`、`docs/tasks/clarification-interrogation-protocol/*`（含 `advance-stage` 生成的 `skill-manifest.json`）。
+- 回滚策略: 回滚本任务文档和模板改动即可恢复旧路由口径；新增协议只影响写作和路由说明，不改变脚本推进行为或 validator exit code。
+- ui: not-applicable
+
+## User Confirmation
+- status: confirmed
+
+## Change Contract
+- change_type: enhance
+- affected_paths:
+  - skills/entry-router/SKILL.md
+  - skills/plan/SKILL.md
+  - skills/review/SKILL.md
+  - skills/orchestrator/references/lite-writing-guide.md
+  - vault-template/entry/AGENTS.md.template
+  - vault-template/工作流/任务识别协议.md
+  - agent-configs/codex/AGENTS.md.template
+  - agent-configs/workspace/AGENTS.md.template
+  - agent-configs/claude/CLAUDE.md.template
+  - README.md
+  - docs/tasks/README.md
+  - tests/verify-lite-artifact-validator.ps1
+  - docs/tasks/clarification-interrogation-protocol/plan.md
+  - docs/tasks/clarification-interrogation-protocol/skill-manifest.json
+  - docs/tasks/clarification-interrogation-protocol/test.md
+
+## Plan
+- read_first: [README.md, skills/entry-router/SKILL.md, skills/plan/SKILL.md, skills/review/SKILL.md, skills/orchestrator/references/lite-writing-guide.md, vault-template/entry/AGENTS.md.template, vault-template/工作流/任务识别协议.md, tests/verify-lite-artifact-validator.ps1]
+- convergence:
+  - `Select-String -Path skills/entry-router/SKILL.md,skills/plan/SKILL.md,skills/orchestrator/references/lite-writing-guide.md,README.md -Pattern '澄清|拷问|头脑风暴|需求确认|PLAN|Clarification'`
+  - `pwsh -NoProfile -File .assistant/entry/validate-lite-artifacts.ps1 -TaskId clarification-interrogation-protocol`
+  - `pwsh -NoProfile -File tests/verify-lite-artifact-validator.ps1`
+- artifacts: [docs/tasks/clarification-interrogation-protocol/plan.md, docs/tasks/clarification-interrogation-protocol/test.md]
+- TODO 1: 在 `skills/entry-router/SKILL.md` 和入口模板中加入 Clarification 协议族触发词，说明这些词在开发任务里默认导向 `PLAN/Clarification` 或 `ask`，不是新 stage。
+- TODO 2: 在 `skills/plan/SKILL.md` 与 `skills/orchestrator/references/lite-writing-guide.md` 中定义 Clarification 协议族写作规则：一次只问一个问题、能查代码先查代码、每个问题给推荐答案、确认前保持 `User Confirmation: draft`。
+- TODO 3: 在 `skills/review/SKILL.md` 中补充 PLAN_REVIEW 检查点，确认 Clarification 协议没有新增 stage、second truth 或 validator hard gate，且问题/推荐答案/决策口径能指导 IMPLEMENT。
+- TODO 4: 更新 README 和任务识别模板，面向使用者说明“需求澄清 / 拷问 / 头脑风暴 / 需求确认”等词如何进入现有 workflow。
+- TODO 5: 更新 `docs/tasks/README.md` 和 `tests/verify-lite-artifact-validator.ps1` 的 live baseline，把本任务纳入当前 plan-bearing task set。
+- TODO 6: 追加 Implementation Notes、Code Review 和 TEST 证据，验证 validator 与核心回归通过后用 `advance-stage.ps1` 推进到 `DONE`。
+
+## Verification
+- `Select-String -Path skills/entry-router/SKILL.md,skills/plan/SKILL.md,skills/review/SKILL.md,skills/orchestrator/references/lite-writing-guide.md,README.md,vault-template/entry/AGENTS.md.template,vault-template/工作流/任务识别协议.md,agent-configs/codex/AGENTS.md.template,agent-configs/workspace/AGENTS.md.template,agent-configs/claude/CLAUDE.md.template -Pattern '澄清|拷问|头脑风暴|需求确认|Clarification|PLAN'`
+- `pwsh -NoProfile -File .assistant/entry/validate-lite-artifacts.ps1 -TaskId clarification-interrogation-protocol`
+- `pwsh -NoProfile -File tests/verify-lite-artifact-validator.ps1`
+- `pwsh -NoProfile -File scripts/run-validation.ps1 -Suite core`
+- `git diff --check`
+
+## Risks
+- 触发词过宽可能把普通闲聊误导到 workflow；缓解: 文案限定“开发任务 / 需要可审计决策”才进入 workflow，低置信度仍走 `ask`。
+- 新协议可能被误解为独立阶段；缓解: 所有文案都明确只落在 `PLAN -> ## Clarification`，不新增 stage 或 frontmatter 字段。
+- 新增 plan-bearing task 会造成 live baseline 漂移；缓解: 同步更新 `docs/tasks/README.md` 与 `tests/verify-lite-artifact-validator.ps1`。
+
+## Plan Review
+
+### Run 1 · 2026-06-23 18:10 · runner: Codex
+- verdict: pass
+- findings: none
+- next: proceed to IMPLEMENT; keep the change as writing/routing guidance only, and do not introduce a new stage, runtime, validator hard gate, or second truth source.
+
+## Implementation Notes
+
+### Run 1 · 2026-06-23 18:12 · runner: Codex
+- changed: Added the Clarification protocol family to entry routing, PLAN writing guidance, PLAN_REVIEW checks, installed entry templates, README user guidance, live task list, and validator live baseline; declared the task-local `skill-manifest.json` generated by `advance-stage`.
+- tests: `Select-String -Path skills/entry-router/SKILL.md,skills/plan/SKILL.md,skills/review/SKILL.md,skills/orchestrator/references/lite-writing-guide.md,README.md,vault-template/entry/AGENTS.md.template,vault-template/工作流/任务识别协议.md,agent-configs/codex/AGENTS.md.template,agent-configs/workspace/AGENTS.md.template,agent-configs/claude/CLAUDE.md.template -Pattern '澄清|拷问|头脑风暴|需求确认|Clarification|PLAN'` PASS; `pwsh -NoProfile -File .assistant/entry/validate-lite-artifacts.ps1 -TaskId clarification-interrogation-protocol` STATUS: PASS with expected advisory for future `test.md`; `pwsh -NoProfile -File tests/verify-lite-artifact-validator.ps1` PASS; `git diff --check` PASS; `pwsh -NoProfile -File scripts/run-validation.ps1 -Suite core` PASS.
+- risks: none beyond the planned broad-trigger risk; wording limits the protocol to development tasks that need durable decisions, and keeps low-confidence cases in `ask`.
+- next: CODE_REVIEW should verify the protocol remains writing/routing guidance only and did not add a stage, runtime, validator hard gate, or second truth.
+
+## Code Review
+
+### Run 1 · 2026-06-23 18:14 · runner: Codex
+- verdict: pass
+- findings: none
+- next: proceed to TEST; verify `test.md` removes the expected future-artifact advisory and rerun validator plus core regression.

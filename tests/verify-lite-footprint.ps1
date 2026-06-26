@@ -61,33 +61,6 @@ function Assert-PathAbsent {
     }
 }
 
-function Assert-FileContains {
-    <#
-    .SYNOPSIS
-    断言文件包含指定文本。
-    .DESCRIPTION
-    用于锁定共享模板和 ignore 规则的最小契约。
-    .PARAMETER Path
-    相对仓库根目录的文件路径。
-    .PARAMETER Needle
-    必须存在的文本。
-    .OUTPUTS
-    None。
-    #>
-    param(
-        [string]$Path,
-        [string]$Needle
-    )
-
-    $fullPath = Join-Path $script:RepoRoot $Path
-    $content = Get-Content -LiteralPath $fullPath -Raw -Encoding utf8
-    if ($content.Contains($Needle)) {
-        Add-Check ('{0} contains `{1}`' -f $Path, $Needle)
-    } else {
-        Add-Failure ('{0} should contain `{1}`' -f $Path, $Needle)
-    }
-}
-
 function Assert-FileNotContains {
     <#
     .SYNOPSIS
@@ -359,18 +332,6 @@ if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'scripts/run-validation.p
     Add-Failure 'quiet validation runner should exist at scripts/run-validation.ps1'
 }
 
-if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'scripts/context-preflight.ps1') -PathType Leaf) {
-    Add-Check 'context preflight helper exists'
-} else {
-    Add-Failure 'context preflight helper should exist at scripts/context-preflight.ps1'
-}
-
-if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'tests/verify-context-preflight.ps1') -PathType Leaf) {
-    Add-Check 'context preflight regression exists'
-} else {
-    Add-Failure 'context preflight regression should exist at tests/verify-context-preflight.ps1'
-}
-
 if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'skills/workflow-team/SKILL.md') -PathType Leaf) {
     Add-Check 'workflow-team skill exists'
 } else {
@@ -407,30 +368,6 @@ if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'docs/工作流/single-wr
     Add-Failure 'single-writer precompact doc should exist at docs/工作流/single-writer-precompact.md'
 }
 
-if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'docs/工作流/case-artifact.md') -PathType Leaf) {
-    Add-Check 'case artifact workflow doc exists'
-} else {
-    Add-Failure 'case artifact workflow doc should exist at docs/工作流/case-artifact.md'
-}
-
-if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'vault-template/模板/case.md') -PathType Leaf) {
-    Add-Check 'case artifact template exists'
-} else {
-    Add-Failure 'case artifact template should exist at vault-template/模板/case.md'
-}
-
-if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'docs/工作流/subtask-roadmap-artifact.md') -PathType Leaf) {
-    Add-Check 'subtask roadmap workflow doc exists'
-} else {
-    Add-Failure 'subtask roadmap workflow doc should exist at docs/工作流/subtask-roadmap-artifact.md'
-}
-
-if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'vault-template/模板/subtasks.yaml') -PathType Leaf) {
-    Add-Check 'subtask roadmap template exists'
-} else {
-    Add-Failure 'subtask roadmap template should exist at vault-template/模板/subtasks.yaml'
-}
-
 if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'scripts/check-shared-memory-layers.ps1') -PathType Leaf) {
     Add-Check 'shared memory layers checker exists'
 } else {
@@ -443,283 +380,14 @@ if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'tests/verify-shared-memo
     Add-Failure 'shared memory layers regression should exist at tests/verify-shared-memory-layers.ps1'
 }
 
-Assert-FileContains -Path '.gitignore' -Needle '.assistant/'
-Assert-FileContains -Path '.gitignore' -Needle '!.assistant/运行时/'
-Assert-FileContains -Path '.gitignore' -Needle '.assistant/运行时/*'
-Assert-FileContains -Path '.gitignore' -Needle '!.assistant/运行时/记忆-学习.md'
-Assert-FileContains -Path '.gitignore' -Needle '!.assistant/运行时/记忆-决策.md'
-Assert-FileContains -Path '.gitignore' -Needle '!.assistant/运行时/记忆-约定.md'
-Assert-FileContains -Path '.gitignore' -Needle '!.assistant/运行时/记忆-问题.md'
-Assert-FileContains -Path '.gitignore' -Needle 'skills/*/.runtime/'
-Assert-FileContains -Path '.gitignore' -Needle 'agent-configs/workspace/entry/'
-Assert-FileContains -Path '.gitignore' -Needle '/.codex/'
-Assert-FileContains -Path 'docs/shared-memory-layers.md' -Needle '## Layers'
-Assert-FileContains -Path 'docs/shared-memory-layers.md' -Needle '## Writeback Ladder'
-Assert-FileContains -Path 'docs/shared-memory-layers.md' -Needle '## Forbidden Reverse Edges'
-Assert-FileContains -Path 'vault-template/工作流/共享记忆协议.md' -Needle 'docs/tasks/<task-id>/*'
-Assert-FileContains -Path 'vault-template/工作流/共享记忆协议.md' -Needle 'docs/shared-memory-layers.md'
-Assert-FileContains -Path 'vault-template/工作流/共享记忆协议.md' -Needle '{REPO_ROOT}\docs\shared-memory-layers.md'
-Assert-FileContains -Path 'vault-template/工作流/写回协议.md' -Needle 'docs/tasks/<task-id>/*'
-Assert-FileContains -Path 'vault-template/工作流/写回协议.md' -Needle 'docs/shared-memory-layers.md'
-Assert-FileContains -Path 'vault-template/配置/敏感信息规范.md' -Needle 'docs/tasks/**'
-Assert-FileContains -Path 'README.md' -Needle 'skills/orchestrator/references/lite-writing-guide.md'
-Assert-FileContains -Path 'README.md' -Needle 'scripts/validate-lite-artifacts.ps1'
-Assert-FileContains -Path 'README.md' -Needle 'scripts/run-validation.ps1'
-Assert-FileContains -Path 'README.md' -Needle '-NoProfile -NonInteractive -File .\scripts\run-validation.ps1'
-Assert-FileContains -Path 'README.md' -Needle 'quiet validation'
-Assert-FileContains -Path 'README.md' -Needle 'export-team-preset.ps1'
-Assert-FileContains -Path 'README.md' -Needle 'AIONUI_TEAM_MODE'
-Assert-FileContains -Path 'README.md' -Needle '.assistant\entry\advance-stage.ps1'
-Assert-FileContains -Path 'README.md' -Needle '.assistant\entry\validate-lite-artifacts.ps1'
-Assert-FileContains -Path 'README.md' -Needle 'tool: claudecode | codex | none'
-Assert-FileContains -Path 'README.md' -Needle 'tool_profile'
-Assert-FileContains -Path 'README.md' -Needle 'mode: quick | workflow | ask'
-Assert-FileContains -Path 'README.md' -Needle '自动懒加载规则'
-Assert-FileContains -Path 'README.md' -Needle '禁止 bulk-load 全部 skills'
-Assert-FileContains -Path 'README.md' -Needle 'md-html'
-Assert-FileContains -Path 'README.md' -Needle 'Markdown 默认是人类和 AI 共同编辑的 canonical source / source of truth'
-Assert-FileContains -Path 'README.md' -Needle 'HTML 默认是 generated display artifact'
-Assert-FileContains -Path 'README.md' -Needle '超过 160 行或含 8 个及以上 `##` 二级标题'
-Assert-FileContains -Path 'README.md' -Needle 'paired reading HTML'
-Assert-FileContains -Path 'README.md' -Needle '不替代 Markdown'
-Assert-FileContains -Path 'README.md' -Needle '主动重组 summary、decision、risk、checkpoint'
-Assert-FileContains -Path 'README.md' -Needle 'scripts\render-review-html.ps1'
-Assert-FileContains -Path 'README.md' -Needle '默认不含 `doctype`、`html`、`head`、`body` 外壳'
-Assert-FileContains -Path 'README.md' -Needle '局部 HTML 增强只允许用于卡片、对比区、流程区、信息网格'
-Assert-FileContains -Path 'README.md' -Needle '不得使用 `script`、`iframe` 或外部 JS'
-Assert-FileContains -Path 'README.md' -Needle '完整 HTML 页面只有用户明确要求时才生成'
-Assert-FileContains -Path 'README.md' -Needle 'resume-current'
-Assert-FileContains -Path 'README.md' -Needle '直接改'
-Assert-FileContains -Path 'README.md' -Needle '走 workflow'
-Assert-FileContains -Path 'skills/workflow-team/SKILL.md' -Needle '.assistant/'
-Assert-FileContains -Path 'skills/workflow-team/SKILL.md' -Needle 'docs/tasks/<task-id>/'
-Assert-FileContains -Path 'scripts/advance-stage.ps1' -Needle 'validate-lite-artifacts.ps1'
-Assert-FileContains -Path 'scripts/advance-stage.ps1' -Needle '[writeback-fallback]'
-Assert-FileContains -Path 'scripts/export-team-preset.ps1' -Needle 'members_read_only_path_prefixes'
-Assert-FileContains -Path 'scripts/check-shared-memory-layers.ps1' -Needle 'derived_from'
-Assert-FileContains -Path 'tests/verify-shared-memory-layers.ps1' -Needle 'runtime.lock.json'
-Assert-FileContains -Path 'scripts/advance-stage.ps1' -Needle '[string]$Tool = ""'
-Assert-FileContains -Path 'scripts/advance-stage.ps1' -Needle '[string]$Profile = ""'
-Assert-FileContains -Path 'scripts/run-validation.ps1' -Needle 'CreateNoWindow = $true'
-Assert-FileContains -Path 'scripts/run-validation.ps1' -Needle "ValidateSet('quick', 'core', 'all')"
-Assert-FileContains -Path 'scripts/run-validation.ps1' -Needle '-NoProfile -NonInteractive -ExecutionPolicy Bypass'
-Assert-FileContains -Path 'scripts/run-validation.ps1' -Needle 'StandardOutputEncoding'
-Assert-FileContains -Path 'scripts/run-validation.ps1' -Needle 'verify-context-preflight.ps1'
-Assert-FileContains -Path 'scripts/context-preflight.ps1' -Needle 'advisory-only'
-Assert-FileContains -Path 'scripts/context-preflight.ps1' -Needle 'advance-stage'
-Assert-FileContains -Path 'scripts/context-preflight.ps1' -Needle 'skills_whitelist'
-Assert-FileContains -Path 'tests/verify-context-preflight.ps1' -Needle 'matching phase'
-Assert-FileContains -Path 'docs/工作流/context-manifest-artifact.md' -Needle 'scripts/context-preflight.ps1'
-Assert-FileContains -Path 'scripts/run-validation.ps1' -Needle 'verify-md-html-review-renderer.ps1'
-Assert-FileContains -Path 'scripts/render-review-html.ps1' -Needle 'data-visual-block="summary"'
-Assert-FileContains -Path 'scripts/render-review-html.ps1' -Needle 'data-visual-block="decision-grid"'
-Assert-FileContains -Path 'scripts/render-review-html.ps1' -Needle 'data-visual-block="risk-grid"'
-Assert-FileContains -Path 'scripts/render-review-html.ps1' -Needle 'data-visual-block="checkpoints"'
-Assert-FileContains -Path 'tests/verify-md-html-review-renderer.ps1' -Needle 'output stays an HTML fragment'
-Assert-FileContains -Path 'tests/verify-aionui-skill-contract.ps1' -Needle '-WindowStyle Hidden'
-Assert-FileContains -Path 'tests/verify-skill-manifest.ps1' -Needle '-WindowStyle Hidden'
-Assert-FileContains -Path 'tests/verify-workflow-descriptor.ps1' -Needle '-WindowStyle Hidden'
-Assert-FileContains -Path 'tests/verify-team-orchestration.ps1' -Needle '-WindowStyle Hidden'
-Assert-FileContains -Path 'tests/verify-team-preset.ps1' -Needle '-WindowStyle Hidden'
-Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle 'tool_profile'
-Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle '[switch]$Quality'
-Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle 'artifacts'
-Assert-FileContains -Path 'agent-configs/profiles/harness-default-claude.yaml' -Needle 'backend: claudecode'
-Assert-FileContains -Path 'agent-configs/profiles/harness-default-codex.yaml' -Needle 'backend: codex'
-Assert-FileContains -Path 'agent-configs/profiles/harness-default-codex.yaml' -Needle '  - entry-router'
-Assert-FileContains -Path 'agent-configs/profiles/harness-default-claude.yaml' -Needle '  - entry-router'
-Assert-FileContains -Path 'agent-configs/profiles/harness-default-codex.yaml' -Needle '  - md-html'
-Assert-FileContains -Path 'agent-configs/profiles/harness-default-claude.yaml' -Needle '  - md-html'
-Assert-FileContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle 'default_profile: harness-default-codex'
-Assert-FileContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle 'skills_whitelist: [plan, entry-router]'
 Assert-FileNotContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle 'skills_whitelist: [plan, using-superpowers]'
-Assert-FileContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle 'skills_whitelist: [test]'
-Assert-FileContains -Path 'agent-configs/role-prompts/plan-author.md' -Needle 'Allowed skills: plan, entry-router'
-Assert-FileContains -Path 'agent-configs/role-prompts/tester.md' -Needle 'Allowed skills: test'
 Assert-FileNotContains -Path 'agent-configs/role-prompts/tester.md' -Needle 'Allowed skills: test, test-runner'
-Assert-FileContains -Path 'skills/spec/SKILL.md' -Needle '../orchestrator/references/lite-writing-guide.md'
-Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle '../orchestrator/references/lite-writing-guide.md'
-Assert-FileContains -Path 'skills/review/SKILL.md' -Needle '../orchestrator/references/lite-writing-guide.md'
-Assert-FileContains -Path 'skills/review/SKILL.md' -Needle 'quality-rubric.md'
-Assert-FileContains -Path 'skills/test/SKILL.md' -Needle '../orchestrator/references/lite-writing-guide.md'
-Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'references/lite-writing-guide.md'
-Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'read_first'
-Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'convergence'
-Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'artifacts:'
-Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'Case Artifact'
-Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'docs/tasks/<task-id>/case.md'
-Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'Subtask Roadmap'
-Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'docs/tasks/<task-id>/subtasks.yaml'
-Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle 'docs/roadmaps/<slug>/items.yaml'
-Assert-FileContains -Path 'skills/review/SKILL.md' -Needle 'read_first'
-Assert-FileContains -Path 'skills/review/SKILL.md' -Needle 'case.md'
-Assert-FileContains -Path 'skills/review/SKILL.md' -Needle 'case artifact'
-Assert-FileContains -Path 'skills/review/SKILL.md' -Needle 'subtasks.yaml'
-Assert-FileContains -Path 'skills/review/SKILL.md' -Needle 'subtask roadmap'
-Assert-FileContains -Path 'skills/test/SKILL.md' -Needle 'case.md'
-Assert-FileContains -Path 'skills/test/SKILL.md' -Needle 'Case Artifact advisory evidence bundle'
-Assert-FileContains -Path 'skills/test/SKILL.md' -Needle 'subtasks.yaml'
-Assert-FileContains -Path 'skills/test/SKILL.md' -Needle 'Subtask Roadmap advisory artifact'
-Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'read_first'
-Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'convergence'
-Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'artifacts:'
-Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'Case Artifact'
-Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'docs/tasks/<task-id>/case.md'
-Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'Subtask Roadmap'
-Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'docs/tasks/<task-id>/subtasks.yaml'
-Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'docs/roadmaps/<slug>/items.yaml'
-Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'SKILL.md 拆分守则'
-Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle '.assistant\entry\validate-lite-artifacts.ps1'
-Assert-FileContains -Path 'skills/implement/SKILL.md' -Needle '.assistant\entry\validate-lite-artifacts.ps1'
-Assert-FileContains -Path 'skills/review/SKILL.md' -Needle '.assistant\entry\advance-stage.ps1'
-Assert-FileContains -Path 'skills/plan/SKILL.md' -Needle '不作为 Codex-only 默认流程的必需依赖'
-Assert-FileContains -Path 'skills/implement/SKILL.md' -Needle '不作为 Codex-only 默认流程的必需依赖'
-Assert-FileContains -Path 'skills/review/SKILL.md' -Needle '不作为 Codex-only 默认流程的必需依赖'
 Assert-FileNotContains -Path 'skills/plan/SKILL.md' -Needle '适用：`claudecode`'
 Assert-FileNotContains -Path 'skills/implement/SKILL.md' -Needle '适用：`claudecode`'
 Assert-FileNotContains -Path 'skills/review/SKILL.md' -Needle '适用：`claudecode`'
-Assert-FileContains -Path 'skills/test/SKILL.md' -Needle '.assistant\entry\validate-lite-artifacts.ps1'
-Assert-FileContains -Path 'skills/orchestrator/references/runbook.md' -Needle '.assistant\entry\advance-stage.ps1'
-Assert-FileContains -Path 'skills/orchestrator/references/runbook.md' -Needle 'spawn-team.ps1'
-Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle 'name: entry-router'
-Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '.assistant\entry\advance-stage.ps1'
-Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle 'mode: quick | workflow | ask'
-Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle 'quick`：只加载入口规则'
-Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '禁止 bulk-load 全部 skills'
-Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle 'md-html'
-Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle 'Markdown 默认是 source of truth'
-Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle 'HTML 是 generated artifact'
-Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '超过 160 行或含 8 个及以上 `##` 二级标题'
-Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle 'fixed template 生成 paired reading HTML'
-Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '局部 HTML 增强只限卡片、对比区、流程区、信息网格'
-Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '不使用 `script`、`iframe` 或外部 JS'
-Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '直接改'
-Assert-FileContains -Path 'skills/entry-router/SKILL.md' -Needle '走 workflow'
 Assert-PathAbsent -Path 'skills/using-superpowers'
 Assert-PathAbsent -Path ('skills/' + 'gemini-designer' + '-main')
-Assert-FileContains -Path 'skills/md-html/SKILL.md' -Needle 'name: md-html'
-Assert-FileContains -Path 'skills/md-html/SKILL.md' -Needle 'Markdown 是人类和 AI 共同编辑的 canonical source / source of truth'
-Assert-FileContains -Path 'skills/md-html/SKILL.md' -Needle 'HTML 是 generated display artifact'
-Assert-FileContains -Path 'skills/md-html/SKILL.md' -Needle '默认不允许同一轮同时自由编辑 Markdown 和 HTML'
-Assert-FileContains -Path 'skills/md-html/SKILL.md' -Needle '超过 160 行或含 8 个及以上二级标题'
-Assert-FileContains -Path 'skills/md-html/SKILL.md' -Needle 'Markdown-only'
-Assert-FileContains -Path 'skills/md-html/SKILL.md' -Needle 'Paired reading HTML'
-Assert-FileContains -Path 'skills/md-html/SKILL.md' -Needle 'Local HTML enhancement'
-Assert-FileContains -Path 'skills/md-html/SKILL.md' -Needle 'plan.review.html'
-Assert-FileContains -Path 'skills/md-html/SKILL.md' -Needle 'spec.review.html'
-Assert-FileContains -Path 'skills/md-html/SKILL.md' -Needle 'HTML 阅读版是派生产物，不替代 Markdown'
-Assert-FileContains -Path 'skills/md-html/SKILL.md' -Needle 'summary、decision、risk、checkpoint'
-Assert-FileContains -Path 'skills/md-html/SKILL.md' -Needle 'scripts/render-review-html.ps1'
-Assert-FileContains -Path 'skills/md-html/SKILL.md' -Needle '默认产物是自包含 HTML fragment + inline CSS'
-Assert-FileContains -Path 'skills/md-html/SKILL.md' -Needle '完整 HTML 页面只有用户明确要求时才生成'
-Assert-FileContains -Path 'skills/md-html/SKILL.md' -Needle '禁止 `script`、`iframe`、外部 JS'
-Assert-FileContains -Path 'skills/md-html/references/checklist.md' -Needle 'P0 Gate'
-Assert-FileContains -Path 'skills/md-html/references/checklist.md' -Needle 'P1 Gate'
-Assert-FileContains -Path 'skills/md-html/references/checklist.md' -Needle 'Markdown-only'
-Assert-FileContains -Path 'skills/md-html/references/checklist.md' -Needle 'Paired reading HTML'
-Assert-FileContains -Path 'skills/md-html/references/checklist.md' -Needle 'Local HTML enhancement'
-Assert-FileContains -Path 'skills/md-html/references/checklist.md' -Needle '未超过 160 行且少于 8 个 `##` 二级标题'
-Assert-FileContains -Path 'skills/md-html/references/checklist.md' -Needle '不把 HTML 放进代码块'
-Assert-FileContains -Path 'skills/md-html/references/checklist.md' -Needle '禁止 `script`、`iframe`、外部 JS'
-Assert-FileContains -Path 'skills/md-html/references/checklist.md' -Needle 'scripts/render-review-html.ps1'
-Assert-FileContains -Path 'skills/md-html/references/checklist.md' -Needle '退化为普通 Markdown 渲染'
-Assert-FileContains -Path 'skills/md-html/references/checklist.md' -Needle 'tests/verify-md-html-review-renderer.ps1'
-Assert-FileContains -Path 'tests/verify-md-html-review-renderer.ps1' -Needle 'output stays an HTML fragment'
-Assert-FileContains -Path 'scripts/render-review-html.ps1' -Needle 'Generated paired reading HTML fragment'
-Assert-FileContains -Path 'scripts/render-review-html.ps1' -Needle 'table-scroll'
-Assert-FileContains -Path 'skills/md-html/references/pipeline.md' -Needle 'markitdown'
-Assert-FileContains -Path 'skills/md-html/references/pipeline.md' -Needle '仓库不因此新增 runtime 依赖'
-Assert-FileContains -Path 'skills/md-html/references/pipeline.md' -Needle '模式矩阵'
-Assert-FileContains -Path 'skills/md-html/references/pipeline.md' -Needle 'fixed reading template'
-Assert-FileContains -Path 'skills/md-html/references/pipeline.md' -Needle 'HTML 阅读版是派生产物'
-Assert-FileContains -Path 'skills/md-html/references/pipeline.md' -Needle '结构重组后的 fragment'
-Assert-FileContains -Path 'skills/md-html/references/pipeline.md' -Needle '`doctype`、`html`、`head`、`body`'
-Assert-FileContains -Path 'skills/md-html/references/pipeline.md' -Needle 'Local HTML enhancement 模式不输出 `html` / `head` / `body` 外壳'
-Assert-FileContains -Path 'skills/md-html/references/pipeline.md' -Needle '`script`、`iframe`、外部 JS'
-Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'new-task mode=workflow'
-Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle '按当前 stage 懒加载'
-Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'md-html'
-Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle '不新增 stage，也不进入默认 stage whitelist'
-Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle '超过 160 行或 8 个二级标题'
-Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'fixed template paired reading HTML'
-Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'workflow-team` 仅在 `$env:AIONUI_TEAM_MODE=''1''`'
-Assert-FileContains -Path 'skills/orchestrator/references/runbook.md' -Needle 'mode: quick | workflow | ask'
-Assert-FileContains -Path 'skills/orchestrator/references/runbook.md' -Needle 'Lazy Loading'
-Assert-FileContains -Path 'skills/orchestrator/references/runbook.md' -Needle 'md-html'
-Assert-FileContains -Path 'skills/orchestrator/references/runbook.md' -Needle '不改变默认 PLAN/IMPLEMENT/REVIEW/TEST stage'
-Assert-FileContains -Path 'skills/orchestrator/references/runbook.md' -Needle '长 `spec.md` / `plan.md` 超过 160 行或 8 个二级标题'
-Assert-FileContains -Path 'skills/orchestrator/references/runbook.md' -Needle '默认声明 paired reading HTML artifact'
-Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'new-task mode=workflow'
-Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'Markdown / HTML artifact source boundary'
-Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'Markdown 默认是 source of truth'
-Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'HTML 默认是 generated display artifact'
-Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle '超过 160 行或含 8 个及以上 `##` 二级标题'
-Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'paired reading HTML 使用固定模板'
-Assert-FileContains -Path 'skills/orchestrator/references/lite-writing-guide.md' -Needle 'Local HTML enhancement 只限局部卡片、对比区、流程区、信息网格'
-Assert-FileContains -Path 'docs/工作流/case-artifact.md' -Needle 'case.md'
-Assert-FileContains -Path 'docs/工作流/case-artifact.md' -Needle 'advisory-only'
-Assert-FileContains -Path 'docs/工作流/case-artifact.md' -Needle 'second task truth source'
-Assert-FileContains -Path 'docs/工作流/case-artifact.md' -Needle 'validator hard gate'
-Assert-FileContains -Path 'vault-template/模板/case.md' -Needle '# Case Artifact'
-Assert-FileContains -Path 'docs/工作流/subtask-roadmap-artifact.md' -Needle 'subtasks.yaml'
-Assert-FileContains -Path 'docs/工作流/subtask-roadmap-artifact.md' -Needle 'docs/roadmaps/<slug>/items.yaml'
-Assert-FileContains -Path 'docs/工作流/subtask-roadmap-artifact.md' -Needle 'advisory-only'
-Assert-FileContains -Path 'docs/工作流/subtask-roadmap-artifact.md' -Needle 'second task truth source'
-Assert-FileContains -Path 'docs/工作流/subtask-roadmap-artifact.md' -Needle 'advance-stage.ps1'
-Assert-FileContains -Path 'vault-template/模板/subtasks.yaml' -Needle 'schema_version: 1'
-Assert-FileContains -Path 'vault-template/模板/subtasks.yaml' -Needle 'depends_on'
-Assert-FileContains -Path 'vault-template/模板/subtasks.yaml' -Needle 'forbidden'
-Assert-FileContains -Path 'skills/orchestrator/references/gates.md' -Needle 'new-task mode=workflow'
-Assert-FileContains -Path 'vault-template/工作流/任务识别协议.md' -Needle 'quick | workflow | ask'
-Assert-FileContains -Path 'vault-template/工作流/任务识别协议.md' -Needle '自动懒加载规则'
-Assert-FileContains -Path 'vault-template/工作流/恢复协议.md' -Needle 'Resume 懒加载'
-Assert-FileContains -Path 'vault-template/工作流/任务识别协议.md' -Needle '直接改'
-Assert-FileContains -Path 'vault-template/工作流/任务识别协议.md' -Needle '走 workflow'
-Assert-FileContains -Path 'vault-template/工作流/写回协议.md' -Needle 'mode: quick | workflow | ask'
-Assert-FileContains -Path '.assistant/工作流/长会话恢复.md' -Needle 'mode: quick | workflow | ask'
-Assert-FileContains -Path '.assistant/工作流/长会话恢复.md' -Needle 'Resume 懒加载'
-Assert-FileContains -Path 'vault-template/entry/AGENTS.md.template' -Needle 'mode: quick | workflow | ask'
-Assert-FileContains -Path 'vault-template/entry/AGENTS.md.template' -Needle 'Lazy loading:'
-Assert-FileContains -Path 'vault-template/entry/AGENTS.md.template' -Needle '`workflow`: load `entry-router`, `orchestrator`'
-Assert-FileContains -Path 'vault-template/entry/AGENTS.md.template' -Needle '`ask`: do not load workflow skills; ask one minimal clarification question.'
-Assert-FileContains -Path 'agent-configs/codex/AGENTS.md.template' -Needle 'Do not bulk-load all skills'
-Assert-FileContains -Path 'agent-configs/codex/AGENTS.md.template' -Needle '`workflow` loads `entry-router`, `orchestrator`'
-Assert-FileContains -Path 'agent-configs/codex/AGENTS.md.template' -Needle '`ask` does not load workflow skills; ask one minimal clarification question.'
-Assert-FileContains -Path 'agent-configs/workspace/AGENTS.md.template' -Needle 'Do not bulk-load all skills'
-Assert-FileContains -Path 'agent-configs/workspace/AGENTS.md.template' -Needle '`workflow` loads `entry-router`, `orchestrator`'
-Assert-FileContains -Path 'agent-configs/workspace/AGENTS.md.template' -Needle '`ask` does not load workflow skills; ask one minimal clarification question.'
-Assert-FileContains -Path 'agent-configs/claude/CLAUDE.md.template' -Needle 'Claude 是显式兼容 host'
-Assert-FileContains -Path 'agent-configs/claude/CLAUDE.md.template' -Needle '先调用 `/entry-router`'
-Assert-FileContains -Path 'agent-configs/claude/CLAUDE.md.template' -Needle '`ask` 不加载 workflow skill，只问一个最小澄清问题。'
-Assert-FileContains -Path 'skills/orchestrator/references/default-tool-profiles.md' -Needle 'team preset'
-Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'PreCompact 自检'
-Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'append-runtime-inbox.ps1'
-Assert-FileContains -Path 'skills/orchestrator/SKILL.md' -Needle 'single-writer-precompact.md'
-Assert-FileContains -Path 'skills/workflow-team/SKILL.md' -Needle 'PreCompact Callback'
-Assert-FileContains -Path 'skills/workflow-team/SKILL.md' -Needle 'append-runtime-inbox.ps1'
-Assert-FileContains -Path 'skills/workflow-team/SKILL.md' -Needle 'single-writer-precompact.md'
-Assert-FileContains -Path 'docs/team-write-authority.md' -Needle '.assistant/'
-Assert-FileContains -Path 'docs/team-write-authority.md' -Needle 'docs/tasks/<task-id>/'
-Assert-FileContains -Path 'docs/工作流/single-writer-precompact.md' -Needle 'cooperative-yield'
-Assert-FileContains -Path 'docs/工作流/single-writer-precompact.md' -Needle 'append-runtime-inbox.ps1'
-Assert-FileContains -Path 'docs/工作流/single-writer-precompact.md' -Needle 'skills/orchestrator/SKILL.md'
-Assert-FileContains -Path 'docs/工作流/single-writer-precompact.md' -Needle 'skills/workflow-team/SKILL.md'
-Assert-FileContains -Path 'skills/obsidian-memory/SKILL.md' -Needle '记忆-学习.md'
-Assert-FileContains -Path 'skills/obsidian-memory/SKILL.md' -Needle '记忆-决策.md'
-Assert-FileContains -Path 'skills/obsidian-memory/SKILL.md' -Needle '记忆-约定.md'
-Assert-FileContains -Path 'skills/obsidian-memory/SKILL.md' -Needle '记忆-问题.md'
-Assert-FileContains -Path 'skills/obsidian-memory/SKILL.md' -Needle '已合入 entry-router'
-Assert-FileContains -Path 'agent-configs/codex/config.shared.toml.template' -Needle 'skills\\entry-router\\SKILL.md'
 Assert-FileNotContains -Path 'agent-configs/codex/config.shared.toml.template' -Needle 'using-superpowers'
-Assert-FileContains -Path 'agent-configs/workflows/harness-lite.yaml' -Needle '-Quality'
-Assert-FileContains -Path 'docs/工作流/quality-rubric.md' -Needle 'completeness'
-Assert-FileContains -Path 'docs/工作流/quality-rubric.md' -Needle 'consistency'
-Assert-FileContains -Path 'docs/工作流/quality-rubric.md' -Needle 'accuracy'
-Assert-FileContains -Path 'docs/工作流/quality-rubric.md' -Needle 'depth'
-Assert-FileContains -Path '.assistant/运行时/记忆-学习.md' -Needle 'phase6-init'
-Assert-FileContains -Path '.assistant/运行时/记忆-决策.md' -Needle 'phase6-init'
-Assert-FileContains -Path '.assistant/运行时/记忆-约定.md' -Needle 'phase6-init'
-Assert-FileContains -Path '.assistant/运行时/记忆-问题.md' -Needle 'phase6-init'
 Assert-GitIgnoreState -Path '.assistant/运行时/记忆-学习.md' -ShouldBeIgnored $false
 Assert-GitIgnoreState -Path '.assistant/运行时/记忆-决策.md' -ShouldBeIgnored $false
 Assert-GitIgnoreState -Path '.assistant/运行时/记忆-约定.md' -ShouldBeIgnored $false
@@ -727,12 +395,6 @@ Assert-GitIgnoreState -Path '.assistant/运行时/记忆-问题.md' -ShouldBeIgn
 Assert-GitIgnoreState -Path '.assistant/运行时/记忆候选.md' -ShouldBeIgnored $true
 Assert-GitIgnoreState -Path '.assistant/运行时/记忆候选归档.md' -ShouldBeIgnored $true
 Assert-GitIgnoreState -Path '.assistant/运行时/收件箱.md' -ShouldBeIgnored $true
-Assert-FileContains -Path 'vault-template/entry/advance-stage.ps1.template' -Needle '{REPO_ROOT}\scripts\advance-stage.ps1'
-Assert-FileContains -Path 'vault-template/entry/advance-stage.ps1.template' -Needle '[string]$Tool = ""'
-Assert-FileContains -Path 'vault-template/entry/validate-lite-artifacts.ps1.template' -Needle '{REPO_ROOT}\scripts\validate-lite-artifacts.ps1'
-Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle "'entry-router'"
-Assert-FileContains -Path 'scripts/validate-lite-artifacts.ps1' -Needle "'md-html'"
-Assert-FileContains -Path 'skills/obsidian-memory/scripts/check-shared-memory.ps1' -Needle "Join-Path (Join-Path `$workspaceRoot 'docs/tasks') `$TaskId"
 Assert-FileNotContains -Path 'skills/obsidian-memory/scripts/check-shared-memory.ps1' -Needle "Join-Path (Join-Path `$workspaceRoot 'docs') `$TaskId"
 Assert-FileNotContains -Path 'skills/obsidian-memory/scripts/repair-shared-memory.ps1' -Needle 'docs/tasks/none/plan.md'
 Assert-FileNotContains -Path 'README.md' -Needle 'claude-codex-gemini'

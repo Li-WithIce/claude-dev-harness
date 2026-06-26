@@ -7,6 +7,8 @@ param(
 
     [string]$RepoRoot = "",
 
+    [string]$WorkspaceRoot = "",
+
     [switch]$Quality
 )
 
@@ -190,7 +192,7 @@ function Get-ToolProfile {
     .DESCRIPTION
     只解析 Phase 1 需要的顶层 scalar 字段：name/backend/model。
     .PARAMETER RepoRoot
-    仓库根目录。
+    harness 工具仓库根目录；profile 描述符从这里读取。
     .PARAMETER Name
     profile 名称。
     .OUTPUTS
@@ -659,7 +661,7 @@ function Assert-ArtifactDriftAdvisory {
     #>
     param(
         [string]$Stage,
-        [string]$RepoRoot,
+        [string]$WorkspaceRoot,
         [string[]]$Artifacts,
         [string[]]$AffectedPaths
     )
@@ -676,14 +678,14 @@ function Assert-ArtifactDriftAdvisory {
         return
     }
 
-    $gitState = Get-GitChangedPathsForAudit -RepoRoot $RepoRoot
+    $gitState = Get-GitChangedPathsForAudit -RepoRoot $WorkspaceRoot
     if (-not $gitState.Success) {
         Add-Warning ("artifact drift audit skipped: {0}" -f $gitState.Reason)
         return
     }
 
     foreach ($artifact in $artifactPaths) {
-        if (-not (Test-RepoRelativePathExists -RepoRoot $RepoRoot -RelativePath $artifact)) {
+        if (-not (Test-RepoRelativePathExists -RepoRoot $WorkspaceRoot -RelativePath $artifact)) {
             Add-Warning ("artifact drift: declared artifact is missing: {0}" -f $artifact)
         }
     }
@@ -704,7 +706,7 @@ function Assert-ArtifactDriftAdvisory {
     }
 
     foreach ($artifact in $artifactPaths) {
-        if (Test-RepoRelativePathExists -RepoRoot $RepoRoot -RelativePath $artifact) {
+        if (Test-RepoRelativePathExists -RepoRoot $WorkspaceRoot -RelativePath $artifact) {
             continue
         }
 
@@ -1387,7 +1389,8 @@ function Assert-PlanContract {
     param(
         [string]$TaskId,
         [string]$PlanPath,
-        [string]$RepoRoot
+        [string]$RepoRoot,
+        [string]$WorkspaceRoot
     )
 
     $content = Get-Content -LiteralPath $PlanPath -Raw -Encoding utf8
@@ -1471,7 +1474,7 @@ function Assert-PlanContract {
 
     $planBody = Get-SectionContent -Sections $sections -Name 'Plan'
     $planMetadata = Get-TopLevelPlanBullets -Content $planBody
-    Assert-ArtifactDriftAdvisory -Stage $fields['stage'] -RepoRoot $RepoRoot -Artifacts $planMetadata.ArtifactsItems -AffectedPaths $affectedPaths
+    Assert-ArtifactDriftAdvisory -Stage $fields['stage'] -WorkspaceRoot $WorkspaceRoot -Artifacts $planMetadata.ArtifactsItems -AffectedPaths $affectedPaths
     if ($planMetadata.OrdinaryBullets.Count -gt 0) {
         Add-Check "Plan contains actionable bullets"
     } else {
@@ -1579,12 +1582,16 @@ function Assert-TestContract {
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent $PSScriptRoot
 }
+if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+    $WorkspaceRoot = $RepoRoot
+}
 
 $script:Checks = @()
 $script:Failures = @()
 $script:Warnings = @()
 $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
-$taskRoot = Join-Path (Join-Path $RepoRoot 'docs\tasks') $TaskId
+$WorkspaceRoot = [System.IO.Path]::GetFullPath($WorkspaceRoot)
+$taskRoot = Join-Path (Join-Path $WorkspaceRoot 'docs\tasks') $TaskId
 $planPath = Join-Path $taskRoot 'plan.md'
 $specPath = Join-Path $taskRoot 'spec.md'
 $testPath = Join-Path $taskRoot 'test.md'
@@ -1597,7 +1604,7 @@ if (Test-Path -LiteralPath $taskRoot -PathType Container) {
 
 if (Test-Path -LiteralPath $planPath -PathType Leaf) {
     Add-Check "plan.md exists"
-    $planState = Assert-PlanContract -TaskId $TaskId -PlanPath $planPath -RepoRoot $RepoRoot
+    $planState = Assert-PlanContract -TaskId $TaskId -PlanPath $planPath -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot
 
     if (Test-Path -LiteralPath $specPath -PathType Leaf) {
         Add-Check "spec.md exists"

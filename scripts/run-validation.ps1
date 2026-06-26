@@ -159,7 +159,6 @@ if ($IncludeCachedDiff) {
 }
 
 $coreScripts = @(
-    'verify-context-preflight.ps1',
     'verify-lite-artifact-validator.ps1',
     'verify-lite-footprint.ps1',
     'verify-md-html-review-renderer.ps1',

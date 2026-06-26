@@ -64,14 +64,6 @@ pass
 
 `delivery` 与 `follow_up` 是 validator 最低必填；`artifact`、`drift`、`follow_up_decision`、`memory_spec_update` 是新任务的 finish boundary 写作要求，用来记录产物是否存在或已交付、是否存在 artifact / diff drift、follow-up 是否需要拆新任务、是否需要 memory / spec update。`current_state`、`key_decisions`、`next_actions` 为 opt-in 密度扩展，推荐长任务填写。旧格式 Handoff（只含 delivery/follow_up）继续通过 validator。格式契约以 `../orchestrator/references/lite-writing-guide.md` 为单一真相源。
 
-若 `Plan.artifacts` 声明了 `docs/tasks/<task-id>/task-entity.yaml`，TEST/Handoff 需要在 `artifact` 或 `drift` 中说明该 Task entity advisory artifact 是否已交付，以及是否发现 stage/status/verdict/tool/current pointer 类 second truth 风险。TEST 不解析 task entity schema，也不把它当作阶段状态来源。
-
-若 `Plan.artifacts` 声明了 `docs/tasks/<task-id>/subtasks.yaml` 或 `docs/roadmaps/<slug>/items.yaml`，TEST/Handoff 需要在 `artifact` 或 `drift` 中说明该 Subtask Roadmap advisory artifact 是否已交付，是否覆盖 parent/child、depends_on、acceptance、artifacts 和 open gaps，以及是否发现替代 `advance-stage.ps1`、team board、`test.md` 结论或 Handoff 的 second truth 风险。TEST 不解析 roadmap schema，也不把它当作阶段状态来源。
-
-若 `Plan.artifacts` 声明了 `docs/tasks/<task-id>/context-manifest.yaml`，TEST/Handoff 需要在 `artifact` 或 `drift` 中说明该 Context Manifest advisory artifact 是否已交付，以及是否发现覆盖 `read_first:`、lazy loading、`skills_whitelist`、workflow descriptor 或自动注入的 second truth 风险。TEST 不解析 context manifest schema，也不把它当作加载或注入来源。
-
-若 `Plan.artifacts` 声明了 `docs/tasks/<task-id>/case.md`，TEST/Handoff 需要在 `artifact` 或 `drift` 中说明该 Case Artifact advisory evidence bundle 是否已交付，是否覆盖复现、时间线、证据、命令、环境和 open gaps，以及是否发现替代 `test.md` 结论或 Handoff 的 second truth 风险。TEST 不解析 case schema，也不把它当作阶段状态来源。
-
 ## work_type 条件化验证
 
 当 `plan.md` 的 `## Clarification` 含 `work_type: bug` 或 `work_type: refactor` 时，TEST 仍只产出同一个 `docs/tasks/<task-id>/test.md`，不要新增 issue/refactor 专用报告或额外阶段。
@@ -95,12 +87,11 @@ pass
 1. 读取 `plan.md` 和可选 `spec.md`
 2. 收集真实测试证据
 3. 按证据写 `test.md`
-4. 若声明了 `task-entity.yaml`、`subtasks.yaml`、roadmap `items.yaml`、`context-manifest.yaml` 或 `case.md`，抽查文件存在性和 advisory-only 边界，并把结论写入 Handoff
-5. 确认 `Conclusion` 和 `Handoff` 合法
-6. 只有结论为 `pass` 时再执行 `.assistant\entry\advance-stage.ps1 -TaskId <task-id>` 进入 `DONE`
-7. `TEST -> DONE` 不需要再指定下一阶段 `tool`
-8. `DONE` 会清除 `tool_profile` / `model`，因为终态固定为 `tool: none`
-9. 如需单独排查文档问题，再手动运行 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
+4. 确认 `Conclusion` 和 `Handoff` 合法
+5. 只有结论为 `pass` 时再执行 `.assistant\entry\advance-stage.ps1 -TaskId <task-id>` 进入 `DONE`
+6. `TEST -> DONE` 不需要再指定下一阶段 `tool`
+7. `DONE` 会清除 `tool_profile` / `model`，因为终态固定为 `tool: none`
+8. 如需单独排查文档问题，再手动运行 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
 
 ## 不要做的事
 

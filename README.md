@@ -76,6 +76,8 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 
 显式覆盖词优先：用户说“直接改”“快修”时偏 `quick`；用户说“走 workflow”“留痕”“review”“test”时偏 `workflow`。没有显式词时由入口 agent 自主判断，默认保持轻量。
 
+“需求澄清”“需求确认”“拷问需求”“拷问方案”“头脑风暴”“方案压力测试”“设计访谈”“边界确认”“验收标准确认”“非目标确认”，以及 `clarify`、`brainstorm`、`pressure test`、`challenge this plan`、`ask me questions` 等表达属于 Clarification 协议族。它们不是新 stage：开发任务需要可审计决策或后续实现时，进入现有 `PLAN -> ## Clarification`，用户确认前 `## User Confirmation` 保持 `draft`；只有任务归属、目标或风险边界不足以判断时才走 `ask`，并且只问一个最小澄清问题。能通过代码库、文档或 artifact 回答的问题，入口 agent 应先查证再给推荐答案。
+
 ### 自动懒加载规则
 
 入口完成 `resume-current / switch-existing / new-task / inbox-first` 判定，以及 `new-task` 的 `quick | workflow | ask` 路由后，才加载下一层材料：
@@ -174,6 +176,8 @@ updated: YYYY-MM-DD
 当 `work_type: bug` 时，PLAN 里的 Clarification 应补足复现、期望/实际行为、影响面、根因定位动作和修复验证；TEST 会重点重跑复现、验证修复和最小回归；CODE_REVIEW 会检查实现证据是否覆盖根因与影响面。
 
 当 `work_type: refactor` 时，PLAN 里的 Clarification 应补足行为不变约束、重构边界、受影响调用点、等价验证和回滚/兼容路径；TEST 会重点验证行为等价；CODE_REVIEW 会检查是否夹带计划外功能行为变化。
+
+Clarification 协议族可在 `## Clarification` 中用普通 bullets 记录 `question`、`recommended_answer`、`decision`、`dependencies` 和 `non_goals`。这些字段只是写作约定，不写入 frontmatter，不参与 `advance-stage.ps1` 或 validator hard gate。
 
 最小写法示例：
 

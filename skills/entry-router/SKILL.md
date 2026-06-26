@@ -79,6 +79,15 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 - 偏 quick：`直接改`、`快修`、`小改一下`、`不用 workflow`、`别走流程`
 - 偏 workflow：`走 workflow`、`留痕`、`需要 review`、`需要 test`、`跑完整流程`、`写计划`
 
+### Clarification 协议触发词
+
+当开发任务里出现“需求澄清”“需求确认”“拷问需求”“拷问方案”“方案压力测试”“头脑风暴”“设计访谈”“边界确认”“验收标准确认”“非目标确认”，或英文 `clarify` / `brainstorm` / `pressure test` / `challenge this plan` / `ask me questions` / `interrogate the requirement` 等同族表达时，按 Clarification 协议处理。
+
+- 若请求需要可审计决策、后续实现或跨阶段留痕，走 `new-task mode=workflow`，在 `PLAN -> ## Clarification` 中沉淀问题、推荐答案、决策和边界；`## User Confirmation` 在用户确认前保持 `draft`。
+- 若任务归属、目标或风险边界不足以判断 quick/workflow，走 `ask`，只问一个最小澄清问题。
+- 若问题能通过读取代码、文档或现有 artifact 回答，先自行检索事实源，再给出推荐答案；不要把可查问题直接抛给用户。
+- Clarification 协议不是新 stage，不新增 frontmatter 字段、runtime、validator hard gate 或第二套 truth。
+
 默认判断：
 
 - 窄范围、单文件或文档小修、验收清楚、失败影响低、可立即验证时，默认 `quick`。

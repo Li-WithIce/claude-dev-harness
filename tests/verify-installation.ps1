@@ -509,7 +509,9 @@ Assert-RenderedFile -Path $WorkspaceAgentsPath -ForbiddenTokens $ForbiddenTokens
 Assert-GitIgnoreManagedEntries -Path $WorkspaceGitIgnorePath
 Assert-RenderedFile -Path $WorkspaceEntryAgentsPath -ForbiddenTokens $ForbiddenTokens
 Assert-RenderedFile -Path $WorkspaceAdvanceStageShimPath -ForbiddenTokens $ForbiddenTokens
+Assert-TemplateFileMatches -Path $WorkspaceAdvanceStageShimPath -TemplatePath (Join-Path $RepoRoot 'vault-template\entry\advance-stage.ps1.template') -Label 'workspace advance-stage shim'
 Assert-RenderedFile -Path $WorkspaceValidateArtifactsShimPath -ForbiddenTokens $ForbiddenTokens
+Assert-TemplateFileMatches -Path $WorkspaceValidateArtifactsShimPath -TemplatePath (Join-Path $RepoRoot 'vault-template\entry\validate-lite-artifacts.ps1.template') -Label 'workspace validate-lite-artifacts shim'
 
 if (Test-Path -LiteralPath $ClaudeSettingsPath -PathType Leaf) {
     try {

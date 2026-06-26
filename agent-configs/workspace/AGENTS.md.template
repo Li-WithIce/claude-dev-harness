@@ -17,6 +17,7 @@
 - `workflow` loads `entry-router`, `orchestrator`, and the current-stage skill.
 - `resume-current` / `switch-existing` loads recovery runtime files first, then the current-stage skill.
 - `ask` does not load workflow skills; ask one minimal clarification question.
+- Clarification-family requests such as 需求澄清 / 需求确认 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认 follow `.assistant\entry\AGENTS.md` and land in existing `PLAN -> Clarification` when they need durable development decisions; they do not create a new stage.
 - Do not bulk-load all skills, all historical tasks, Claude compatibility skills, or `workflow-team` unless an explicit trigger requires them.
 
 ## Entry Shim

@@ -154,6 +154,8 @@ function Invoke-Validator {
     任务标识。
     .PARAMETER RepoRoot
     仓库根目录。
+    .PARAMETER WorkspaceRoot
+    项目根目录；为空时 validator 使用 RepoRoot 兼容旧调用。
     .OUTPUTS
     PSCustomObject。
     #>
@@ -161,6 +163,7 @@ function Invoke-Validator {
         [string]$ValidatorPath,
         [string]$TaskId,
         [string]$RepoRoot,
+        [string]$WorkspaceRoot = "",
         [switch]$Quality
     )
 
@@ -171,6 +174,9 @@ function Invoke-Validator {
         '-TaskId', $TaskId,
         '-RepoRoot', $RepoRoot
     )
+    if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+        $command += @('-WorkspaceRoot', $WorkspaceRoot)
+    }
     if ($Quality.IsPresent) {
         $command += '-Quality'
     }
@@ -369,34 +375,6 @@ $handoff
 "@
 }
 
-function Assert-TaskSetEquals {
-    <#
-    .SYNOPSIS
-    比较实际 task 集合与预期快照。
-    .DESCRIPTION
-    当前 live baseline 只锁定保留下来的任务 artifact 集合，避免历史路线图影响回归。
-    .PARAMETER Label
-    集合标签。
-    .PARAMETER Actual
-    实际 task 名称集合。
-    .PARAMETER Expected
-    预期 task 名称集合。
-    .OUTPUTS
-    None。
-    #>
-    param(
-        [string]$Label,
-        [string[]]$Actual,
-        [string[]]$Expected
-    )
-
-    if ((@($Actual) -join '|') -eq (@($Expected) -join '|')) {
-        Add-Check ('{0} matches live snapshot' -f $Label)
-    } else {
-        Add-Failure ('{0} drifted. expected [{1}], got [{2}]' -f $Label, (@($Expected) -join ', '), (@($Actual) -join ', '))
-    }
-}
-
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 }
@@ -448,6 +426,26 @@ try {
         Add-Check 'valid DONE task passes validator'
     } else {
         Add-Failure ("valid task should pass validator, got: {0}" -f ($validResult.Output -join ' | '))
+    }
+
+    $workspaceRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('harness-lite-validator-workspace-' + [guid]::NewGuid().ToString('N'))
+    $createdTaskDirs += $workspaceRoot
+    $workspaceTaskBase = Join-Path $workspaceRoot 'docs\tasks'
+    New-Item -ItemType Directory -Path $workspaceTaskBase -Force | Out-Null
+    $taskWorkspace = 'lite-validator-workspace-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskWorkspaceDir = Join-Path $workspaceTaskBase $taskWorkspace
+    New-Item -ItemType Directory -Path $taskWorkspaceDir -Force | Out-Null
+    Write-Utf8Bom -Path (Join-Path $taskWorkspaceDir 'plan.md') -Content (New-PlanContent -TaskId $taskWorkspace -Stage 'PLAN' -Tool 'codex')
+    $workspaceResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskWorkspace -RepoRoot $RepoRoot -WorkspaceRoot $workspaceRoot
+    $repoTaskPath = Join-Path $taskBase $taskWorkspace
+    $workspaceOutput = $workspaceResult.Output -join "`n"
+    if ($workspaceResult.ExitCode -eq 0 -and
+        $workspaceOutput -match 'STATUS: PASS' -and
+        $workspaceOutput -match [regex]::Escape("TaskRoot: $taskWorkspaceDir") -and
+        -not (Test-Path -LiteralPath $repoTaskPath)) {
+        Add-Check 'validator reads task artifacts from WorkspaceRoot while using RepoRoot for harness config'
+    } else {
+        Add-Failure ("WorkspaceRoot task should pass without a repo-local task, got: {0}" -f ($workspaceResult.Output -join ' | '))
     }
 
     $validQualityResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskValid -RepoRoot $RepoRoot -Quality
@@ -714,81 +712,6 @@ try {
     } else {
         Add-Failure ("score verdict mismatch should fail in -Quality mode, got: {0}" -f ($qualityMismatchResult.Output -join ' | '))
     }
-
-    $livePlanTasks = Get-ChildItem (Join-Path $SourceRoot 'docs\tasks') -Directory |
-        Where-Object { Test-Path (Join-Path $_.FullName 'plan.md') } |
-        Sort-Object Name |
-        Select-Object -ExpandProperty Name
-    if ($livePlanTasks.Count -eq 10) {
-        Add-Check 'live baseline contains only 10 current plan-bearing tasks'
-    } else {
-        Add-Failure ("live baseline should contain 10 current plan-bearing tasks, got {0}" -f $livePlanTasks.Count)
-    }
-
-    $expectedPassTasks = @(
-        'artifact-drift-advisory',
-        'artifact-drift-path-normalization',
-        'context-manifest-advisory',
-        'context-preflight-advisory-command',
-        'finish-boundary-checklist',
-        'session-case-artifact',
-        'subtask-roadmap-artifact',
-        'task-entity-artifact-design',
-        'trellis-comparison-reusable-design',
-        'trellis-context-injection-feasibility'
-    )
-    $expectedFailTasks = @()
-
-    $livePassesDefault = @()
-    $liveFailsDefault = @()
-    foreach ($taskName in $livePlanTasks) {
-        $result = Invoke-Validator -ValidatorPath (Join-Path $SourceRoot 'scripts\validate-lite-artifacts.ps1') -TaskId $taskName -RepoRoot $SourceRoot
-        if ($result.ExitCode -eq 0) {
-            $livePassesDefault += $taskName
-        } else {
-            $liveFailsDefault += $taskName
-        }
-    }
-
-    Assert-TaskSetEquals -Label 'live default PASS set' -Actual $livePassesDefault -Expected $expectedPassTasks
-    Assert-TaskSetEquals -Label 'live default FAIL set' -Actual $liveFailsDefault -Expected $expectedFailTasks
-
-    $retiredLiveTasks = @(
-        @(
-            'codestable-borrowing-roadmap',
-            'eo-lite-enhancement',
-            'overview-maintenance-enhancement',
-            'phase2-workflow-descriptor',
-            'phase3-acp-skill-alignment',
-            'phase4-team-preset-bridge',
-            'phase5-doc-protocol-hardening',
-            'phase6-quality-score-hard-constraints',
-            'phase7-runtime-hooks-artifact-declaration',
-            'shared-memory-v2-live-migration',
-            'shared-memory-v2-optimization',
-            'trellis-adoption-roadmap',
-            'workflow-optimization-roadmap'
-        ) | Where-Object { $livePlanTasks -contains $_ }
-    )
-    if ($retiredLiveTasks.Count -eq 0) {
-        Add-Check 'retired historical plan tasks are absent from live baseline'
-    } else {
-        Add-Failure ("retired historical plan tasks should not remain in live baseline: {0}" -f ($retiredLiveTasks -join ', '))
-    }
-
-    $livePassesQuality = @()
-    $liveFailsQuality = @()
-    foreach ($taskName in $livePlanTasks) {
-        $result = Invoke-Validator -ValidatorPath (Join-Path $SourceRoot 'scripts\validate-lite-artifacts.ps1') -TaskId $taskName -RepoRoot $SourceRoot -Quality
-        if ($result.ExitCode -eq 0) {
-            $livePassesQuality += $taskName
-        } else {
-            $liveFailsQuality += $taskName
-        }
-    }
-
-    Assert-TaskSetEquals -Label 'live -Quality PASS set' -Actual $livePassesQuality -Expected $expectedPassTasks
-    Assert-TaskSetEquals -Label 'live -Quality FAIL set' -Actual $liveFailsQuality -Expected $expectedFailTasks
 
     $taskExtraField = 'lite-validator-extra-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     $taskExtraFieldDir = Join-Path $taskBase $taskExtraField

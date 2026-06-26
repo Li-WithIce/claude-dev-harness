@@ -20,5 +20,5 @@ The task id under `docs/tasks/<task-id>/`.
 None.
 #>
 
-& '{REPO_ROOT}\scripts\validate-lite-artifacts.ps1' -TaskId $TaskId -RepoRoot '{REPO_ROOT}'
+& '{REPO_ROOT}\scripts\validate-lite-artifacts.ps1' -TaskId $TaskId -RepoRoot '{REPO_ROOT}' -WorkspaceRoot '{WORKSPACE_ROOT}'
 exit $LASTEXITCODE

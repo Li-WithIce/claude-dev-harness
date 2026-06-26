@@ -40,6 +40,8 @@ description: Use when the task is in PLAN_REVIEW or CODE_REVIEW and a new append
 ### PLAN_REVIEW
 
 - Clarification 是否完整
+- 若用户通过“需求澄清 / 需求确认 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认”等同族触发词进入 PLAN，确认该协议只落在 `## Clarification` 和 `## User Confirmation`，没有新增 stage、frontmatter 字段、runtime、validator hard gate 或第二 truth。
+- 对 Clarification 协议族任务，检查关键问题是否一次一个、可由代码库回答的问题是否已先查证、仍需用户决策的问题是否带 `recommended_answer` 和可执行的决策边界。
 - 若 `## Clarification` 含 `work_type:`，核对它是否只作为 PLAN 语义路由使用，且与验收标准、非目标、受影响路径和验证命令一致
 - 确认 `work_type` 没有替代 `Change Contract.change_type`，没有写入 frontmatter，也没有要求 `advance-stage.ps1` 或 validator 把它当作阶段真相源
 - 若 `work_type: bug`，检查 PLAN 是否说明复现步骤、期望/实际行为、影响范围/严重程度、根因定位动作和修复验证动作；不得退化为“见 issue”这类不可执行占位
@@ -51,14 +53,6 @@ description: Use when the task is in PLAN_REVIEW or CODE_REVIEW and a new append
 - 风险和验证命令是否可执行
 - `Plan.artifacts` 是否描述交付产物，`Change Contract.affected_paths` 是否描述变更面；二者和非目标、verification 是否自洽，未把 artifact 声明误当成 hard gate 或第二 truth
 - `artifacts:`、`affected_paths`、`read_first:` 与 `convergence:` 是否足以让 IMPLEMENT 和后续 TEST/Handoff 检查产物存在性、artifact/diff drift、follow-up 和 memory/spec update 判断
-- 若 PLAN 启用 `docs/tasks/<task-id>/task-entity.yaml`，检查它是否写入 `artifacts:`，且定位为 Task entity advisory artifact，不含 `stage`、`status`、`verdict`、`tool`、`current_phase`、`next_action`、`active_task`、`current_pointer` 等 forbidden fields
-- 检查 task entity 是否只记录 owner/priority/branch/PR/parent/children/related_files/external_refs/meta/notes，没有把 stage/status、handoff conclusion 或当前 pointer 变成 second truth
-- 若 PLAN 启用 `docs/tasks/<task-id>/subtasks.yaml` 或 `docs/roadmaps/<slug>/items.yaml`，检查它是否写入 `artifacts:`，且定位为 Subtask Roadmap advisory artifact，不含 `stage`、`status`、`verdict`、`tool`、`current_phase`、`next_action`、`active_task`、`current_pointer` 等 forbidden fields
-- 检查 subtask roadmap artifact 是否只记录 item、task_id、depends_on、acceptance、artifacts、notes 和 open gaps，没有替代 `advance-stage.ps1`、team board、`test.md` 结论或 Handoff
-- 若 PLAN 启用 `docs/tasks/<task-id>/context-manifest.yaml`，检查它是否写入 `artifacts:`，且定位为 Context Manifest advisory artifact，不含 `stage`、`status`、`verdict`、`tool`、`current_phase`、`next_action`、`active_task`、`current_pointer`、`skills_whitelist`、`auto_inject` 等 forbidden fields
-- 检查 context manifest 是否只记录 phase/file/reason/required/notes，没有覆盖 `read_first:`、lazy loading、`skills_whitelist`、workflow descriptor 或自动注入机制，没有把上下文清单变成 second truth
-- 若 PLAN 启用 `docs/tasks/<task-id>/case.md`，检查它是否写入 `artifacts:`，且定位为 Case Artifact advisory evidence bundle，不含 `stage`、`status`、`verdict`、`tool`、`current_phase`、`next_action`、`active_task`、`current_pointer` 等 forbidden fields
-- 检查 case artifact 是否只记录复现、时间线、日志/命令证据、环境、调查结论和 open gaps，没有替代 `test.md` 的验证结论或 Handoff
 - reviewer 必须按 `read_first:` 抽查 IMPLEMENT 是否真读了，按 `convergence:` 抽查每条 criterion 是否可执行
 
 ### CODE_REVIEW
@@ -68,10 +62,6 @@ description: Use when the task is in PLAN_REVIEW or CODE_REVIEW and a new append
 - 最新 `Implementation Notes` 是否和代码一致
 - 实际 diff 是否落在 `Change Contract.affected_paths` 可解释范围内，声明的 `Plan.artifacts` 是否已经创建或在 `Implementation Notes` 中解释未交付原因
 - 是否存在 artifact/diff drift：例如改了未声明路径、声明产物缺失、产物和变更面角色混淆；命中时用现有 finding 退回或要求 TEST 明确记录
-- 若声明了 `task-entity.yaml`，确认文件已交付、字段仍为 advisory metadata，且没有新增 stage/status/verdict/tool/current pointer 等 second truth 字段；发现边界漂移时退回 IMPLEMENT 或要求补文档
-- 若声明了 `subtasks.yaml` 或 `docs/roadmaps/<slug>/items.yaml`，确认文件已交付、字段仍为 advisory breakdown，且没有新增 stage/status/verdict/tool/current pointer、team board state 或 Handoff conclusion 等 second truth 字段；发现它替代调度器、`test.md` 或缺少关键依赖/完成判据时退回 IMPLEMENT 或要求 TEST 明确记录
-- 若声明了 `context-manifest.yaml`，确认文件已交付、字段仍为 advisory metadata，且没有新增 stage/status/verdict/tool/current pointer、`skills_whitelist` 或 auto injection 等 second truth 字段；发现 lazy loading / workflow descriptor 边界漂移时退回 IMPLEMENT 或要求补文档
-- 若声明了 `case.md`，确认文件已交付、字段仍为 advisory evidence，且没有新增 stage/status/verdict/tool/current pointer 或 Handoff conclusion 等 second truth 字段；发现它替代 `test.md` 或缺少关键调查证据时退回 IMPLEMENT 或要求 TEST 明确记录
 - 抽查实现是否命中 reflection 风险：过大文件继续塞逻辑、计划外抽象、邻近顺手重构、未声明新概念、症状补丁替代根因修复
 - 若命中 reflection 风险，确认最新 `Implementation Notes - risks:` 或 `- next:` 已说明理由、取舍和验证；未说明或超出 PLAN 时用现有 P1/P2 finding 退回 IMPLEMENT
 - 若 `work_type: bug`，确认实现证据能对应复现问题、根因定位和修复验证；未覆盖影响面回归时应退回补证据

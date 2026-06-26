@@ -13,7 +13,7 @@ These shims delegate to the managed harness repo scripts and always use the inst
 
 `TEST -> DONE` also omits `-Tool`; non-DONE stages use the workflow descriptor when no explicit backend is passed.
 
-Mode hints: `directly edit` / `quick fix` / `直接改` / `快修` bias to `quick`; `workflow` / `留痕` / `review` / `test` bias to `workflow`. Use `ask` only when routing confidence is low.
+Mode hints: `directly edit` / `quick fix` / `直接改` / `快修` bias to `quick`; `workflow` / `留痕` / `review` / `test` bias to `workflow`. Clarification-family triggers such as `需求澄清` / `需求确认` / `拷问` / `头脑风暴` / `方案压力测试` / `边界确认` enter existing `PLAN -> Clarification` when a development task needs durable decisions; use `ask` only when routing confidence is low, and ask one minimal question.
 
 Lazy loading:
 

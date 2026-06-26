@@ -6,6 +6,7 @@
 
 - `artifact-drift-advisory`
 - `artifact-drift-path-normalization`
+- `clarification-interrogation-protocol`
 - `context-manifest-advisory`
 - `context-preflight-advisory-command`
 - `finish-boundary-checklist`
