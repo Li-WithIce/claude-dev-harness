@@ -229,6 +229,7 @@ function New-PlanContent {
         [string]$ConfirmationStatus = "confirmed",
         [string]$FrontmatterExtra = "",
         [string]$ChangeContractBody = "",
+        [string]$ClarificationBody = "",
         [string]$PlanSectionBody = "",
         [string]$PlanReviewRuns = "",
         [string]$ImplementationRuns = "",
@@ -247,6 +248,17 @@ function New-PlanContent {
     } else {
         $PlanSectionBody
     }
+    $clarificationSection = if ([string]::IsNullOrWhiteSpace($ClarificationBody)) {
+        @(
+            '- 验收标准: validator 返回预期结果。'
+            '- 非目标: 不改动无关脚本。'
+            '- 受影响目录: scripts/, tests/, skills/'
+            '- 回滚策略: 回退本轮脚本与文档改动。'
+            '- ui: not-applicable'
+        ) -join "`r`n"
+    } else {
+        $ClarificationBody
+    }
 @"
 ---
 task_id: $TaskId
@@ -257,11 +269,7 @@ $extra---
 # Sample Plan
 
 ## Clarification
-- 验收标准: validator 返回预期结果。
-- 非目标: 不改动无关脚本。
-- 受影响目录: scripts/, tests/, skills/
-- 回滚策略: 回退本轮脚本与文档改动。
-- ui: not-applicable
+$clarificationSection
 
 ## User Confirmation
 - status: $ConfirmationStatus
@@ -426,6 +434,46 @@ try {
         Add-Check 'valid DONE task passes validator'
     } else {
         Add-Failure ("valid task should pass validator, got: {0}" -f ($validResult.Output -join ' | '))
+    }
+
+    # Format-loosening: clarification accepts 同义写法 (受影响模块 / 兼容) aligned with advance-stage.
+    $taskLenientClarify = 'lite-validator-clarify-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskLenientClarifyDir = Join-Path $taskBase $taskLenientClarify
+    $createdTaskDirs += $taskLenientClarifyDir
+    New-Item -ItemType Directory -Path $taskLenientClarifyDir -Force | Out-Null
+    $lenientClarification = @(
+        '- work_type: refactor'
+        '- 验收: 行为不变。'
+        '- 非目标: 不扩大范围。'
+        '- 受影响模块: scripts/'
+        '- 兼容性约束: 保持现有契约。'
+        '- ui: not-applicable'
+    ) -join "`r`n"
+    Write-Utf8Bom -Path (Join-Path $taskLenientClarifyDir 'plan.md') -Content (New-PlanContent -TaskId $taskLenientClarify -Stage 'PLAN' -Tool 'codex' -ClarificationBody $lenientClarification)
+    $lenientClarifyResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskLenientClarify -RepoRoot $RepoRoot
+    if ($lenientClarifyResult.ExitCode -eq 0 -and ($lenientClarifyResult.Output -join "`n") -match 'STATUS: PASS') {
+        Add-Check 'clarification accepts 受影响模块/兼容 synonyms (aligned with advance-stage)'
+    } else {
+        Add-Failure ("lenient clarification synonyms should pass, got: {0}" -f ($lenientClarifyResult.Output -join ' | '))
+    }
+
+    # Format-loosening: Run heading tolerates tight `·` spacing (no surrounding space).
+    $taskTightRun = 'lite-validator-tightrun-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskTightRunDir = Join-Path $taskBase $taskTightRun
+    $createdTaskDirs += $taskTightRunDir
+    New-Item -ItemType Directory -Path $taskTightRunDir -Force | Out-Null
+    $tightRun = @'
+### Run 1·2026-04-09 10:00·runner: Codex
+- verdict: pass
+- findings: none
+- next: none
+'@
+    Write-Utf8Bom -Path (Join-Path $taskTightRunDir 'plan.md') -Content (New-PlanContent -TaskId $taskTightRun -Stage 'PLAN_REVIEW' -Tool 'codex' -PlanReviewRuns $tightRun)
+    $tightRunResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskTightRun -RepoRoot $RepoRoot
+    if ($tightRunResult.ExitCode -eq 0 -and ($tightRunResult.Output -join "`n") -match 'STATUS: PASS') {
+        Add-Check 'Run heading tolerates tight `·` spacing'
+    } else {
+        Add-Failure ("tight Run heading spacing should pass, got: {0}" -f ($tightRunResult.Output -join ' | '))
     }
 
     $workspaceRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('harness-lite-validator-workspace-' + [guid]::NewGuid().ToString('N'))

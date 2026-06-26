@@ -1132,7 +1132,7 @@ function Get-RunBlocks {
     }
 
     $runs = @()
-    $matches = [regex]::Matches($SectionContent, '(?ms)^###\s+Run\s+(\d+)\s+·\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s+·\s+runner:\s+(.+?)\r?\n(.*?)(?=^###\s+Run\s+\d+|\z)')
+    $matches = [regex]::Matches($SectionContent, '(?ms)^###\s+Run\s+(\d+)\s*·\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s*·\s*runner:\s*(.+?)\r?\n(.*?)(?=^###\s+Run\s+\d+|\z)')
     foreach ($match in $matches) {
         $runs += [pscustomobject]@{
             Number = [int]$match.Groups[1].Value
@@ -1457,11 +1457,28 @@ function Assert-PlanContract {
     }
 
     $clarification = Get-SectionContent -Sections $sections -Name 'Clarification'
-    foreach ($needle in @('验收标准', '非目标', '受影响目录', '回滚', 'ui:')) {
-        if ($clarification -match [regex]::Escape($needle)) {
-            Add-Check ('Clarification contains [{0}]' -f $needle)
+    # 只校验语义要素是否出现，容忍常见同义写法（受影响目录/受影响模块、回滚/兼容）。
+    # 与 advance-stage.ps1 的 PLAN clarification gate 保持同一套口径，避免一个误判两套标准。
+    $clarificationAspects = @(
+        @{ Label = '验收'; AnyOf = @('验收') },
+        @{ Label = '非目标'; AnyOf = @('非目标') },
+        @{ Label = '受影响'; AnyOf = @('受影响') },
+        @{ Label = '回滚 或 兼容'; AnyOf = @('回滚', '兼容') },
+        @{ Label = 'ui:'; AnyOf = @('ui:') }
+    )
+    foreach ($aspect in $clarificationAspects) {
+        $present = $false
+        foreach ($pattern in $aspect.AnyOf) {
+            if ($clarification -match [regex]::Escape($pattern)) {
+                $present = $true
+                break
+            }
+        }
+
+        if ($present) {
+            Add-Check ('Clarification contains [{0}]' -f $aspect.Label)
         } else {
-            Add-Failure ('Clarification should contain [{0}]' -f $needle)
+            Add-Failure ('Clarification should contain [{0}]' -f $aspect.Label)
         }
     }
 

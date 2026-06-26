@@ -229,7 +229,7 @@ function Get-RunTimestamp {
     )
 
     $run = Get-LatestRun -Text $Text -Name $Name
-    if ($run -match "(?m)^### Run \d+\s+·\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\s+·\s+runner:") {
+    if ($run -match "(?m)^### Run \d+\s*·\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\s*·\s*runner:") {
         return [datetime]::ParseExact($Matches[1], "yyyy-MM-dd HH:mm", [System.Globalization.CultureInfo]::InvariantCulture)
     }
 
