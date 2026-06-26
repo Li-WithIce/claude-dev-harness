@@ -5,102 +5,58 @@ description: Use when the task is in PLAN_REVIEW or CODE_REVIEW and a new append
 
 # Review
 
-这个 skill 同时服务 `PLAN_REVIEW` 和 `CODE_REVIEW`。它不再产出独立 `review.md`，而是把审查结论追加到 `plan.md`。
+这个 skill 同时服务 `PLAN_REVIEW` 和 `CODE_REVIEW`。它不再产出独立 `review.md`，而是把审查结论 append 到 `plan.md`。
 
 ## 何时使用
 
-- `plan.md` frontmatter 的 `stage` 是 `PLAN_REVIEW`
-- `plan.md` frontmatter 的 `stage` 是 `CODE_REVIEW`
+- `plan.md` frontmatter 的 `stage` 是 `PLAN_REVIEW` → 追加到 `## Plan Review`
+- `plan.md` frontmatter 的 `stage` 是 `CODE_REVIEW` → 追加到 `## Code Review`
 
-## 当前阶段对应关系
+## Run 写法
 
-- `PLAN_REVIEW`：追加到 `## Plan Review`
-- `CODE_REVIEW`：追加到 `## Code Review`
-
-## Run 格式
-
-```markdown
-### Run 1 · 2026-04-09 10:30 · runner: Codex
-- verdict: pass | revise
-- score.completeness: 85
-- score.consistency: 82
-- score.accuracy: 88
-- score.depth: 80
-- findings:
-  - P1: ...
-  - P2: ...
-- next: 下一步动作；无则写 none
-```
-
-`advance-stage.ps1` 只读取最新一条 run 的 `- verdict:`，所以字段名不要变。
-只有在 validator 以 `-Quality` 模式运行时，才要求录入 4-dim score；旧 run 未录入时只会收到 warning。
+append-only run 用 `### Run <N> · YYYY-MM-DD HH:mm · runner: X` 标题，必含 `- verdict: pass | revise`、`- findings:`、`- next:`；`advance-stage.ps1` 只读最新 run 的 `- verdict:`。完整格式（含 4-dim score 字段）见 [`../orchestrator/references/lite-writing-guide.md`](../orchestrator/references/lite-writing-guide.md) 的 Append-Only Run 契约。
 
 ## 审查重点
 
 ### PLAN_REVIEW
 
 - Clarification 是否完整
-- 若用户通过“需求澄清 / 需求确认 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认”等同族触发词进入 PLAN，确认该协议只落在 `## Clarification` 和 `## User Confirmation`，没有新增 stage、frontmatter 字段、runtime、validator hard gate 或第二 truth。
-- 对 Clarification 协议族任务，检查关键问题是否一次一个、可由代码库回答的问题是否已先查证、仍需用户决策的问题是否带 `recommended_answer` 和可执行的决策边界。
-- 若 `## Clarification` 含 `work_type:`，核对它是否只作为 PLAN 语义路由使用，且与验收标准、非目标、受影响路径和验证命令一致
-- 确认 `work_type` 没有替代 `Change Contract.change_type`，没有写入 frontmatter，也没有要求 `advance-stage.ps1` 或 validator 把它当作阶段真相源
+- 若用户通过“需求澄清 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认”等同族触发词进入 PLAN，确认该协议只落在 `## Clarification` 和 `## User Confirmation`，没有新增 stage、frontmatter 字段、runtime、validator hard gate 或第二 truth
+- 对 Clarification 协议族任务，检查关键问题是否一次一个、可由代码库回答的问题是否已先查证、仍需用户决策的问题是否带 `recommended_answer` 和可执行的决策边界
+- 若 `## Clarification` 含 `work_type:`，核对它是否只作为 PLAN 语义路由使用，且与验收标准、非目标、受影响路径和验证命令一致，没有替代 `Change Contract.change_type`、没有写入 frontmatter
 - 若 `work_type: bug`，检查 PLAN 是否说明复现步骤、期望/实际行为、影响范围/严重程度、根因定位动作和修复验证动作；不得退化为“见 issue”这类不可执行占位
-- 若 `work_type: refactor`，检查 PLAN 是否说明行为不变约束、重构边界、受影响调用点、等价验证和回滚/兼容路径；不得夹带功能变更
-- 声明型字段可以作为承诺，但必须有同任务内可执行的 `equivalence_check` 或 verification 证据兜底；不能只写“行为不变”这类空声明
+- 若 `work_type: refactor`，检查 PLAN 是否说明行为不变约束、重构边界、受影响调用点、等价验证和回滚/兼容路径；不得夹带功能变更；声明型字段必须有同任务内可执行的 `equivalence_check` 或 verification 兜底
 - 确认 bug/refactor 模板仍嵌在现有 `plan.md` / `test.md` 结构内，没有新增 issue/analyze/fix stage 或独立真相源文件
 - User Confirmation 是否已经 `confirmed`
-- 计划粒度是否足够指导实现和验证
-- 风险和验证命令是否可执行
-- `Plan.artifacts` 是否描述交付产物，`Change Contract.affected_paths` 是否描述变更面；二者和非目标、verification 是否自洽，未把 artifact 声明误当成 hard gate 或第二 truth
-- `artifacts:`、`affected_paths`、`read_first:` 与 `convergence:` 是否足以让 IMPLEMENT 和后续 TEST/Handoff 检查产物存在性、artifact/diff drift、follow-up 和 memory/spec update 判断
-- reviewer 必须按 `read_first:` 抽查 IMPLEMENT 是否真读了，按 `convergence:` 抽查每条 criterion 是否可执行
+- 计划粒度是否足够指导实现和验证，风险和验证命令是否可执行
+- `Plan.artifacts` 描述交付产物、`Change Contract.affected_paths` 描述变更面；二者与非目标、verification 自洽，未把 artifact 声明误当成 hard gate 或第二 truth
+- 按 `read_first:` 抽查 IMPLEMENT 是否真读了，按 `convergence:` 抽查每条 criterion 是否可执行
 
 ### CODE_REVIEW
 
-- 实现是否满足计划
-- 是否有明显漏做、做错、多做
+- 实现是否满足计划，是否有明显漏做、做错、多做
 - 最新 `Implementation Notes` 是否和代码一致
-- 实际 diff 是否落在 `Change Contract.affected_paths` 可解释范围内，声明的 `Plan.artifacts` 是否已经创建或在 `Implementation Notes` 中解释未交付原因
-- 是否存在 artifact/diff drift：例如改了未声明路径、声明产物缺失、产物和变更面角色混淆；命中时用现有 finding 退回或要求 TEST 明确记录
-- 抽查实现是否命中 reflection 风险：过大文件继续塞逻辑、计划外抽象、邻近顺手重构、未声明新概念、症状补丁替代根因修复
-- 若命中 reflection 风险，确认最新 `Implementation Notes - risks:` 或 `- next:` 已说明理由、取舍和验证；未说明或超出 PLAN 时用现有 P1/P2 finding 退回 IMPLEMENT
-- 若 `work_type: bug`，确认实现证据能对应复现问题、根因定位和修复验证；未覆盖影响面回归时应退回补证据
-- 若 `work_type: refactor`，确认实现没有计划外功能行为变化，并且等价验证覆盖 PLAN 声明的调用点或依赖面
-- 确认后续 TEST/Handoff 能覆盖 artifact、drift、follow-up 和 memory/spec update 四项 finish boundary 判断；旧任务只含 `delivery`/`follow_up` 时仍按兼容格式处理
+- 实际 diff 是否落在 `Change Contract.affected_paths` 可解释范围内，声明的 `Plan.artifacts` 是否已创建或在 `Implementation Notes` 中解释未交付原因
+- 是否存在 artifact/diff drift（改了未声明路径、声明产物缺失、产物与变更面角色混淆）；命中时用现有 finding 退回或要求 TEST 明确记录
+- 抽查实现是否命中 reflection 风险：过大文件继续塞逻辑、计划外抽象、邻近顺手重构、未声明新概念、症状补丁替代根因修复；命中且最新 `Implementation Notes` 未在 `- risks:` / `- next:` 说明理由取舍时，用现有 P1/P2 finding 退回 IMPLEMENT
+- 若 `work_type: bug`，确认实现证据对应复现、根因定位和修复验证，覆盖影响面回归
+- 若 `work_type: refactor`，确认没有计划外功能行为变化，等价验证覆盖 PLAN 声明的调用点或依赖面
+- 确认后续 TEST/Handoff 能覆盖 artifact、drift、follow-up 和 memory/spec update 四项 finish boundary 判断
 - 是否还需要回 IMPLEMENT 补证据或补实现
-
-## TodoWrite Milestones
-
-- 适用：宿主提供 TodoWrite surface 时使用；不作为 Codex-only 默认流程的必需依赖。
-- TodoWrite 是可选宿主 surface，不引入新依赖；没有该 surface 时用原生计划 / team board / 回报消息表达同等 milestone。
-- milestone 是事件，不是签到点；遇到 blocker、证据缺口或 scope 漂移时，必须立刻汇报。
-- 推荐最小节奏固定为：`context-loaded` → `findings-collected` → `run-appended`。
-- `run-appended` 完成后，必须与最终的 verdict callback / `team_send_message` / 用户回报配对，不能只停在 TodoWrite 更新。
-- 最小示例：
-  - `context-loaded`：已读完 `plan.md`、最新实现证据与目标代码
-  - `findings-collected`：finding、残留风险与结论已收敛
-  - `run-appended`：新的 `Plan Review` 或 `Code Review` run 已追加完成
 
 ## 判定规则
 
 - `pass`：当前阶段可以推进
-- `revise`：退回上一可写阶段重做
-  - `PLAN_REVIEW -> PLAN`
-  - `CODE_REVIEW -> IMPLEMENT`
+- `revise`：退回上一可写阶段（`PLAN_REVIEW -> PLAN`、`CODE_REVIEW -> IMPLEMENT`）
 
 ## 评分依据
 
-- 4-dim score 使用 `completeness` / `consistency` / `accuracy` / `depth`
-- 评分定义、阈值口径和示例统一看 [../../docs/工作流/quality-rubric.md](../../docs/工作流/quality-rubric.md)
-- `-Quality` 打开时，review run 的 score 字段必须与该 rubric 的阈值一致；不要在本文件重复发明第二套标准
+- 4-dim score（`completeness` / `consistency` / `accuracy` / `depth`）的定义、阈值和示例统一看 [`../../docs/工作流/quality-rubric.md`](../../docs/工作流/quality-rubric.md)
+- 只在 validator `-Quality` 模式下要求 score 与该 rubric 阈值一致；不要在本文件另发明一套标准
 
-写完最新 run 后，再按下一阶段选择执行 `.assistant\entry\advance-stage.ps1`；它会自动调用 validator。
+## 推进
 
-推进规则：
-
-- `PLAN_REVIEW -> IMPLEMENT` / `PLAN`、`CODE_REVIEW -> IMPLEMENT` 与 `CODE_REVIEW -> TEST` 默认走 workflow descriptor 的 `harness-default-codex`
-- 如需切换 backend，推进时显式传 `-Tool`；如使用 profile，同步传 `-Profile <profile-name>` 和完整 `-Model <model-id>`，且 profile 的 backend 必须等于 `-Tool`
-- 推进命令默认是 `.assistant\entry\advance-stage.ps1 -TaskId <task-id>`
+写完最新 run 后执行 `.assistant\entry\advance-stage.ps1 -TaskId <task-id>`（自动调用 validator）。默认走 workflow descriptor 的 `harness-default-codex`；切换 backend 时显式传 `-Tool`（如用 profile 同步传 `-Profile` 和完整 `-Model`，profile 的 backend 必须等于 `-Tool`）。
 
 ## 不要做的事
 
@@ -110,4 +66,4 @@ description: Use when the task is in PLAN_REVIEW or CODE_REVIEW and a new append
 
 ## Reference
 
-- 写作规范: [../orchestrator/references/lite-writing-guide.md](../orchestrator/references/lite-writing-guide.md)
+- 写作规范（单一真相源）: [../orchestrator/references/lite-writing-guide.md](../orchestrator/references/lite-writing-guide.md)

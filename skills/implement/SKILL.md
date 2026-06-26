@@ -20,17 +20,9 @@ IMPLEMENT 负责两件事：改代码，以及把本轮实现证据追加到 `do
 - 回修轮必须追加一条比最近一次 `Code Review` 更晚的 Implementation Notes run
 - 不手改 frontmatter 的 `stage`
 
-## Run 格式
+## Run 写法
 
-```markdown
-## Implementation Notes
-
-### Run 2 · 2026-04-09 11:00 · runner: Codex
-- changed: 修改的文件和行为
-- tests: 实际跑过的命令；没跑就写 none
-- risks: 本轮残留风险；没有就写 none
-- next: 交给 CODE_REVIEW 关注什么
-```
+`## Implementation Notes` 末尾 append `### Run <N> · YYYY-MM-DD HH:mm · runner: X`，字段为 `- changed: / - tests: / - risks: / - next:`（没有就写 none）。完整格式见 [`../orchestrator/references/lite-writing-guide.md`](../orchestrator/references/lite-writing-guide.md) 的 Append-Only Run 契约。
 
 ## Implementation Reflection Checks
 
@@ -60,19 +52,6 @@ IMPLEMENT 负责两件事：改代码，以及把本轮实现证据追加到 `do
 5. 推进到 `CODE_REVIEW` 前，默认使用 workflow descriptor 的 `harness-default-codex`；如需切换 backend，再让用户指定下一阶段 `tool`
 6. 调用 `.assistant\entry\advance-stage.ps1 -TaskId <task-id>` 进入 `CODE_REVIEW`；切换 backend 时追加 `-Tool <next-tool>`
 7. 如需单独排查文档问题，再手动运行 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
-
-## TodoWrite Milestones
-
-- 适用：宿主提供 TodoWrite surface 时使用；不作为 Codex-only 默认流程的必需依赖。
-- TodoWrite 是可选宿主 surface，不引入新依赖；没有该 surface 时用原生计划 / team board / 回报消息表达同等 milestone。
-- milestone 是事件，不是签到点；一旦发现 blocker、计划外改动或验证无法完成，必须立刻汇报。
-- 推荐最小节奏固定为：`context-loaded` → `code-edited` → `tests-run` → `notes-appended`。
-- `notes-appended` 完成后，必须与最终的 stage callback / `team_send_message` / 用户回报配对，不能只停在本地 TodoWrite。
-- 最小示例：
-  - `context-loaded`：已读完 `plan.md`、`spec.md` 与目标文件
-  - `code-edited`：本轮代码或文档改动已落盘
-  - `tests-run`：本轮最小必要验证已执行并记录结果
-  - `notes-appended`：`Implementation Notes` 已追加新 run，准备交给 `CODE_REVIEW`
 
 ## 不要做的事
 

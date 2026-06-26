@@ -127,26 +127,7 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 
 默认 descriptor 是 Codex-only：`PLAN`、`PLAN_REVIEW`、`IMPLEMENT`、`CODE_REVIEW`、`TEST` 都使用 `harness-default-codex`。`claudecode` 仍是合法 backend，但需要在任务 frontmatter 或推进命令中显式指定。
 
-唯一阶段真相源始终是 `docs/tasks/<task-id>/plan.md` frontmatter：
-
-```yaml
----
-task_id: <task-id>
-stage: PLAN | PLAN_REVIEW | IMPLEMENT | CODE_REVIEW | TEST | DONE
-tool: claudecode | codex | none
-tool_profile: <optional profile id>
-model: <optional full model id>
-updated: YYYY-MM-DD
----
-```
-
-当前仓库的真实约束：
-
-- 非 `DONE` 阶段时，`tool` 只能是 `claudecode`、`codex`
-- `DONE` 固定写 `tool: none`
-- `tool_profile` 是可选当前阶段元数据，不是下一阶段的黏性 fallback
-- `model` 必须是完整模型 ID，不接受 `pro`、`latest` 这类短别名
-- 存在 `tool_profile` 时，`tool` 必须等于对应 profile 的 `backend`
+唯一阶段真相源始终是 `docs/tasks/<task-id>/plan.md` frontmatter（`task_id` / `stage` / `tool` / `updated`，加可选 `tool_profile` / `model`）。字段枚举、约束和完整骨架只在 [`skills/orchestrator/references/lite-writing-guide.md`](skills/orchestrator/references/lite-writing-guide.md) 维护一份，本 README 不重复。
 
 ### 每个阶段写什么
 
@@ -166,41 +147,7 @@ updated: YYYY-MM-DD
 
 ### `work_type`、条件化模板与 reflection guidance
 
-`work_type` 是可选的 PLAN / Clarification 分诊信号，用来描述“这轮按哪类工作审”，不是阶段状态、不是 frontmatter 字段，也不是 `advance-stage.ps1` 或 validator 的输入。
-
-它和 `Change Contract.change_type` 的职责分开：
-
-- `work_type` 描述意图和审查重点，例如 `bug`、`refactor`、`feature`、`doc`
-- `Change Contract.change_type` 描述产物或变更类型，继续使用现有 validator 认可的 `task | feature | enhance | refactor`
-
-当 `work_type: bug` 时，PLAN 里的 Clarification 应补足复现、期望/实际行为、影响面、根因定位动作和修复验证；TEST 会重点重跑复现、验证修复和最小回归；CODE_REVIEW 会检查实现证据是否覆盖根因与影响面。
-
-当 `work_type: refactor` 时，PLAN 里的 Clarification 应补足行为不变约束、重构边界、受影响调用点、等价验证和回滚/兼容路径；TEST 会重点验证行为等价；CODE_REVIEW 会检查是否夹带计划外功能行为变化。
-
-Clarification 协议族可在 `## Clarification` 中用普通 bullets 记录 `question`、`recommended_answer`、`decision`、`dependencies` 和 `non_goals`。这些字段只是写作约定，不写入 frontmatter，不参与 `advance-stage.ps1` 或 validator hard gate。
-
-最小写法示例：
-
-```markdown
-## Clarification
-- work_type: bug
-- bug.repro: 运行 `pwsh -File tests/repro.ps1`，当前会复现退出码 1
-- bug.expected: 命令通过并生成 expected.json
-- bug.actual: 命令在缺少配置时提前失败
-- bug.impact: 缺少可选配置的工作区无法启动相关流程
-- bug.root_cause_action: 定位配置读取默认值为何未生效
-- bug.fix_verification: 重跑复现命令和相关最小回归
-- 验收标准: 缺少可选配置时仍使用默认值
-- 非目标: 不调整配置 schema
-
-## Change Contract
-- change_type: task
-- affected_paths:
-  - src/config-loader.ps1
-  - tests/repro.ps1
-```
-
-IMPLEMENT / CODE_REVIEW 的 implementation reflection checks 是轻量 guidance，只覆盖 5 类风险：过大文件继续塞逻辑、计划外抽象、邻近顺手重构、未声明新概念、症状补丁替代根因修复。实现者只在命中风险时，把理由、取舍和验证记录到最新 `Implementation Notes` 的 `risks` 或 `next`；未命中不需要逐项打勾。它不会新增阶段、独立 checklist、第二套真相源或 validator gate。
+`work_type`（可选 PLAN / Clarification 分诊信号，不写入 frontmatter、不被 `advance-stage.ps1` / validator 消费）、`bug` / `refactor` 条件化模板、Clarification 协议族写法，以及 IMPLEMENT / CODE_REVIEW 的 implementation reflection checks（过大文件塞逻辑、计划外抽象、邻近顺手重构、未声明新概念、症状补丁 5 类风险），写法与示例都在 [`skills/orchestrator/references/lite-writing-guide.md`](skills/orchestrator/references/lite-writing-guide.md) 与对应 stage skill 维护，本 README 不重复。
 
 ### 推进规则
 
@@ -288,68 +235,13 @@ IMPLEMENT / CODE_REVIEW 的 implementation reflection checks 是轻量 guidance�
   - `.assistant/运行时/记忆-问题.md`
 - 仓库历史里还保留了部分 shared-memory migration 相关 `.assistant` 文件；除非任务明确要求，不要把 live pointer 文件当成普通文档随手提交
 
-## Phase 5 / 6 / 7 已新增或强化的使用约束
+## 历史 Phase 能力（已并入主线）
 
-### Phase 5：文档协议收口
+当前仓库已包含 Phase 1-7 与 shared-memory v2 的主线能力。这些约束不再按 phase 单独罗列，而是并入对应单一真相源：
 
-- `agent-configs/workflows/harness-lite.yaml` 只增加注释协议，不增加新的 YAML 实体字段
-- team auto mode 的环境变量名固定为 `HARNESS_AUTO`
-- 长会话恢复统一看 `.assistant/工作流/长会话恢复.md`
-- `spec.md` 可选支持 `front_keywords`
-
-### Phase 6：quality 与 plan metadata
-
-`## Plan` 段现在支持顶部 metadata-style 块：
-
-```markdown
-## Plan
-- read_first: [docs/shared-memory-layers.md, scripts/validate-lite-artifacts.ps1]
-- convergence:
-  - `pwsh -File tests/verify-lite-artifact-validator.ps1`
-- artifacts: [docs/工作流/single-writer-precompact.md, scripts/validate-lite-artifacts.ps1]
-- TODO 1: ...
-```
-
-当前规则是：
-
-- `read_first` / `convergence` / `artifacts` 只能出现在 `## Plan` 标题之后、第一条普通 TODO 之前
-- `read_first` 与 `artifacts` 必须是 inline array
-- `convergence` 必须至少有 1 条非占位 criterion
-- `artifacts` 是声明性字段，只做格式校验
-
-review run 现在支持 `-Quality`：
-
-```powershell
-pwsh -File .\scripts\validate-lite-artifacts.ps1 -TaskId <task-id> -Quality
-```
-
-当前真实语义：
-
-- 只在 `PLAN_REVIEW` / `CODE_REVIEW` 的 review run 上检查 4-dim score
-- 4 个维度固定为 `completeness` / `consistency` / `accuracy` / `depth`
-- 阈值以 `docs/工作流/quality-rubric.md` 为准
-- 旧任务未补 score 时，在 `-Quality` 模式下只产生 warning，不强制失败
-
-### Phase 7：PreCompact 与 single-writer
-
-Phase 7 没有新增后台进程或新 hook，只有协议收口：
-
-- `PreCompact` 是 leader / worker 的自检协议，不是新的 Claude Code runtime hook
-- 需要先保留上下文时，只允许 append 到 `.assistant/运行时/收件箱.md`
-- append 路径使用现有 `append-runtime-inbox.ps1`
-- 收件箱后续仍走 `promote-runtime-inbox.ps1` / `triage-runtime-inbox.ps1`
-- 一旦涉及非 append 写回，必须委托现有 `.assistant/entry/advance-stage.ps1`
-- 不允许手工 patch：
-  - `docs/tasks/<task-id>/plan.md` frontmatter
-  - `.assistant/运行时/tasks/<task-id>.md`
-  - `.assistant/运行时/当前任务.md`
-  - `.assistant/运行时/恢复索引.md`
-
-这套约束的当前文档入口是：
-
-- `skills/orchestrator/SKILL.md`
-- `skills/workflow-team/SKILL.md`
-- `docs/工作流/single-writer-precompact.md`
+- plan metadata（`read_first` / `convergence` / `artifacts`）与 review `-Quality` 4-dim score（`completeness` / `consistency` / `accuracy` / `depth`）：见 [`skills/orchestrator/references/lite-writing-guide.md`](skills/orchestrator/references/lite-writing-guide.md) 与 [`docs/工作流/quality-rubric.md`](docs/工作流/quality-rubric.md)
+- `PreCompact` 自检与 single-writer 写回（append 走 `append-runtime-inbox.ps1`，非 append 写回只委托 `advance-stage.ps1`）：见 [`skills/orchestrator/SKILL.md`](skills/orchestrator/SKILL.md)、[`skills/workflow-team/SKILL.md`](skills/workflow-team/SKILL.md) 与 [`docs/工作流/single-writer-precompact.md`](docs/工作流/single-writer-precompact.md)
+- team auto mode 环境变量固定为 `HARNESS_AUTO`；长会话恢复统一看 `.assistant/工作流/长会话恢复.md`；`spec.md` 可选 `front_keywords`
 
 ## 关键入口命令
 

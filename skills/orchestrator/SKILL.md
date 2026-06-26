@@ -118,6 +118,18 @@ pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <claudecod
 - 若当前 stage 已可推进，非 append 写回只能委托 `.assistant\entry\advance-stage.ps1`；不要手工 patch `plan.md`、`运行时/tasks/<task-id>.md`、`运行时/当前任务.md` 或 `运行时/恢复索引.md`。
 - 触发 append 或 advance 前，先按 [docs/工作流/single-writer-precompact.md](../../docs/工作流/single-writer-precompact.md) 执行 `cooperative-yield` / single-writer 协议；不要与正在运行的 `advance-stage` 主流程竞争。
 
+## TodoWrite Milestones（跨阶段，可选 host surface）
+
+各 stage skill 不再各自重复这段；统一在此。
+
+- 仅在宿主提供 TodoWrite surface 时使用；不是 Codex-only 默认流程的必需依赖。没有该 surface 时用原生计划 / team board / 回报消息表达同等 milestone。
+- milestone 是事件不是签到点：发现 blocker、计划外改动、证据缺口或 scope 漂移时必须立刻汇报，不要堆到收尾。
+- 每个 stage 的最小节奏都是「load-context → core-work → verify → append/report」，例如：
+  - `PLAN`：`phase-loaded` → `core-work-done` → `verification-done`
+  - `IMPLEMENT`：`context-loaded` → `code-edited` → `tests-run` → `notes-appended`
+  - `PLAN_REVIEW` / `CODE_REVIEW`：`context-loaded` → `findings-collected` → `run-appended`
+- 最后一个 milestone 完成后必须紧跟最终的 stage callback / `team_send_message` / 用户回报，不能只停在 TodoWrite 更新。
+
 ## stop 条件
 
 出现以下任一情况就停止并直接报告：
