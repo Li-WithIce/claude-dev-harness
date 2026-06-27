@@ -159,6 +159,7 @@ if ($IncludeCachedDiff) {
 }
 
 $coreScripts = @(
+    'verify-harness-entry.ps1',
     'verify-lite-artifact-validator.ps1',
     'verify-lite-footprint.ps1',
     'verify-md-html-review-renderer.ps1',

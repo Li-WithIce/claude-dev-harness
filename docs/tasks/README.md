@@ -7,12 +7,7 @@
 - `artifact-drift-advisory`
 - `artifact-drift-path-normalization`
 - `clarification-interrogation-protocol`
-- `context-manifest-advisory`
-- `context-preflight-advisory-command`
 - `finish-boundary-checklist`
-- `session-case-artifact`
-- `subtask-roadmap-artifact`
-- `task-entity-artifact-design`
 - `trellis-comparison-reusable-design`
 - `trellis-context-injection-feasibility`
 

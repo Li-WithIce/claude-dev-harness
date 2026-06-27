@@ -29,7 +29,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$AllowedSkills = @('review', 'test', 'test-runner', 'codex')
+$AllowedSkills = @('review', 'test', 'codex')
 $DeniedSkills = @('implement')
 
 function New-AdapterResult {

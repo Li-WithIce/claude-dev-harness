@@ -204,18 +204,28 @@ function Resolve-WorkspaceRoot {
 
     $cwd = Get-NormalizedPath -Path (Get-Location).Path
     $assistantRoot = Find-AncestorContaining -StartPath $cwd -ChildName '.assistant' -RepoRoot $RepoRoot
+    $gitRoot = Find-AncestorContaining -StartPath $cwd -ChildName '.git' -RepoRoot $RepoRoot
+
+    # 取更近的 marker：一个 fresh git 工作区（只有 .git，还没 .assistant）嵌套在更上层
+    # 带 .assistant 的工作区之下时，应在自身 git root bootstrap，而不是解析到上层。
+    # 当 git root 是 .assistant root 的真子目录（更深），或根本没有 .assistant 祖先时，git root 优先。
+    $gitRootIsNearer = (-not [string]::IsNullOrWhiteSpace($gitRoot)) -and (
+        [string]::IsNullOrWhiteSpace($assistantRoot) -or (
+            (Test-PathWithinRoot -Path $gitRoot -Root $assistantRoot) -and
+            -not $gitRoot.Equals($assistantRoot, [System.StringComparison]::OrdinalIgnoreCase)
+        )
+    )
+    if ($gitRootIsNearer) {
+        return [pscustomobject]@{
+            Path   = $gitRoot
+            Source = 'git-ancestor'
+        }
+    }
+
     if (-not [string]::IsNullOrWhiteSpace($assistantRoot)) {
         return [pscustomobject]@{
             Path   = $assistantRoot
             Source = 'assistant-ancestor'
-        }
-    }
-
-    $gitRoot = Find-AncestorContaining -StartPath $cwd -ChildName '.git' -RepoRoot $RepoRoot
-    if (-not [string]::IsNullOrWhiteSpace($gitRoot)) {
-        return [pscustomobject]@{
-            Path   = $gitRoot
-            Source = 'git-ancestor'
         }
     }
 
