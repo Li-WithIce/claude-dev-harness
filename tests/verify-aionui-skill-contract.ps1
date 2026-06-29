@@ -575,6 +575,31 @@ try {
         Add-Failure ("D2 invocation trace skip failed, got stdout=[{0}] stderr=[{1}] validator=[{2}]" -f $d2Result.StdOut, $d2Result.StdErr, $d2Validator.Text)
     }
 
+    $taskD3 = 'skill-contract-d3-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskD3Dir = Join-Path $taskBase $taskD3
+    New-Item -ItemType Directory -Path $taskD3Dir -Force | Out-Null
+    Write-Utf8Bom -Path (Join-Path $taskD3Dir 'plan.md') -Content (New-PlanContent -TaskId $taskD3 -Stage 'PLAN_REVIEW' -Tool 'codex' -IncludePlanReviewRun)
+    $workspaceD3 = Join-Path ([System.IO.Path]::GetTempPath()) ('skill-contract-workspace-d3-' + [guid]::NewGuid().ToString('N'))
+    $cleanupPaths += $workspaceD3
+    New-Item -ItemType Directory -Path $workspaceD3 -Force | Out-Null
+    $planBeforeHashD3 = (Get-FileHash -LiteralPath (Join-Path $taskD3Dir 'plan.md') -Algorithm SHA256).Hash
+    $d3Result = Invoke-Adapter -AdapterPath $adapterPath -TaskId $taskD3 -Stage 'PLAN_REVIEW' -Skill 'test-runner' -Tool 'codex' -WorkspaceRoot $workspaceD3 -ArtifactRoot $taskD3Dir
+    $d3Json = Assert-SingleLineJson -JsonText $d3Result.StdOut -Label 'D3'
+    $planAfterHashD3 = (Get-FileHash -LiteralPath (Join-Path $taskD3Dir 'plan.md') -Algorithm SHA256).Hash
+    $d3Plan = Read-FileUtf8 -Path (Join-Path $taskD3Dir 'plan.md')
+    $d3Validator = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskD3 -RepoRoot $fixtureRoot
+    if ($d3Result.ExitCode -ne 0 -and
+        $null -ne $d3Json -and
+        -not $d3Json.ok -and
+        (($d3Json.errors -join ' ') -match 'whitelist') -and
+        $planBeforeHashD3 -eq $planAfterHashD3 -and
+        $d3Plan -notmatch '- invocation:' -and
+        $d3Validator.ExitCode -eq 0) {
+        Add-Check 'D3 rejected adapter path leaves plan.md unchanged (no invocation trace) even with a Run block'
+    } else {
+        Add-Failure ("D3 rejected-path trace suppression failed, got stdout=[{0}] stderr=[{1}] validator=[{2}]" -f $d3Result.StdOut, $d3Result.StdErr, $d3Validator.Text)
+    }
+
     $taskE1 = 'skill-contract-e1-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     $taskE1Dir = Join-Path $taskBase $taskE1
     New-Item -ItemType Directory -Path $taskE1Dir -Force | Out-Null

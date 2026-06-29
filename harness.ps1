@@ -206,11 +206,15 @@ function Resolve-WorkspaceRoot {
     $assistantRoot = Find-AncestorContaining -StartPath $cwd -ChildName '.assistant' -RepoRoot $RepoRoot
     $gitRoot = Find-AncestorContaining -StartPath $cwd -ChildName '.git' -RepoRoot $RepoRoot
 
-    # 取更近的 marker：一个 fresh git 工作区（只有 .git，还没 .assistant）嵌套在更上层
-    # 带 .assistant 的工作区之下时，应在自身 git root bootstrap，而不是解析到上层。
-    # 当 git root 是 .assistant root 的真子目录（更深），或根本没有 .assistant 祖先时，git root 优先。
+    # 取更近的 marker：
+    # - 没有 .assistant 祖先时，git root 优先（fresh git bootstrap）。
+    # - git root 是 .assistant 祖先的真子目录（更深）时，只有「独立 repo」（.git 为目录）才优先并
+    #   bootstrap 自己的 workspace；submodule / worktree（.git 是 gitlink 文件）视为父 workspace 的内容，
+    #   留在父 workspace。要把 submodule 单独拆成 workspace，必须显式传 -WorkspaceRoot。
+    $gitRootHasGitDirectory = (-not [string]::IsNullOrWhiteSpace($gitRoot)) -and (Test-Path -LiteralPath (Join-Path $gitRoot '.git') -PathType Container)
     $gitRootIsNearer = (-not [string]::IsNullOrWhiteSpace($gitRoot)) -and (
         [string]::IsNullOrWhiteSpace($assistantRoot) -or (
+            $gitRootHasGitDirectory -and
             (Test-PathWithinRoot -Path $gitRoot -Root $assistantRoot) -and
             -not $gitRoot.Equals($assistantRoot, [System.StringComparison]::OrdinalIgnoreCase)
         )

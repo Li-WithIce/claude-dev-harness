@@ -629,7 +629,9 @@ if ($null -eq $result) {
     $exitCode = 1
 }
 
-if (-not [string]::IsNullOrWhiteSpace($artifactDirectory)) {
+# 只有真正成功的调用（markdown-fallback / delegated, ok=true）才把 invocation trace
+# 写回 plan.md；rejected / error 路径不得 mutate 真相源 artifact。
+if (-not [string]::IsNullOrWhiteSpace($artifactDirectory) -and $result.ok) {
     Try-AppendInvocationTrace -ArtifactRoot $artifactDirectory -Stage $Stage -Skill $Skill -Tool $Tool -Result $result
 }
 
