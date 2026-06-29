@@ -44,6 +44,16 @@ append-only run 用 `### Run <N> · YYYY-MM-DD HH:mm · runner: X` 标题，必�
 - 确认后续 TEST/Handoff 能覆盖 artifact、drift、follow-up 和 memory/spec update 四项 finish boundary 判断
 - 是否还需要回 IMPLEMENT 补证据或补实现
 
+### 对抗性审查纪律（复杂任务默认开启）
+
+做完相对复杂的任务后，CODE_REVIEW 默认用对抗姿态审查，再 append 进 `## Code Review` run：
+
+- **否定式对抗**：默认证伪实现，主动找错 / 漏 / 多做，对关键改动构造反例或失败输入，而不是确认它“看起来对”
+- **追问式对抗**：对存疑点连环追问根因（为什么这么改 / 假设成立吗 / 边界、并发、失败路径如何 / 是否命中 PLAN 根因），问到可验证或退回 IMPLEMENT
+- **墨菲定律**：默认会出错的终将出错，显式列最坏失效路径（异常输入、空值、并发、回滚、依赖不可用、部分失败），核对 Verification 是否覆盖，未覆盖写成 finding
+
+命中用现有 `findings` + `verdict: revise` 退回，不加硬校验。复杂 / 高风险任务可显式升级到多 agent 对抗审查（`$env:AIONUI_TEAM_MODE='1'` 走 `workflow-team`，或宿主提供的等效多 agent 能力），由独立 agent 分担否定式与追问式；Codex-only 单 agent 也要完成上述三条。详见 guide 的“对抗性审查纪律”。
+
 ## 判定规则
 
 - `pass`：当前阶段可以推进

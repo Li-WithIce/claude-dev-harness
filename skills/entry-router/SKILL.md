@@ -82,6 +82,7 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 - **Clarification 协议族**（需求澄清 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认 / `clarify` / `brainstorm` / `pressure test` 等）：仍走 `new-task mode=workflow`，在 `PLAN -> ## Clarification` 沉淀问题 / 推荐答案 / 决策，确认前 `## User Confirmation` 保持 `draft`；信息不足以判归属时走 `ask`；可查问题先自查再给推荐答案。详细写法见 `plan` skill 与 lite-writing-guide。
 - **Markdown / HTML artifact**：需要互转 / HTML 报告 / 网页 artifact / 发布预览 / 从 URL 提取 Markdown 时按需加载 `md-html` skill；Markdown 是 source of truth、HTML 是 generated artifact，边界见该 skill。
 - **开发流程细节**：5 阶段 harness-lite、`plan.md` frontmatter 真相源、`advance-stage.ps1` 推进语义、`spec.md` 可选附件等，见 `orchestrator` skill 与 README，本入口不重复。
+- **推理与对抗审查纪律**：解决问题 / 修 bug / 设计架构或方案时从第一性原理出发，遵循剃刀法则与贝叶斯更新；做完相对复杂的任务后默认做对抗性审查（否定式 + 追问式 + 墨菲定律），复杂任务可升级到多 agent。quick 任务同样适用推理纪律；workflow 任务的详细写法见 `plan` / `review` skill 与 lite-writing-guide。
 
 ## 调用层级
 

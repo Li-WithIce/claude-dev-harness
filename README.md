@@ -147,7 +147,7 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 
 ### `work_type`、条件化模板与 reflection guidance
 
-`work_type`（可选 PLAN / Clarification 分诊信号，不写入 frontmatter、不被 `advance-stage.ps1` / validator 消费）、`bug` / `refactor` 条件化模板、Clarification 协议族写法，以及 IMPLEMENT / CODE_REVIEW 的 implementation reflection checks（过大文件塞逻辑、计划外抽象、邻近顺手重构、未声明新概念、症状补丁 5 类风险），写法与示例都在 [`skills/orchestrator/references/lite-writing-guide.md`](skills/orchestrator/references/lite-writing-guide.md) 与对应 stage skill 维护，本 README 不重复。
+`work_type`（可选 PLAN / Clarification 分诊信号，不写入 frontmatter、不被 `advance-stage.ps1` / validator 消费）、`bug` / `refactor` 条件化模板、Clarification 协议族写法、推理纪律（解决问题 / 修 bug / 设计时的第一性原理 / 剃刀法则 / 贝叶斯更新）、CODE_REVIEW 对抗性审查纪律（否定式 / 追问式 / 墨菲定律，复杂任务可选多 agent 升级），以及 IMPLEMENT / CODE_REVIEW 的 implementation reflection checks（过大文件塞逻辑、计划外抽象、邻近顺手重构、未声明新概念、症状补丁 5 类风险），写法与示例都在 [`skills/orchestrator/references/lite-writing-guide.md`](skills/orchestrator/references/lite-writing-guide.md) 与对应 stage skill 维护，本 README 不重复。
 
 ### 推进规则
 

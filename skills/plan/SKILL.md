@@ -82,6 +82,10 @@ updated: 2026-04-09
 
 当用户要求需求澄清 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认等同族请求时，仍只在 `PLAN` 阶段处理，不新增 stage：一次只推进一个关键问题；可由代码库 / 文档 / artifact 回答的先自查；仍需用户决策的每个问题给 `recommended_answer`，确认前 `## User Confirmation` 保持 `draft`。详细写法见 guide。
 
+## 推理纪律（第一性原理 / 剃刀 / 贝叶斯）
+
+解决问题、修 bug、设计架构或方案时，Clarification 与 Plan 的推理按三条纪律收敛：**第一性原理**回到根本约束与根因（bug 用 `bug.root_cause_action` 对齐根因，呼应“症状补丁”反射检查）、**剃刀法则**在满足验收前提下选最简方案并砍掉计划外抽象与顺手重构、**贝叶斯更新**随新证据（代码事实 / 验证结果 / review finding）修正结论（呼应 Clarification“一次一个关键问题、先自查再给 `recommended_answer`”）。只改推理与写作，不新增 stage / 字段 / gate。详见 guide 的“推理纪律”。
+
 ## 工作方式
 
 1. 先读已批准输入和可选 `spec.md`

@@ -123,6 +123,16 @@ stages:
 - 回滚策略或兼容性约束
 - `ui: <expectation | not-applicable>`
 
+#### 推理纪律：第一性原理 / 剃刀法则 / 贝叶斯
+
+解决问题、修 bug、设计架构或方案时，Clarification 与 Plan 的推理按这三条纪律收敛；落到产物里只写结论与依据，不写口号：
+
+- **第一性原理**：先回到问题的本质约束与目标，而不是照搬现成做法或类比。在 `## Clarification` 写清真正要解决的根本问题和不可让步的约束；bug 任务用 `bug.root_cause_action` 对齐根因而非症状，与 IMPLEMENT 的“症状补丁”反射检查同一口径。
+- **剃刀法则**：在满足验收与约束的前提下选最简方案，砍掉非必要实体、抽象与依赖。计划外抽象、邻近顺手重构属于要剔除项（与 IMPLEMENT 反射检查同口径），`## Plan` 只保留必要、可执行的 TODO。
+- **贝叶斯更新**：把方案当成带先验的假设，遇到新证据（代码事实、验证结果、review finding）就更新结论，不锚定初稿。Clarification 协议族“一次一个关键问题、先自查再给 `recommended_answer`”就是这条纪律的写法；回修后用新 run 记录被证据更新过的判断。
+
+这三条只约束推理与写作方式，不新增 stage、frontmatter 字段或 validator gate。
+
 #### Clarification 协议族
 
 “需求澄清”“需求确认”“拷问需求”“拷问方案”“头脑风暴”“方案压力测试”“设计访谈”“边界确认”“验收标准确认”“非目标确认”，以及 `clarify`、`brainstorm`、`pressure test`、`challenge this plan`、`ask me questions`、`interrogate the requirement` 等表达，都是同一类 PLAN/Clarification 触发词。
@@ -367,6 +377,18 @@ front_keywords: [shared-memory, long-session, recovery]
 - 只在真的有问题时使用 `P0/P1/P2/P3`。
 - Phase 3 adapter 的 invocation trace 只能追加到现有 run 末尾，不能手写到 section 顶层
 - PLAN_REVIEW / CODE_REVIEW 应把 artifact、affected_paths、实际 diff、Implementation Notes 和后续 Handoff 的 finish boundary 作为人工审查点；这是 append-only review 写作规则，不新增 stage，也不把 drift 升为 validator hard gate。
+
+#### 对抗性审查纪律（CODE_REVIEW）
+
+做完相对复杂的任务后，CODE_REVIEW 默认按对抗姿态审查，再把结论 append 进 `## Code Review` run；这是审查写法，不新增 stage 或 validator gate：
+
+- **否定式对抗**：默认尝试证伪本次实现——主动找“它在哪里是错的 / 漏的 / 多做的”，对每条关键改动设法构造反例或失败输入，而不是确认它“看起来对”。
+- **追问式对抗**：对存疑点连环追问根因——“为什么这样改 / 这个假设成立吗 / 边界、并发、失败路径如何 / 真的命中 PLAN 的根因吗”，一直问到能给出可验证答案或退回 IMPLEMENT。
+- **墨菲定律**：默认“会出错的地方终将出错”，显式列出最坏失效路径（异常输入、空值、并发、回滚、依赖不可用、部分失败），核对 PLAN 的 Verification 是否覆盖；未覆盖的写成 finding。
+
+命中问题用现有 `findings`（`P0/P1/P2/P3`）退回，`verdict: revise`；不引入新的硬校验。
+
+可选多 Agent 升级：复杂或高风险任务可显式 escalate 到多 agent 对抗审查——leader 在 `$env:AIONUI_TEAM_MODE='1'` 下走 `skills/workflow-team`（或宿主提供的等效多 agent 能力），让独立 agent 分别承担否定式与追问式角色；Codex-only 默认单 agent 也必须完成上面三条纪律。结论仍 append 回同一个 `## Code Review` run，不另开真相源。
 
 ### Implementation Notes
 
