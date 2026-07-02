@@ -210,7 +210,7 @@ function Assert-UsingSuperpowersRemovedFromActiveSurface {
     .SYNOPSIS
     锁定活跃入口面不再引用 using-superpowers。
     .DESCRIPTION
-    旧 alias 目录移除后，旧名只能留在历史 docs/tasks 记录或测试回归锁点；
+    旧 alias 目录移除后，旧名只能留在 git history 或测试回归锁点；
     入口、配置、脚本、skill 与模板不应再引用它。
     .OUTPUTS
     None。
@@ -222,7 +222,6 @@ function Assert-UsingSuperpowersRemovedFromActiveSurface {
         'scripts',
         'skills',
         'vault-template',
-        'docs/aionui-integration',
         'docs/team-write-authority.md',
         'docs/shared-memory-layers.md',
         'docs/工作流'
@@ -242,7 +241,7 @@ function Assert-GeminiDesignerRemovedFromActiveSurface {
     .SYNOPSIS
     锁定活跃入口面不再引用旧 Gemini designer 命名。
     .DESCRIPTION
-    迁移到 test-runner 后，旧名只能留在历史 docs/tasks 记录或测试回归锁点；
+    迁移到 test-runner 后，旧名只能留在 git history 或测试回归锁点；
     入口、配置、脚本、skill 与模板不应再引用它。
     .OUTPUTS
     None。
@@ -254,7 +253,6 @@ function Assert-GeminiDesignerRemovedFromActiveSurface {
         'scripts',
         'skills',
         'vault-template',
-        'docs/aionui-integration',
         'docs/team-write-authority.md',
         'docs/shared-memory-layers.md',
         'docs/工作流'
@@ -395,6 +393,8 @@ Assert-GitIgnoreState -Path '.assistant/运行时/记忆-问题.md' -ShouldBeIgn
 Assert-GitIgnoreState -Path '.assistant/运行时/记忆候选.md' -ShouldBeIgnored $true
 Assert-GitIgnoreState -Path '.assistant/运行时/记忆候选归档.md' -ShouldBeIgnored $true
 Assert-GitIgnoreState -Path '.assistant/运行时/收件箱.md' -ShouldBeIgnored $true
+Assert-GitIgnoreState -Path 'docs/tasks/example/plan.md' -ShouldBeIgnored $true
+Assert-GitIgnoreState -Path 'docs/tasks/README.md' -ShouldBeIgnored $false
 Assert-FileNotContains -Path 'skills/obsidian-memory/scripts/check-shared-memory.ps1' -Needle "Join-Path (Join-Path `$workspaceRoot 'docs') `$TaskId"
 Assert-FileNotContains -Path 'skills/obsidian-memory/scripts/repair-shared-memory.ps1' -Needle 'docs/tasks/none/plan.md'
 Assert-FileNotContains -Path 'README.md' -Needle 'claude-codex-gemini'

@@ -165,7 +165,7 @@ ${extra}updated: $updatedDate
 - Add ACP-style skill adapter coverage.
 
 ## Verification
-- ``pwsh -File tests/verify-aionui-skill-contract.ps1``
+- ``pwsh -File tests/verify-aiteamcode-skill-contract.ps1``
 
 ## Risks
 - none

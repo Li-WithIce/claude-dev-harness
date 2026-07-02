@@ -62,7 +62,7 @@ append-only run 用 `### Run <N> · YYYY-MM-DD HH:mm · runner: X` 标题，必�
 - **判断否决证据门槛**：推翻“该不该做 / 是否过度 / 是否应删除”这类设计判断时，必须给可执行反例验证或代码 / 文档证据；给不出时只作为非阻断提示，不直接作为 `verdict: revise` 的唯一理由
 - **Debono 价值保留**：`verdict: revise` 后，在 `next` 或 finding 中保留仍成立的约束、价值或适用条件，避免过度批判
 
-命中用现有 `findings` + `verdict: revise` 退回，不加硬校验。复杂 / 高风险任务可显式升级到多 agent 对抗审查（`$env:AIONUI_TEAM_MODE='1'` 走 `workflow-team`，或宿主提供的等效多 agent 能力），由独立 agent 分担否定式与追问式；Codex-only 单 agent 也要完成上述三条。详见 guide 的“对抗性审查纪律”。
+命中用现有 `findings` + `verdict: revise` 退回，不加硬校验。复杂 / 高风险任务可显式升级到多 agent 对抗审查（`$env:AITEAMCODE_TEAM_MODE='1'` 走 `workflow-team`，或宿主提供的等效多 agent 能力），由独立 agent 分担否定式与追问式；Codex-only 单 agent 也要完成上述三条。详见 guide 的“对抗性审查纪律”。
 
 ## 判定规则
 

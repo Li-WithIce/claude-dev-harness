@@ -168,7 +168,7 @@ $coreScripts = @(
     'verify-shared-memory-layers.ps1',
     'verify-render-review-html.ps1',
     'verify-skill-manifest.ps1',
-    'verify-aionui-skill-contract.ps1',
+    'verify-aiteamcode-skill-contract.ps1',
     'verify-tool-profile.ps1'
 )
 

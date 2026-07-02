@@ -1,5 +1,5 @@
 # `harness-lite` 在 Phase 5 只增加 auto-mode 文档协议，不改 YAML 实体字段。
-# 当 leader 同时设置 AIONUI_TEAM_MODE=1 与 HARNESS_AUTO=1 时，
+# 当 leader 同时设置 AITEAMCODE_TEAM_MODE=1 与 HARNESS_AUTO=1 时，
 # spawned member 可按 non-interactive 方式执行自己的阶段工作。
 # 缺少 HARNESS_AUTO 时按 fail-closed 处理，保持当前 non-auto 行为。
 # auto-mode 不得绕过 PLAN_REVIEW / CODE_REVIEW 或 leader 的推进确认。

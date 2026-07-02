@@ -80,7 +80,7 @@ pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <claudecod
 
 - orchestrator 只保留 team-mode 的文档分支，不新增可执行 dispatcher
 - 唯一可执行强制点：`skills/workflow-team/scripts/spawn-team.ps1`
-- `spawn-team.ps1` 只有在 `$env:AIONUI_TEAM_MODE='1'` 时才会进入 spawn 路径
+- `spawn-team.ps1` 只有在 `$env:AITEAMCODE_TEAM_MODE='1'` 时才会进入 spawn 路径
 - env 未设时，脚本会 fail-closed 返回 `reason=team_mode_disabled`
 - 单写者约束参考 [docs/team-write-authority.md](../../../docs/team-write-authority.md)
 

@@ -87,7 +87,7 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 - `resume-current` / `switch-existing`：先加载 `.assistant/运行时/恢复索引.md`、`.assistant/运行时/当前任务.md`、`运行时/tasks/<task-id>.md`；必要时只读当前任务的 `plan.md` frontmatter 判定 stage，再加载当前 stage skill。
 - `ask`：不加载 workflow skill，只问一个最小澄清问题。
 
-禁止 bulk-load 全部 skills、全部历史 `docs/tasks/*`、Claude 兼容 skill 或 `workflow-team`。只有用户显式切换 backend、当前 stage frontmatter / workflow descriptor 命中、或 `$env:AIONUI_TEAM_MODE='1'` 等触发条件满足时，才加载这些兼容路径。
+禁止 bulk-load 全部 skills、全部历史 `docs/tasks/*`、Claude 兼容 skill 或 `workflow-team`。只有用户显式切换 backend、当前 stage frontmatter / workflow descriptor 命中、或 `$env:AITEAMCODE_TEAM_MODE='1'` 等触发条件满足时，才加载这些兼容路径。
 
 ### Markdown / HTML artifact 能力
 
@@ -221,11 +221,11 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 
 ### `git`
 
-`git` 在这个体系里承担“可审计变更面”角色，不是运行时状态容器。
+`git` 在这个体系里承担“可审计代码与协议变更面”角色，不是运行时状态容器。
 
 当前真实边界：
 
-- `docs/tasks/<task-id>/*` 是应当进入 review/commit 的主产物面
+- `docs/tasks/<task-id>/*` 是本地 workflow 任务产物，默认由 `.gitignore` 排除；需要沉淀长期协议时，把结论移入 `docs/工作流/`、`skills/`、`tests/` 或其他明确维护面
 - 大部分 `.assistant/` 仍默认忽略，不应该把运行时噪音随手提交
 - 已显式放开的 `.assistant` 审计面目前主要包括：
   - `.assistant/工作流/长会话恢复.md`
@@ -273,7 +273,7 @@ pwsh -File .\scripts\generate-skills-index.ps1 -TaskId <task-id> -Stage TEST -Ba
 
 # team preset 导出与 team mode
 pwsh -File .\scripts\export-team-preset.ps1 -Workflow harness-lite -Output <tmp>\team.yaml
-$env:AIONUI_TEAM_MODE='1'
+$env:AITEAMCODE_TEAM_MODE='1'
 $env:HARNESS_AUTO='1'
 pwsh -File .\skills\workflow-team\scripts\spawn-team.ps1 -TaskId <task-id>
 ```
@@ -324,7 +324,7 @@ pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite core
 三档口径：
 
 - `quick`：只跑 `git diff --check` 和 `tests/verify-lite-footprint.ps1`，适合 README / 文档小修后的快速回归。
-- `core`：跑 `git diff --check` 加核心协议脚本，包括 artifact validator、footprint、workflow contracts / descriptor、shared-memory layers、review HTML renderer、skill manifest、AionUI skill contract、tool profile。
+- `core`：跑 `git diff --check` 加核心协议脚本，包括 artifact validator、footprint、workflow contracts / descriptor、shared-memory layers、review HTML renderer、skill manifest、AiTeamCode skill contract、tool profile。
 - `all`：跑 `git diff --check` 加除 `verify-installation.ps1` 外所有 `tests/verify-*.ps1`；需要安装验证时额外传 `-WorkspaceRoot`。
 
 ### 跑完整 verify 套件

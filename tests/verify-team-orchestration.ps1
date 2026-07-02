@@ -184,9 +184,9 @@ function Invoke-SpawnTeam {
 
     $wrapperContent = @"
 if ($teamModeLiteral -eq '') {
-    Remove-Item Env:\AIONUI_TEAM_MODE -ErrorAction SilentlyContinue
+    Remove-Item Env:\AITEAMCODE_TEAM_MODE -ErrorAction SilentlyContinue
 } else {
-    `$env:AIONUI_TEAM_MODE = $teamModeLiteral
+    `$env:AITEAMCODE_TEAM_MODE = $teamModeLiteral
 }
 `$global:MockMode = $mockModeLiteral
 `$global:TeamSpawnLogPath = $logPathLiteral
@@ -240,10 +240,10 @@ try {
         $null -ne $o1Json -and
         -not $o1Json.ok -and
         $o1Json.reason -eq 'team_mode_disabled' -and
-        $o1Result.StdErr -match 'AIONUI_TEAM_MODE not set' -and
+        $o1Result.StdErr -match 'AITEAMCODE_TEAM_MODE not set' -and
         $orchestratorSkill.Contains('Team mode (documentation only)') -and
-        -not ($orchestratorSkill -match '(?m)^\s*if\s*\(\$env:AIONUI_TEAM_MODE')) {
-        Add-Check 'O1 spawn-team fails closed when AIONUI_TEAM_MODE is unset and orchestrator keeps a documentation-only team-mode branch'
+        -not ($orchestratorSkill -match '(?m)^\s*if\s*\(\$env:AITEAMCODE_TEAM_MODE')) {
+        Add-Check 'O1 spawn-team fails closed when AITEAMCODE_TEAM_MODE is unset and orchestrator keeps a documentation-only team-mode branch'
     } else {
         Add-Failure ("O1 env opt-in guard failed, stdout=[{0}] stderr=[{1}]" -f $o1Result.StdOut, $o1Result.StdErr)
     }
@@ -346,7 +346,7 @@ Set-Content $repo/docs/tasks/x/plan.md 'x'
         $o6PayloadLines.Count -eq 0 -and
         $null -ne $o6Json -and
         $o6Json.reason -eq 'team_mode_disabled') {
-        Add-Check 'O6 MCP availability does not bypass the env opt-in gate when AIONUI_TEAM_MODE is unset'
+        Add-Check 'O6 MCP availability does not bypass the env opt-in gate when AITEAMCODE_TEAM_MODE is unset'
     } else {
         Add-Failure ("O6 MCP bypass guard failed, O1 stdout=[{0}] O6 stdout=[{1}] O6 calls={2}" -f $o1Result.StdOut, $o6Result.StdOut, $o6PayloadLines.Count)
     }

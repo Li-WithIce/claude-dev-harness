@@ -108,8 +108,8 @@ $exitCode = 0
 $presetTempPath = ''
 try {
     Write-TraceDiagnostic 'spawn-team: begin'
-    if ($env:AIONUI_TEAM_MODE -ne '1') {
-        $message = 'AIONUI_TEAM_MODE not set; team-mode is opt-in only'
+    if ($env:AITEAMCODE_TEAM_MODE -ne '1') {
+        $message = 'AITEAMCODE_TEAM_MODE not set; team-mode is opt-in only'
         Write-Diagnostic $message
         $result = New-Result -Ok $false -Reason 'team_mode_disabled' -Errors @($message)
         $exitCode = 1

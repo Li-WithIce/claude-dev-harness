@@ -75,7 +75,7 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 - `resume-current` / `switch-existing`：先读恢复运行时（恢复索引 / 当前任务 / tasks），再按 `plan.md` frontmatter stage 加载当前 stage skill。
 - `ask`：不加载 workflow skill，只问一个最小澄清问题。
 
-禁止 bulk-load 全部 skills / 全部历史任务 / Claude 兼容 skill / `workflow-team`；仅在显式 backend override、frontmatter 命中或 `$env:AIONUI_TEAM_MODE='1'` 时才加载这些路径。
+禁止 bulk-load 全部 skills / 全部历史任务 / Claude 兼容 skill / `workflow-team`；仅在显式 backend override、frontmatter 命中或 `$env:AITEAMCODE_TEAM_MODE='1'` 时才加载这些路径。
 
 ### 同族分支路由（按需，写法见对应单一真相源）
 

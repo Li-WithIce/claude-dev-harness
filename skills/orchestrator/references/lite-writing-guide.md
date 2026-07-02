@@ -427,7 +427,7 @@ front_keywords: [shared-memory, long-session, recovery]
 
 命中问题用现有 `findings`（`P0/P1/P2/P3`）退回，`verdict: revise`；不引入新的硬校验。
 
-可选多 Agent 升级：复杂或高风险任务可显式 escalate 到多 agent 对抗审查——leader 在 `$env:AIONUI_TEAM_MODE='1'` 下走 `skills/workflow-team`（或宿主提供的等效多 agent 能力），让独立 agent 分别承担否定式与追问式角色；Codex-only 默认单 agent 也必须完成上面三条纪律。结论仍 append 回同一个 `## Code Review` run，不另开真相源。
+可选多 Agent 升级：复杂或高风险任务可显式 escalate 到多 agent 对抗审查——leader 在 `$env:AITEAMCODE_TEAM_MODE='1'` 下走 `skills/workflow-team`（或宿主提供的等效多 agent 能力），让独立 agent 分别承担否定式与追问式角色；Codex-only 默认单 agent 也必须完成上面三条纪律。结论仍 append 回同一个 `## Code Review` run，不另开真相源。
 
 ### Implementation Notes
 
