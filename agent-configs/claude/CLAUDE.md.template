@@ -17,6 +17,7 @@ Today's date is __RENDER_AT_INSTALL__
 3. 安装状态只看 `配置/引导状态.md`，不要用它判断当前任务。
 4. 共享运行时文件采用单写者模型。
 5. 多步骤任务开始、切换、暂停时同步更新共享运行时。
+6. 新功能开发或功能修改以当前需求和业务正确性为准；不要为了兼容旧测试、旧快照或过期断言而保留或恢复旧行为。若旧测试与新需求冲突，应更新或删除旧测试并说明原因；只有用户明确要求历史兼容时才保留旧测试兼容。
 
 ## 恢复触发
 
@@ -36,4 +37,7 @@ Claude 是显式兼容 host，仍先调用 `/entry-router`，但后续读取面�
 - `resume-current` / `switch-existing` 先加载恢复运行时文件，再加载当前 stage skill。
 - `ask` 不加载 workflow skill，只问一个最小澄清问题。
 - “需求澄清 / 需求确认 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认”等同族请求跟随工作区入口规则；需要可审计开发决策时只落到现有 `PLAN -> Clarification`，不新增 stage。
+- PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径仍不足以指导 IMPLEMENT 时，也按同一 Clarification 协议处理。
+- 进入 Clarification 协议后，先回答可由代码/文档查证的问题，保留 Clarification 最低字段，剩余用户决策按依赖顺序一次只问一个并给推荐答案；`clarification_ledger` 仍有 `decision: pending` 时，`User Confirmation` 保持 draft。
+- 阶段原则路由只作为认知视角，不新增五转流程：Entry/Clarification 用 Socrates，PLAN 用 Osborn/Hegel/First Principles/Occam，PLAN_REVIEW 用 Hegel+Bayes，IMPLEMENT 用 Ponytail/surgical change，CODE_REVIEW 用 Feynman，TEST 用 Bayes，revise 后用 Debono 保留仍成立的价值和约束。
 - 禁止 bulk-load 全部 skills、全部历史任务、Claude 兼容 skill 或 `workflow-team`，除非显式 backend、stage 或 team-mode 触发。

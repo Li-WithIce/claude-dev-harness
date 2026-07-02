@@ -123,6 +123,8 @@ stages:
 - 回滚策略或兼容性约束
 - `ui: <expectation | not-applicable>`
 
+`clarification_ledger` 只补充问题树和决策留痕，不能替代上述最低字段；即使八类账本都已闭环，`advance-stage` / validator 仍依赖这些机器可读行。
+
 #### 推理纪律：第一性原理 / 剃刀法则 / 贝叶斯
 
 解决问题、修 bug、设计架构或方案时，Clarification 与 Plan 的推理按这三条纪律收敛；落到产物里只写结论与依据，不写口号：
@@ -133,6 +135,20 @@ stages:
 
 这三条只约束推理与写作方式，不新增 stage、frontmatter 字段或 validator gate。
 
+#### 阶段原则路由
+
+harness-lite 仍只有 `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`；以下大师/原则只是各阶段的默认认知视角，不新增五转 pipeline、stage、frontmatter 字段、runtime 文件或 validator hard gate：
+
+- **Entry / Clarification — Socrates**：先分清输入是外部论点、用户需求、内部推理还是待验证结论。外部论点先做来源与代码 / 文档 / artifact 证据核对；用户需求进入 Clarification 问题树；内部推理回到根约束并找反例；待验证结论进入后续 Verification / TEST 证据收集。剩余用户决策一次只问一个。
+- **PLAN 发散 — Osborn**：复杂方案不要过早锁死；先列替代路径，但只保留会影响验收、非目标、风险或实现路径的发散结果。
+- **PLAN 收敛 — Hegel**：把发散项收成关键矛盾、依赖、未决项和可执行 TODO。
+- **PLAN 方案选择 — First Principles + Occam**：回到根约束和验收，选择最小必要方案，删除计划外抽象。
+- **PLAN_REVIEW — Hegel + Bayes**：检查计划是否自洽，前提是否有代码 / 文档 / artifact 证据，未决项是否闭环。
+- **IMPLEMENT — Ponytail / Surgical Change**：最小正确 diff，根因修复，不顺手重构。
+- **CODE_REVIEW — Feynman**：盲审、证据、反例验证；判断否决必须给可执行反例，给不出则只作为非阻断提示。
+- **TEST — Bayes**：用真实验证更新结论；没证据不写 pass。
+- **revise 后 — Debono**：记录被否方案中仍应保留的约束、价值或适用条件，避免过度批判。
+
 #### Clarification 协议族
 
 “需求澄清”“需求确认”“拷问需求”“拷问方案”“头脑风暴”“方案压力测试”“设计访谈”“边界确认”“验收标准确认”“非目标确认”，以及 `clarify`、`brainstorm`、`pressure test`、`challenge this plan`、`ask me questions`、`interrogate the requirement` 等表达，都是同一类 PLAN/Clarification 触发词。
@@ -140,11 +156,27 @@ stages:
 规则：
 
 - 它们只改变 PLAN 写作方式，不新增 workflow stage、frontmatter 字段、runtime、validator hard gate 或第二 truth。
-- 开发任务需要留痕或后续实现时，在 `PLAN -> ## Clarification` 中沉淀问题、推荐答案、决策、依赖和非目标；用户确认前 `## User Confirmation` 保持 `- status: draft`。
+- 触发范围包括显式触发词，也包括 PLAN 的验收、非目标、影响面、回滚/兼容任一项仍不确定，或实现路径仍不足以指导 IMPLEMENT。
+- 开发任务需要留痕或后续实现时，在 `PLAN -> ## Clarification` 中用 `clarification_ledger` 沉淀问题、证据、推荐答案、决策和影响；用户确认前 `## User Confirmation` 保持 `- status: draft`。
+- `clarification_ledger` 是 `Clarification 最低要求` 的补充，不替代 `验收标准 / 非目标 / 受影响目录或模块 / 回滚策略或兼容性约束 / ui:`；这些字段必须继续出现在 `## Clarification` 中。
 - 信息不足以判断 quick/workflow 时才走 `ask`，并且只问一个最小澄清问题。
-- 一次只推进一个关键问题；多个互相依赖的问题应按依赖顺序逐项处理。
-- 能通过读取代码库、文档或现有 artifact 回答的问题，先自行查证，再给出推荐答案。
-- 每个需要用户决策的问题都要给 `recommended_answer`；确认后再把该点记为 `decision`。
+- 触发后先自行查证能由代码库、文档或现有 artifact 回答的问题；剩余用户决策按依赖顺序一次只问一个，并给 `recommended_answer`。
+- `clarification_ledger` 分类限定为：`目标/验收`、`用户与权限`、`流程与状态`、`数据与边界`、`集成依赖`、`失败与回滚`、`非目标`、`验证证据`；触发协议时八类都必须有账本项。不适用类别写 `question: 该类别是否适用？`、`evidence: not-applicable`、`recommended_answer: 不适用`、`decision: accepted`、`impact: none`。
+- 每个账本项使用字段 `category / question / evidence / recommended_answer / decision / impact`；`decision` 只能是 `pending | accepted | rejected`。存在 `pending` 时不得把 `## User Confirmation` 改成 `confirmed`。
+- 不得代替用户伪造决策：能由代码 / 文档 / artifact 自行闭环的问题，`evidence` 必须写明证据路径或事实；需要用户选择的问题，在用户回答前必须保持 `decision: pending`，用户回答后把简要回答写入 `evidence`。
+- `decision: accepted | rejected` 且 `impact` 不是 `none` 时，必须落到后续 `## Plan`、`## Verification` 或 `## Risks` 的对应 TODO / 命令 / 风险里；否则账本只是旁路记录，不算可执行决策。
+
+账本项示例（节选）：
+
+```markdown
+- clarification_ledger:
+  - category: 目标/验收
+    question: 是否以当前需求替换旧测试期望？
+    evidence: 代码和测试期望冲突，当前需求已明确新行为。
+    recommended_answer: 接受新行为并更新旧测试。
+    decision: accepted
+    impact: IMPLEMENT 不保留旧测试兼容分支。
+```
 
 #### <a id="work-type-routing"></a>work_type（可选语义路由）
 
@@ -231,6 +263,11 @@ stages:
 ## User Confirmation
 - status: draft | confirmed
 ```
+
+规则：
+
+- 用户确认前保持 `draft`。
+- 若 `## Clarification` 含 `clarification_ledger`，存在 `decision: pending` 时不得写 `confirmed`。
 
 ### Plan 内容要求
 
@@ -385,6 +422,8 @@ front_keywords: [shared-memory, long-session, recovery]
 - **否定式对抗**：默认尝试证伪本次实现——主动找“它在哪里是错的 / 漏的 / 多做的”，对每条关键改动设法构造反例或失败输入，而不是确认它“看起来对”。
 - **追问式对抗**：对存疑点连环追问根因——“为什么这样改 / 这个假设成立吗 / 边界、并发、失败路径如何 / 真的命中 PLAN 的根因吗”，一直问到能给出可验证答案或退回 IMPLEMENT。
 - **墨菲定律**：默认“会出错的地方终将出错”，显式列出最坏失效路径（异常输入、空值、并发、回滚、依赖不可用、部分失败），核对 PLAN 的 Verification 是否覆盖；未覆盖的写成 finding。
+- **判断否决证据门槛**：若 finding 推翻的是“该不该做 / 是否过度 / 是否应删除”这类设计判断，必须附一个可执行反例验证或代码 / 文档证据；给不出时只作为非阻断提示，不直接作为 `verdict: revise` 的唯一理由。
+- **Debono 价值保留**：`verdict: revise` 后，在 `next` 或 finding 中保留仍成立的约束、价值或适用条件；不要把可复用的洞察随被否方案一起丢掉。
 
 命中问题用现有 `findings`（`P0/P1/P2/P3`）退回，`verdict: revise`；不引入新的硬校验。
 
@@ -515,6 +554,8 @@ pass
 - [ ] `plan.md` frontmatter 只有 4 个基础字段，或再加合法的 `tool_profile` / `model`
 - [ ] `tool` 与当前 `stage` 组合合法
 - [ ] `User Confirmation` 使用机器可读 `status`
+- [ ] `clarification_ledger` 没有替代 Clarification 最低字段：`验收标准`、`非目标`、`受影响目录 / 模块`、`回滚策略或兼容性约束`、`ui:`
+- [ ] 触发 Clarification 协议时，`clarification_ledger` 无 `decision: pending`，且非 `impact: none` 决策已落到 Plan / Verification / Risks
 - [ ] append-only run 没有改写旧历史
 - [ ] review run 含 `verdict`
 - [ ] test.md 含 `Conclusion` 和 `Handoff`

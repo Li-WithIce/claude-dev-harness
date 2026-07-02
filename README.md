@@ -76,7 +76,7 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 
 显式覆盖词优先：用户说“直接改”“快修”时偏 `quick`；用户说“走 workflow”“留痕”“review”“test”时偏 `workflow`。没有显式词时由入口 agent 自主判断，默认保持轻量。
 
-“需求澄清”“需求确认”“拷问需求”“拷问方案”“头脑风暴”“方案压力测试”“设计访谈”“边界确认”“验收标准确认”“非目标确认”，以及 `clarify`、`brainstorm`、`pressure test`、`challenge this plan`、`ask me questions` 等表达属于 Clarification 协议族。它们不是新 stage：开发任务需要可审计决策或后续实现时，进入现有 `PLAN -> ## Clarification`，用户确认前 `## User Confirmation` 保持 `draft`；只有任务归属、目标或风险边界不足以判断时才走 `ask`，并且只问一个最小澄清问题。能通过代码库、文档或 artifact 回答的问题，入口 agent 应先查证再给推荐答案。
+“需求澄清”“需求确认”“拷问需求”“拷问方案”“头脑风暴”“方案压力测试”“设计访谈”“边界确认”“验收标准确认”“非目标确认”，以及 `clarify`、`brainstorm`、`pressure test`、`challenge this plan`、`ask me questions` 等表达属于 Clarification 协议族；PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径仍不足以指导 IMPLEMENT 时也按该协议处理。它们不是新 stage：开发任务需要可审计决策或后续实现时，进入现有 `PLAN -> ## Clarification`，用 `clarification_ledger` 记录 `category / question / evidence / recommended_answer / decision / impact`，但账本不替代 Clarification 最低字段；用户确认前 `## User Confirmation` 保持 `draft`，账本仍有 `decision: pending` 时不得确认。只有任务归属、目标或风险边界不足以判断时才走 `ask`；能通过代码库、文档或 artifact 回答的问题，入口 agent 应先查证，剩余用户决策按依赖顺序一次只问一个并给推荐答案。
 
 ### 自动懒加载规则
 
@@ -147,7 +147,7 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 
 ### `work_type`、条件化模板与 reflection guidance
 
-`work_type`（可选 PLAN / Clarification 分诊信号，不写入 frontmatter、不被 `advance-stage.ps1` / validator 消费）、`bug` / `refactor` 条件化模板、Clarification 协议族写法、推理纪律（解决问题 / 修 bug / 设计时的第一性原理 / 剃刀法则 / 贝叶斯更新）、CODE_REVIEW 对抗性审查纪律（否定式 / 追问式 / 墨菲定律，复杂任务可选多 agent 升级），以及 IMPLEMENT / CODE_REVIEW 的 implementation reflection checks（过大文件塞逻辑、计划外抽象、邻近顺手重构、未声明新概念、症状补丁 5 类风险），写法与示例都在 [`skills/orchestrator/references/lite-writing-guide.md`](skills/orchestrator/references/lite-writing-guide.md) 与对应 stage skill 维护，本 README 不重复。
+`work_type`（可选 PLAN / Clarification 分诊信号，不写入 frontmatter、不被 `advance-stage.ps1` / validator 消费）、`bug` / `refactor` 条件化模板、Clarification 协议族写法、阶段原则路由（Socrates / Osborn / Hegel / First Principles / Occam / Feynman / Bayes / Debono 只作为阶段认知视角，不新增五转流程）、推理纪律、CODE_REVIEW 对抗性审查纪律，以及 IMPLEMENT / CODE_REVIEW 的 implementation reflection checks，写法与示例都在 [`skills/orchestrator/references/lite-writing-guide.md`](skills/orchestrator/references/lite-writing-guide.md) 与对应 stage skill 维护，本 README 不重复。
 
 ### 推进规则
 

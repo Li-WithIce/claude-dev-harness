@@ -15,6 +15,14 @@ These shims delegate to the managed harness repo scripts and always use the inst
 
 Mode hints: `directly edit` / `quick fix` / `直接改` / `快修` bias to `quick`; `workflow` / `留痕` / `review` / `test` bias to `workflow`. Clarification-family triggers such as `需求澄清` / `需求确认` / `拷问` / `头脑风暴` / `方案压力测试` / `边界确认` enter existing `PLAN -> Clarification` when a development task needs durable decisions; use `ask` only when routing confidence is low, and ask one minimal question.
 
+Clarification trigger rule: unresolved PLAN acceptance, non-goals, impact, rollback/compatibility, or implementation path that cannot guide IMPLEMENT also enters the Clarification protocol.
+
+Clarification ledger rule: answer code/doc-discoverable questions first, keep the base Clarification fields, ask remaining user decisions one at a time with a recommended answer, and keep `User Confirmation` draft while any `clarification_ledger` item is `decision: pending`.
+
+Stage principle routing: use these as cognitive lenses only, not a new five-turn workflow: Entry/Clarification=Socrates, PLAN=Osborn/Hegel/First Principles/Occam, PLAN_REVIEW=Hegel+Bayes, IMPLEMENT=Ponytail/surgical change, CODE_REVIEW=Feynman, TEST=Bayes, revise=Debono value preservation.
+
+Implementation rule: 新功能开发或功能修改以当前需求和业务正确性为准；不要为了兼容旧测试、旧快照或过期断言而保留或恢复旧行为。若旧测试与新需求冲突，应更新或删除旧测试并说明原因；只有用户明确要求历史兼容时才保留旧测试兼容。
+
 Lazy loading:
 
 - `quick`: load only entry rules, user preferences / necessary config, and the directly relevant skill or reference.

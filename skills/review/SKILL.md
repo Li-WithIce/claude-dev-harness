@@ -21,8 +21,15 @@ append-only run 用 `### Run <N> · YYYY-MM-DD HH:mm · runner: X` 标题，必�
 ### PLAN_REVIEW
 
 - Clarification 是否完整
-- 若用户通过“需求澄清 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认”等同族触发词进入 PLAN，确认该协议只落在 `## Clarification` 和 `## User Confirmation`，没有新增 stage、frontmatter 字段、runtime、validator hard gate 或第二 truth
-- 对 Clarification 协议族任务，检查关键问题是否一次一个、可由代码库回答的问题是否已先查证、仍需用户决策的问题是否带 `recommended_answer` 和可执行的决策边界
+- 按阶段原则路由审查：PLAN_REVIEW 用 Hegel + Bayes，检查计划自洽、前提证据、未决项闭环；不要新增五转 stage 或第二 truth
+- 若用户通过“需求澄清 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认”等同族触发词进入 PLAN，或 PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径仍不足以指导 IMPLEMENT，确认该协议只落在 `## Clarification` 和 `## User Confirmation`，没有新增 stage、frontmatter 字段、runtime、validator hard gate 或第二 truth
+- 对 Clarification 协议族或上述不确定任务，检查 `clarification_ledger` 没有替代 `## Clarification` 最低字段；缺少 `验收标准`、`非目标`、`受影响目录 / 模块`、`回滚策略或兼容性约束`、`ui:` 任一项时必须 `verdict: revise`
+- 对 Clarification 协议族或上述不确定任务，检查 `## Clarification` 是否包含 `clarification_ledger`，每项是否有 `category / question / evidence / recommended_answer / decision / impact`
+- 对 Clarification 协议族或上述不确定任务，若缺少账本、存在 `decision: pending`、或 `## User Confirmation` 已 `- status: confirmed` 但仍有未决项，必须 `verdict: revise`
+- 对 Clarification 协议族或上述不确定任务，检查八类问题树（目标/验收、用户与权限、流程与状态、数据与边界、集成依赖、失败与回滚、非目标、验证证据）是否均有账本项；不适用类别必须显式写 `evidence: not-applicable`，否则 `verdict: revise`
+- 对 Clarification 协议族或上述不确定任务，检查 `decision: accepted | rejected` 是否有代码 / 文档 / artifact 证据或用户确认依据写入 `evidence`；agent 自行替用户作选择时必须 `verdict: revise`
+- 对 Clarification 协议族或上述不确定任务，检查每个 `impact` 非 `none` 的 accepted/rejected 决策是否已反映到 `## Plan`、`## Verification` 或 `## Risks`；没有落地时必须 `verdict: revise`
+- 对 Clarification 协议族或上述不确定任务，检查关键问题是否一次一个、可由代码库回答的问题是否已先查证、仍需用户决策的问题是否带 `recommended_answer` 和可执行的决策边界
 - 若 `## Clarification` 含 `work_type:`，核对它是否只作为 PLAN 语义路由使用，且与验收标准、非目标、受影响路径和验证命令一致，没有替代 `Change Contract.change_type`、没有写入 frontmatter
 - 若 `work_type: bug`，检查 PLAN 是否说明复现步骤、期望/实际行为、影响范围/严重程度、根因定位动作和修复验证动作；不得退化为“见 issue”这类不可执行占位
 - 若 `work_type: refactor`，检查 PLAN 是否说明行为不变约束、重构边界、受影响调用点、等价验证和回滚/兼容路径；不得夹带功能变更；声明型字段必须有同任务内可执行的 `equivalence_check` 或 verification 兜底
@@ -34,6 +41,7 @@ append-only run 用 `### Run <N> · YYYY-MM-DD HH:mm · runner: X` 标题，必�
 
 ### CODE_REVIEW
 
+- 按阶段原则路由审查：CODE_REVIEW 用 Feynman 反自欺，TEST 交给 Bayes 收证据，`revise` 后用 Debono 保留仍成立的约束、价值或适用条件
 - 实现是否满足计划，是否有明显漏做、做错、多做
 - 最新 `Implementation Notes` 是否和代码一致
 - 实际 diff 是否落在 `Change Contract.affected_paths` 可解释范围内，声明的 `Plan.artifacts` 是否已创建或在 `Implementation Notes` 中解释未交付原因
@@ -51,6 +59,8 @@ append-only run 用 `### Run <N> · YYYY-MM-DD HH:mm · runner: X` 标题，必�
 - **否定式对抗**：默认证伪实现，主动找错 / 漏 / 多做，对关键改动构造反例或失败输入，而不是确认它“看起来对”
 - **追问式对抗**：对存疑点连环追问根因（为什么这么改 / 假设成立吗 / 边界、并发、失败路径如何 / 是否命中 PLAN 根因），问到可验证或退回 IMPLEMENT
 - **墨菲定律**：默认会出错的终将出错，显式列最坏失效路径（异常输入、空值、并发、回滚、依赖不可用、部分失败），核对 Verification 是否覆盖，未覆盖写成 finding
+- **判断否决证据门槛**：推翻“该不该做 / 是否过度 / 是否应删除”这类设计判断时，必须给可执行反例验证或代码 / 文档证据；给不出时只作为非阻断提示，不直接作为 `verdict: revise` 的唯一理由
+- **Debono 价值保留**：`verdict: revise` 后，在 `next` 或 finding 中保留仍成立的约束、价值或适用条件，避免过度批判
 
 命中用现有 `findings` + `verdict: revise` 退回，不加硬校验。复杂 / 高风险任务可显式升级到多 agent 对抗审查（`$env:AIONUI_TEAM_MODE='1'` 走 `workflow-team`，或宿主提供的等效多 agent 能力），由独立 agent 分担否定式与追问式；Codex-only 单 agent 也要完成上述三条。详见 guide 的“对抗性审查纪律”。
 

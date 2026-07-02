@@ -79,7 +79,8 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 
 ### 同族分支路由（按需，写法见对应单一真相源）
 
-- **Clarification 协议族**（需求澄清 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认 / `clarify` / `brainstorm` / `pressure test` 等）：仍走 `new-task mode=workflow`，在 `PLAN -> ## Clarification` 沉淀问题 / 推荐答案 / 决策，确认前 `## User Confirmation` 保持 `draft`；信息不足以判归属时走 `ask`；可查问题先自查再给推荐答案。详细写法见 `plan` skill 与 lite-writing-guide。
+- **Clarification 协议族**（需求澄清 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认 / `clarify` / `brainstorm` / `pressure test` 等，或 PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径仍不足以指导 IMPLEMENT）：仍走 `new-task mode=workflow`，在 `PLAN -> ## Clarification` 的 `clarification_ledger` 沉淀问题 / 证据 / 推荐答案 / 决策 / 影响，并保留 Clarification 最低字段；确认前 `## User Confirmation` 保持 `draft`；信息不足以判归属时走 `ask`；可查问题先自查，剩余用户决策按依赖顺序一次只问一个并给推荐答案。详细写法见 `plan` skill 与 lite-writing-guide。
+- **阶段原则路由**：不新增五转流程；按阶段借用认知视角。Entry/Clarification 用 Socrates 分流：外部论点先查来源与代码 / 文档 / artifact 证据，用户需求进入 Clarification 问题树，内部推理回到根约束并找反例，待验证结论进入 Verification / TEST 证据收集；PLAN 用 Osborn 发散、Hegel 收敛、First Principles + Occam 选最小方案；PLAN_REVIEW 用 Hegel + Bayes；IMPLEMENT 用 Ponytail / surgical change；CODE_REVIEW 用 Feynman；TEST 用 Bayes；`revise` 后用 Debono 保留仍成立的价值和约束。
 - **Markdown / HTML artifact**：需要互转 / HTML 报告 / 网页 artifact / 发布预览 / 从 URL 提取 Markdown 时按需加载 `md-html` skill；Markdown 是 source of truth、HTML 是 generated artifact，边界见该 skill。
 - **开发流程细节**：5 阶段 harness-lite、`plan.md` frontmatter 真相源、`advance-stage.ps1` 推进语义、`spec.md` 可选附件等，见 `orchestrator` skill 与 README，本入口不重复。
 - **推理与对抗审查纪律**：解决问题 / 修 bug / 设计架构或方案时从第一性原理出发，遵循剃刀法则与贝叶斯更新；做完相对复杂的任务后默认做对抗性审查（否定式 + 追问式 + 墨菲定律），复杂任务可升级到多 agent。quick 任务同样适用推理纪律；workflow 任务的详细写法见 `plan` / `review` skill 与 lite-writing-guide。

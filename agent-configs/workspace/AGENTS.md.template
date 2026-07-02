@@ -4,6 +4,7 @@
 - Default language: 中文
 - If a task needs recovery, runtime state, long-term preferences, or tool paths, use the shared memory docs first
 - Do not keep parallel runtime notes outside `.assistant`
+- 新功能开发或功能修改以当前需求和业务正确性为准；不要为了兼容旧测试、旧快照或过期断言而保留或恢复旧行为。若旧测试与新需求冲突，应更新或删除旧测试并说明原因；只有用户明确要求历史兼容时才保留旧测试兼容。
 
 ## Read Order
 
@@ -18,6 +19,9 @@
 - `resume-current` / `switch-existing` loads recovery runtime files first, then the current-stage skill.
 - `ask` does not load workflow skills; ask one minimal clarification question.
 - Clarification-family requests such as 需求澄清 / 需求确认 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认 follow `.assistant\entry\AGENTS.md` and land in existing `PLAN -> Clarification` when they need durable development decisions; they do not create a new stage.
+- Treat unresolved PLAN acceptance, non-goals, impact, rollback/compatibility, or implementation path that cannot guide IMPLEMENT as the same Clarification protocol.
+- In that protocol, answer code/doc-discoverable questions first, keep the base Clarification fields, ask remaining user decisions one at a time with a recommended answer, and keep `User Confirmation` draft while any `clarification_ledger` item is `decision: pending`.
+- Stage principle routing is only a cognitive lens, not a new five-turn workflow: Entry/Clarification=Socrates, PLAN=Osborn/Hegel/First Principles/Occam, PLAN_REVIEW=Hegel+Bayes, IMPLEMENT=Ponytail/surgical change, CODE_REVIEW=Feynman, TEST=Bayes, revise=Debono value preservation.
 - Do not bulk-load all skills, all historical tasks, Claude compatibility skills, or `workflow-team` unless an explicit trigger requires them.
 
 ## Entry Shim

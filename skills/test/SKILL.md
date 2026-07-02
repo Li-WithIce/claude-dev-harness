@@ -20,6 +20,7 @@ TEST 的唯一产物是 `docs/tasks/<task-id>/test.md`。只有 `pass` 才能由
 - `## Conclusion` 下第一行必须且只能是：`pass`、`fail`、`blocked`
 - `## Handoff` 必须存在；validator 最低必填 `- delivery:` 和 `- follow_up:`（其余 finish boundary 字段见 guide）
 - 没有证据不写 `pass`
+- 按阶段原则路由，TEST 用 Bayes 视角：用真实验证更新结论，无法验证的项写入风险或缺口
 - `DONE` 由 `advance-stage.ps1` 写回 frontmatter，不在 `test.md` 里手写
 
 ## work_type 条件化验证
