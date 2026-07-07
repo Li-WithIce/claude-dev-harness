@@ -22,6 +22,7 @@ append-only run 用 `### Run <N> · YYYY-MM-DD HH:mm · runner: X` 标题，必�
 
 - Clarification 是否完整
 - 对 context provider 任务，按需读取 `references/adversarial-review-gate.md`、`references/code-intel-review.md`、`references/historical-recall-review.md`、`references/codedb-mcp-experimental.md`；provider finding 必须绑定真实证据。
+- 若 provider 输出影响计划或审查判断，检查 run 内是否有 `provider_context` 或等价的 grounded evidence；该记录不得进入 frontmatter、不得影响 stage advancement、不得直接决定 verdict。
 - 按阶段原则路由审查：PLAN_REVIEW 用 Hegel + Bayes，检查计划自洽、前提证据、未决项闭环；不要新增五转 stage 或第二 truth
 - 若用户通过“需求澄清 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认”等同族触发词进入 PLAN，或 PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径仍不足以指导 IMPLEMENT，确认该协议只落在 `## Clarification` 和 `## User Confirmation`，没有新增 stage、frontmatter 字段、runtime、validator hard gate 或第二 truth
 - 对 Clarification 协议族或上述不确定任务，检查 `clarification_ledger` 没有替代 `## Clarification` 最低字段；缺少 `验收标准`、`非目标`、`受影响目录 / 模块`、`回滚策略或兼容性约束`、`ui:` 任一项时必须 `verdict: revise`
@@ -48,6 +49,7 @@ append-only run 用 `### Run <N> · YYYY-MM-DD HH:mm · runner: X` 标题，必�
 - 最新 `Implementation Notes` 是否和代码一致
 - 实际 diff 是否落在 `Change Contract.affected_paths` 可解释范围内，声明的 `Plan.artifacts` 是否已创建或在 `Implementation Notes` 中解释未交付原因
 - 是否存在 artifact/diff drift（改了未声明路径、声明产物缺失、产物与变更面角色混淆）；命中时用现有 finding 退回或要求 TEST 明确记录
+- 若 provider 输出影响 CODE_REVIEW，确认 `provider_context` 已落到当前文件、命令、diff 或测试输出；不能把 provider claims 当作 verdict 本身。
 - 抽查实现是否命中 reflection 风险：过大文件继续塞逻辑、计划外抽象、邻近顺手重构、未声明新概念、症状补丁替代根因修复；命中且最新 `Implementation Notes` 未在 `- risks:` / `- next:` 说明理由取舍时，用现有 P1/P2 finding 退回 IMPLEMENT
 - 若 `work_type: bug`，确认实现证据对应复现、根因定位和修复验证，覆盖影响面回归
 - 若 `work_type: refactor`，确认没有计划外功能行为变化，等价验证覆盖 PLAN 声明的调用点或依赖面

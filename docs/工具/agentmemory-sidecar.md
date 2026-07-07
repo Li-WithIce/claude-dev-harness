@@ -18,6 +18,14 @@ Status: optional read-only historical recall sidecar.
 - Must not promote wisdom directly.
 - Any `agentmemory connect` or registration is user opt-in.
 
+## Windows / WSL Caveat
+
+- agentmemory remains opt-in.
+- WSL2 may be the practical fast path for setup and runtime behavior.
+- Native Windows setup may be manual, limited, or environment-specific.
+- Harness install/update must not run `agentmemory connect`.
+- agentmemory is read-only historical recall, not a replacement for `.assistant` or `docs/tasks`.
+
 ## Conflict Rule
 
 Current user instruction, current repo files, current task artifacts, and `.assistant` override agentmemory recall.

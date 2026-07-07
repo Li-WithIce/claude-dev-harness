@@ -5,7 +5,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path) }
 $failures = New-Object System.Collections.Generic.List[string]
-$scriptPaths = @('install.ps1','harness.ps1','scripts/update-managed-assets.ps1','scripts/run-validation.ps1','uninstall.ps1')
+$scriptPaths = @('install.ps1','harness.ps1','scripts/update-managed-assets.ps1','scripts/run-validation.ps1','scripts/advance-stage.ps1','uninstall.ps1')
 $patterns = @('codegraph install','agentmemory connect','codedb mcp add','codedb mcp register','mcp add codedb','mcp register')
 foreach ($path in $scriptPaths) {
     $full = Join-Path $RepoRoot $path

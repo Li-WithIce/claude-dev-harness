@@ -291,10 +291,10 @@ pwsh -File .\skills\workflow-team\scripts\spawn-team.ps1 -TaskId <task-id>
 
 截至当前仓库状态：
 
-- `skills/` 下有 `11` 个 workflow skills 和 1 个按需 artifact skill（`md-html`）
-- `scripts/` 下有 `18` 个 PowerShell 脚本
+- `skills/` 下有 `12` 个 skill 目录（含 `.system`、`codex` 和按需 artifact skill `md-html`）
+- `scripts/` 下有 `20` 个 PowerShell 脚本
 - `runtime-hooks/claude/` 下有 `3` 个 hooks
-- `tests/` 下有 `26` 个 `verify-*.ps1` 回归脚本
+- `tests/` 下有 `37` 个 `verify-*.ps1` 回归脚本
 
 关键组件分布：
 
@@ -333,12 +333,12 @@ pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite core
 三档口径：
 
 - `quick`：只跑 `git diff --check` 和 `tests/verify-lite-footprint.ps1`，适合 README / 文档小修后的快速回归。
-- `core`：跑 `git diff --check` 加核心协议脚本，包括 artifact validator、footprint、workflow contracts / descriptor、shared-memory layers、review HTML renderer、skill manifest、AiTeamCode skill contract、tool profile。
+- `core`：跑 `git diff --check` 加核心协议脚本，包括 context-provider guardrails、artifact validator、footprint、workflow contracts / descriptor、shared-memory layers、review HTML renderer、skill manifest、AiTeamCode skill contract、tool profile。
 - `all`：跑 `git diff --check` 加除 `verify-installation.ps1` 外所有 `tests/verify-*.ps1`；需要安装验证时额外传 `-WorkspaceRoot`。
 
 ### 跑完整 verify 套件
 
-当前共有 `26` 个 `verify-*.ps1`；其中 `verify-installation.ps1` 需要显式传 `-WorkspaceRoot`。
+当前共有 `37` 个 `verify-*.ps1`；其中 `verify-installation.ps1` 需要显式传 `-WorkspaceRoot`。
 
 ```powershell
 # 跑可直接执行的验证脚本；verify-installation.ps1 需要 WorkspaceRoot 时单独传入

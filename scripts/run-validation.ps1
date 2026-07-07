@@ -160,18 +160,22 @@ if ($IncludeCachedDiff) {
 
 $coreScripts = @(
     'verify-adversarial-review-gate.ps1',
+    'verify-code-intel-provider-boundary.ps1',
     'verify-context-provider-boundary.ps1',
     'verify-context-provider-install-isolation.ps1',
     'verify-harness-entry.ps1',
     'verify-lite-artifact-validator.ps1',
     'verify-lite-footprint.ps1',
+    'verify-memory-provider-boundary.ps1',
     'verify-minimal-safe-change-policy.ps1',
     'verify-md-html-review-renderer.ps1',
+    'verify-provider-usage-recording.ps1',
     'verify-workflow-contracts.ps1',
     'verify-workflow-descriptor.ps1',
     'verify-shared-memory-layers.ps1',
     'verify-render-review-html.ps1',
     'verify-skill-manifest.ps1',
+    'verify-task-artifact-drift-audit.ps1',
     'verify-aiteamcode-skill-contract.ps1',
     'verify-tool-profile.ps1'
 )

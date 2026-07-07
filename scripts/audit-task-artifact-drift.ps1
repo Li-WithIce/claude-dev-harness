@@ -13,6 +13,33 @@ $root = Resolve-Path -LiteralPath (Get-Location)
 $target = Join-Path $root $TaskDir
 $warnings = New-Object System.Collections.Generic.List[string]
 
+function Get-ChangeContractAffectedPaths {
+    param([string]$Content)
+
+    $match = [regex]::Match($Content, '(?ms)^## Change Contract\s*(?<body>.*?)(?=^## |\z)')
+    if (-not $match.Success) { return @() }
+
+    $paths = New-Object System.Collections.Generic.List[string]
+    $insideAffectedPaths = $false
+    foreach ($line in ($match.Groups['body'].Value -split "`r?`n")) {
+        if ($line -match '^- affected_paths:\s*$') {
+            $insideAffectedPaths = $true
+            continue
+        }
+
+        if ($insideAffectedPaths -and $line -match '^\s*-\s+(?<path>.+?)\s*$') {
+            $paths.Add($Matches['path'].Trim().Trim('`')) | Out-Null
+            continue
+        }
+
+        if ($insideAffectedPaths -and $line -match '^- ') {
+            break
+        }
+    }
+
+    return @($paths)
+}
+
 if (-not (Test-Path -LiteralPath $target)) {
     Write-Output "WARN: artifact drift audit skipped; missing TaskDir $TaskDir"
     exit 0
@@ -26,6 +53,13 @@ foreach ($plan in Get-ChildItem -LiteralPath $target -Recurse -Filter plan.md -F
             if (-not (Test-Path -LiteralPath (Join-Path $root $item))) {
                 $warnings.Add(("declared artifact is missing: {0}" -f $item)) | Out-Null
             }
+        }
+    }
+
+    foreach ($item in (Get-ChangeContractAffectedPaths -Content $content)) {
+        $normalized = ($item -replace '\\', '/')
+        if ($normalized -match '^docs/tasks/') {
+            $warnings.Add(("affected_paths should describe implementation paths, not task artifacts: {0}" -f $item)) | Out-Null
         }
     }
 }

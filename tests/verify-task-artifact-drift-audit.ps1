@@ -11,7 +11,39 @@ $text = Get-Content -LiteralPath $script -Raw -Encoding utf8
 foreach ($needle in @('TaskDir','Mode','Advisory','Strict')) {
     if ($text -notmatch [regex]::Escape($needle)) { $failures.Add("artifact drift audit missing $needle") | Out-Null }
 }
-$output = @(& pwsh -NoProfile -NonInteractive -File $script -TaskDir 'missing-artifact-drift-dir' -Mode Advisory 2>&1)
-if ($LASTEXITCODE -ne 0) { $failures.Add('artifact drift audit should not hard fail in Advisory mode') | Out-Null }
+if ($text -notmatch [regex]::Escape('affected_paths should describe implementation paths')) { $failures.Add('artifact drift audit missing affected_paths warning') | Out-Null }
+
+Push-Location $RepoRoot
+try {
+    $output = @(& pwsh -NoProfile -NonInteractive -File $script -TaskDir 'missing-artifact-drift-dir' -Mode Advisory 2>&1)
+    if ($LASTEXITCODE -ne 0) { $failures.Add('artifact drift audit should not hard fail in Advisory mode') | Out-Null }
+
+    $tempTaskRoot = Join-Path $RepoRoot '.tmp-artifact-drift-test'
+    $taskDir = Join-Path $tempTaskRoot 'demo'
+    New-Item -ItemType Directory -Force -Path $taskDir | Out-Null
+    Set-Content -LiteralPath (Join-Path $taskDir 'plan.md') -Encoding utf8 -Value @'
+# Demo
+
+## Change Contract
+- change_type: enhance
+- affected_paths:
+  - docs/tasks/demo/plan.md
+
+## Plan
+- artifacts: [README.md]
+- Demo task.
+'@
+    $relativeTemp = Split-Path -Leaf $tempTaskRoot
+    $output = @(& pwsh -NoProfile -NonInteractive -File $script -TaskDir $relativeTemp -Mode Advisory 2>&1)
+    if ($LASTEXITCODE -ne 0) { $failures.Add('artifact drift audit affected_paths warning should remain advisory') | Out-Null }
+    if (($output -join "`n") -notmatch [regex]::Escape('affected_paths should describe implementation paths')) {
+        $failures.Add('artifact drift audit did not warn on docs/tasks affected_paths') | Out-Null
+    }
+} finally {
+    Pop-Location
+    if (Test-Path -LiteralPath (Join-Path $RepoRoot '.tmp-artifact-drift-test')) {
+        Remove-Item -LiteralPath (Join-Path $RepoRoot '.tmp-artifact-drift-test') -Recurse -Force
+    }
+}
 if ($failures.Count -gt 0) { $failures | ForEach-Object { Write-Output "- $_" }; exit 1 }
 Write-Output 'Task artifact drift audit verified.'

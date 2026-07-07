@@ -9,6 +9,13 @@ At least five adversarial review rounds are required before IMPLEMENT for V0-V3.
 - Review records must not introduce a new stage.
 - Review records must not add frontmatter fields.
 
+## Current Enforcement
+
+- This is a formal human/process gate, not a parsed workflow stage.
+- Current validators verify that this contract exists and is referenced; they do not count or parse per-task adversarial review rounds.
+- `advance-stage.ps1` only checks the latest review `verdict`; it does not parse free-form adversarial review notes in this pass.
+- Future work may add an advisory or strict parser once the review record format is stable enough to parse without breaking old tasks.
+
 ## Required Rounds
 
 1. Workflow Core Defender

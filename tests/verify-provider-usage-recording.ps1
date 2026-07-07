@@ -6,8 +6,18 @@ $ErrorActionPreference = "Stop"
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path) }
 $failures = New-Object System.Collections.Generic.List[string]
 $doc = Get-Content -LiteralPath (Join-Path $RepoRoot 'docs/工具/provider-usage-recording.md') -Raw -Encoding utf8
-foreach ($needle in @('provider_context','Do not write frontmatter','advisory-only')) {
+foreach ($needle in @('provider_context','grounded_to','limitations','Do not write frontmatter','Do not affect stage advancement','Do not decide review verdict','advisory-only')) {
     if ($doc -notmatch [regex]::Escape($needle)) { $failures.Add("provider usage doc missing $needle") | Out-Null }
+}
+foreach ($pair in @(
+    @('skills/orchestrator/references/lite-writing-guide.md', 'provider_context'),
+    @('skills/implement/SKILL.md', 'provider_context'),
+    @('skills/review/SKILL.md', 'provider_context')
+)) {
+    $path = $pair[0]
+    $needle = $pair[1]
+    $content = Get-Content -LiteralPath (Join-Path $RepoRoot $path) -Raw -Encoding utf8
+    if ($content -notmatch [regex]::Escape($needle)) { $failures.Add("$path missing $needle") | Out-Null }
 }
 $script = Join-Path $RepoRoot 'scripts/audit-context-provider-usage.ps1'
 if (-not (Test-Path -LiteralPath $script)) { $failures.Add('missing audit-context-provider-usage.ps1') | Out-Null }

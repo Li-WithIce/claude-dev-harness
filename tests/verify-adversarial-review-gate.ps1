@@ -17,6 +17,11 @@ Assert-Contains 'docs/工作流/adversarial-review-gate.md' 'Workflow Core Defen
 Assert-Contains 'docs/工作流/adversarial-review-gate.md' 'must not advance'
 Assert-Contains 'docs/工作流/adversarial-review-gate.md' 'must not introduce a new stage'
 Assert-Contains 'docs/工作流/adversarial-review-gate.md' 'must not add frontmatter fields'
+Assert-Contains 'docs/工作流/adversarial-review-gate.md' 'not a parsed workflow stage'
+Assert-Contains 'docs/工作流/adversarial-review-gate.md' 'do not count or parse per-task adversarial review rounds'
+Assert-Contains 'docs/工作流/adversarial-review-gate.md' 'Future work may add an advisory or strict parser'
 Assert-Contains 'skills/review/references/adversarial-review-gate.md' 'Scope Creep Defender'
+Assert-Contains 'skills/review/references/adversarial-review-gate.md' 'advance-stage.ps1'
+Assert-Contains 'skills/review/references/adversarial-review-gate.md' 'latest `- verdict:` only'
 if ($failures.Count -gt 0) { $failures | ForEach-Object { Write-Output "- $_" }; exit 1 }
 Write-Output 'Adversarial review gate contract verified.'

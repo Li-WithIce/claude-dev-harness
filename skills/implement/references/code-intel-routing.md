@@ -9,3 +9,5 @@ Sequence:
 5. Record provider grounding in `- risks:` or `- next:` when it matters.
 
 Provider unavailable or stale means use `rg`/Read. Provider output must not decide TEST, review verdict, or stage.
+
+CodeGraph setup/status commands are manual user actions. Do not add provider install/register/connect calls to harness install/update/validation/uninstall/stage scripts.

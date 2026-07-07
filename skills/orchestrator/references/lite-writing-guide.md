@@ -76,6 +76,20 @@ stages:
 
 Context providers 只提供 advisory context。Provider output is evidence candidate, not workflow truth；任何 provider 结果影响决策前，必须落回当前仓库真实文件、命令、diff、review finding、Implementation Notes 或 test output。Provider 不可写 frontmatter、`.assistant/运行时/*`、review verdict 或 TEST conclusion；不可用、stale 或冲突时回退 `rg`/Read/manual inspection。
 
+Provider usage may be recorded inside an append-only run when it affected scope, risk, or verification. This is not frontmatter, not a stage gate, and not a verdict source:
+
+```yaml
+provider_context:
+  - provider: codegraph | agentmemory | codedb-mcp | none
+    purpose: impact-scan | historical-recall | risk-scan | test-scope
+    grounded_to:
+      - path/or/command
+    fallback: rg/read/manual-inspection
+    limitations: stale-index | historical-only | unavailable | none
+```
+
+If no provider was used, write `provider_context: none` only when useful, otherwise omit it.
+
 ### Phase 3 Side Artifacts（可选）
 
 - `docs/tasks/<task-id>/skill-manifest.json`：由 `advance-stage.ps1` 在成功推进后 best-effort 生成；不是新的真相源，也不写入 `.assistant/`

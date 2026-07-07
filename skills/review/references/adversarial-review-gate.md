@@ -2,6 +2,8 @@
 
 Before IMPLEMENT, record adversarial rounds in `## Plan Review`.
 
+This is currently a human/process gate. Validators check that the gate contract exists and is referenced; they do not parse free-form rounds or block `PLAN_REVIEW -> IMPLEMENT` by counting roles. `advance-stage.ps1` continues to rely on the latest `- verdict:` only. A later advisory/strict parser can be added when the record shape is stable.
+
 Required final-release roles:
 
 1. Workflow Core Defender

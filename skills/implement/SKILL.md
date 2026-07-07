@@ -57,7 +57,8 @@ IMPLEMENT 负责两件事：改代码，以及把本轮实现证据追加到 `do
 
 - 实现前先按 `references/minimal-safe-change-policy.md` 收敛到最小安全 diff。
 - 需要代码检索时读取 `references/code-intel-routing.md`；CodeGraph 等 provider 只给 hints，必须回读真实文件并保留 `rg`/Read fallback。
-- provider 使用只写入本轮 `- risks:` 或 `- next:` 的真实落地点，不新增字段。
+- provider 使用影响 scope、risk 或 verification 时，可在本轮 Implementation Notes 里写 `provider_context` block；它不是 frontmatter，不影响 stage advancement，不决定 review verdict 或 TEST pass/fail。
+- 未使用 provider 时可写 `provider_context: none`，也可以按当前 run 风格省略。
 
 ## 不要做的事
 

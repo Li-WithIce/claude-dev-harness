@@ -60,7 +60,7 @@ Claude、Codex 共用同一份 Obsidian 记忆仓库：
 
 ## agentmemory Compatibility
 
-agentmemory 只能作为 read-only historical recall sidecar。它不能修改 `.assistant/运行时/*`、不能提升 wisdom、不能决定当前 stage/review verdict/TEST conclusion；与当前 repo、当前 task、`.assistant` 或用户指令冲突时，后者优先。
+agentmemory 只能作为 opt-in read-only historical recall sidecar。它不能修改 `.assistant/运行时/*`、不能提升 wisdom、不能决定当前 stage/review verdict/TEST conclusion；与当前 repo、当前 task、`.assistant` 或用户指令冲突时，后者优先。Windows native setup 可能需要手工处理或受限，WSL2 可以作为实际可行路径；harness install/update 不运行 `agentmemory connect`。
 
 ## Tooling
 

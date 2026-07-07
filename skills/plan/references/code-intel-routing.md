@@ -15,3 +15,7 @@ Every provider hint must be checked against current repo files before it becomes
 ## Fallback
 
 If code-intel is unavailable, stale, or conflicting, use `rg`/Read/manual inspection.
+
+## Opt-in Boundary
+
+CodeGraph setup/status commands are manual user actions. Harness install/update/validation must not install, register, or invoke a provider.
