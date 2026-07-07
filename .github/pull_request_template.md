@@ -1,12 +1,25 @@
 ## Summary
 -
 
-## Validation
+## Workflow Impact
+-
+
+## Files Changed
+-
+
+## Validation Run
 
 - [ ] `pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation.ps1 -Suite quick`
 - [ ] `pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation.ps1 -Suite core`
 
-## Checklist
+## Provider Impact
+-
+
+## Install / Uninstall Impact
+-
+
+## Risks / Rollback
+-
 
 - [ ] `.assistant/` and `docs/tasks/<task-id>/` local artifacts are not committed.
 - [ ] Provider integrations remain optional/advisory and are not installed or connected by default.

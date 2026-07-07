@@ -22,6 +22,8 @@ pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation.ps1 -Suite 
 
 Provider tools are optional advisory inputs. Installation, updates, and validation must not install, register, or connect external providers by default.
 
+Do not mutate user-private Claude, Codex, or MCP configuration unless a task explicitly requires it and the change is reviewed as part of the diff.
+
 ## License
 
 No repository license has been specified yet. Do not add a license file or relicense content without explicit maintainer approval.
