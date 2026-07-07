@@ -223,10 +223,12 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 - Phase 2 的 workflow descriptor advisory `Warnings:`
 - Phase 6/7 的 plan metadata：`read_first` / `convergence` / `artifacts`
 
-它当前不会做两件事：
+artifact drift 属于 advisory-first 检查，不是硬 gate：
 
-- 不校验 `artifacts:` 里路径是否真的存在
-- 不把 `artifacts:` 与 `Change Contract -> affected_paths` 做交叉校验
+- `PLAN` / `PLAN_REVIEW` 阶段不会因为未来 artifact 尚未创建而 warning
+- `IMPLEMENT` 及之后阶段会把声明 artifact 缺失、实际 changed path 未被 `artifacts:` 或 `Change Contract -> affected_paths` 覆盖、以及 artifact / affected_paths 明显角色混淆写入 `Warnings:`
+- 这些 warning 默认不进入 `Errors:`，也不改变 exit code
+- 缺少 `artifacts:` 或 `Change Contract` 的 legacy / incomplete task 继续合法
 
 ### `git`
 
