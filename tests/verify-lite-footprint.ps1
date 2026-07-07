@@ -175,15 +175,41 @@ function Assert-GitIgnoreState {
     )
 
     $fullPath = Join-Path $script:RepoRoot $Path
-    & git -C $script:RepoRoot check-ignore -q -- $fullPath
+    $ignoreOutput = @(& git -C $script:RepoRoot check-ignore --no-index -v -- $Path 2>$null | ForEach-Object { [string]$_ })
     $isIgnored = ($LASTEXITCODE -eq 0)
+    if ($isIgnored -and $ignoreOutput.Count -gt 0) {
+        $rulePart = ($ignoreOutput[-1] -split "`t", 2)[0]
+        $rule = ($rulePart -split ':')[-1]
+        if ($rule.StartsWith('!')) {
+            $isIgnored = $false
+        }
+    }
 
     if ($isIgnored -eq $ShouldBeIgnored) {
         $label = if ($ShouldBeIgnored) { 'is ignored' } else { 'is reviewable' }
-        Add-Check ('git ignore behavior ok: {0} {1}' -f $Path, $label)
+        $source = if ($ignoreOutput.Count -gt 0) { $ignoreOutput[0] } else { 'no matching rule' }
+        Add-Check ('git ignore behavior ok: {0} {1} ({2})' -f $Path, $label, $source)
     } else {
         $expected = if ($ShouldBeIgnored) { 'ignored' } else { 'reviewable' }
         Add-Failure ('git ignore behavior drifted: {0} should be {1}' -f $Path, $expected)
+    }
+}
+
+function Assert-NoTrackedAssistantFiles {
+    <#
+    .SYNOPSIS
+    断言 `.assistant/` 不再进入 Git 索引。
+    .DESCRIPTION
+    `.assistant/` 是本地 vault 与运行时状态；协议和模板必须沉淀到 tracked docs/skills/vault-template。
+    .OUTPUTS
+    None。
+    #>
+
+    $tracked = @(& git -C $script:RepoRoot -c core.quotepath=false ls-files -- .assistant 2>$null | ForEach-Object { [string]$_ })
+    if ($tracked.Count -eq 0) {
+        Add-Check '.assistant has no tracked files'
+    } else {
+        Add-Failure ('.assistant should have no tracked files, got: {0}' -f ($tracked -join ', '))
     }
 }
 
@@ -386,15 +412,21 @@ Assert-FileNotContains -Path 'skills/review/SKILL.md' -Needle '适用：`claudec
 Assert-PathAbsent -Path 'skills/using-superpowers'
 Assert-PathAbsent -Path ('skills/' + 'gemini-designer' + '-main')
 Assert-FileNotContains -Path 'agent-configs/codex/config.shared.toml.template' -Needle 'using-superpowers'
-Assert-GitIgnoreState -Path '.assistant/运行时/记忆-学习.md' -ShouldBeIgnored $false
-Assert-GitIgnoreState -Path '.assistant/运行时/记忆-决策.md' -ShouldBeIgnored $false
-Assert-GitIgnoreState -Path '.assistant/运行时/记忆-约定.md' -ShouldBeIgnored $false
-Assert-GitIgnoreState -Path '.assistant/运行时/记忆-问题.md' -ShouldBeIgnored $false
+Assert-NoTrackedAssistantFiles
+Assert-GitIgnoreState -Path '.assistant/工作流/长会话恢复.md' -ShouldBeIgnored $true
+Assert-GitIgnoreState -Path '.assistant/配置/schema-versions.md' -ShouldBeIgnored $true
+Assert-GitIgnoreState -Path '.assistant/entry/AGENTS.md' -ShouldBeIgnored $true
+Assert-GitIgnoreState -Path '.assistant/运行时/记忆-学习.md' -ShouldBeIgnored $true
+Assert-GitIgnoreState -Path '.assistant/运行时/记忆-决策.md' -ShouldBeIgnored $true
+Assert-GitIgnoreState -Path '.assistant/运行时/记忆-约定.md' -ShouldBeIgnored $true
+Assert-GitIgnoreState -Path '.assistant/运行时/记忆-问题.md' -ShouldBeIgnored $true
 Assert-GitIgnoreState -Path '.assistant/运行时/记忆候选.md' -ShouldBeIgnored $true
 Assert-GitIgnoreState -Path '.assistant/运行时/记忆候选归档.md' -ShouldBeIgnored $true
 Assert-GitIgnoreState -Path '.assistant/运行时/收件箱.md' -ShouldBeIgnored $true
 Assert-GitIgnoreState -Path 'docs/tasks/example/plan.md' -ShouldBeIgnored $true
 Assert-GitIgnoreState -Path 'docs/tasks/README.md' -ShouldBeIgnored $false
+Assert-GitIgnoreState -Path '.codegraph/index.db' -ShouldBeIgnored $true
+Assert-GitIgnoreState -Path '.codedb-mcp/state.db' -ShouldBeIgnored $true
 Assert-FileNotContains -Path 'skills/obsidian-memory/scripts/check-shared-memory.ps1' -Needle "Join-Path (Join-Path `$workspaceRoot 'docs') `$TaskId"
 Assert-FileNotContains -Path 'skills/obsidian-memory/scripts/repair-shared-memory.ps1' -Needle 'docs/tasks/none/plan.md'
 Assert-FileNotContains -Path 'README.md' -Needle 'claude-codex-gemini'

@@ -413,12 +413,150 @@ stages:
         Add-Failure ("A5 legacy using-superpowers should warn as unsupported, got: {0}" -f ($legacySkillResult.Output -join ' | '))
     }
 
+    Set-WorkflowDescriptor -RepoRoot $RepoRoot -Content @"
+name: harness-lite
+version: 1
+stages:
+  PLAN:
+    role: plan-author
+    default_profile: harness-default-codex
+    skills_whitelist: [plan, entry-router]
+  IMPLEMENT:
+    role: implementer
+    default_profile: harness-default-codex
+    skills_whitelist: [implement]
+  PLAN_REVIEW:
+    role: plan-reviewer
+    default_profile: harness-default-codex
+    skills_whitelist: [review]
+  CODE_REVIEW:
+    role: code-reviewer
+    default_profile: harness-default-codex
+    skills_whitelist: [review]
+  TEST:
+    role: tester
+    default_profile: harness-default-codex
+    skills_whitelist: [test]
+"@
+    $wrongOrderResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskValid -RepoRoot $RepoRoot
+    if ($wrongOrderResult.ExitCode -eq 0 -and $wrongOrderResult.Text -match 'workflow descriptor stages should be exactly PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST') {
+        Add-Check 'A6 workflow descriptor warns when stage order drifts'
+    } else {
+        Add-Failure ("A6 wrong stage order should warn, got: {0}" -f ($wrongOrderResult.Output -join ' | '))
+    }
+
+    Set-WorkflowDescriptor -RepoRoot $RepoRoot -Content @"
+name: harness-lite
+version: 1
+stages:
+  PLAN:
+    role: plan-author
+    default_profile: harness-default-codex
+    skills_whitelist: [plan, codegraph]
+  PLAN_REVIEW:
+    role: plan-reviewer
+    default_profile: harness-default-codex
+    skills_whitelist: [review]
+  IMPLEMENT:
+    role: implementer
+    default_profile: harness-default-codex
+    skills_whitelist: [implement]
+  CODE_REVIEW:
+    role: code-reviewer
+    default_profile: harness-default-codex
+    skills_whitelist: [review]
+  TEST:
+    role: tester
+    default_profile: harness-default-codex
+    skills_whitelist: [test]
+"@
+    $providerSkillResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskValid -RepoRoot $RepoRoot
+    if ($providerSkillResult.ExitCode -eq 0 -and $providerSkillResult.Text -match 'workflow descriptor stage PLAN must not whitelist provider skill: codegraph') {
+        Add-Check 'A7 workflow descriptor rejects provider names in skills_whitelist'
+    } else {
+        Add-Failure ("A7 provider skill should warn, got: {0}" -f ($providerSkillResult.Output -join ' | '))
+    }
+
+    Set-WorkflowDescriptor -RepoRoot $RepoRoot -Content @"
+name: harness-lite
+version: 1
+stages:
+  PLAN:
+    role: plan-author
+    default_profile: harness-default-codex
+    skills_whitelist: [plan, entry-router]
+  codegraph:
+    role: codegraph
+    default_profile: harness-default-codex
+    skills_whitelist: [plan]
+  PLAN_REVIEW:
+    role: plan-reviewer
+    default_profile: harness-default-codex
+    skills_whitelist: [review]
+  IMPLEMENT:
+    role: implementer
+    default_profile: harness-default-codex
+    skills_whitelist: [implement]
+  CODE_REVIEW:
+    role: code-reviewer
+    default_profile: harness-default-codex
+    skills_whitelist: [review]
+  TEST:
+    role: tester
+    default_profile: harness-default-codex
+    skills_whitelist: [test]
+"@
+    $providerStageResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskValid -RepoRoot $RepoRoot
+    if ($providerStageResult.ExitCode -eq 0 -and
+        $providerStageResult.Text -match 'workflow descriptor contains unsupported stage: codegraph' -and
+        $providerStageResult.Text -match 'workflow descriptor must not define provider as stage: codegraph') {
+        Add-Check 'A8 workflow descriptor rejects providers as stages'
+    } else {
+        Add-Failure ("A8 provider stage should warn, got: {0}" -f ($providerStageResult.Output -join ' | '))
+    }
+
+    Set-WorkflowDescriptor -RepoRoot $RepoRoot -Content @"
+name: harness-lite
+version: 1
+stages:
+  PLAN:
+    role: plan-author
+    default_profile: harness-default-codex
+    skills_whitelist: [plan, entry-router]
+  PLAN:
+    role: plan-author
+    default_profile: harness-default-codex
+    skills_whitelist: [plan]
+  PLAN_REVIEW:
+    role: plan-reviewer
+    default_profile: harness-default-codex
+    skills_whitelist: [review]
+  IMPLEMENT:
+    role: implementer
+    default_profile: harness-default-codex
+    skills_whitelist: [implement]
+  CODE_REVIEW:
+    role: code-reviewer
+    default_profile: harness-default-codex
+    skills_whitelist: [review]
+  TEST:
+    role: tester
+    default_profile: harness-default-codex
+    skills_whitelist: [test]
+"@
+    $duplicateStageResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskValid -RepoRoot $RepoRoot
+    if ($duplicateStageResult.ExitCode -eq 0 -and $duplicateStageResult.Text -match 'workflow descriptor duplicates stage PLAN') {
+        Add-Check 'A9 workflow descriptor warns on duplicate stages'
+    } else {
+        Add-Failure ("A9 duplicate stage should warn, got: {0}" -f ($duplicateStageResult.Output -join ' | '))
+    }
+
     Remove-WorkflowDescriptor -RepoRoot $RepoRoot
     $missingWorkflowResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskValid -RepoRoot $RepoRoot
     if ($missingWorkflowResult.ExitCode -eq 0 -and (Assert-WarningsNone -Text $missingWorkflowResult.Text)) {
-        Add-Check 'A6 missing workflow descriptor is skipped without warnings'
+        Add-Check 'A10 missing workflow descriptor is skipped without warnings'
     } else {
-        Add-Failure ("A6 missing workflow descriptor should keep warnings empty, got: {0}" -f ($missingWorkflowResult.Output -join ' | '))
+        Add-Failure ("A10 missing workflow descriptor should keep warnings empty, got: {0}" -f ($missingWorkflowResult.Output -join ' | '))
     }
 
     Set-WorkflowDescriptor -RepoRoot $RepoRoot -Content (Get-ValidWorkflowDescriptorContent)

@@ -9,9 +9,6 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-Add-Type -AssemblyName System.Web.Extensions
-$script:JsonSerializer = New-Object System.Web.Script.Serialization.JavaScriptSerializer
-$script:JsonSerializer.MaxJsonLength = [int]::MaxValue
 
 function Get-NormalizedPath {
     param([string]$Path)
@@ -349,7 +346,7 @@ function ConvertTo-NormalizedObject {
         foreach ($item in $Value) {
             [void]$items.Add((ConvertTo-NormalizedObject -Value $item))
         }
-        return $items
+        return ,$items
     }
 
     $result = [ordered]@{}
@@ -357,6 +354,16 @@ function ConvertTo-NormalizedObject {
         $result[$property.Name] = ConvertTo-NormalizedObject -Value $property.Value
     }
     return $result
+}
+
+function ConvertFrom-JsonDocument {
+    param([string]$Json)
+
+    if ([string]::IsNullOrWhiteSpace($Json)) {
+        return [ordered]@{}
+    }
+
+    return ConvertTo-NormalizedObject -Value ($Json | ConvertFrom-Json)
 }
 
 function Read-JsonObject {
@@ -367,19 +374,19 @@ function Read-JsonObject {
         return [ordered]@{}
     }
 
-    return ConvertTo-NormalizedObject -Value ($script:JsonSerializer.DeserializeObject($raw))
+    return ConvertFrom-JsonDocument -Json $raw
 }
 
 function ConvertTo-JsonDocument {
     param($Value)
 
-    return (ConvertTo-NormalizedObject -Value $Value | ConvertTo-Json -Depth 100)
+    return (ConvertTo-Json -InputObject (ConvertTo-NormalizedObject -Value $Value) -Depth 100)
 }
 
 function ConvertTo-ManifestJsonDocument {
     param($Value)
 
-    return (ConvertTo-NormalizedObject -Value $Value | ConvertTo-Json -Depth 50)
+    return (ConvertTo-Json -InputObject (ConvertTo-NormalizedObject -Value $Value) -Depth 50)
 }
 
 function Merge-DeepObject {
@@ -443,7 +450,7 @@ function Merge-UniqueArray {
         }
     }
 
-    return $result
+    return ,$result
 }
 
 function Ensure-ArrayValue {
@@ -452,18 +459,18 @@ function Ensure-ArrayValue {
     $items = New-Object System.Collections.ArrayList
 
     if ($null -eq $Value) {
-        return $items
+        return ,$items
     }
 
     if (($Value -is [System.Collections.IEnumerable]) -and -not ($Value -is [string]) -and -not ($Value -is [System.Collections.IDictionary])) {
         foreach ($item in $Value) {
             [void]$items.Add((ConvertTo-NormalizedObject -Value $item))
         }
-        return $items
+        return ,$items
     }
 
     [void]$items.Add((ConvertTo-NormalizedObject -Value $Value))
-    return $items
+    return ,$items
 }
 
 function Normalize-SettingsShape {
@@ -609,7 +616,7 @@ function Read-RenderedJsonTemplate {
     }
 
     $rendered = Render-Content -Content $raw -TargetPath $TargetPath
-    return ConvertTo-NormalizedObject -Value ($script:JsonSerializer.DeserializeObject($rendered))
+    return ConvertFrom-JsonDocument -Json $rendered
 }
 
 function Render-JsonTemplateText {
@@ -633,116 +640,27 @@ function Merge-SettingsLocalJsonText {
         [string]$OverlayPath
     )
 
-    $tempDir = Join-Path $script:BackupRoot '_settings-merge'
-    Ensure-Directory -Path $tempDir
-
-    $sharedPath = Join-Path $tempDir 'shared.json'
-    $existingTempPath = Join-Path $tempDir 'existing.json'
-    $overlayTempPath = Join-Path $tempDir 'overlay.json'
-    $scriptPath = Join-Path $tempDir 'merge-settings.cjs'
+    $sharedJson = if ([string]::IsNullOrWhiteSpace($RenderedSharedJson)) {
+        '{}'
+    } else {
+        $RenderedSharedJson
+    }
 
     $existingJson = Read-FileUtf8 -Path $ExistingPath
     if ([string]::IsNullOrWhiteSpace($existingJson)) {
         $existingJson = '{}'
     }
+
     $overlayJson = Read-FileUtf8 -Path $OverlayPath
     if ([string]::IsNullOrWhiteSpace($overlayJson)) {
         $overlayJson = '{}'
     }
 
-    Write-Utf8NoBom -Path $sharedPath -Content $RenderedSharedJson
-    Write-Utf8NoBom -Path $existingTempPath -Content $existingJson
-    Write-Utf8NoBom -Path $overlayTempPath -Content $overlayJson
-    Write-Utf8NoBom -Path $scriptPath -Content @'
-const fs = require("fs");
+    $sharedObject = ConvertFrom-JsonDocument -Json $sharedJson
+    $existingObject = ConvertFrom-JsonDocument -Json $existingJson
+    $overlayObject = ConvertFrom-JsonDocument -Json $overlayJson
 
-const [sharedPath, existingPath, overlayPath] = process.argv.slice(2);
-
-function readJson(path) {
-  if (!path || !fs.existsSync(path)) return {};
-  const raw = fs.readFileSync(path, "utf8").trim();
-  return raw ? JSON.parse(raw) : {};
-}
-
-function isObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value);
-}
-
-function asArray(value) {
-  if (value == null) return [];
-  return Array.isArray(value) ? value : [value];
-}
-
-function uniqueArray(values) {
-  const seen = new Set();
-  const result = [];
-  for (const value of values) {
-    const key = typeof value === "string" ? `s:${value}` : JSON.stringify(value);
-    if (!seen.has(key)) {
-      seen.add(key);
-      result.push(value);
-    }
-  }
-  return result;
-}
-
-function mergeDeep(base, overlay) {
-  if (Array.isArray(base) && Array.isArray(overlay)) {
-    return overlay.slice();
-  }
-  if (isObject(base) && isObject(overlay)) {
-    const result = { ...base };
-    for (const [key, value] of Object.entries(overlay)) {
-      result[key] = key in result ? mergeDeep(result[key], value) : value;
-    }
-    return result;
-  }
-  return overlay;
-}
-
-const shared = readJson(sharedPath);
-const existing = readJson(existingPath);
-const overlay = readJson(overlayPath);
-
-const result = mergeDeep(existing, overlay);
-
-const permissions = mergeDeep(result.permissions || {}, shared.permissions || {});
-permissions.allow = uniqueArray([
-  ...asArray(result.permissions && result.permissions.allow),
-  ...asArray(shared.permissions && shared.permissions.allow),
-]);
-if (permissions.allow.length > 0 || Object.keys(permissions).length > 0) {
-  result.permissions = permissions;
-}
-
-for (const [key, value] of Object.entries(shared)) {
-  if (key === "permissions") continue;
-  result[key] = value;
-}
-
-for (const key of ["UserPromptSubmit", "Stop", "PostToolUse"]) {
-  if (!(key in result)) continue;
-  result[key] = asArray(result[key]);
-  for (const entry of result[key]) {
-    if (isObject(entry) && "hooks" in entry) {
-      entry.hooks = asArray(entry.hooks);
-    }
-  }
-}
-
-if (result.permissions && "allow" in result.permissions) {
-  result.permissions.allow = asArray(result.permissions.allow);
-}
-
-process.stdout.write(JSON.stringify(result, null, 2));
-'@
-
-    $mergedOutput = @(& node $scriptPath $sharedPath $existingTempPath $overlayTempPath 2>&1)
-    if ($LASTEXITCODE -ne 0) {
-        throw ("Failed to merge settings.local.json via node: {0}" -f ($mergedOutput -join "`n"))
-    }
-
-    return ($mergedOutput -join "`n")
+    return ConvertTo-JsonDocument -Value (Merge-SettingsLocal -Shared $sharedObject -Existing $existingObject -Overlay $overlayObject)
 }
 
 function Get-JunctionTarget {

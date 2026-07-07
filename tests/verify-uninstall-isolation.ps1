@@ -16,6 +16,15 @@ function Get-NormalizedPath {
     return [System.IO.Path]::GetFullPath($Path)
 }
 
+function Get-LastExitCodeOrZero {
+    $variable = Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+    if ($null -ne $variable -and $variable.Value -is [int]) {
+        return $variable.Value
+    }
+
+    return 0
+}
+
 function Invoke-RepoScript {
     param(
         [string]$UserProfile,
@@ -29,7 +38,7 @@ function Invoke-RepoScript {
         $output = @(& $ScriptPath @Arguments 2>&1)
         return [pscustomobject]@{
             Output   = $output
-            ExitCode = $LASTEXITCODE
+            ExitCode = (Get-LastExitCodeOrZero)
         }
     } finally {
         $env:USERPROFILE = $originalUserProfile

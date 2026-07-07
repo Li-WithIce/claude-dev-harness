@@ -30,6 +30,8 @@ pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\dev-harn
 - 最小运行时目录：`.assistant/运行时/tasks/`
 - Claude Code hooks：`runtime-hooks/claude/*.js` 的安装副本
 
+安装与更新路径只依赖 PowerShell 和 Git；Node.js 不是 harness 安装前置条件。`.js` hooks 只是被复制到目标位置，不要求安装脚本执行 `node` / `npm` / `npx`。
+
 只有显式 `-VaultProfile full`，或 `auto` 检测到既有完整 vault 时，才安装/维护 `.assistant/.obsidian`、`.assistant/工作流`、`.assistant/模板`、`.assistant/配置`、`首页.md`、`MEMORY.md` 和默认运行时指针文件。
 
 宿主侧当前真实行为是：
@@ -49,7 +51,7 @@ pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\dev-harn
 
 ### Optional Context Providers
 
-Context providers 是可选辅助输入，不是 workflow 真相源。内置权威仍是 `docs/tasks/<task-id>/`、当前仓库文件和 `.assistant/`；CodeGraph、agentmemory、codedb-mcp 只能提供 advisory context provider 结果，且必须落回真实路径、命令、diff、review finding、Implementation Notes 或 test output。安装、更新和 validation 默认不会安装、注册或连接外部 provider；详细边界见 `docs/工作流/context-provider-boundary.md`，工具入口见 `docs/工具/context-providers.md`。
+Context providers 是可选辅助输入，不是 workflow 真相源。内置权威仍是 `docs/tasks/<task-id>/`、当前仓库文件和本地 `.assistant/`；CodeGraph、agentmemory、codedb-mcp 只能提供 advisory context provider 结果，且必须落回真实路径、命令、diff、review finding、Implementation Notes 或 test output。安装、更新和 validation 默认不会安装、注册或连接外部 provider；详细边界见 `docs/工作流/context-provider-boundary.md`，工具入口见 `docs/工具/context-providers.md`。
 
 最常用命令：
 
@@ -191,7 +193,7 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 
 ### `.assistant/`
 
-这是项目本地入口、共享记忆、恢复、运行时派生视图与可选协议文档所在位置。默认 minimal 安装只包含入口 shim 与最小运行时目录；full vault 才包含完整配置、工作流说明、模板与 Obsidian 配置。
+这是项目本地入口、共享记忆、恢复、运行时派生视图与可选协议文档所在位置。`.assistant/` 是用户/工作区本地状态，默认不进入 Git；需要长期维护的协议、模板与规则应放入 tracked `docs/`、`skills/`、`tests/` 或 `vault-template/`。默认 minimal 安装只包含入口 shim 与最小运行时目录；full vault 才包含完整配置、工作流说明、模板与 Obsidian 配置。
 
 按 shared-memory v2 当前约定，可以把它理解成四层：
 
@@ -237,14 +239,9 @@ artifact drift 属于 advisory-first 检查，不是硬 gate：
 当前真实边界：
 
 - `docs/tasks/<task-id>/*` 是本地 workflow 任务产物，默认由 `.gitignore` 排除；需要沉淀长期协议时，把结论移入 `docs/工作流/`、`skills/`、`tests/` 或其他明确维护面
-- 大部分 `.assistant/` 仍默认忽略，不应该把运行时噪音随手提交
-- 已显式放开的 `.assistant` 审计面目前主要包括：
-  - `.assistant/工作流/长会话恢复.md`
-  - `.assistant/运行时/记忆-学习.md`
-  - `.assistant/运行时/记忆-决策.md`
-  - `.assistant/运行时/记忆-约定.md`
-  - `.assistant/运行时/记忆-问题.md`
-- 仓库历史里还保留了部分 shared-memory migration 相关 `.assistant` 文件；除非任务明确要求，不要把 live pointer 文件当成普通文档随手提交
+- `.assistant/` 整体默认忽略，不应提交 live vault、runtime pointer、用户偏好或恢复视图
+- `.assistant/` 里的通用协议若需要进入仓库，应先提升到 `docs/工作流/`、`skills/` 或 `vault-template/`，再由安装/更新路径渲染到目标工作区
+- 仓库历史里可能曾保留 shared-memory migration 相关 `.assistant` 文件；当前索引不再跟踪 `.assistant/` 内容
 
 ## 历史 Phase 能力（已并入主线）
 
@@ -296,7 +293,7 @@ pwsh -File .\skills\workflow-team\scripts\spawn-team.ps1 -TaskId <task-id>
 - `skills/` 下有 `12` 个 skill 目录（含 `.system`、`codex` 和按需 artifact skill `md-html`）
 - `scripts/` 下有 `20` 个 PowerShell 脚本
 - `runtime-hooks/claude/` 下有 `3` 个 hooks
-- `tests/` 下有 `37` 个 `verify-*.ps1` 回归脚本
+- `tests/` 下有 `38` 个 `verify-*.ps1` 回归脚本
 
 关键组件分布：
 
@@ -335,12 +332,14 @@ pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite core
 三档口径：
 
 - `quick`：只跑 `git diff --check` 和 `tests/verify-lite-footprint.ps1`，适合 README / 文档小修后的快速回归。
-- `core`：跑 `git diff --check` 加核心协议脚本，包括 context-provider guardrails、artifact validator、footprint、workflow contracts / descriptor、shared-memory layers、review HTML renderer、skill manifest、AiTeamCode skill contract、tool profile。
+- `core`：跑 `git diff --check` 加核心协议脚本，包括 context-provider guardrails、artifact validator、footprint、workflow contracts / descriptor、shared-memory layers、review HTML renderer、skill manifest、AiTeamCode skill contract、tool profile，以及安装路径无 Node/npm/npx 强依赖检查。
 - `all`：跑 `git diff --check` 加除 `verify-installation.ps1` 外所有 `tests/verify-*.ps1`；需要安装验证时额外传 `-WorkspaceRoot`。
+
+GitHub Actions 在 `main` 与 `codex/harness-distribution` 的 push，以及 pull request 上运行 Windows quick/core validation。CI 不安装、注册或连接外部 provider，也不要求 Node.js。
 
 ### 跑完整 verify 套件
 
-当前共有 `37` 个 `verify-*.ps1`；其中 `verify-installation.ps1` 需要显式传 `-WorkspaceRoot`。
+当前共有 `38` 个 `verify-*.ps1`；其中 `verify-installation.ps1` 需要显式传 `-WorkspaceRoot`。
 
 ```powershell
 # 跑可直接执行的验证脚本；verify-installation.ps1 需要 WorkspaceRoot 时单独传入

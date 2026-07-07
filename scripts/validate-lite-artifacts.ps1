@@ -45,6 +45,8 @@ $script:TestSections = @(
     "Handoff"
 )
 $script:SpecSections = @("Gap", "Constraint", "Verification Delta")
+$script:ExpectedWorkflowStages = @("PLAN", "PLAN_REVIEW", "IMPLEMENT", "CODE_REVIEW", "TEST")
+$script:ForbiddenWorkflowProviderNames = @("code-intel", "memory-provider", "agentmemory", "codegraph", "codedb", "codedb-mcp")
 
 function Add-Check {
     <#
@@ -802,7 +804,7 @@ function Get-WorkflowDescriptorForAudit {
             continue
         }
 
-        if ($line -match '^\s{2}([A-Z_]+):\s*$') {
+        if ($line -match '^\s{2}([A-Za-z0-9_-]+):\s*$') {
             $currentStage = $Matches[1]
             if ($descriptor.Stages.Contains($currentStage)) {
                 $warnings += ("workflow descriptor duplicates stage {0} at line {1}" -f $currentStage, $lineNumber)
@@ -895,7 +897,12 @@ function Assert-WorkflowDescriptorAdvisory {
         return
     }
 
-    $expectedStages = @('PLAN', 'PLAN_REVIEW', 'IMPLEMENT', 'CODE_REVIEW', 'TEST')
+    $expectedStages = $script:ExpectedWorkflowStages
+    $actualStages = @($descriptor.Stages.Keys)
+    if (($actualStages -join '|') -ne ($expectedStages -join '|')) {
+        Add-Warning ("workflow descriptor stages should be exactly {0}; got {1}" -f ($expectedStages -join ' -> '), ($actualStages -join ' -> '))
+    }
+
     foreach ($expectedStage in $expectedStages) {
         if (-not $descriptor.Stages.Contains($expectedStage)) {
             Add-Warning ("workflow descriptor should define stage: {0}" -f $expectedStage)
@@ -906,6 +913,9 @@ function Assert-WorkflowDescriptorAdvisory {
         $stageDescriptor = $descriptor.Stages[$stageName]
         if ($stageName -notin $expectedStages) {
             Add-Warning ("workflow descriptor contains unsupported stage: {0}" -f $stageName)
+        }
+        if ($stageName.ToLowerInvariant() -in $script:ForbiddenWorkflowProviderNames) {
+            Add-Warning ("workflow descriptor must not define provider as stage: {0}" -f $stageName)
         }
 
         if ([string]::IsNullOrWhiteSpace($stageDescriptor.Role)) {
@@ -931,6 +941,10 @@ function Assert-WorkflowDescriptorAdvisory {
 
         $allowedSkills = @(Get-AllowedWorkflowSkills -RepoRoot $RepoRoot)
         foreach ($skill in $stageDescriptor.SkillsWhitelist) {
+            if ($skill.ToLowerInvariant() -in $script:ForbiddenWorkflowProviderNames) {
+                Add-Warning ("workflow descriptor stage {0} must not whitelist provider skill: {1}" -f $stageName, $skill)
+                continue
+            }
             if ($skill -notin $allowedSkills) {
                 Add-Warning ("workflow descriptor stage {0} references unsupported skill: {1}" -f $stageName, $skill)
             }

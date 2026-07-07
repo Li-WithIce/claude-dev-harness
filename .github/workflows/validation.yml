@@ -1,0 +1,26 @@
+name: Validation
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - codex/harness-distribution
+
+permissions:
+  contents: read
+
+jobs:
+  validation:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Quick validation
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation.ps1 -Suite quick
+
+      - name: Core validation
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation.ps1 -Suite core

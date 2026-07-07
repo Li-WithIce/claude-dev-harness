@@ -71,7 +71,8 @@ function New-PowerShellEncodedArguments {
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(`$false)
 `$OutputEncoding = [Console]::OutputEncoding
 $($tokens -join ' ')
-if (`$global:LASTEXITCODE -is [int]) { exit `$global:LASTEXITCODE }
+`$lastExitCodeVariable = Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+if (`$null -ne `$lastExitCodeVariable -and `$lastExitCodeVariable.Value -is [int]) { exit `$lastExitCodeVariable.Value }
 exit 0
 "@
 
@@ -169,6 +170,7 @@ $coreScripts = @(
     'verify-memory-provider-boundary.ps1',
     'verify-minimal-safe-change-policy.ps1',
     'verify-md-html-review-renderer.ps1',
+    'verify-no-node-install-dependency.ps1',
     'verify-provider-usage-recording.ps1',
     'verify-workflow-contracts.ps1',
     'verify-workflow-descriptor.ps1',
