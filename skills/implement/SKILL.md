@@ -53,6 +53,12 @@ IMPLEMENT 负责两件事：改代码，以及把本轮实现证据追加到 `do
 6. 调用 `.assistant\entry\advance-stage.ps1 -TaskId <task-id>` 进入 `CODE_REVIEW`；切换 backend 时追加 `-Tool <next-tool>`
 7. 如需单独排查文档问题，再手动运行 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
 
+## Context Providers
+
+- 实现前先按 `references/minimal-safe-change-policy.md` 收敛到最小安全 diff。
+- 需要代码检索时读取 `references/code-intel-routing.md`；CodeGraph 等 provider 只给 hints，必须回读真实文件并保留 `rg`/Read fallback。
+- provider 使用只写入本轮 `- risks:` 或 `- next:` 的真实落地点，不新增字段。
+
 ## 不要做的事
 
 - 不要重写旧 run

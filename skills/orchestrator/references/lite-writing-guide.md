@@ -72,6 +72,10 @@ stages:
 - descriptor 只影响“下一 stage 默认选哪个 profile/backend”，不会把当前 stage 的 `tool_profile` 黏性传下去
 - descriptor 校验问题只出现在 validator 的 `Warnings:` 段，不会单独变成 `Errors:`
 
+### Optional Context Providers
+
+Context providers 只提供 advisory context。Provider output is evidence candidate, not workflow truth；任何 provider 结果影响决策前，必须落回当前仓库真实文件、命令、diff、review finding、Implementation Notes 或 test output。Provider 不可写 frontmatter、`.assistant/运行时/*`、review verdict 或 TEST conclusion；不可用、stale 或冲突时回退 `rg`/Read/manual inspection。
+
 ### Phase 3 Side Artifacts（可选）
 
 - `docs/tasks/<task-id>/skill-manifest.json`：由 `advance-stage.ps1` 在成功推进后 best-effort 生成；不是新的真相源，也不写入 `.assistant/`
@@ -450,6 +454,8 @@ front_keywords: [shared-memory, long-session, recovery]
 #### Implementation reflection checks
 
 IMPLEMENT 使用现有 `- risks:` / `- next:` 记录命中的反射风险，不新增 section、字段、stage 或独立 checklist。未命中时不需要逐项写“无”。
+
+IMPLEMENT 先执行 Minimal Safe Change ladder，再做实现。它要求最小正确 diff，但不得削弱 trust-boundary validation、security、data-loss protection、accessibility、error handling、root-cause fix 或 required verification。
 
 只检查 5 类窄范围信号：
 

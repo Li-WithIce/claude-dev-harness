@@ -58,6 +58,10 @@ Claude、Codex 共用同一份 Obsidian 记忆仓库：
 - 不在 `MEMORY.md`、`配置\*.md`、`配置\引导状态.md` 记录当前任务
 - 长期记忆提升前必须得到用户确认
 
+## agentmemory Compatibility
+
+agentmemory 只能作为 read-only historical recall sidecar。它不能修改 `.assistant/运行时/*`、不能提升 wisdom、不能决定当前 stage/review verdict/TEST conclusion；与当前 repo、当前 task、`.assistant` 或用户指令冲突时，后者优先。
+
 ## Tooling
 
 - Consistency check: `scripts/check-shared-memory.ps1`

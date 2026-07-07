@@ -21,6 +21,7 @@ append-only run 用 `### Run <N> · YYYY-MM-DD HH:mm · runner: X` 标题，必�
 ### PLAN_REVIEW
 
 - Clarification 是否完整
+- 对 context provider 任务，按需读取 `references/adversarial-review-gate.md`、`references/code-intel-review.md`、`references/historical-recall-review.md`、`references/codedb-mcp-experimental.md`；provider finding 必须绑定真实证据。
 - 按阶段原则路由审查：PLAN_REVIEW 用 Hegel + Bayes，检查计划自洽、前提证据、未决项闭环；不要新增五转 stage 或第二 truth
 - 若用户通过“需求澄清 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认”等同族触发词进入 PLAN，或 PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径仍不足以指导 IMPLEMENT，确认该协议只落在 `## Clarification` 和 `## User Confirmation`，没有新增 stage、frontmatter 字段、runtime、validator hard gate 或第二 truth
 - 对 Clarification 协议族或上述不确定任务，检查 `clarification_ledger` 没有替代 `## Clarification` 最低字段；缺少 `验收标准`、`非目标`、`受影响目录 / 模块`、`回滚策略或兼容性约束`、`ui:` 任一项时必须 `verdict: revise`
@@ -42,6 +43,7 @@ append-only run 用 `### Run <N> · YYYY-MM-DD HH:mm · runner: X` 标题，必�
 ### CODE_REVIEW
 
 - 按阶段原则路由审查：CODE_REVIEW 用 Feynman 反自欺，TEST 交给 Bayes 收证据，`revise` 后用 Debono 保留仍成立的约束、价值或适用条件
+- 先用 `references/overengineering-checklist.md` 检查过度抽象，再检查 underengineering：少写不能跳过 validation、security、data-loss protection、accessibility、error handling、root-cause fix 或 required verification。
 - 实现是否满足计划，是否有明显漏做、做错、多做
 - 最新 `Implementation Notes` 是否和代码一致
 - 实际 diff 是否落在 `Change Contract.affected_paths` 可解释范围内，声明的 `Plan.artifacts` 是否已创建或在 `Implementation Notes` 中解释未交付原因

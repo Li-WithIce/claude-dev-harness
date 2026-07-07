@@ -47,6 +47,10 @@ pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\dev-harn
 3. workflow 阶段完成后，用 `.assistant/entry/advance-stage.ps1` 推进到下一阶段。
 4. 会话中断后，说“继续”/“恢复”/`resume`，优先读取已存在的 runtime 指针；full vault 项目可按 `.assistant/工作流/长会话恢复.md` 的顺序恢复。
 
+### Optional Context Providers
+
+Context providers 是可选辅助输入，不是 workflow 真相源。内置权威仍是 `docs/tasks/<task-id>/`、当前仓库文件和 `.assistant/`；CodeGraph、agentmemory、codedb-mcp 只能提供 advisory context provider 结果，且必须落回真实路径、命令、diff、review finding、Implementation Notes 或 test output。安装、更新和 validation 默认不会安装、注册或连接外部 provider；详细边界见 `docs/工作流/context-provider-boundary.md`，工具入口见 `docs/工具/context-providers.md`。
+
 最常用命令：
 
 ```powershell

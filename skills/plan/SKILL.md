@@ -98,6 +98,12 @@ PLAN 阶段默认按 Osborn 打开发散空间、Hegel 收敛矛盾与依赖，�
 4. gate 满足后执行 `.assistant\entry\advance-stage.ps1 -TaskId <task-id>`（默认走 workflow descriptor 的 `harness-default-codex`，切换 backend 时追加 `-Tool <next-tool>`）
 5. 如需单独排查文档问题，再手动跑 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
 
+## Context Providers
+
+- 代码影响面不清时，可按需读取 `references/code-intel-routing.md`；provider 结果必须回读当前文件。
+- 历史决策不清时，可按需读取 `references/historical-recall.md`；historical recall 不覆盖当前用户指令、当前 repo 或 `.assistant`。
+- quick/ask 默认不加载 provider reference。
+
 ## 不要做的事
 
 - 不要写 `docs/<task-id>/...`

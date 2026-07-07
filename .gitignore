@@ -45,6 +45,7 @@ Microsoft/
 /.idea/
 /.claude/
 /.codex/
+/.codegraph/
 /.codedb-mcp/
 
 # dev-harness workspace artifacts

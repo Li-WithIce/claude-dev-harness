@@ -159,9 +159,13 @@ if ($IncludeCachedDiff) {
 }
 
 $coreScripts = @(
+    'verify-adversarial-review-gate.ps1',
+    'verify-context-provider-boundary.ps1',
+    'verify-context-provider-install-isolation.ps1',
     'verify-harness-entry.ps1',
     'verify-lite-artifact-validator.ps1',
     'verify-lite-footprint.ps1',
+    'verify-minimal-safe-change-policy.ps1',
     'verify-md-html-review-renderer.ps1',
     'verify-workflow-contracts.ps1',
     'verify-workflow-descriptor.ps1',
