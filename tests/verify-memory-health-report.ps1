@@ -84,6 +84,7 @@ New-Item -ItemType Directory -Path $healthyWorkspace,$healthyUser -Force | Out-N
 $installResult = Invoke-RepoScript -UserProfile $healthyUser -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @{
     WorkspaceRoot = $healthyWorkspace
     RepoRoot      = $RepoRoot
+    VaultProfile  = 'full'
 }
 if ($installResult.ExitCode -ne 0) {
     Add-Failure 'install.ps1 should succeed before memory-health-report smoke runs'

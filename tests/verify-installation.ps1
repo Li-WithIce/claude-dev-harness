@@ -252,6 +252,25 @@ function Assert-TemplateFileMatches {
     }
 }
 
+function Test-FullVaultProfile {
+    param([string]$VaultPath)
+
+    foreach ($relativePath in @('工作流', '.obsidian', '首页.md', 'MEMORY.md')) {
+        if (Test-Path -LiteralPath (Join-Path $VaultPath $relativePath)) {
+            return $true
+        }
+    }
+
+    $weakMarkerCount = 0
+    foreach ($relativePath in @('配置', '模板')) {
+        if (Test-Path -LiteralPath (Join-Path $VaultPath $relativePath)) {
+            $weakMarkerCount++
+        }
+    }
+
+    return ($weakMarkerCount -eq 2)
+}
+
 function Assert-GitIgnoreManagedEntries {
     param([string]$Path)
 
@@ -482,6 +501,8 @@ $WorkspaceGitIgnorePath = Join-Path $WorkspaceRoot '.gitignore'
 $WorkspaceEntryAgentsPath = Join-Path $VaultPath 'entry\AGENTS.md'
 $WorkspaceAdvanceStageShimPath = Join-Path $VaultPath 'entry\advance-stage.ps1'
 $WorkspaceValidateArtifactsShimPath = Join-Path $VaultPath 'entry\validate-lite-artifacts.ps1'
+$WorkspaceRuntimeTasksPath = Join-Path $VaultPath '运行时\tasks'
+$VaultIsFull = Test-FullVaultProfile -VaultPath $VaultPath
 $ForbiddenTokens = @('{REPO_ROOT}', '{WORKSPACE_ROOT}', '{VAULT_PATH}', '{CLAUDE_HOME}', '{CODEX_HOME}')
 $script:RenderTokens = [ordered]@{
     '{REPO_ROOT}' = $RepoRoot
@@ -512,6 +533,16 @@ Assert-RenderedFile -Path $WorkspaceAdvanceStageShimPath -ForbiddenTokens $Forbi
 Assert-TemplateFileMatches -Path $WorkspaceAdvanceStageShimPath -TemplatePath (Join-Path $RepoRoot 'vault-template\entry\advance-stage.ps1.template') -Label 'workspace advance-stage shim'
 Assert-RenderedFile -Path $WorkspaceValidateArtifactsShimPath -ForbiddenTokens $ForbiddenTokens
 Assert-TemplateFileMatches -Path $WorkspaceValidateArtifactsShimPath -TemplatePath (Join-Path $RepoRoot 'vault-template\entry\validate-lite-artifacts.ps1.template') -Label 'workspace validate-lite-artifacts shim'
+if (Test-Path -LiteralPath $WorkspaceRuntimeTasksPath -PathType Container) {
+    Add-Check 'workspace runtime tasks directory exists'
+} else {
+    Add-Error ("缺少 workspace runtime tasks directory: {0}" -f $WorkspaceRuntimeTasksPath)
+}
+if ($VaultIsFull) {
+    Add-Check 'workspace vault profile detected: full'
+} else {
+    Add-Check 'workspace vault profile detected: minimal'
+}
 
 if (Test-Path -LiteralPath $ClaudeSettingsPath -PathType Leaf) {
     try {
@@ -611,7 +642,9 @@ if ($null -eq $tomlHits) {
     Add-Error ("agent-configs/codex/*.toml 命中 forbidden prefix: {0}:{1}" -f $firstHit.Path, $firstHit.LineNumber)
 }
 
-if ($Scope -eq 'WorkflowStatus') {
+if (-not $VaultIsFull) {
+    Add-Check 'minimal workspace vault skips shared-memory health check'
+} elseif ($Scope -eq 'WorkflowStatus') {
     Add-Check 'WorkflowStatus scope skips shared-memory health because harness-status runs that gate separately'
 } elseif (Test-Path -LiteralPath (Join-Path $RepoRoot 'scripts\memory-health.ps1') -PathType Leaf) {
     $healthArguments = @{

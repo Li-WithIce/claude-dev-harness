@@ -2,7 +2,9 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$WorkspaceRoot,
-    [string]$RepoRoot = ""
+    [string]$RepoRoot = "",
+    [ValidateSet('auto', 'minimal', 'full')]
+    [string]$VaultProfile = 'auto'
 )
 
 Set-StrictMode -Version Latest
@@ -1067,6 +1069,61 @@ function Install-VaultTemplate {
     }
 }
 
+function Test-ExistingFullVault {
+    param([string]$TargetRoot)
+
+    foreach ($relativePath in @('工作流', '.obsidian', '首页.md', 'MEMORY.md')) {
+        if (Test-Path -LiteralPath (Join-Path $TargetRoot $relativePath)) {
+            return $true
+        }
+    }
+
+    $weakMarkerCount = 0
+    foreach ($relativePath in @('配置', '模板')) {
+        if (Test-Path -LiteralPath (Join-Path $TargetRoot $relativePath)) {
+            $weakMarkerCount++
+        }
+    }
+
+    return ($weakMarkerCount -eq 2)
+}
+
+function Resolve-VaultProfile {
+    param(
+        [string]$RequestedProfile,
+        [string]$TargetRoot
+    )
+
+    if ($RequestedProfile -ne 'auto') {
+        return $RequestedProfile
+    }
+
+    if (Test-ExistingFullVault -TargetRoot $TargetRoot) {
+        return 'full'
+    }
+
+    return 'minimal'
+}
+
+function Install-MinimalVaultTemplate {
+    param(
+        [string]$TemplateRoot,
+        [string]$TargetRoot
+    )
+
+    $entryRoot = Join-Path $TemplateRoot 'entry'
+    Install-RenderedFile -SourcePath (Join-Path $entryRoot 'AGENTS.md.template') -TargetPath (Join-Path $TargetRoot 'entry\AGENTS.md')
+    Install-RenderedFile -SourcePath (Join-Path $entryRoot 'advance-stage.ps1.template') -TargetPath (Join-Path $TargetRoot 'entry\advance-stage.ps1')
+    Install-RenderedFile -SourcePath (Join-Path $entryRoot 'validate-lite-artifacts.ps1.template') -TargetPath (Join-Path $TargetRoot 'entry\validate-lite-artifacts.ps1')
+
+    $runtimeTasksRoot = Join-Path $TargetRoot '运行时\tasks'
+    Ensure-Directory -Path $runtimeTasksRoot
+    $gitkeepSource = Join-Path $TemplateRoot '运行时\tasks\.gitkeep'
+    if (Test-Path -LiteralPath $gitkeepSource -PathType Leaf) {
+        Copy-Item -LiteralPath $gitkeepSource -Destination (Join-Path $runtimeTasksRoot '.gitkeep') -Force
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
     throw 'USERPROFILE is required for install.ps1'
 }
@@ -1108,6 +1165,8 @@ $script:Manifest = [ordered]@{
     agents_home = $AgentsHome
     backup_root = $BackupRoot
     generated_repo_system_path = $null
+    requested_vault_profile = $VaultProfile
+    effective_vault_profile = $null
     backups = @()
 }
 $script:ManifestPath = Join-Path $BackupRoot 'install-manifest.json'
@@ -1141,7 +1200,15 @@ try {
     Ensure-Directory -Path (Join-Path $RepoSkillsPath '.system')
     Ensure-WorkspaceGitIgnoreEntries -WorkspaceRoot $WorkspaceRoot
 
-    Install-VaultTemplate -TemplateRoot (Join-Path $RepoRoot 'vault-template') -TargetRoot $VaultPath
+    $effectiveVaultProfile = Resolve-VaultProfile -RequestedProfile $VaultProfile -TargetRoot $VaultPath
+    $script:Manifest.effective_vault_profile = $effectiveVaultProfile
+    Save-InstallManifestSnapshot
+
+    if ($effectiveVaultProfile -eq 'full') {
+        Install-VaultTemplate -TemplateRoot (Join-Path $RepoRoot 'vault-template') -TargetRoot $VaultPath
+    } else {
+        Install-MinimalVaultTemplate -TemplateRoot (Join-Path $RepoRoot 'vault-template') -TargetRoot $VaultPath
+    }
 
     Backup-IfNeeded -Path $claudeGlobalPath
     Install-RenderedFile -SourcePath (Join-Path $RepoRoot 'agent-configs\claude\CLAUDE.md.template') -TargetPath $claudeGlobalPath
@@ -1181,6 +1248,8 @@ try {
         repo_root = $RepoRoot
         workspace_root = $WorkspaceRoot
         vault_path = $VaultPath
+        requested_vault_profile = $VaultProfile
+        effective_vault_profile = $effectiveVaultProfile
         installed_at = $script:Manifest.installed_at
     }))
 
@@ -1188,6 +1257,8 @@ try {
     Write-Output ('- repo_root: {0}' -f $RepoRoot)
     Write-Output ('- workspace_root: {0}' -f $WorkspaceRoot)
     Write-Output ('- vault_path: {0}' -f $VaultPath)
+    Write-Output ('- requested_vault_profile: {0}' -f $VaultProfile)
+    Write-Output ('- effective_vault_profile: {0}' -f $effectiveVaultProfile)
     Write-Output ('- claude_skills_root: {0}' -f $claudeSkillsPath)
     Write-Output ('- codex_skills_root: {0}' -f $codexSkillsPath)
     Write-Output ('- agents_skills_root: {0}' -f $agentsSkillsPath)

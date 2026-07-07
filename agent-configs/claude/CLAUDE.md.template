@@ -23,10 +23,11 @@ Today's date is __RENDER_AT_INSTALL__
 
 当收到“继续”“恢复”“resume”“刚才做到哪里了”等触发词时：
 
-- 先读 `{VAULT_PATH}\运行时\恢复索引.md`
-- 细节不足时再读 `{VAULT_PATH}\运行时\当前任务.md`
-- 然后按 `task_id` 读取 `{VAULT_PATH}\运行时\tasks\<task-id>.md`
-- 最后再读 `{VAULT_PATH}\运行时\中断任务.md` 与 `{VAULT_PATH}\运行时\上次会话.md`
+- 先读已存在的 `{VAULT_PATH}\运行时\恢复索引.md`
+- 细节不足且文件存在时再读 `{VAULT_PATH}\运行时\当前任务.md`
+- 有 `task_id` 且文件存在时读取 `{VAULT_PATH}\运行时\tasks\<task-id>.md`
+- 最后按需读取已存在的 `{VAULT_PATH}\运行时\中断任务.md` 与 `{VAULT_PATH}\运行时\上次会话.md`
+- 缺失运行时文件表示当前没有已记录的活动状态，不作为错误
 
 ## 懒加载边界
 

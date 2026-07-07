@@ -124,8 +124,32 @@ if (-not (Test-Path -LiteralPath (Join-Path $workspaceRoot '.assistant') -PathTy
 } else {
     Add-Check 'harness.ps1 creates .assistant during bootstrap'
 }
+if (Test-Path -LiteralPath (Join-Path $workspaceRoot '.assistant\工作流') -PathType Container) {
+    Add-Failure 'harness.ps1 should use minimal vault profile for a fresh workspace by default'
+} else {
+    Add-Check 'harness.ps1 uses minimal vault profile for a fresh workspace by default'
+}
 
-# Case 2: update an existing workspace from a descendant path and repair managed drift.
+# Case 2: auto vault detection should not treat one weak marker as an existing full vault.
+$caseRoot = Join-Path $scratchRoot 'auto-ignores-weak-vault-marker'
+$userProfile = Join-Path $caseRoot 'user'
+$workspaceRoot = Join-Path $caseRoot 'workspace'
+New-Item -ItemType Directory -Path $userProfile,(Join-Path $workspaceRoot '.assistant\配置') -Force | Out-Null
+
+$weakMarkerInstall = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @{
+    WorkspaceRoot = $workspaceRoot
+    RepoRoot      = $RepoRoot
+}
+
+if ($weakMarkerInstall.ExitCode -ne 0) {
+    Add-Failure 'install.ps1 should succeed when only one weak full-vault marker exists'
+} elseif (Test-Path -LiteralPath (Join-Path $workspaceRoot '.assistant\工作流') -PathType Container) {
+    Add-Failure 'auto vault detection should keep a workspace with only .assistant\配置 on minimal profile'
+} else {
+    Add-Check 'auto vault detection ignores a single weak full-vault marker'
+}
+
+# Case 3: update an existing workspace from a descendant path and repair managed drift.
 $caseRoot = Join-Path $scratchRoot 'update-existing-workspace'
 $userProfile = Join-Path $caseRoot 'user'
 $workspaceRoot = Join-Path $caseRoot 'workspace'
@@ -135,6 +159,7 @@ New-Item -ItemType Directory -Path $userProfile,$workspaceRoot -Force | Out-Null
 $installResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @{
     WorkspaceRoot = $workspaceRoot
     RepoRoot      = $RepoRoot
+    VaultProfile  = 'full'
 }
 
 if ($installResult.ExitCode -ne 0) {

@@ -17,15 +17,20 @@ pwsh -File .\harness.ps1 -WorkspaceRoot D:\my-project
 
 # 直接安装
 pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\dev-harness
+
+# 显式安装完整 Obsidian/shared-memory vault
+pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\dev-harness -VaultProfile full
 ```
 
-安装完成后，目标工作区会得到：
+默认安装使用 `VaultProfile auto`：新项目安装 minimal vault；已有完整 `.assistant` vault 的项目继续按 full/preserve 更新，不会自动瘦身或删除旧文件。`VaultProfile` 控制本次安装维护哪些文件，不负责清理已有 vault 内容；需要瘦身时先人工确认再删除旧 full 文件。安装完成后，目标工作区至少会得到：
 
 - 工作区入口文档：`AGENTS.md`
-- 工作区共享记忆：`.assistant/`
 - 工作区入口 shim：`.assistant/entry/AGENTS.md`
 - 工作区脚本 shim：`.assistant/entry/advance-stage.ps1`、`.assistant/entry/validate-lite-artifacts.ps1`
+- 最小运行时目录：`.assistant/运行时/tasks/`
 - Claude Code hooks：`runtime-hooks/claude/*.js` 的安装副本
+
+只有显式 `-VaultProfile full`，或 `auto` 检测到既有完整 vault 时，才安装/维护 `.assistant/.obsidian`、`.assistant/工作流`、`.assistant/模板`、`.assistant/配置`、`首页.md`、`MEMORY.md` 和默认运行时指针文件。
 
 宿主侧当前真实行为是：
 
@@ -40,7 +45,7 @@ pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\dev-harn
 1. 在目标工作区里直接发起开发任务，让入口文档先判定 `resume-current / switch-existing / new-task / inbox-first`；`new-task` 再轻量路由到 `quick / workflow / ask`。
 2. `quick` 直接完成并报告验证；`workflow` 才进入 `entry-router -> orchestrator` 并写 `docs/tasks/<task-id>/`。
 3. workflow 阶段完成后，用 `.assistant/entry/advance-stage.ps1` 推进到下一阶段。
-4. 会话中断后，说“继续”/“恢复”/`resume`，按 `.assistant/工作流/长会话恢复.md` 的顺序恢复。
+4. 会话中断后，说“继续”/“恢复”/`resume`，优先读取已存在的 runtime 指针；full vault 项目可按 `.assistant/工作流/长会话恢复.md` 的顺序恢复。
 
 最常用命令：
 
@@ -84,7 +89,7 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 
 - `quick`：只加载入口规则、用户偏好 / 必要配置，以及与本次请求直接相关的 skill 或 reference；不预读 orchestrator、全部 stage skill 或历史任务。
 - `workflow`：加载 `entry-router`、`orchestrator`，再按当前 stage 加载一个阶段 skill：`PLAN -> plan`、`PLAN_REVIEW -> review`、`IMPLEMENT -> implement`、`CODE_REVIEW -> review`、`TEST -> test`。
-- `resume-current` / `switch-existing`：先加载 `.assistant/运行时/恢复索引.md`、`.assistant/运行时/当前任务.md`、`运行时/tasks/<task-id>.md`；必要时只读当前任务的 `plan.md` frontmatter 判定 stage，再加载当前 stage skill。
+- `resume-current` / `switch-existing`：先加载已存在的 `.assistant/运行时/恢复索引.md`、`.assistant/运行时/当前任务.md`、`运行时/tasks/<task-id>.md`；缺失运行时文件表示没有已记录的活动状态，不作为错误；必要时只读当前任务的 `plan.md` frontmatter 判定 stage，再加载当前 stage skill。
 - `ask`：不加载 workflow skill，只问一个最小澄清问题。
 
 禁止 bulk-load 全部 skills、全部历史 `docs/tasks/*`、Claude 兼容 skill 或 `workflow-team`。只有用户显式切换 backend、当前 stage frontmatter / workflow descriptor 命中、或 `$env:AITEAMCODE_TEAM_MODE='1'` 等触发条件满足时，才加载这些兼容路径。
@@ -182,23 +187,23 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 
 ### `.assistant/`
 
-这是共享记忆、恢复、运行时派生视图与协议文档所在位置。
+这是项目本地入口、共享记忆、恢复、运行时派生视图与可选协议文档所在位置。默认 minimal 安装只包含入口 shim 与最小运行时目录；full vault 才包含完整配置、工作流说明、模板与 Obsidian 配置。
 
 按 shared-memory v2 当前约定，可以把它理解成四层：
 
 | 层 | 路径 | 角色 |
 |---|---|---|
 | artifact | `docs/tasks/<task-id>/` | 任务真相源 |
-| runtime | `.assistant/运行时/` | 当前任务、恢复索引、task mirror、收件箱、wisdom 等运行时状态 |
-| config | `.assistant/配置/` | 用户偏好、工具、schema 版本 |
-| workflow | `.assistant/工作流/` | 协议与恢复说明 |
+| runtime | `.assistant/运行时/` | 当前任务、恢复索引、task mirror、收件箱、wisdom 等运行时状态；minimal 下按需生成 |
+| config | `.assistant/配置/` | 用户偏好、工具、schema 版本；full vault 才默认安装 |
+| workflow | `.assistant/工作流/` | 协议与恢复说明；full vault 才默认安装 |
 
 当前最重要的职责分工：
 
-- `.assistant/运行时/tasks/<task-id>.md` 是从任务产物镜像出来的 task-runtime
-- `.assistant/运行时/当前任务.md` / `恢复索引.md` 是共享 pointer / derived view
-- `.assistant/工作流/长会话恢复.md` 汇总了恢复触发词、读取顺序和单写者场景
-- 新事项先进入 `.assistant/运行时/收件箱.md`
+- `.assistant/运行时/tasks/<task-id>.md` 是从任务产物镜像出来的 task-runtime，按需生成
+- `.assistant/运行时/当前任务.md` / `恢复索引.md` 是共享 pointer / derived view，按需生成
+- `.assistant/工作流/长会话恢复.md` 只在 full vault 中默认存在，用于汇总恢复触发词、读取顺序和单写者场景
+- 新事项先进入 `.assistant/运行时/收件箱.md`，文件不存在时由写入入口创建
 - pending wisdom 不直接落到 `记忆-*.md`，而是先走收件箱，再 promote/triage
 
 ### `validate-lite-artifacts.ps1`
@@ -241,7 +246,7 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 
 - plan metadata（`read_first` / `convergence` / `artifacts`）与 review `-Quality` 4-dim score（`completeness` / `consistency` / `accuracy` / `depth`）：见 [`skills/orchestrator/references/lite-writing-guide.md`](skills/orchestrator/references/lite-writing-guide.md) 与 [`docs/工作流/quality-rubric.md`](docs/工作流/quality-rubric.md)
 - `PreCompact` 自检与 single-writer 写回（append 走 `append-runtime-inbox.ps1`，非 append 写回只委托 `advance-stage.ps1`）：见 [`skills/orchestrator/SKILL.md`](skills/orchestrator/SKILL.md)、[`skills/workflow-team/SKILL.md`](skills/workflow-team/SKILL.md) 与 [`docs/工作流/single-writer-precompact.md`](docs/工作流/single-writer-precompact.md)
-- team auto mode 环境变量固定为 `HARNESS_AUTO`；长会话恢复统一看 `.assistant/工作流/长会话恢复.md`；`spec.md` 可选 `front_keywords`
+- team auto mode 环境变量固定为 `HARNESS_AUTO`；长会话恢复优先看已存在 runtime 指针，full vault 项目再读 `.assistant/工作流/长会话恢复.md`；`spec.md` 可选 `front_keywords`
 
 ## 关键入口命令
 
@@ -299,7 +304,7 @@ pwsh -File .\skills\workflow-team\scripts\spawn-team.ps1 -TaskId <task-id>
 | `skills/md-html` | Markdown/HTML 互转、发布与导入边界 |
 | `agent-configs/profiles` | tool profile 描述符 |
 | `agent-configs/workflows/harness-lite.yaml` | workflow descriptor 与阶段注释协议 |
-| `vault-template/` | 新工作区 `.assistant` 骨架 |
+| `vault-template/` | 新工作区 `.assistant` minimal/full 骨架 |
 
 ## 验证与回归
 

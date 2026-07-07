@@ -261,7 +261,8 @@ function Invoke-ManagedAssetsCase {
         [scriptblock]$Mutator,
         [scriptblock]$PostAssert,
         [hashtable]$UpdateArguments = $null,
-        [string]$WorkingDirectory = ''
+        [string]$WorkingDirectory = '',
+        [string]$InstallVaultProfile = ''
     )
 
     $caseRoot = Join-Path $scratchRoot $Name
@@ -274,10 +275,15 @@ function Invoke-ManagedAssetsCase {
         & $PreInstall $caseRoot $userProfile $workspaceRoot
     }
 
-    $installResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @{
+    $installArguments = @{
         WorkspaceRoot = $workspaceRoot
         RepoRoot      = $RepoRoot
     }
+    if (-not [string]::IsNullOrWhiteSpace($InstallVaultProfile)) {
+        $installArguments.VaultProfile = $InstallVaultProfile
+    }
+
+    $installResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments $installArguments
 
     if ($installResult.ExitCode -ne 0) {
         $script:Failures += [pscustomobject]@{
@@ -359,6 +365,7 @@ try {
         -Name 'workflow-protocol-drift-is-repaired' `
         -Scope 'All' `
         -ExpectedStatus 'PASS' `
+        -InstallVaultProfile 'full' `
         -Mutator {
             param($CaseRoot, $UserProfile, $WorkspaceRoot)
 
@@ -642,6 +649,7 @@ enabled = true
         -Name 'decision-needed-template-drift-is-repaired' `
         -Scope 'All' `
         -ExpectedStatus 'PASS' `
+        -InstallVaultProfile 'full' `
         -Mutator {
             param($CaseRoot, $UserProfile, $WorkspaceRoot)
 

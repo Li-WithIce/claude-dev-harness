@@ -2,16 +2,16 @@
 
 - Active workspace resolution: explicit `-WorkspaceRoot` -> `DEV_HARNESS_WORKSPACE_ROOT` -> `WORKSPACE_ROOT` -> current working directory inside an installed workspace
 - Shared memory vault: use the active workspace's `.assistant`
-- Once resolved, treat the active workspace's local `AGENTS.md` and `.assistant` as the source of truth
+- Once resolved, treat the active workspace's local `AGENTS.md` and `.assistant` as the source of truth; user-level rules are defaults only
 - Default language: 中文
-- If a task needs recovery, runtime state, long-term preferences, or tool paths, use `obsidian-memory` first
+- If a task needs recovery, runtime state, long-term preferences, or tool paths, use `obsidian-memory` after workspace resolution and only against existing shared memory/runtime docs in the resolved workspace; if optional docs are absent, continue from project files and current evidence
 - Do not keep parallel runtime notes under `{CODEX_HOME}`
 - 新功能开发或功能修改以当前需求和业务正确性为准；不要为了兼容旧测试、旧快照或过期断言而保留或恢复旧行为。若旧测试与新需求冲突，应更新或删除旧测试并说明原因；只有用户明确要求历史兼容时才保留旧测试兼容。
 
 ## Read Order
 
-- Orientation: the active workspace's `AGENTS.md` -> `.assistant\首页.md` -> `.assistant\工作流\项目约定.md` -> `.assistant\配置\系统信息.md` -> `.assistant\配置\用户偏好.md` -> `.assistant\配置\工具与组件.md`
-- Resume: the active workspace's `.assistant\运行时\恢复索引.md` -> `.assistant\运行时\当前任务.md` -> `.assistant\运行时\tasks\<task-id>.md` -> `.assistant\运行时\中断任务.md` -> `.assistant\运行时\上次会话.md`
+- Orientation: the active workspace's `AGENTS.md` first, then read existing optional files only if present: `.assistant\首页.md` -> `.assistant\工作流\项目约定.md` -> `.assistant\配置\系统信息.md` -> `.assistant\配置\用户偏好.md` -> `.assistant\配置\工具与组件.md`
+- Resume: read existing runtime files only if present: `.assistant\运行时\恢复索引.md` -> `.assistant\运行时\当前任务.md` -> `.assistant\运行时\tasks\<task-id>.md` -> `.assistant\运行时\中断任务.md` -> `.assistant\运行时\上次会话.md`; missing runtime files mean no active recorded state
 
 ## Lazy Loading
 
@@ -24,11 +24,13 @@
 - Treat unresolved PLAN acceptance, non-goals, impact, rollback/compatibility, or implementation path that cannot guide IMPLEMENT as the same Clarification protocol.
 - In that protocol, answer code/doc-discoverable questions first, keep the base Clarification fields, ask remaining user decisions one at a time with a recommended answer, and keep `User Confirmation` draft while any `clarification_ledger` item is `decision: pending`.
 - Stage principle routing is only a cognitive lens, not a new five-turn workflow: Entry/Clarification=Socrates, PLAN=Osborn/Hegel/First Principles/Occam, PLAN_REVIEW=Hegel+Bayes, IMPLEMENT=Ponytail/surgical change, CODE_REVIEW=Feynman, TEST=Bayes, revise=Debono value preservation.
+- MCP/connectors are not preloaded, probed, or accessed just because they are installed. Use them only when the user explicitly names them, the task requires them, or the active workspace rules require them.
 - Do not bulk-load all skills, all historical tasks, Claude compatibility skills, or `workflow-team` unless an explicit trigger requires them.
 
 ## Writeback
 
 - Single-writer model: only the entry agent writes shared pointer files
-- Codex writes only `docs/tasks/<task-id>/*` and `运行时\tasks\<task-id>.md`
-- If Codex is the active entry host for the task, it must also update shared pointer files and refresh `运行时\恢复索引.md` according to the shared memory protocol
+- Codex writes task artifacts under `docs/tasks/<task-id>/*` as local workflow artifacts by default, plus the active workspace's `.assistant\运行时\tasks\<task-id>.md` when required
+- Durable, code-managed conclusions must be promoted into maintained tracked surfaces such as workflow docs, skills, tests, templates, or user-approved tracked docs
+- Codex updates shared pointer files only when the active workspace entry rules identify Codex as the active entry host for the current task; otherwise, do not touch shared pointers
 - New items go to `运行时\收件箱.md` first

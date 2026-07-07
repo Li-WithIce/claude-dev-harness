@@ -84,6 +84,7 @@ New-Item -ItemType Directory -Path $workspaceRoot,$userProfile -Force | Out-Null
 $installResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @{
     WorkspaceRoot = $workspaceRoot
     RepoRoot      = $RepoRoot
+    VaultProfile  = 'full'
 }
 
 if ($installResult.ExitCode -ne 0) {
