@@ -413,8 +413,10 @@ Assert-PathAbsent -Path 'skills/using-superpowers'
 Assert-PathAbsent -Path ('skills/' + 'gemini-designer' + '-main')
 Assert-FileNotContains -Path 'agent-configs/codex/config.shared.toml.template' -Needle 'using-superpowers'
 Assert-NoTrackedAssistantFiles
+Assert-GitIgnoreState -Path '.assistant/' -ShouldBeIgnored $true
 Assert-GitIgnoreState -Path '.assistant/工作流/长会话恢复.md' -ShouldBeIgnored $true
 Assert-GitIgnoreState -Path '.assistant/配置/schema-versions.md' -ShouldBeIgnored $true
+Assert-GitIgnoreState -Path '.assistant/配置/用户偏好.md' -ShouldBeIgnored $true
 Assert-GitIgnoreState -Path '.assistant/entry/AGENTS.md' -ShouldBeIgnored $true
 Assert-GitIgnoreState -Path '.assistant/运行时/记忆-学习.md' -ShouldBeIgnored $true
 Assert-GitIgnoreState -Path '.assistant/运行时/记忆-决策.md' -ShouldBeIgnored $true
