@@ -6,7 +6,7 @@
 2. 判定为 `new-task` 后先选择 `mode: quick | workflow | ask`
    - `quick`：低风险、边界清楚、可当前对话直接完成和验证；不创建 `docs/tasks/{task_id}/`
    - `workflow`：需要计划、留痕、review、test、多文件/跨模块协作或较高风险；进入 orchestrator
-   - `ask`：只有 quick/workflow 信号冲突或缺少关键判断信息时使用，只问一个最小问题
+   - `ask`：iterative blocking clarification gate；只有 quick/workflow 信号冲突或缺少关键判断信息时使用，默认一次只问一个 highest-value blocking question，阻塞到需求足够清楚后再重新路由
 3. 显式覆盖词：`直接改` / `快修` 偏 `quick`；`走 workflow` / `留痕` / `review` / `test` 偏 `workflow`
 4. 进入 workflow 后为新任务选择 `task_id`；未显式指定时，当前 `PLAN` 默认使用 `tool: codex`、`tool_profile: harness-default-codex`、`model: gpt-5.5/xhigh`
    可选：显式选择其他 `tool_profile` 和完整 `model`

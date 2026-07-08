@@ -51,6 +51,7 @@ $routingFiles = @(
     'skills/entry-router/SKILL.md',
     'skills/orchestrator/SKILL.md',
     'skills/orchestrator/references/lite-writing-guide.md',
+    'skills/orchestrator/references/runbook.md',
     'vault-template/entry/AGENTS.md.template',
     'vault-template/工作流/任务识别协议.md',
     'agent-configs/workspace/AGENTS.md.template',
@@ -78,6 +79,7 @@ foreach ($path in @(
         'skills/entry-router/SKILL.md',
         'skills/orchestrator/SKILL.md',
         'skills/orchestrator/references/lite-writing-guide.md',
+        'skills/orchestrator/references/runbook.md',
         'skills/md-html/SKILL.md',
         'vault-template/entry/AGENTS.md.template',
         'vault-template/工作流/任务识别协议.md',
@@ -86,8 +88,19 @@ foreach ($path in @(
         'agent-configs/claude/CLAUDE.md.template',
         'README.md'
     )) {
-    Reject-Regex $path '只问一个最小澄清问题|先问一个最小澄清问题|only one minimal question|ask one minimal question' "$path should not use shallow one-question ask wording"
+    Reject-Regex $path '只问一个最小澄清问题|先问一个最小澄清问题|一次只问一个最小问题|只问一个最小问题|only one minimal question|ask one minimal question|one minimal clarification question' "$path should not use shallow one-question ask wording"
     Reject-Regex $path '(?mi)^stage:\s*ASK\b' "$path should not introduce ASK as a frontmatter stage"
+}
+
+foreach ($path in @(
+        'skills/entry-router/SKILL.md',
+        'vault-template/entry/AGENTS.md.template',
+        'agent-configs/workspace/AGENTS.md.template',
+        'agent-configs/codex/AGENTS.md.template',
+        'agent-configs/claude/CLAUDE.md.template',
+        'README.md'
+    )) {
+    Reject-Regex $path '1% chance|ABSOLUTELY MUST invoke|Invoke relevant or requested skills BEFORE any response or action|Even a 1% chance' "$path should not use broad pre-routing skill invocation wording"
 }
 
 Reject-Regex 'skills/orchestrator/references/lite-writing-guide.md' 'PLAN\s*->\s*ASK|ASK\s*->\s*PLAN|PLAN\s*->\s*IMPLEMENT\s*->\s*REVIEW\s*->\s*TEST\s*->\s*SUMMARY' 'lite writing guide should not list ASK or legacy stage chains'
