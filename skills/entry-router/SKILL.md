@@ -60,7 +60,7 @@ For development tasks, route through this skill first. Load non-workflow/domain 
 
 - **quick**：quick only when all true：范围和验收清楚、风险低、当前对话内可完成并验证、用户没有要求留痕 / review / test / 计划。默认不建 `docs/tasks/<task-id>/`，不改共享指针。
 - **workflow**：workflow when any of these is true：用户要求 workflow / 留痕 / review / test / 计划，或变更触碰入口协议、脚本、模板、validator、多文件 / 跨模块、高风险路径，或需要可审计决策 / 产物时，导向 `/orchestrator` 建 `plan.md`。
-- **ask**：Deep Clarification Mode. 缺少答案导致无法判断 quick/workflow、验收、范围、风险或输出边界时使用；提出 minimum sufficient clarification set，可多轮，但每轮只问足以解除当前阻塞的必要问题，并优先给推荐答案。
+- **ask**：Deep Clarification Mode. Ask mode is an iterative blocking clarification gate. 当 intent、scope、acceptance criteria、constraints、risk、affected area、output format 或 route choice 不清楚时使用；默认一次只问一个 highest-value clarification question。每次用户回答后重新判断，Remain in ask until all blocking uncertainties are resolved. 只有足够理解后才能转 `quick` 或 `workflow`。
 
 显式覆盖词：偏 quick（`直接改`、`快修`、`小改一下`、`不用 workflow`、`别走流程`），但必须满足 quick 全部条件；偏 workflow（`走 workflow`、`留痕`、`需要 review`、`需要 test`、`跑完整流程`、`写计划`）。无显式词时按 all/any 规则判断；quick 执行中影响面扩大或用户开始要留痕，停止扩大并切 workflow 或先确认。
 
@@ -69,24 +69,54 @@ For development tasks, route through this skill first. Load non-workflow/domain 
 - `quick`：只加载入口规则、用户偏好 / 必要配置和直接相关 skill；不加载 orchestrator 或全部 stage skill。
 - `workflow`：加载本 skill + `orchestrator`，再按当前 stage 只加载一个阶段 skill（`PLAN→plan`、`PLAN_REVIEW/CODE_REVIEW→review`、`IMPLEMENT→implement`、`TEST→test`）。
 - `resume-current` / `switch-existing`：先读恢复运行时（恢复索引 / 当前任务 / tasks），再按 `plan.md` frontmatter stage 加载当前 stage skill。
-- `ask`：不加载 workflow stage skill；用 Deep Clarification Mode 澄清到足以判断路由和验收边界，不创建 `docs/tasks/<task-id>/`、不改代码、不推进阶段。
+- `ask`：不加载 workflow stage skill；不进入 quick、workflow、PLAN、IMPLEMENT 或后续阶段；不创建 `docs/tasks/<task-id>/`、不改代码、不初始化 provider。Remain in ask until all blocking uncertainties are resolved.
 
 禁止 bulk-load 全部 skills / 全部历史任务 / Claude 兼容 skill / `workflow-team`；仅在显式 backend override、frontmatter 命中或 `$env:AITEAMCODE_TEAM_MODE='1'` 时才加载这些路径。
 
 ### ask response format
 
-Deep Clarification Mode 只输出足以解除阻塞的澄清内容，推荐格式：
+Deep Clarification Mode 只输出足以解除阻塞的澄清内容。不要问可由当前 repo 文件低成本查到的问题；可给推荐默认值，但除非用户确认或项目规则显式允许默认，否则不得按默认值继续。
 
-- `我会先按 ask 处理`：一句话说明阻塞点，例如路由、验收、范围、风险或输出边界不清楚。
-- `已能确定`：列出可由当前请求、代码或文档直接确定的事实。
-- `还需要确认`：提出 minimum sufficient clarification set，覆盖必要的意图、成功标准、范围 / 非范围、影响面、优先级、风险容忍、约束、输出格式、示例 / 反例、quick/workflow 归属、是否需要设计 / 实现 / review / testing、是否需要 durable artifacts。
-- `推荐答案`：给出默认建议，说明采用后会走 `quick` 还是 `workflow`。
+推荐格式：
 
-若用户回答后仍不足以安全路由或执行，可以继续 ask；一旦足够明确，转入 `quick` 或 `workflow`，但 `ask` 本身不是 frontmatter stage。
+```markdown
+我先停留在 ask，因为还有一个会影响路由/实现的关键问题没有确认。
+
+我目前理解：
+- ...
+
+当前阻塞点：
+- ...
+
+请先确认一个问题：
+- ...
+
+我的建议默认值：
+- ...
+
+你确认后，我会重新判断应该走 quick 还是 workflow。
+```
+
+### Ask exit criteria
+
+ask cannot exit until the agent can state:
+
+1. User goal:
+2. Success / acceptance criteria:
+3. In scope:
+4. Out of scope / non-goals:
+5. Affected area:
+6. Constraints:
+7. Risk level:
+8. Expected output:
+9. Recommended route: quick or workflow
+10. Why this route is safe:
+
+If any item is materially unknown and affects the work, remain in ask. Simple ambiguity may be resolved with one question, but ask mode remains active until all blocking uncertainties are resolved.
 
 ### 同族分支路由（按需，写法见对应单一真相源）
 
-- **Clarification 协议族**（需求澄清 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认 / `clarify` / `brainstorm` / `pressure test` 等，或 PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径仍不足以指导 IMPLEMENT）：仍走 `new-task mode=workflow`，在 `PLAN -> ## Clarification` 的 `clarification_ledger` 沉淀问题 / 证据 / 推荐答案 / 决策 / 影响，并保留 Clarification 最低字段；确认前 `## User Confirmation` 保持 `draft`；信息不足以判归属时走 `ask`；可查问题先自查，剩余用户决策按依赖顺序一次只问一个并给推荐答案。详细写法见 `plan` skill 与 lite-writing-guide。
+- **Clarification 协议族**（需求澄清 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认 / `clarify` / `brainstorm` / `pressure test` 等，或 PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径仍不足以指导 IMPLEMENT）：仍走 `new-task mode=workflow`，在 `PLAN -> ## Clarification` 的 `clarification_ledger` 沉淀问题 / 证据 / 推荐答案 / 决策 / 影响，并保留 Clarification 最低字段；确认前 `## User Confirmation` 保持 `draft`；若进入 workflow 前仍信息不足以判归属，停留在 `ask`，不得创建 task artifact 或进入 PLAN；可查问题先自查，剩余用户决策按依赖顺序一次只问一个并给推荐答案。详细写法见 `plan` skill 与 lite-writing-guide。
 - **阶段原则路由**：不新增五转流程；按阶段借用认知视角。Entry/Clarification 用 Socrates 分流：外部论点先查来源与代码 / 文档 / artifact 证据，用户需求进入 Clarification 问题树，内部推理回到根约束并找反例，待验证结论进入 Verification / TEST 证据收集；PLAN 用 Osborn 发散、Hegel 收敛、First Principles + Occam 选最小方案；PLAN_REVIEW 用 Hegel + Bayes；IMPLEMENT 用 Ponytail / surgical change；CODE_REVIEW 用 Feynman；TEST 用 Bayes；`revise` 后用 Debono 保留仍成立的价值和约束。
 - **Markdown / HTML artifact**：需要互转 / HTML 报告 / 网页 artifact / 发布预览 / 从 URL 提取 Markdown 时按需加载 `md-html` skill；Markdown 是 source of truth、HTML 是 generated artifact，边界见该 skill。
 - **开发流程细节**：5 阶段 harness-lite、`plan.md` frontmatter 真相源、`advance-stage.ps1` 推进语义、`spec.md` 可选附件等，见 `orchestrator` skill 与 README，本入口不重复。

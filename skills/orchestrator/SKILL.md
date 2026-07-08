@@ -40,7 +40,7 @@ updated: YYYY-MM-DD
 ## 入口规则
 
 1. 先判断请求是 `resume-current`、`switch-existing`、`new-task` 还是 `inbox-first`
-2. 只有 `new-task mode=workflow` 才进入 orchestrator；`mode=quick` 由入口 agent 直接处理并验证，`mode=ask` 先问一个最小澄清问题
+2. 只有 `new-task mode=workflow` 才进入 orchestrator；`mode=quick` 由入口 agent 直接处理并验证；`mode=ask` 是 iterative blocking clarification gate，必须停留在入口层，直到所有阻塞需求问题解除并重新路由到 `quick` 或 `workflow`
 3. `new-task` 的显式覆盖词：`直接改` / `快修` 偏 `quick`；`走 workflow` / `留痕` / `review` / `test` 偏 `workflow`
 4. 进入 workflow 后先定 `task_id`；未显式指定时，当前 `PLAN` 默认写 `tool: codex`、`tool_profile: harness-default-codex`、`model: gpt-5.5/xhigh`
 5. 如果 `plan.md` 已存在，直接读 frontmatter 决定当前 `stage` 和 `tool`
@@ -49,7 +49,7 @@ updated: YYYY-MM-DD
 
 ## 自动懒加载规则
 
-orchestrator 只能在 `new-task mode=workflow` 或已确认的 resume/switch workflow 任务中加载。进入后按当前 stage 懒加载：
+orchestrator 只能在 `new-task mode=workflow` 或已确认的 resume/switch workflow 任务中加载。`ask` 未解除阻塞前不得加载 orchestrator、创建 `docs/tasks/<task-id>/` 或进入 `PLAN`。进入 workflow 后按当前 stage 懒加载：
 
 - `PLAN`：只加载 `plan`
 - `PLAN_REVIEW`：只加载 `review`

@@ -133,7 +133,9 @@ if (-not (Test-Path -LiteralPath $entryShimPath -PathType Leaf)) {
     if ($entryShimContent.Contains('quick` only when all true') -and
         $entryShimContent.Contains('workflow` when any of these is true') -and
         $entryShimContent.Contains('Deep Clarification Mode') -and
-        $entryShimContent.Contains('minimum sufficient clarification set') -and
+        $entryShimContent.Contains('iterative blocking clarification gate') -and
+        $entryShimContent.Contains('Remain in ask until all blocking uncertainties are resolved') -and
+        $entryShimContent.Contains('Ask exit criteria') -and
         $entryShimContent.Contains('Do not invoke other workflow skills before routing')) {
         Add-Check 'workspace entry shim documents quick/workflow/ask routing gates'
     } else {

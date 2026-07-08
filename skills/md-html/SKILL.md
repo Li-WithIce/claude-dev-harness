@@ -80,7 +80,7 @@ description: Use when a task involves Markdown/HTML conversion, HTML reports, we
 - `quick`：单文件、小范围、边界明确时直接转换或修正，并报告 source、artifact、命令和检查结果；不创建任务目录。若短文足够清晰，使用 Markdown-only。
 - `workflow`：涉及多文件、发布交付、模板规则、视觉验收、URL 导入或需要 review/test 证据时，进入 `entry-router -> orchestrator`；PLAN 应声明 canonical Markdown、generated HTML、模板/样式路径和验证命令。
 - `workflow` 中的长 `spec.md` / `plan.md` 若命中阈值且需要人工审阅/决策，默认声明 paired reading HTML artifact。
-- `ask`：缺少源文件、目标方向、输出路径、保真要求或无法判断是否需要 HTML 阅读版时，只问一个最小澄清问题，例如“本轮以 Markdown 还是 HTML 作为 source of truth？”
+- `ask`：缺少源文件、目标方向、输出路径、保真要求或无法判断是否需要 HTML 阅读版时，停留在 iterative blocking clarification gate；默认一次只问一个最高价值问题，例如“本轮以 Markdown 还是 HTML 作为 source of truth？”，确认后再重新判断 quick/workflow。
 
 ## AI 与人类协作边界
 

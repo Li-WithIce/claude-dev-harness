@@ -9,7 +9,7 @@
 - `plan.md` 里的 append-only `Plan Review / Implementation Notes / Code Review`
 - `docs/tasks/<task-id>/test.md`
 
-本指南只约束 `new-task mode=workflow` 后的任务产物。`mode=quick` 默认不创建 `docs/tasks/<task-id>/`，只在当前对话内完成、验证并报告；若 quick 执行中发现需要留痕、review、test 或影响面扩大，应切换到 workflow。
+本指南只约束 `new-task mode=workflow` 后的任务产物。`mode=quick` 默认不创建 `docs/tasks/<task-id>/`，只在当前对话内完成、验证并报告；若 quick 执行中发现需要留痕、review、test 或影响面扩大，应切换到 workflow。`mode=ask` 是 workflow 前的 iterative blocking clarification gate：未解除阻塞前不创建 `docs/tasks/<task-id>/`、不进入 PLAN、不修改代码。
 
 ## 通用原则
 
@@ -177,7 +177,8 @@ harness-lite 仍只有 `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`
 - 触发范围包括显式触发词，也包括 PLAN 的验收、非目标、影响面、回滚/兼容任一项仍不确定，或实现路径仍不足以指导 IMPLEMENT。
 - 开发任务需要留痕或后续实现时，在 `PLAN -> ## Clarification` 中用 `clarification_ledger` 沉淀问题、证据、推荐答案、决策和影响；用户确认前 `## User Confirmation` 保持 `- status: draft`。
 - `clarification_ledger` 是 `Clarification 最低要求` 的补充，不替代 `验收标准 / 非目标 / 受影响目录或模块 / 回滚策略或兼容性约束 / ui:`；这些字段必须继续出现在 `## Clarification` 中。
-- 信息不足以判断 quick/workflow 时才走 `ask`，并且只问一个最小澄清问题。
+- 信息不足以判断 quick/workflow 时才走 `ask`。Ask mode is an iterative blocking clarification gate：默认一次只问一个 highest-value clarification question；每次用户回答后重新判断是否足以路由；Remain in ask until all blocking uncertainties are resolved；只有阻塞问题全部解除后，才可进入 `quick` 或 `workflow`。
+- Ask exit criteria: ask cannot exit until the agent can state User goal, Success / acceptance criteria, In scope, Out of scope / non-goals, Affected area, Constraints, Risk level, Expected output, Recommended route: quick or workflow, and Why this route is safe. If any item is materially unknown and affects the work, remain in ask.
 - 触发后先自行查证能由代码库、文档或现有 artifact 回答的问题；剩余用户决策按依赖顺序一次只问一个，并给 `recommended_answer`。
 - `clarification_ledger` 分类限定为：`目标/验收`、`用户与权限`、`流程与状态`、`数据与边界`、`集成依赖`、`失败与回滚`、`非目标`、`验证证据`；触发协议时八类都必须有账本项。不适用类别写 `question: 该类别是否适用？`、`evidence: not-applicable`、`recommended_answer: 不适用`、`decision: accepted`、`impact: none`。
 - 每个账本项使用字段 `category / question / evidence / recommended_answer / decision / impact`；`decision` 只能是 `pending | accepted | rejected`。存在 `pending` 时不得把 `## User Confirmation` 改成 `confirmed`。

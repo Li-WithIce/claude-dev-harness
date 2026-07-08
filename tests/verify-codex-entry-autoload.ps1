@@ -72,26 +72,31 @@ foreach ($skill in @('workflow-team', 'codegraph', 'agentmemory', 'codedb-mcp', 
 
 Need-Text 'agent-configs/codex/AGENTS.md.template' 'entry-router` is the default auto-entry skill'
 Need-Text 'agent-configs/codex/AGENTS.md.template' 'must not bypass `plan.md` frontmatter stage truth'
-Need-Text 'agent-configs/codex/AGENTS.md.template' 'Deep Clarification Mode'
-Need-Text 'agent-configs/codex/AGENTS.md.template' 'minimum sufficient clarification set'
+Need-Text 'agent-configs/codex/AGENTS.md.template' 'iterative blocking clarification gate'
+Need-Text 'agent-configs/codex/AGENTS.md.template' 'until all blocking uncertainties are resolved'
 Need-Text 'agent-configs/workspace/AGENTS.md.template' '.assistant\entry\AGENTS.md'
 Need-Text 'agent-configs/workspace/AGENTS.md.template' '`quick`, `workflow`, or `ask`'
 Need-Text 'agent-configs/workspace/AGENTS.md.template' 'PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST'
 Need-Text 'agent-configs/workspace/AGENTS.md.template' 'summaries are user-facing responses, not workflow stages'
-Need-Text 'agent-configs/workspace/AGENTS.md.template' 'Deep Clarification Mode'
-Need-Text 'agent-configs/workspace/AGENTS.md.template' 'minimum sufficient clarification set'
+Need-Text 'agent-configs/workspace/AGENTS.md.template' 'iterative blocking clarification gate'
+Need-Text 'agent-configs/workspace/AGENTS.md.template' 'Recommended route: quick or workflow'
 Need-Text 'agent-configs/workspace/AGENTS.md.template' 'Provider indexes are opt-in.'
 Need-Text 'agent-configs/workspace/AGENTS.md.template' 'explicit provider opt-in'
 Need-Text 'agent-configs/workspace/AGENTS.md.template' 'CodeGraph, codedb-mcp, or agentmemory'
 Need-Text 'agent-configs/workspace/AGENTS.md.template' '`rg` / read / manual inspection'
 Need-Text 'agent-configs/workspace/AGENTS.md.template' 'Provider absence must never block `quick`, `workflow`, or `ask` routing.'
-Need-Text 'agent-configs/claude/CLAUDE.md.template' 'Deep Clarification Mode'
-Need-Text 'agent-configs/claude/CLAUDE.md.template' 'minimum sufficient clarification set'
+Need-Text 'agent-configs/claude/CLAUDE.md.template' 'iterative blocking clarification gate'
 Need-Text 'vault-template/entry/AGENTS.md.template' 'Deep Clarification Mode'
+Need-Text 'vault-template/entry/AGENTS.md.template' 'Ask exit criteria'
+Need-Text 'vault-template/entry/AGENTS.md.template' 'Remain in ask until all blocking uncertainties are resolved'
 Need-Text 'vault-template/entry/AGENTS.md.template' 'Do not invoke other workflow skills before routing'
 Need-Text 'skills/entry-router/SKILL.md' 'Entry-router is the default first hop for development tasks'
 Need-Text 'skills/entry-router/SKILL.md' 'Do not invoke other workflow skills before routing'
-Need-Text 'skills/entry-router/SKILL.md' 'minimum sufficient clarification set'
+Need-Text 'skills/entry-router/SKILL.md' 'Ask exit criteria'
+Need-Text 'skills/entry-router/SKILL.md' 'Recommended route: quick or workflow'
+Need-Text 'skills/orchestrator/SKILL.md' 'iterative blocking clarification gate'
+Need-Text 'skills/orchestrator/references/lite-writing-guide.md' 'ask cannot exit'
+Need-Text 'vault-template/工作流/任务识别协议.md' 'ask cannot exit'
 
 foreach ($stage in @('PLAN', 'PLAN_REVIEW', 'IMPLEMENT', 'CODE_REVIEW', 'TEST')) {
     Need-Text 'agent-configs/workspace/AGENTS.md.template' $stage
@@ -103,11 +108,15 @@ Reject-Regex 'agent-configs/workspace/AGENTS.md.template' '(?m)^\s*-\s*SUMMARY\b
 Reject-Regex 'agent-configs/workspace/AGENTS.md.template' '同步初始化项目工作流、`codedb-mcp` 索引和 CodeGraph' 'workspace AGENTS template should not auto-bootstrap provider indexes'
 
 $oldBroadSkillPattern = ('1%' + ' chance') + '|' + ('ABSOLUTELY ' + 'MUST')
-$oldAskPattern = ('one minimal ' + 'question') + '|' + ('ask one ' + 'minimal')
+$oldAskPattern = ('one minimal ' + 'question') + '|' + ('ask one ' + 'minimal') + '|' + ('one minimal clarification ' + 'question') + '|' + ('只问一个最小' + '澄清问题') + '|' + ('先问一个最小' + '澄清问题')
 Reject-Regex 'skills/entry-router/SKILL.md' $oldBroadSkillPattern 'entry-router skill should not use obsolete broad skill invocation wording'
 foreach ($path in @(
         'skills/entry-router/SKILL.md',
+        'skills/orchestrator/SKILL.md',
+        'skills/orchestrator/references/lite-writing-guide.md',
+        'skills/md-html/SKILL.md',
         'vault-template/entry/AGENTS.md.template',
+        'vault-template/工作流/任务识别协议.md',
         'agent-configs/workspace/AGENTS.md.template',
         'agent-configs/codex/AGENTS.md.template',
         'agent-configs/claude/CLAUDE.md.template',

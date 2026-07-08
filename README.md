@@ -45,7 +45,7 @@ pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\dev-harn
 安装后的用户视角，日常基本只有 4 件事：
 
 1. 在目标工作区里直接发起开发任务，让入口文档先判定 `resume-current / switch-existing / new-task / inbox-first`；`new-task` 再轻量路由到 `quick / workflow / ask`。
-2. `quick` 直接完成并报告验证；`workflow` 才进入 `entry-router -> orchestrator` 并写 `docs/tasks/<task-id>/`。
+2. `quick` 直接完成并报告验证；`ask` 是阻塞澄清路由，不写 `docs/tasks/<task-id>/`、不改代码；`workflow` 才进入 `entry-router -> orchestrator` 并写 `docs/tasks/<task-id>/`。
 3. workflow 阶段完成后，用 `.assistant/entry/advance-stage.ps1` 推进到下一阶段。
 4. 会话中断后，说“继续”/“恢复”/`resume`，优先读取已存在的 runtime 指针；full vault 项目可按 `.assistant/工作流/长会话恢复.md` 的顺序恢复。
 
@@ -83,11 +83,11 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 
 - `quick`：quick only when all true：范围和验收清楚、风险低、能在当前对话内完成并验证、用户没有要求留痕 / review / test / 计划；默认不创建 `docs/tasks/<task-id>/`，不改共享指针。
 - `workflow`：workflow when any of these is true：用户要求 workflow / 留痕 / review / test / 计划，或变更触碰入口协议、脚本、模板、validator、多文件 / 跨模块、高风险路径，或需要可审计决策 / 产物；进入 `entry-router -> orchestrator`。
-- `ask`：Deep Clarification Mode：缺少答案导致无法判断 quick/workflow、验收、范围、风险或输出边界时使用；提出 minimum sufficient clarification set，可多轮，但每轮只问足以解除当前阻塞的必要问题，并优先给推荐答案。
+- `ask`：Deep Clarification Mode / iterative blocking clarification gate：缺少答案导致无法判断 intent、scope、acceptance criteria、constraints、risk、affected area、output format 或 quick/workflow route choice 时使用；默认每轮只问一个最高价值问题，用户回答后重新判断。Remain in ask until all blocking uncertainties are resolved，只有足够理解后才转 `quick` 或 `workflow`。
 
 显式覆盖词优先，但不能覆盖硬风险：用户说“直接改”“快修”时只有满足 `quick` 全部条件才偏 `quick`；用户说“走 workflow”“留痕”“review”“test”时直接偏 `workflow`。没有显式词时由入口 agent 按上面的 all/any 规则自主判断。
 
-“需求澄清”“需求确认”“拷问需求”“拷问方案”“头脑风暴”“方案压力测试”“设计访谈”“边界确认”“验收标准确认”“非目标确认”，以及 `clarify`、`brainstorm`、`pressure test`、`challenge this plan`、`ask me questions` 等表达属于 Clarification 协议族；PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径仍不足以指导 IMPLEMENT 时也按该协议处理。它们不是新 stage：开发任务需要可审计决策或后续实现时，进入现有 `PLAN -> ## Clarification`，用 `clarification_ledger` 记录 `category / question / evidence / recommended_answer / decision / impact`，但账本不替代 Clarification 最低字段；用户确认前 `## User Confirmation` 保持 `draft`，账本仍有 `decision: pending` 时不得确认。只有任务归属、目标或风险边界不足以判断时才走 `ask`；能通过代码库、文档或 artifact 回答的问题，入口 agent 应先查证，剩余用户决策按依赖顺序一次只问一个并给推荐答案。
+“需求澄清”“需求确认”“拷问需求”“拷问方案”“头脑风暴”“方案压力测试”“设计访谈”“边界确认”“验收标准确认”“非目标确认”，以及 `clarify`、`brainstorm`、`pressure test`、`challenge this plan`、`ask me questions` 等表达属于 Clarification 协议族；PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径仍不足以指导 IMPLEMENT 时也按该协议处理。它们不是新 stage：开发任务需要可审计决策或后续实现时，进入现有 `PLAN -> ## Clarification`，用 `clarification_ledger` 记录 `category / question / evidence / recommended_answer / decision / impact`，但账本不替代 Clarification 最低字段；用户确认前 `## User Confirmation` 保持 `draft`，账本仍有 `decision: pending` 时不得确认。进入 workflow 前，只有任务归属、目标或风险边界不足以判断时才走 `ask`；ask 不创建任务产物、不进入 PLAN，直到阻塞问题解除；能通过代码库、文档或 artifact 回答的问题，入口 agent 应先查证，剩余用户决策按依赖顺序一次只问一个并给推荐答案。
 
 ### 自动懒加载规则
 
@@ -96,7 +96,7 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 - `quick`：只加载入口规则、用户偏好 / 必要配置，以及与本次请求直接相关的 skill 或 reference；不预读 orchestrator、全部 stage skill 或历史任务。
 - `workflow`：加载 `entry-router`、`orchestrator`，再按当前 stage 加载一个阶段 skill：`PLAN -> plan`、`PLAN_REVIEW -> review`、`IMPLEMENT -> implement`、`CODE_REVIEW -> review`、`TEST -> test`。
 - `resume-current` / `switch-existing`：先加载已存在的 `.assistant/运行时/恢复索引.md`、`.assistant/运行时/当前任务.md`、`运行时/tasks/<task-id>.md`；缺失运行时文件表示没有已记录的活动状态，不作为错误；必要时只读当前任务的 `plan.md` frontmatter 判定 stage，再加载当前 stage skill。
-- `ask`：不加载 workflow stage skill；用 Deep Clarification Mode 澄清到足以判断路由和验收边界，不创建 `docs/tasks/<task-id>/`、不改代码、不推进阶段。
+- `ask`：不加载 workflow stage skill；不创建 `docs/tasks/<task-id>/`、不改代码、不推进阶段、不进入 quick/workflow/PLAN/IMPLEMENT。阻塞澄清到足以说明 User goal、Success / acceptance criteria、In scope、Out of scope / non-goals、Affected area、Constraints、Risk level、Expected output、Recommended route: quick or workflow、Why this route is safe。
 
 禁止 bulk-load 全部 skills、全部历史 `docs/tasks/*`、Claude 兼容 skill 或 `workflow-team`。只有用户显式切换 backend、当前 stage frontmatter / workflow descriptor 命中、或 `$env:AITEAMCODE_TEAM_MODE='1'` 等触发条件满足时，才加载这些兼容路径。
 
@@ -116,7 +116,7 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 
 - `quick`：小文档直接转换、导入或生成。
 - `workflow`：复杂报告、网页原型、可审计交付先声明 Markdown source、HTML artifact、模板/样式边界和验证方式。
-- `ask`：缺少方向、用途、输出路径或样式边界时，用 Deep Clarification Mode 提出最小充分澄清问题集。
+- `ask`：缺少方向、用途、输出路径或样式边界时，停留在阻塞澄清路由；默认一次问一个最高价值问题，确认后再判断 quick/workflow。
 
 `spec.md` / `plan.md` 是最需要人工审阅和介入的文档。若它们超过 160 行或含 8 个及以上 `##` 二级标题，且用户需要审阅/决策、Markdown 层次不够清晰，默认生成同目录 paired reading HTML（`plan.review.html` / `spec.review.html`，单一审阅文件可用 `review.html`）。该 HTML 使用固定模板，主动重组 summary、decision、risk、checkpoint、流程/架构、对比矩阵、信息卡片和折叠源章节，不替代 Markdown；内容变更仍改 `spec.md` / `plan.md` 后重新生成。
 
