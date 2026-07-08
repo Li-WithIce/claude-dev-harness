@@ -173,6 +173,7 @@ $coreScripts = @(
     'verify-minimal-safe-change-policy.ps1',
     'verify-md-html-review-renderer.ps1',
     'verify-no-node-install-dependency.ps1',
+    'verify-placeholder-rendering.ps1',
     'verify-provider-usage-recording.ps1',
     'verify-workflow-contracts.ps1',
     'verify-workflow-descriptor.ps1',

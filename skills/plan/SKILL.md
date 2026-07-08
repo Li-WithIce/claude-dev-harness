@@ -104,8 +104,8 @@ Use the PLAN discipline from `docs/工作流/stage-discipline-matrix.md` when th
 1. 先读已批准输入和可选 `spec.md`
 2. 把 Clarification 补齐到能执行的粒度，写出精确文件路径、验证命令和风险；`clarification_ledger` 的非 `impact: none` 决策必须落到 Plan / Verification / Risks
 3. 用户确认且 `clarification_ledger` 没有 `decision: pending` 后，把 `User Confirmation` 改成 `confirmed`
-4. gate 满足后执行 `.assistant\entry\advance-stage.ps1 -TaskId <task-id>`（默认走 workflow descriptor 的 `harness-default-codex`，切换 backend 时追加 `-Tool <next-tool>`）
-5. 如需单独排查文档问题，再手动跑 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
+4. gate 满足后执行 `.assistant\entry\advance-stage.ps1 -TaskId {task_id}`（默认走 workflow descriptor 的 `harness-default-codex`，切换 backend 时追加 `-Tool <next-tool>`）
+5. 如需单独排查文档问题，再手动跑 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId {task_id}`
 
 ## Context Providers
 

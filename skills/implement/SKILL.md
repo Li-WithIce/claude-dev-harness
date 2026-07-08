@@ -59,8 +59,8 @@ Use the IMPLEMENT discipline from `docs/工作流/stage-discipline-matrix.md` wh
 3. 跑最小必要验证
 4. 在 `## Implementation Notes` 末尾追加新 run
 5. 推进到 `CODE_REVIEW` 前，默认使用 workflow descriptor 的 `harness-default-codex`；如需切换 backend，再让用户指定下一阶段 `tool`
-6. 调用 `.assistant\entry\advance-stage.ps1 -TaskId <task-id>` 进入 `CODE_REVIEW`；切换 backend 时追加 `-Tool <next-tool>`
-7. 如需单独排查文档问题，再手动运行 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
+6. 调用 `.assistant\entry\advance-stage.ps1 -TaskId {task_id}` 进入 `CODE_REVIEW`；切换 backend 时追加 `-Tool <next-tool>`
+7. 如需单独排查文档问题，再手动运行 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId {task_id}`
 
 ## Context Providers
 

@@ -59,22 +59,22 @@ Context providers 是可选辅助输入，不是 workflow 真相源。内置权�
 
 ```powershell
 # Codex-only 默认路径：下一阶段已有 descriptor default_profile 时可省略 -Tool/-Profile
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id}
 
 # 显式指定 profile，backend 从 profile.backend 解析
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Profile harness-default-codex
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -Profile harness-default-codex
 
 # 显式指定 tool + profile + model
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool codex -Profile harness-default-codex -Model gpt-5.5/xhigh
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -Tool codex -Profile harness-default-codex -Model gpt-5.5/xhigh
 
 # 仍可显式切到其他合法 backend
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool claudecode
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -Tool claudecode
 
 # TEST -> DONE 可省略 -Tool
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id}
 
 # 单独校验任务产物
-pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
+pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId {task_id}
 ```
 
 ## 真实任务流程
@@ -263,8 +263,8 @@ pwsh -File .\harness.ps1 -WorkspaceRoot <workspace-root>
 pwsh -File .\scripts\update-managed-assets.ps1 -WorkspaceRoot <workspace-root>
 
 # 推进与校验
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> [-Tool <backend>] [-Profile <profile>] [-Model <full-model-id>]
-pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id> [-Quality]
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} [-Tool <backend>] [-Profile <profile>] [-Model <full-model-id>]
+pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId {task_id} [-Quality]
 
 # 共享记忆
 pwsh -File .\scripts\memory-health.ps1 -VaultRoot <workspace-root>\.assistant
@@ -276,16 +276,16 @@ pwsh -File .\scripts\check-shared-memory-layers.ps1 -VaultRoot <workspace-root>\
 
 ```powershell
 # ACP-style skill adapter
-pwsh -File .\scripts\invoke-harness-skill.ps1 -TaskId <task-id> -Stage PLAN_REVIEW -Skill review -Tool codex -WorkspaceRoot <workspace-root> -ArtifactRoot docs\tasks\{task_id} -Mode readonly -PayloadJson '{}'
+pwsh -File .\scripts\invoke-harness-skill.ps1 -TaskId {task_id} -Stage PLAN_REVIEW -Skill review -Tool codex -WorkspaceRoot <workspace-root> -ArtifactRoot docs\tasks\{task_id} -Mode readonly -PayloadJson '{}'
 
 # per-task skills index
-pwsh -File .\scripts\generate-skills-index.ps1 -TaskId <task-id> -Stage TEST -BackendHint codex
+pwsh -File .\scripts\generate-skills-index.ps1 -TaskId {task_id} -Stage TEST -BackendHint codex
 
 # team preset 导出与 team mode
 pwsh -File .\scripts\export-team-preset.ps1 -Workflow harness-lite -Output <tmp>\team.yaml
 $env:AITEAMCODE_TEAM_MODE='1'
 $env:HARNESS_AUTO='1'
-pwsh -File .\skills\workflow-team\scripts\spawn-team.ps1 -TaskId <task-id>
+pwsh -File .\skills\workflow-team\scripts\spawn-team.ps1 -TaskId {task_id}
 ```
 
 ## 当前仓库清单

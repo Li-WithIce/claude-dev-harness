@@ -254,7 +254,7 @@ try {
         -not [string]::IsNullOrWhiteSpace([string]$manifest.available_commands[0].description) -and
         -not [string]::IsNullOrWhiteSpace([string]$manifest.generated_at) -and
         $vaultManifestCount -eq 0) {
-        Add-Check 'E1 manifest writes to docs/tasks/<task-id>/skill-manifest.json and never to .assistant'
+        Add-Check 'E1 manifest writes to docs/tasks/{task_id}/skill-manifest.json and never to .assistant'
     } else {
         Add-Failure ("E1 manifest positive case failed, got stdout=[{0}] stderr=[{1}] manifest=[{2}] vaultCount=[{3}]" -f $e1Result.StdOut, $e1Result.StdErr, $manifestText, $vaultManifestCount)
     }

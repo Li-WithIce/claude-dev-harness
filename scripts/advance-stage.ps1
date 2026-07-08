@@ -1,5 +1,5 @@
 ﻿# 推进 harness lite 阶段，并按 `plan.md` frontmatter 重写共享运行时 mirror。
-# 这个脚本只认 lite 契约：`docs/tasks/<task-id>/plan.md` 是唯一阶段真相源。
+# 这个脚本只认 lite 契约：`docs/tasks/{task_id}/plan.md` 是唯一阶段真相源。
 param(
     [Parameter(Mandatory = $true)]
     [string]$TaskId,

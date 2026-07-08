@@ -87,7 +87,7 @@ Use the PLAN_REVIEW and CODE_REVIEW disciplines from `docs/工作流/stage-disci
 
 ## 推进
 
-写完最新 run 后执行 `.assistant\entry\advance-stage.ps1 -TaskId <task-id>`（自动调用 validator）。默认走 workflow descriptor 的 `harness-default-codex`；切换 backend 时显式传 `-Tool`（如用 profile 同步传 `-Profile` 和完整 `-Model`，profile 的 backend 必须等于 `-Tool`）。
+写完最新 run 后执行 `.assistant\entry\advance-stage.ps1 -TaskId {task_id}`（自动调用 validator）。默认走 workflow descriptor 的 `harness-default-codex`；切换 backend 时显式传 `-Tool`（如用 profile 同步传 `-Profile` 和完整 `-Model`，profile 的 backend 必须等于 `-Tool`）。
 
 ## 不要做的事
 

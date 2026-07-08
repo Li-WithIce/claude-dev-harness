@@ -1,4 +1,4 @@
-﻿# 校验单个 `docs/tasks/<task-id>/` 任务目录是否满足 harness-lite 文档契约。
+﻿# 校验单个 `docs/tasks/{task_id}/` 任务目录是否满足 harness-lite 文档契约。
 # 这份脚本只覆盖当前主线真正依赖的结构，不再兼容 legacy artifact 语义。
 [CmdletBinding()]
 param(
@@ -1647,7 +1647,7 @@ if (Test-Path -LiteralPath $planPath -PathType Leaf) {
             Add-Check "test.md exists for TEST/DONE"
             Assert-TestContract -TestPath $testPath -CurrentStage $planState.Stage
         } else {
-            Add-Failure "TEST/DONE requires docs/tasks/<task-id>/test.md"
+            Add-Failure "TEST/DONE requires docs/tasks/{task_id}/test.md"
         }
     } elseif (Test-Path -LiteralPath $testPath -PathType Leaf) {
         Add-Check "test.md exists"

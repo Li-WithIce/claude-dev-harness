@@ -4,7 +4,7 @@
 
 `.assistant/` is local user/workspace state and must not be committed. Durable protocol, template, and policy changes belong in tracked surfaces such as `docs/`, `skills/`, `tests/`, or `vault-template/`.
 
-`docs/tasks/<task-id>/` contains local workflow artifacts and is ignored by default. Keep `docs/tasks/README.md` tracked.
+Generated `docs/tasks/{task_id}/` task artifacts are local workflow artifacts and ignored by default. Keep `docs/tasks/README.md` tracked.
 
 ## Validation
 

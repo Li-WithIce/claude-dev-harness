@@ -79,13 +79,13 @@ stage 只通过下面这条命令推进：
 
 ```powershell
 # Codex-only 默认路径：descriptor 为下一 stage 声明 default_profile 时可省略 -Tool/-Profile
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id}
 # 可选：同时绑定下一阶段 profile/model
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <codex> -Profile harness-default-codex -Model gpt-5.5/xhigh
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -Tool <codex> -Profile harness-default-codex -Model gpt-5.5/xhigh
 # 可选：只传 profile，backend 从 profile.backend 解析
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Profile harness-default-codex
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -Profile harness-default-codex
 # 可选：显式切到其他合法 backend
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <claudecode>
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -Tool <claudecode>
 ```
 
 规则：
@@ -150,7 +150,7 @@ pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <claudecod
 task_id: <task-id>
 stage: <stage>
 tool: <tool>
-advance_hint: pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id>
+advance_hint: pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id}
 ```
 
 `advance_hint` 默认走 workflow descriptor；需要临时切换 backend 时再追加 `-Tool <claudecode|codex>`。`TEST -> DONE` 时也可以省略 `-Tool`。

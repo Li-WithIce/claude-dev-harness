@@ -55,8 +55,8 @@ Use the TEST and Handoff/DONE disciplines from `docs/工作流/stage-discipline-
 2. 收集真实测试证据
 3. 按证据和 guide 的 test.md 契约写 `test.md`
 4. 确认 `Conclusion` 和 `Handoff` 合法
-5. 只有结论为 `pass` 时再执行 `.assistant\entry\advance-stage.ps1 -TaskId <task-id>` 进入 `DONE`（不需要再指定下一阶段 `tool`；`DONE` 会清除 `tool_profile` / `model`）
-6. 如需单独排查文档问题，再手动跑 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>`
+5. 只有结论为 `pass` 时再执行 `.assistant\entry\advance-stage.ps1 -TaskId {task_id}` 进入 `DONE`（不需要再指定下一阶段 `tool`；`DONE` 会清除 `tool_profile` / `model`）
+6. 如需单独排查文档问题，再手动跑 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId {task_id}`
 
 ## 不要做的事
 

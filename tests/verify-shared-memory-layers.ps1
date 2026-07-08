@@ -98,7 +98,7 @@ function New-LayersFixture {
 
 | Layer | Path | Writer | Truth |
 |-------|------|--------|-------|
-| artifact | docs/tasks/<task-id>/ | entry agent | authoritative |
+| artifact | docs/tasks/{task_id}/ | entry agent | authoritative |
 
 ## Writeback Ladder
 
