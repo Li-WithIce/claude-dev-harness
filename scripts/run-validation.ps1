@@ -161,6 +161,7 @@ if ($IncludeCachedDiff) {
 
 $coreScripts = @(
     'verify-adversarial-review-gate.ps1',
+    'verify-codex-entry-autoload.ps1',
     'verify-code-intel-provider-boundary.ps1',
     'verify-context-provider-boundary.ps1',
     'verify-context-provider-install-isolation.ps1',

@@ -22,10 +22,11 @@
 ## Code Understanding
 
 - 修改前先理解仓库结构、已有实现和项目约定。
-- 日常找代码、定位文件/符号、自然语言检索、BM25/关键词检索、上下文候选收集，优先使用已暴露且已索引当前项目的 `codedb-mcp`；若环境命名为 `codebase-mcp`，按同一类代码库检索工具处理。
-- `codedb-mcp` / `codebase-mcp` 不可用或未索引当前项目时，退回 `rg` / 文件阅读，不阻塞任务。
-- 需要 `impact` / `callers` / `callees` / `affected`、跨模块调用链、依赖扩散、架构边界判断等结构化影响分析时，使用 CodeGraph。
-- 当任务明确需要 CodeGraph 且 `codegraph_explore` MCP 已暴露时，使用 `codegraph_explore`；否则使用 `codegraph explore "<问题或符号>"`。
+- 日常找代码、定位文件/符号、自然语言检索、BM25/关键词检索、上下文候选收集，默认使用 `rg` / 文件阅读 / manual inspection。
+- Provider indexes are opt-in. 只有用户明确要求、或项目存在显式 provider opt-in 时，才使用 CodeGraph、`codedb-mcp` / `codebase-mcp` 或 agentmemory 作为 advisory context provider。
+- 已 opt-in 且已索引当前项目的 `codedb-mcp` / `codebase-mcp` 可以辅助检索；不可用或未索引时，退回 `rg` / 文件阅读，不阻塞任务。
+- 需要 `impact` / `callers` / `callees` / `affected`、跨模块调用链、依赖扩散、架构边界判断等结构化影响分析时，只有在 CodeGraph 已 opt-in 且可用时才使用。
+- 当任务明确需要 CodeGraph 且 `codegraph_explore` MCP 已暴露时，使用 `codegraph_explore`；否则在显式 opt-in 后使用 `codegraph explore "<问题或符号>"`。
 - 不因 MCP 已安装而预加载、探测或访问；仅在用户显式点名、任务必需，或本项目规则要求时使用。
 - 既有项目未初始化 CodeGraph 时，不擅自初始化；先询问用户。
 - CodeGraph 不可用时继续用代码库检索与阅读，并在总结中说明。
@@ -34,9 +35,10 @@
 
 ## New Project Bootstrap
 
-- 执行本工作流的新项目初始化时，同步初始化项目工作流、`codedb-mcp` 索引和 CodeGraph。
-- 该规则只适用于新项目 bootstrap；既有项目缺失 `codedb-mcp` 或 CodeGraph 时，先询问用户再初始化。
-- 初始化失败时说明失败项和原因，不阻塞基础工作流落地。
+- 新项目 bootstrap 可以安装/更新基础 harness workflow。
+- Provider indexes are opt-in. Do not initialize CodeGraph, codedb-mcp, or agentmemory unless the user explicitly asks or the project has an explicit provider opt-in.
+- 如果 provider context 会有帮助但没有明确 opt-in，先询问用户；若 provider 不可用，继续使用 `rg` / read / manual inspection 和基础 harness workflow。
+- Provider absence must never block `quick`, `workflow`, or `ask` routing.
 
 ## Lazy Loading
 
@@ -54,12 +56,12 @@
 ## Task Workflow
 
 - 小任务直接处理，不额外创建计划文档。
-- 复杂任务、跨文件修改、风险较高的改动，按现有 workspace 流程执行；PLAN / IMPLEMENT / REVIEW / TEST / SUMMARY 只是执行检查清单，不新增 stage。
-- PLAN 明确目标、影响范围、修改方案和验证方式。
-- IMPLEMENT 按计划修改，保持改动聚焦。
-- REVIEW 自查风险、边界条件、兼容性和安全问题。
-- TEST 执行必要测试，或说明无法测试的原因。
-- SUMMARY 总结改动、验证结果和后续建议。
+- Development tasks must first pass through `.assistant\entry\AGENTS.md` routing. For new work, route to `quick`, `workflow`, or `ask`.
+- Only `workflow` tasks use the canonical stage chain: `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`.
+- Do not use `REVIEW` or `SUMMARY` as frontmatter stage names; summaries are user-facing responses, not workflow stages.
+- `quick` tasks can be handled directly and summarized without creating task artifacts.
+- `ask` mode only clarifies missing requirements.
+- `workflow` mode uses `docs/tasks/<task-id>/plan.md` and the canonical stages.
 - 任务中断后，继续时先恢复目标、已完成事项、待处理事项和验证状态。
 - 不为简单命令、报错解释、SQL 改写、配置查询创建额外任务目录。
 - 只有长期任务或多轮开发任务才写入 `docs/tasks/<task-id>/`；该目录默认是本地 workflow 产物。

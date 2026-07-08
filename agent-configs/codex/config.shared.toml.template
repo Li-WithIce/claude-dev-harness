@@ -7,26 +7,29 @@
 [managed.shared_paths]
 skills_root = "{CODEX_HOME}\\skills"
 
+# `entry-router` is the default development-task entry skill. The core
+# stage skills stay available for harness dispatch; lazy loading is governed
+# by AGENTS routing and `plan.md` frontmatter.
 [[skills.config]]
 path = "{CODEX_HOME}\\skills\\entry-router\\SKILL.md"
-enabled = false
+enabled = true
 
 [[skills.config]]
 path = "{CODEX_HOME}\\skills\\orchestrator\\SKILL.md"
-enabled = false
+enabled = true
 
 [[skills.config]]
 path = "{CODEX_HOME}\\skills\\plan\\SKILL.md"
-enabled = false
+enabled = true
 
 [[skills.config]]
 path = "{CODEX_HOME}\\skills\\implement\\SKILL.md"
-enabled = false
+enabled = true
 
 [[skills.config]]
 path = "{CODEX_HOME}\\skills\\review\\SKILL.md"
-enabled = false
+enabled = true
 
 [[skills.config]]
 path = "{CODEX_HOME}\\skills\\test\\SKILL.md"
-enabled = false
+enabled = true

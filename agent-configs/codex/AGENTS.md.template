@@ -16,6 +16,8 @@
 ## Lazy Loading
 
 - After task recognition, follow the active workspace's `.assistant\entry\AGENTS.md` mode rules.
+- For development tasks, `entry-router` is the default auto-entry skill; it chooses `resume-current`, `switch-existing`, `new-task`, or `inbox-first`, then `quick`, `workflow`, or `ask` for new work.
+- `orchestrator`, `plan`, `implement`, `review`, and `test` are available for harness dispatch, but stage skills should be reached through `entry-router` / `orchestrator` and must not bypass `plan.md` frontmatter stage truth.
 - `quick` loads only entry rules, user preferences / necessary config, and the directly relevant skill.
 - `workflow` loads `entry-router`, `orchestrator`, and the current-stage skill.
 - `resume-current` / `switch-existing` loads recovery runtime files first, then the current-stage skill.
