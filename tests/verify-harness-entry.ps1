@@ -124,6 +124,20 @@ if (-not (Test-Path -LiteralPath (Join-Path $workspaceRoot '.assistant') -PathTy
 } else {
     Add-Check 'harness.ps1 creates .assistant during bootstrap'
 }
+
+$entryShimPath = Join-Path $workspaceRoot '.assistant\entry\AGENTS.md'
+if (-not (Test-Path -LiteralPath $entryShimPath -PathType Leaf)) {
+    Add-Failure 'harness.ps1 should install the workspace entry shim'
+} else {
+    $entryShimContent = Get-Content -LiteralPath $entryShimPath -Raw -Encoding utf8
+    if ($entryShimContent.Contains('quick` only when all true') -and
+        $entryShimContent.Contains('workflow` when any of these is true') -and
+        $entryShimContent.Contains('`ask` only when a missing answer blocks routing')) {
+        Add-Check 'workspace entry shim documents quick/workflow/ask routing gates'
+    } else {
+        Add-Failure 'workspace entry shim should document quick/workflow/ask routing gates'
+    }
+}
 if (Test-Path -LiteralPath (Join-Path $workspaceRoot '.assistant\工作流') -PathType Container) {
     Add-Failure 'harness.ps1 should use minimal vault profile for a fresh workspace by default'
 } else {

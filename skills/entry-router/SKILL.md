@@ -62,11 +62,11 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 
 `new-task` 后选 `mode: quick | workflow | ask`，默认自主判断，低置信度才 `ask`：
 
-- **quick**：低风险、边界清楚、当前对话内可完成并验证的小改动 / 简短回答。默认不建 `docs/tasks/<task-id>/`，不改共享指针。
-- **workflow**：需要计划 / 留痕 / review / test、多文件跨模块、较高风险或用户明确要求可审计产物时，导向 `/orchestrator` 建 `plan.md`。
-- **ask**：只在 quick/workflow 信号冲突或验收 / 风险边界不足时，问一个最小澄清问题。
+- **quick**：quick only when all true：范围和验收清楚、风险低、当前对话内可完成并验证、用户没有要求留痕 / review / test / 计划。默认不建 `docs/tasks/<task-id>/`，不改共享指针。
+- **workflow**：workflow when any of these is true：用户要求 workflow / 留痕 / review / test / 计划，或变更触碰入口协议、脚本、模板、validator、多文件 / 跨模块、高风险路径，或需要可审计决策 / 产物时，导向 `/orchestrator` 建 `plan.md`。
+- **ask**：ask only when a missing answer blocks routing：缺少一个关键答案导致无法判断 quick/workflow、验收或风险边界时，问一个最小澄清问题并优先给推荐答案。
 
-显式覆盖词：偏 quick（`直接改`、`快修`、`小改一下`、`不用 workflow`、`别走流程`）；偏 workflow（`走 workflow`、`留痕`、`需要 review`、`需要 test`、`跑完整流程`、`写计划`）。无显式词时：窄范围 / 单文件 / 小修 / 验收清楚 / 失败影响低 → 默认 `quick`；需求仍在成形 / 影响面不清 / 改协议或脚本或多阶段产物 / 需要独立 review-test 证据 → 默认 `workflow`。quick 执行中影响面扩大或用户开始要留痕，停止扩大并切 workflow 或先确认。
+显式覆盖词：偏 quick（`直接改`、`快修`、`小改一下`、`不用 workflow`、`别走流程`），但必须满足 quick 全部条件；偏 workflow（`走 workflow`、`留痕`、`需要 review`、`需要 test`、`跑完整流程`、`写计划`）。无显式词时按 all/any 规则判断；quick 执行中影响面扩大或用户开始要留痕，停止扩大并切 workflow 或先确认。
 
 ### 懒加载
 

@@ -81,11 +81,11 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 
 入口判定仍先保留四类结果：`resume-current`、`switch-existing`、`new-task`、`inbox-first`。只有判定为 `new-task` 后，才增加一层 `mode: quick | workflow | ask`。
 
-- `quick`：低风险、边界清楚、可在当前对话内直接完成和验证的小改动 / 简短回答；默认不创建 `docs/tasks/<task-id>/`，不改共享指针。
-- `workflow`：需要计划、留痕、review、test、多文件/跨模块协作、较高风险或用户明确要求可审计产物时，进入 `entry-router -> orchestrator`。
-- `ask`：只在 quick/workflow 置信度低、显式信号冲突或缺少关键判断信息时使用，并只问一个最小澄清问题。
+- `quick`：quick only when all true：范围和验收清楚、风险低、能在当前对话内完成并验证、用户没有要求留痕 / review / test / 计划；默认不创建 `docs/tasks/<task-id>/`，不改共享指针。
+- `workflow`：workflow when any of these is true：用户要求 workflow / 留痕 / review / test / 计划，或变更触碰入口协议、脚本、模板、validator、多文件 / 跨模块、高风险路径，或需要可审计决策 / 产物；进入 `entry-router -> orchestrator`。
+- `ask`：ask only when a missing answer blocks routing：缺少一个关键答案导致无法判断 quick/workflow、验收或风险边界时才使用，并只问一个最小澄清问题，优先给推荐答案。
 
-显式覆盖词优先：用户说“直接改”“快修”时偏 `quick`；用户说“走 workflow”“留痕”“review”“test”时偏 `workflow`。没有显式词时由入口 agent 自主判断，默认保持轻量。
+显式覆盖词优先，但不能覆盖硬风险：用户说“直接改”“快修”时只有满足 `quick` 全部条件才偏 `quick`；用户说“走 workflow”“留痕”“review”“test”时直接偏 `workflow`。没有显式词时由入口 agent 按上面的 all/any 规则自主判断。
 
 “需求澄清”“需求确认”“拷问需求”“拷问方案”“头脑风暴”“方案压力测试”“设计访谈”“边界确认”“验收标准确认”“非目标确认”，以及 `clarify`、`brainstorm`、`pressure test`、`challenge this plan`、`ask me questions` 等表达属于 Clarification 协议族；PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径仍不足以指导 IMPLEMENT 时也按该协议处理。它们不是新 stage：开发任务需要可审计决策或后续实现时，进入现有 `PLAN -> ## Clarification`，用 `clarification_ledger` 记录 `category / question / evidence / recommended_answer / decision / impact`，但账本不替代 Clarification 最低字段；用户确认前 `## User Confirmation` 保持 `draft`，账本仍有 `decision: pending` 时不得确认。只有任务归属、目标或风险边界不足以判断时才走 `ask`；能通过代码库、文档或 artifact 回答的问题，入口 agent 应先查证，剩余用户决策按依赖顺序一次只问一个并给推荐答案。
 
@@ -353,7 +353,7 @@ pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite all -W
 
 - 本仓库当前默认语言是中文；代码、命令、标识符保留英文
 - active `.ps1` 继续要求 UTF-8 BOM，`tests/verify-lite-footprint.ps1` 会锁这个约束
-- repo 根目录并不自带 live `.assistant/entry/AGENTS.md`；安装到目标工作区后会从 `vault-template/entry/AGENTS.md.template` 生成这个 shim
+- Git 索引不跟踪 live `.assistant/entry/AGENTS.md`；安装到目标工作区后会从 `vault-template/entry/AGENTS.md.template` 生成这个 shim
 - 如果你改了 workflow/validator/shared-memory 协议，优先同步：
   - `README.md`
   - `skills/orchestrator/references/lite-writing-guide.md`
