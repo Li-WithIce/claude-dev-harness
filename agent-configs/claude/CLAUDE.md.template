@@ -36,7 +36,7 @@ Claude 是显式兼容 host，仍先调用 `/entry-router`，但后续读取面�
 - `quick` 只加载入口规则、用户偏好 / 必要配置和直接相关 skill。
 - `workflow` 加载 `entry-router`、`orchestrator` 和当前 stage skill。
 - `resume-current` / `switch-existing` 先加载恢复运行时文件，再加载当前 stage skill。
-- `ask` 是 iterative blocking clarification gate：不加载 workflow stage skill，不创建 `docs/tasks/<task-id>/`，不改代码，不进入 quick/workflow/PLAN/IMPLEMENT；默认每轮只问一个最高价值问题，直到所有阻塞不确定性解除后再重新判断路由。
+- `ask` 是 iterative blocking clarification gate：不加载 workflow stage skill，不创建 `docs/tasks/{task_id}/`，不改代码，不进入 quick/workflow/PLAN/IMPLEMENT；默认每轮只问一个最高价值问题，直到所有阻塞不确定性解除后再重新判断路由。
 - “需求澄清 / 需求确认 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认”等同族请求跟随工作区入口规则；需要可审计开发决策时只落到现有 `PLAN -> Clarification`，不新增 stage。
 - PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径仍不足以指导 IMPLEMENT 时，也按同一 Clarification 协议处理。
 - 进入 Clarification 协议后，先回答可由代码/文档查证的问题，保留 Clarification 最低字段，剩余用户决策按依赖顺序一次只问一个并给推荐答案；`clarification_ledger` 仍有 `decision: pending` 时，`User Confirmation` 保持 draft。

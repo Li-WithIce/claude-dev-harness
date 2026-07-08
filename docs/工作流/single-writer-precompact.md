@@ -5,7 +5,7 @@
 - 本仓库继续采用 `vault-as-truth-source`：共享恢复与运行时状态以 `.assistant/` 为准。
 - `.assistant/` 仍是 single-writer 模型，不允许多个入口同时重写同一份 pointer/runtime 文档。
 - 当前可执行写者里，`scripts/advance-stage.ps1` 负责 stage 推进后的非 append 写回，包括：
-  - `docs/tasks/<task-id>/plan.md` frontmatter
+  - `docs/tasks/{task_id}/plan.md` frontmatter
   - `.assistant/运行时/tasks/<task-id>.md`
   - `.assistant/运行时/当前任务.md`
   - `.assistant/运行时/恢复索引.md`

@@ -6,7 +6,7 @@
 
 - `工作流/`: 当前协议文档。这里的内容可以作为后续优化的输入。
 - `tasks/`: 本地 workflow 任务 artifact 目录；git 只保留目录策略说明。
-- `shared-memory-layers.md`: `.assistant` 与 `docs/tasks/<task-id>/` 的真相层关系。
+- `shared-memory-layers.md`: `.assistant` 与 `docs/tasks/{task_id}/` 的真相层关系。
 - `team-write-authority.md`: team mode 下 leader/member 写入边界与 team preset 消费契约。
 
 ## Cleanup Policy

@@ -18,8 +18,8 @@ updated: 2026-04-01
 | task-runtime | `1.1` | `.assistant/运行时/tasks/<task-id>.md` | 未声明版本的历史任务按 `1.0-legacy` 兼容读取 |
 | current-task-pointer | `1.1` | `.assistant/运行时/当前任务.md` | 缺失 `entry_host` 的旧文件按 `1.0-legacy` 兼容读取 |
 | recovery-index | `1.1` | `.assistant/运行时/恢复索引.md` | 缺失 `derived_from` 的旧文件按 `1.0-legacy` 兼容读取 |
-| lite-plan-frontmatter | `1.1` | `docs/tasks/<task-id>/plan.md` frontmatter | 仅接受 lite stage/tool 合法值，`DONE` 固定 `tool: none` |
-| lite-test-report | `1.0` | `docs/tasks/<task-id>/test.md` | `## Conclusion` 与 `## Handoff` 为最低契约 |
+| lite-plan-frontmatter | `1.1` | `docs/tasks/{task_id}/plan.md` frontmatter | 仅接受 lite stage/tool 合法值，`DONE` 固定 `tool: none` |
+| lite-test-report | `1.0` | `docs/tasks/{task_id}/test.md` | `## Conclusion` 与 `## Handoff` 为最低契约 |
 
 ## task-runtime v1.1 最低字段
 

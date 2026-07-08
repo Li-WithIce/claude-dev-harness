@@ -21,7 +21,7 @@ Advance the current lite task stage from the workspace.
 .DESCRIPTION
 This shim keeps the user-facing command inside `.assistant\entry` while delegating to the managed harness repo script.
 .PARAMETER TaskId
-The task id under `docs/tasks/<task-id>/`.
+The task id under `docs/tasks/{task_id}/`.
 .PARAMETER Tool
 The next-stage tool for non-DONE transitions.
 .PARAMETER Profile

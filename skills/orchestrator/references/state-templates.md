@@ -52,7 +52,7 @@ single_writer:
   owner: leader
   members_read_only_path_prefixes:
     - .assistant/
-    - docs/tasks/<task-id>/
+    - docs/tasks/{task_id}/
 members:
   - role: plan-author
     backend: codex
@@ -74,7 +74,7 @@ You are the <role> for the harness-lite workflow.
 ## Authority
 - Read-only path prefixes:
   - .assistant/
-  - docs/tasks/<task-id>/
+  - docs/tasks/{task_id}/
 - Write: NONE under either prefix (leader is the sole vault writer)
 - Allowed skills: <skills_whitelist>
 
@@ -86,7 +86,7 @@ Do not call team_task_update to mutate task state.
 
 ## skill-manifest.json
 
-路径：`docs/tasks/<task-id>/skill-manifest.json`
+路径：`docs/tasks/{task_id}/skill-manifest.json`
 
 ```json
 {
@@ -108,7 +108,7 @@ Do not call team_task_update to mutate task state.
 
 ## skills-index.md
 
-路径：`docs/tasks/<task-id>/skills-index.md`
+路径：`docs/tasks/{task_id}/skills-index.md`
 
 ```markdown
 <!-- generated at 2026-04-25T10:00:00.0000000Z -->
@@ -195,7 +195,7 @@ Do not call team_task_update to mutate task state.
 - ...
 
 ## Inputs Reviewed
-- `docs/tasks/<task-id>/plan.md`
+- `docs/tasks/{task_id}/plan.md`
 
 ## Test Approach
 - ...
@@ -235,7 +235,7 @@ updated: YYYY-MM-DD
 ---
 # Task Mirror
 
-- pointer: docs/tasks/<task-id>/plan.md
+- pointer: docs/tasks/{task_id}/plan.md
 - assigned_tool: <tool>
 - assigned_tool_profile: <optional profile name>
 - assigned_model: <optional full model id>

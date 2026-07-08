@@ -15,7 +15,7 @@ Validate lite task artifacts from the workspace.
 .DESCRIPTION
 This shim exposes the managed validator under `.assistant\entry` so project users do not need to know the harness repo path.
 .PARAMETER TaskId
-The task id under `docs/tasks/<task-id>/`.
+The task id under `docs/tasks/{task_id}/`.
 .OUTPUTS
 None.
 #>

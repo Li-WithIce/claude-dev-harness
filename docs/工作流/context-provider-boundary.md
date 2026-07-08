@@ -5,7 +5,7 @@ Context providers are advisory context providers. They help recall, search, and 
 ## Baseline Invariants
 
 - Workflow stays `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`; `DONE` is only a frontmatter terminal state.
-- `quick` does not create `docs/tasks/<task-id>/` and does not update shared pointers.
+- `quick` does not create `docs/tasks/{task_id}/` and does not update shared pointers.
 - `workflow` enters `entry-router -> orchestrator` and writes task artifacts.
 - `ask` asks one minimal question and does not load workflow skills.
 - `plan.md` frontmatter is the only stage truth.
@@ -25,8 +25,8 @@ Context providers are advisory context providers. They help recall, search, and 
 ## Provider Prohibitions
 
 - create/change stages
-- write `docs/tasks/<task-id>/plan.md` frontmatter
-- write `docs/tasks/<task-id>/test.md` conclusion
+- write `docs/tasks/{task_id}/plan.md` frontmatter
+- write `docs/tasks/{task_id}/test.md` conclusion
 - write `.assistant/运行时/*`
 - promote wisdom directly
 - decide current task or stage

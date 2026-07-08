@@ -5,7 +5,7 @@ description: Use when the task is in IMPLEMENT and code plus fresh implementatio
 
 # Implement
 
-IMPLEMENT 负责两件事：改代码，以及把本轮实现证据追加到 `docs/tasks/<task-id>/plan.md` 的 `## Implementation Notes`。
+IMPLEMENT 负责两件事：改代码，以及把本轮实现证据追加到 `docs/tasks/{task_id}/plan.md` 的 `## Implementation Notes`。
 
 ## 何时使用
 
@@ -42,6 +42,15 @@ IMPLEMENT 负责两件事：改代码，以及把本轮实现证据追加到 `do
   例：只吞掉异常或跳过失败用例，没有验证 PLAN 要求定位的根因。
 
 命中任一项时，先判断是否仍在已确认 PLAN 内：在范围内就把理由、取舍和验证补到 `- risks:` / `- next:`；超出范围就停止实现，要求回 PLAN 或拆新任务。不要新增反射 stage、独立 checklist 或新的 Implementation Notes 字段。
+
+## Stage Discipline
+
+Use the IMPLEMENT discipline from `docs/工作流/stage-discipline-matrix.md` when the task needs stage-discipline clarification or stage-behavior review:
+
+- Implement the approved plan, not adjacent ideas.
+- Prefer existing helpers, patterns, and standard library capabilities.
+- Fix root causes, not symptoms.
+- Keep diffs small, local, and verifiable.
 
 ## 工作流程
 

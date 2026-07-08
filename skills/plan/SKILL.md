@@ -1,11 +1,11 @@
 ---
 name: plan
-description: Use when the task is in PLAN and you need to create or revise the authoritative `docs/tasks/<task-id>/plan.md`.
+description: Use when the task is in PLAN and you need to create or revise the authoritative `docs/tasks/{task_id}/plan.md`.
 ---
 
 # Plan
 
-PLAN 的唯一产物是 `docs/tasks/<task-id>/plan.md`，它的 frontmatter 是 lite workflow 的唯一阶段真相源。
+PLAN 的唯一产物是 `docs/tasks/{task_id}/plan.md`，它的 frontmatter 是 lite workflow 的唯一阶段真相源。
 
 完整写作契约以 [`../orchestrator/references/lite-writing-guide.md`](../orchestrator/references/lite-writing-guide.md) 为**单一真相源**：frontmatter 字段规则、`## Change Contract`、`## Plan` 顶部 `read_first / convergence / artifacts` 语法、`work_type: bug | refactor` 条件化模板、Clarification 协议族和阶段原则路由写法都在那里，本页不重复，只列 PLAN 阶段的 gate 与差量。
 
@@ -89,6 +89,15 @@ updated: 2026-04-09
 解决问题、修 bug、设计架构或方案时，Clarification 与 Plan 的推理按三条纪律收敛：**第一性原理**回到根本约束与根因（bug 用 `bug.root_cause_action` 对齐根因，呼应“症状补丁”反射检查）、**剃刀法则**在满足验收前提下选最简方案并砍掉计划外抽象与顺手重构、**贝叶斯更新**随新证据（代码事实 / 验证结果 / review finding）修正结论（呼应 Clarification“一次一个关键问题、先自查再给 `recommended_answer`”）。只改推理与写作，不新增 stage / 字段 / gate。详见 guide 的“推理纪律”。
 
 PLAN 阶段默认按 Osborn 打开发散空间、Hegel 收敛矛盾与依赖，再用 First Principles + Occam 选择最小必要方案；这只是写作视角，不新增五转流程。
+
+## Stage Discipline
+
+Use the PLAN discipline from `docs/工作流/stage-discipline-matrix.md` when the task needs stage-discipline clarification or stage-behavior review:
+
+- Osborn: consider plausible approaches before locking one in.
+- Hegel: surface constraints, tensions, and tradeoffs.
+- First Principles + Occam: choose the smallest plan that satisfies the true goal and hard constraints.
+- Bayes: treat the plan as a hypothesis that can be updated by evidence.
 
 ## 工作方式
 

@@ -46,11 +46,12 @@
 - `quick` loads only entry rules, user preferences / necessary config, and the directly relevant skill.
 - `workflow` loads `entry-router`, `orchestrator`, and the current-stage skill.
 - `resume-current` / `switch-existing` loads recovery runtime files first, then the current-stage skill.
-- `ask` is an iterative blocking clarification gate: do not load workflow stage skills, create `docs/tasks/<task-id>/`, edit code, or enter quick/workflow/PLAN/IMPLEMENT until all blocking uncertainties are resolved. Ask one highest-value question at a time by default, then reassess.
+- `ask` is an iterative blocking clarification gate: do not load workflow stage skills, create `docs/tasks/{task_id}/`, edit code, or enter quick/workflow/PLAN/IMPLEMENT until all blocking uncertainties are resolved. Ask one highest-value question at a time by default, then reassess.
 - Clarification-family requests such as 需求澄清 / 需求确认 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认 follow `.assistant\entry\AGENTS.md` and land in existing `PLAN -> Clarification` when they need durable development decisions; they do not create a new stage.
 - Treat unresolved PLAN acceptance, non-goals, impact, rollback/compatibility, or implementation path that cannot guide IMPLEMENT as the same Clarification protocol.
 - In that protocol, answer code/doc-discoverable questions first, keep the base Clarification fields, ask remaining user decisions one at a time with a recommended answer, and keep `User Confirmation` draft while any `clarification_ledger` item is `decision: pending`.
 - Stage principle routing is only a cognitive lens, not a new five-turn workflow: Entry/Clarification=Socrates, PLAN=Osborn/Hegel/First Principles/Occam, PLAN_REVIEW=Hegel+Bayes, IMPLEMENT=Ponytail/surgical change, CODE_REVIEW=Feynman, TEST=Bayes, revise=Debono value preservation.
+- Stage Discipline Matrix lives in `docs/工作流/stage-discipline-matrix.md`; load it only when stage-discipline clarification or stage-behavior review is needed.
 - Do not bulk-load all skills, all historical tasks, Claude compatibility skills, or `workflow-team` unless an explicit trigger requires them.
 
 ## Task Workflow
@@ -61,10 +62,10 @@
 - Do not use `REVIEW` or `SUMMARY` as frontmatter stage names; summaries are user-facing responses, not workflow stages.
 - `quick` tasks can be handled directly and summarized without creating task artifacts.
 - `ask` mode only clarifies missing requirements; it cannot exit until the agent can state User goal, Success / acceptance criteria, In scope, Out of scope / non-goals, Affected area, Constraints, Risk level, Expected output, Recommended route: quick or workflow, and Why this route is safe. It does not introduce a frontmatter stage.
-- `workflow` mode uses `docs/tasks/<task-id>/plan.md` and the canonical stages.
+- `workflow` mode uses `docs/tasks/{task_id}/plan.md` and the canonical stages.
 - 任务中断后，继续时先恢复目标、已完成事项、待处理事项和验证状态。
 - 不为简单命令、报错解释、SQL 改写、配置查询创建额外任务目录。
-- 只有长期任务或多轮开发任务才写入 `docs/tasks/<task-id>/`；该目录默认是本地 workflow 产物。
+- 只有长期任务或多轮开发任务才写入 `docs/tasks/{task_id}/`；该目录默认是本地 workflow 产物。
 - 任务文档采用追加记录，不覆盖关键历史。
 
 ## Memory Writeback

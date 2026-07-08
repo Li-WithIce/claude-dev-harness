@@ -311,7 +311,7 @@ try {
         Add-Failure ("O4 fallback failed, stdout=[{0}] stderr=[{1}] calls={2}" -f $o4Result.StdOut, $o4Result.StdErr, $o4PayloadLines.Count)
     }
 
-    $expectedPrefixes = @('.assistant/', 'docs/tasks/<task-id>/')
+    $expectedPrefixes = @('.assistant/', 'docs/tasks/{task_id}/')
     $docPrefixes = @(Get-PathPrefixesFromAuthorityDoc -Path $authorityPath)
     $o5Files = @(
         (Join-Path $fixtureRoot 'skills\workflow-team\SKILL.md')
@@ -319,7 +319,7 @@ try {
     $prefixStringsOk = ((@($docPrefixes) -join '|') -eq ($expectedPrefixes -join '|'))
     foreach ($file in $o5Files) {
         $content = Read-FileUtf8 -Path $file
-        if (-not ($content.Contains('.assistant/') -and $content.Contains('docs/tasks/<task-id>/'))) {
+        if (-not ($content.Contains('.assistant/') -and $content.Contains('docs/tasks/{task_id}/'))) {
             $prefixStringsOk = $false
         }
     }

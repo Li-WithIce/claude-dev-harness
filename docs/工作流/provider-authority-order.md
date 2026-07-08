@@ -4,8 +4,8 @@
 
 1. Current user instruction
 2. Current repo files
-3. `docs/tasks/<task-id>/plan.md` frontmatter
-4. `docs/tasks/<task-id>/test.md` conclusion
+3. `docs/tasks/{task_id}/plan.md` frontmatter
+4. `docs/tasks/{task_id}/test.md` conclusion
 5. `.assistant/运行时/*` derived view
 6. Provider output
 

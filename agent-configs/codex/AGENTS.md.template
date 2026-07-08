@@ -21,7 +21,7 @@
 - `quick` loads only entry rules, user preferences / necessary config, and the directly relevant skill.
 - `workflow` loads `entry-router`, `orchestrator`, and the current-stage skill.
 - `resume-current` / `switch-existing` loads recovery runtime files first, then the current-stage skill.
-- `ask` is an iterative blocking clarification gate: do not load workflow stage skills, create `docs/tasks/<task-id>/`, edit code, or enter quick/workflow/PLAN/IMPLEMENT until all blocking uncertainties are resolved. Ask one highest-value question at a time by default, then reassess.
+- `ask` is an iterative blocking clarification gate: do not load workflow stage skills, create `docs/tasks/{task_id}/`, edit code, or enter quick/workflow/PLAN/IMPLEMENT until all blocking uncertainties are resolved. Ask one highest-value question at a time by default, then reassess.
 - Clarification-family requests such as 需求澄清 / 需求确认 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认 follow the active workspace entry rules and land in existing `PLAN -> Clarification` when they need durable development decisions; they do not create a new stage.
 - Treat unresolved PLAN acceptance, non-goals, impact, rollback/compatibility, or implementation path that cannot guide IMPLEMENT as the same Clarification protocol.
 - In that protocol, answer code/doc-discoverable questions first, keep the base Clarification fields, ask remaining user decisions one at a time with a recommended answer, and keep `User Confirmation` draft while any `clarification_ledger` item is `decision: pending`.
@@ -32,7 +32,7 @@
 ## Writeback
 
 - Single-writer model: only the entry agent writes shared pointer files
-- Codex writes task artifacts under `docs/tasks/<task-id>/*` as local workflow artifacts by default, plus the active workspace's `.assistant\运行时\tasks\<task-id>.md` when required
+- Codex writes task artifacts under `docs/tasks/{task_id}/*` as local workflow artifacts by default, plus the active workspace's `.assistant\运行时\tasks\<task-id>.md` when required
 - Durable, code-managed conclusions must be promoted into maintained tracked surfaces such as workflow docs, skills, tests, templates, or user-approved tracked docs
 - Codex updates shared pointer files only when the active workspace entry rules identify Codex as the active entry host for the current task; otherwise, do not touch shared pointers
 - New items go to `运行时\收件箱.md` first

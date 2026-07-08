@@ -4,7 +4,7 @@ Dev Harness works without external providers.
 
 ## Built-In Authority
 
-- `docs/tasks/<task-id>/`
+- `docs/tasks/{task_id}/`
 - current repo files
 - `.assistant`
 - command output and diffs

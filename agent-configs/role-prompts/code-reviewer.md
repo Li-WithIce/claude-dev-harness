@@ -8,7 +8,7 @@ Drive the CODE_REVIEW stage. Review implementation changes for regressions, corr
 ## Authority
 - Read-only path prefixes:
   - .assistant/
-  - docs/tasks/<task-id>/
+  - docs/tasks/{task_id}/
 - Write: NONE under either prefix (leader is the sole vault writer)
 - Allowed skills: review
 

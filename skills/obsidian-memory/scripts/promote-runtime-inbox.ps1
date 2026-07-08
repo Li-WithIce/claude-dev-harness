@@ -1,6 +1,6 @@
 ﻿# 共享运行时收件箱提升脚本。
 # 支持把 inbox-first 项路由到 interrupted-task 或 decision-needed。
-# 产物默认落到当前 workspace 的 docs/tasks/<task-id>/plan.md。
+# 产物默认落到当前 workspace 的 docs/tasks/{task_id}/plan.md。
 
 [CmdletBinding()]
 param(

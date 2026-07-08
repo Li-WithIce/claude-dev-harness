@@ -47,14 +47,14 @@ lite workflow 不维护自动推导矩阵；`tool` 仍是当前 stage 的显式 
 - Phase 3 里，`skills_dirs` 只服务于 `scripts/invoke-harness-skill.ps1` 的 skill 查找语义
 - 解析顺序是：task-level `skills_dir`（保留字段，当前忽略） -> project-level `.assistant/skills` -> user-level active profile/backend 对应的 `skills_dirs`（例如 `%USERPROFILE%\.claude\skills`、`%USERPROFILE%\.codex\skills`）
 - `install.ps1` / `uninstall.ps1` 不读取 `skills_dirs`，也不受 active profile 影响
-- `scripts/generate-skills-index.ps1` 和 `docs/tasks/<task-id>/skill-manifest.json` 只消费 workflow whitelist + repo 内 `skills/<id>/SKILL.md` 描述，不反向改 profile
+- `scripts/generate-skills-index.ps1` 和 `docs/tasks/{task_id}/skill-manifest.json` 只消费 workflow whitelist + repo 内 `skills/<id>/SKILL.md` 描述，不反向改 profile
 
 ## profile 在 team preset 中的角色
 
 - Phase 4 的 `scripts/export-team-preset.ps1` 仍以 `agent-configs/workflows/harness-lite.yaml` 为 stage 真相源
 - 每个 stage 的 `default_profile` 决定导出 preset 时的 `backend` 与 `model`
 - `role_prompt_ref` 来自 `agent-configs/role-prompts/<role>.md`
-- 单写者保护集合不从 profile 派生；统一固定为 `.assistant/` 与 `docs/tasks/<task-id>/`
+- 单写者保护集合不从 profile 派生；统一固定为 `.assistant/` 与 `docs/tasks/{task_id}/`
 
 ## 不再存在的概念
 

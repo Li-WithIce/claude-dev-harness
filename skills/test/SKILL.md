@@ -1,11 +1,11 @@
 ---
 name: test
-description: Use when the task is in TEST and you need to produce `docs/tasks/<task-id>/test.md` with a legal conclusion and handoff section.
+description: Use when the task is in TEST and you need to produce `docs/tasks/{task_id}/test.md` with a legal conclusion and handoff section.
 ---
 
 # Test
 
-TEST 的唯一产物是 `docs/tasks/<task-id>/test.md`。只有 `pass` 才能由 `advance-stage.ps1` 把任务推进到 `DONE`。
+TEST 的唯一产物是 `docs/tasks/{task_id}/test.md`。只有 `pass` 才能由 `advance-stage.ps1` 把任务推进到 `DONE`。
 
 `test.md` 的完整结构（section 顺序、`## Handoff` 字段、finish boundary、opt-in 密度扩展）以 [`../orchestrator/references/lite-writing-guide.md`](../orchestrator/references/lite-writing-guide.md) 的 test.md 契约为**单一真相源**；本页只列 TEST 阶段的硬约束与差量。
 
@@ -22,6 +22,15 @@ TEST 的唯一产物是 `docs/tasks/<task-id>/test.md`。只有 `pass` 才能由
 - 没有证据不写 `pass`
 - 按阶段原则路由，TEST 用 Bayes 视角：用真实验证更新结论，无法验证的项写入风险或缺口
 - `DONE` 由 `advance-stage.ps1` 写回 frontmatter，不在 `test.md` 里手写
+
+## Stage Discipline
+
+Use the TEST and Handoff/DONE disciplines from `docs/工作流/stage-discipline-matrix.md` when the task needs stage-discipline clarification or stage-behavior review:
+
+- Treat PLAN and IMPLEMENT as hypotheses.
+- Use real commands, outputs, inspections, or documented constraints as evidence.
+- Do not claim `pass` without evidence.
+- Make Handoff clear enough for a future maintainer.
 
 ## work_type 条件化验证
 

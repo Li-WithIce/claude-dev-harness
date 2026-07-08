@@ -344,7 +344,7 @@ try {
             Add-Failure 'P4 preset skills_whitelist parity failed'
         }
 
-        $expectedPrefixes = @('.assistant/', 'docs/tasks/<task-id>/')
+        $expectedPrefixes = @('.assistant/', 'docs/tasks/{task_id}/')
         $docPrefixes = @(Get-PathPrefixesFromAuthorityDoc -Path $authorityPath)
         $rolePromptRefsOk = $true
         foreach ($member in @($preset.members)) {

@@ -1,15 +1,17 @@
 # Lite Writing Guide
 
-本指南约束 `harness-lite` 主线里的任务文档写法。目标只有一个：让 `docs/tasks/<task-id>/` 下的产物既能给人看，也能被脚本稳定读取。
+本指南约束 `harness-lite` 主线里的任务文档写法。目标只有一个：让 `docs/tasks/{task_id}/` 下的产物既能给人看，也能被脚本稳定读取。
 
 ## 适用范围
 
-- `docs/tasks/<task-id>/plan.md`
-- `docs/tasks/<task-id>/spec.md`
+- `docs/tasks/{task_id}/plan.md`
+- `docs/tasks/{task_id}/spec.md`
 - `plan.md` 里的 append-only `Plan Review / Implementation Notes / Code Review`
-- `docs/tasks/<task-id>/test.md`
+- `docs/tasks/{task_id}/test.md`
 
-本指南只约束 `new-task mode=workflow` 后的任务产物。`mode=quick` 默认不创建 `docs/tasks/<task-id>/`，只在当前对话内完成、验证并报告；若 quick 执行中发现需要留痕、review、test 或影响面扩大，应切换到 workflow。`mode=ask` 是 workflow 前的 iterative blocking clarification gate：未解除阻塞前不创建 `docs/tasks/<task-id>/`、不进入 PLAN、不修改代码。
+本指南只约束 `new-task mode=workflow` 后的任务产物。`mode=quick` 默认不创建 `docs/tasks/{task_id}/`，只在当前对话内完成、验证并报告；若 quick 执行中发现需要留痕、review、test 或影响面扩大，应切换到 workflow。`mode=ask` 是 workflow 前的 iterative blocking clarification gate：未解除阻塞前不创建 `docs/tasks/{task_id}/`、不进入 PLAN、不修改代码。
+
+Stage discipline 的单一索引见 `docs/工作流/stage-discipline-matrix.md`。该矩阵只定义思考和审查视角，不新增 stage、frontmatter 字段或 validator hard gate；仅在需要澄清 route/stage discipline 或审查 stage 行为时加载。
 
 ## 通用原则
 
@@ -92,8 +94,8 @@ If no provider was used, write `provider_context: none` only when useful, otherw
 
 ### Phase 3 Side Artifacts（可选）
 
-- `docs/tasks/<task-id>/skill-manifest.json`：由 `advance-stage.ps1` 在成功推进后 best-effort 生成；不是新的真相源，也不写入 `.assistant/`
-- `docs/tasks/<task-id>/skills-index.md`：由 `scripts/generate-skills-index.ps1` 生成，给嵌入消费端或非原生 backend 展示当前 stage 的可用 skills
+- `docs/tasks/{task_id}/skill-manifest.json`：由 `advance-stage.ps1` 在成功推进后 best-effort 生成；不是新的真相源，也不写入 `.assistant/`
+- `docs/tasks/{task_id}/skills-index.md`：由 `scripts/generate-skills-index.ps1` 生成，给嵌入消费端或非原生 backend 展示当前 stage 的可用 skills
 - invocation trace 只允许以单行 `- invocation: ...` 追加到已有 `### Run N` 块内部；目标 section 没有 Run block 时必须跳过，不能新建 section 或 bare 顶层 bullet
 
 ### 必备 section
@@ -153,9 +155,9 @@ If no provider was used, write `provider_context: none` only when useful, otherw
 
 这三条只约束推理与写作方式，不新增 stage、frontmatter 字段或 validator gate。
 
-#### 阶段原则路由
+#### 阶段纪律矩阵
 
-harness-lite 仍只有 `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`；以下大师/原则只是各阶段的默认认知视角，不新增五转 pipeline、stage、frontmatter 字段、runtime 文件或 validator hard gate：
+harness-lite 仍只有 `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`。完整 stage discipline matrix 维护在 `docs/工作流/stage-discipline-matrix.md`；以下只是压缩提示，不新增五转 pipeline、stage、frontmatter 字段、runtime 文件或 validator hard gate：
 
 - **Entry / Clarification — Socrates**：先分清输入是外部论点、用户需求、内部推理还是待验证结论。外部论点先做来源与代码 / 文档 / artifact 证据核对；用户需求进入 Clarification 问题树；内部推理回到根约束并找反例；待验证结论进入后续 Verification / TEST 证据收集。剩余用户决策一次只问一个。
 - **PLAN 发散 — Osborn**：复杂方案不要过早锁死；先列替代路径，但只保留会影响验收、非目标、风险或实现路径的发散结果。
@@ -500,8 +502,8 @@ IMPLEMENT 先执行 Minimal Safe Change ladder，再做实现。它要求最小�
 - 本轮覆盖范围。
 
 ## Inputs Reviewed
-- `docs/tasks/<task-id>/plan.md`
-- `docs/tasks/<task-id>/spec.md`（如存在）
+- `docs/tasks/{task_id}/plan.md`
+- `docs/tasks/{task_id}/spec.md`（如存在）
 
 ## Test Approach
 - 实际执行的命令、手工检查或日志来源。
@@ -571,7 +573,7 @@ pass
 
 ## 自检清单
 
-- [ ] 路径全部位于 `docs/tasks/<task-id>/`
+- [ ] 路径全部位于 `docs/tasks/{task_id}/`
 - [ ] `plan.md` frontmatter 只有 4 个基础字段，或再加合法的 `tool_profile` / `model`
 - [ ] `tool` 与当前 `stage` 组合合法
 - [ ] `User Confirmation` 使用机器可读 `status`

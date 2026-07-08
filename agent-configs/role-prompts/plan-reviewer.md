@@ -8,7 +8,7 @@ Drive the PLAN_REVIEW stage. Review the current plan for correctness, scope cont
 ## Authority
 - Read-only path prefixes:
   - .assistant/
-  - docs/tasks/<task-id>/
+  - docs/tasks/{task_id}/
 - Write: NONE under either prefix (leader is the sole vault writer)
 - Allowed skills: review
 

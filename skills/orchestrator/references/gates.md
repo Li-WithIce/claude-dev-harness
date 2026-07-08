@@ -1,6 +1,6 @@
 # Gate Rules
 
-lite workflow 只认 `docs/tasks/<task-id>/` 下的任务产物；这些 gate 只适用于 `new-task mode=workflow`，不约束 `mode=quick` 的直接处理。
+lite workflow 只认 `docs/tasks/{task_id}/` 下的任务产物；这些 gate 只适用于 `new-task mode=workflow`，不约束 `mode=quick` 的直接处理。
 
 ## tool 规则
 
@@ -13,9 +13,9 @@ lite workflow 只认 `docs/tasks/<task-id>/` 下的任务产物；这些 gate �
 
 | Artifact | Path |
 |---|---|
-| optional spec | `docs/tasks/<task-id>/spec.md` |
-| plan | `docs/tasks/<task-id>/plan.md` |
-| test | `docs/tasks/<task-id>/test.md` |
+| optional spec | `docs/tasks/{task_id}/spec.md` |
+| plan | `docs/tasks/{task_id}/plan.md` |
+| test | `docs/tasks/{task_id}/test.md` |
 | task mirror | `运行时/tasks/<task-id>.md` |
 
 ## PLAN -> PLAN_REVIEW

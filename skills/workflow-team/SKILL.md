@@ -28,7 +28,7 @@ description: Use when harness-lite runs in explicit AiTeamCode team mode and the
 - 仅当 leader 同时设置 `$env:AITEAMCODE_TEAM_MODE='1'` 与 `$env:HARNESS_AUTO='1'` 时，本 skill 才把 spawned member 视为 auto 模式。
 - 缺少任一环境变量时按 fail-closed 处理：member 保持当前 non-auto 行为，不自行猜测自动确认。
 - auto 模式只表示 member 在自身执行过程中尽量减少中间确认；遇到 blocker、范围冲突或权限缺口时，仍必须立即通过 `team_send_message` 回 leader。
-- member 在 auto 模式下仍不得直接写真相源，只能把结果或阻塞回传给 leader，由 leader 决定是否写入 `.assistant/` 或 `docs/tasks/<task-id>/`。
+- member 在 auto 模式下仍不得直接写真相源，只能把结果或阻塞回传给 leader，由 leader 决定是否写入 `.assistant/` 或 `docs/tasks/{task_id}/`。
 - auto 模式不绕过 `PLAN_REVIEW` / `CODE_REVIEW` gate，也不授予跳过 stage 推进确认的权限。
 - leader 仍负责最终的 stage callback / `team_send_message` 交接与推进确认；member 只负责把本阶段执行到可交付状态。
 
@@ -53,6 +53,6 @@ description: Use when harness-lite runs in explicit AiTeamCode team mode and the
 - 参考 [docs/team-write-authority.md](../../docs/team-write-authority.md)
 - spawned member 对以下前缀只读：
   - `.assistant/`
-  - `docs/tasks/<task-id>/`
+  - `docs/tasks/{task_id}/`
 - member 不得直接改 `plan.md`、`test.md`、`skill-manifest.json` 或任何 `.assistant/` 文件
 - member 产出应通过 `team_send_message` 回 leader，由 leader 决定是否写入真相源

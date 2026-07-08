@@ -1,6 +1,6 @@
 ---
 name: spec
-description: Use when PLAN 所需输入不足，必须补一个可选的 `docs/tasks/<task-id>/spec.md` 附件。
+description: Use when PLAN 所需输入不足，必须补一个可选的 `docs/tasks/{task_id}/spec.md` 附件。
 ---
 
 # Spec
@@ -15,7 +15,7 @@ description: Use when PLAN 所需输入不足，必须补一个可选的 `docs/t
 
 ## 硬约束
 
-- 固定路径：`docs/tasks/<task-id>/spec.md`
+- 固定路径：`docs/tasks/{task_id}/spec.md`
 - 只补差量，不重写全量需求
 - 不创建额外旧流程状态
 - `plan.md` 仍然是唯一阶段真相源

@@ -3,7 +3,7 @@
 ## Member read-only path prefixes
 
 - `.assistant/`
-- `docs/tasks/<task-id>/`
+- `docs/tasks/{task_id}/`
 
 ## Team preset contract
 
@@ -16,7 +16,7 @@ single_writer:
   owner: leader
   members_read_only_path_prefixes:
     - .assistant/
-    - docs/tasks/<task-id>/
+    - docs/tasks/{task_id}/
 members:
   - role: plan-author
     backend: codex
@@ -31,10 +31,10 @@ Consumers may add host-local fields when spawning agents, but must not write tho
 
 - 在以上两组前缀下的所有写入路径，都只允许 leader 或 leader 间接调用的 repo 脚本落盘
 - 包括但不限于：
-  - `docs/tasks/<task-id>/plan.md`
-  - `docs/tasks/<task-id>/test.md`
-  - `docs/tasks/<task-id>/skill-manifest.json`
-  - `docs/tasks/<task-id>/skills-index.md`
+  - `docs/tasks/{task_id}/plan.md`
+  - `docs/tasks/{task_id}/test.md`
+  - `docs/tasks/{task_id}/skill-manifest.json`
+  - `docs/tasks/{task_id}/skills-index.md`
   - 任意 `.assistant/` 文件
 
 ## Member authority
@@ -46,7 +46,7 @@ Consumers may add host-local fields when spawning agents, but must not write tho
 
 ## Forbidden member operations
 
-- 对 `.assistant/` 或 `docs/tasks/<task-id>/` 前缀内路径直接执行 `Set-Content`
+- 对 `.assistant/` 或 `docs/tasks/{task_id}/` 前缀内路径直接执行 `Set-Content`
 - 对上述前缀内路径直接执行 `Out-File`
 - 对上述前缀内路径直接执行 `git commit -m ... -- <prefix>/...`
 - 直接调用 `advance-stage.ps1`

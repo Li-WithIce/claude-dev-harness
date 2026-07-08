@@ -18,6 +18,13 @@ append-only run 用 `### Run <N> · YYYY-MM-DD HH:mm · runner: X` 标题，必�
 
 ## 审查重点
 
+Use the PLAN_REVIEW and CODE_REVIEW disciplines from `docs/工作流/stage-discipline-matrix.md` when the task needs stage-discipline clarification or stage-behavior review:
+
+- PLAN_REVIEW: check coherence, evidence, assumptions, risks, rollback, and verification.
+- CODE_REVIEW: try to disprove the patch before accepting it.
+- Explain the change simply enough to expose hidden assumptions.
+- Preserve useful value when asking for revise.
+
 ### PLAN_REVIEW
 
 - Clarification 是否完整

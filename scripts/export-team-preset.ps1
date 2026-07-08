@@ -14,7 +14,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$ReadOnlyPathPrefixes = @('.assistant/', 'docs/tasks/<task-id>/')
+$ReadOnlyPathPrefixes = @('.assistant/', 'docs/tasks/{task_id}/')
 
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent $PSScriptRoot

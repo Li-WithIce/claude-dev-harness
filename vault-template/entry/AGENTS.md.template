@@ -23,6 +23,8 @@ Clarification ledger rule: answer code/doc-discoverable questions first, keep th
 
 Stage principle routing: use these as cognitive lenses only, not a new five-turn workflow: Entry/Clarification=Socrates, PLAN=Osborn/Hegel/First Principles/Occam, PLAN_REVIEW=Hegel+Bayes, IMPLEMENT=Ponytail/surgical change, CODE_REVIEW=Feynman, TEST=Bayes, revise=Debono value preservation.
 
+Stage Discipline Matrix: the managed harness repo keeps the full advisory matrix at `docs/工作流/stage-discipline-matrix.md`; load it only when the task requires stage-discipline clarification or stage-behavior review.
+
 Implementation rule: 新功能开发或功能修改以当前需求和业务正确性为准；不要为了兼容旧测试、旧快照或过期断言而保留或恢复旧行为。若旧测试与新需求冲突，应更新或删除旧测试并说明原因；只有用户明确要求历史兼容时才保留旧测试兼容。
 
 Lazy loading:
@@ -30,7 +32,7 @@ Lazy loading:
 - `quick`: load only entry rules, user preferences / necessary config, and the directly relevant skill or reference.
 - `workflow`: load `entry-router`, `orchestrator`, then exactly one current-stage skill (`plan`, `review`, `implement`, or `test`).
 - `resume-current` / `switch-existing`: load existing runtime files only if present (`.assistant\运行时\恢复索引.md`, `.assistant\运行时\当前任务.md`, `运行时\tasks\<task-id>.md`), then the current-stage skill; missing runtime files mean no active recorded state.
-- `ask`: do not load workflow stage skills; do not enter quick, workflow, PLAN, IMPLEMENT, or later stages; do not create `docs/tasks/<task-id>/`, edit code, or initialize providers. Remain in ask until all blocking uncertainties are resolved.
+- `ask`: do not load workflow stage skills; do not enter quick, workflow, PLAN, IMPLEMENT, or later stages; do not create `docs/tasks/{task_id}/`, edit code, or initialize providers. Remain in ask until all blocking uncertainties are resolved.
 - Do not bulk-load all skills, all historical `docs/tasks/*`, Claude compatibility skills, or `workflow-team` unless an explicit backend, stage, or team-mode trigger requires it.
 
 Ask exit criteria: ask cannot exit until the agent can state User goal, Success / acceptance criteria, In scope, Out of scope / non-goals, Affected area, Constraints, Risk level, Expected output, Recommended route: quick or workflow, and Why this route is safe. If any item is materially unknown and affects the work, remain in ask.

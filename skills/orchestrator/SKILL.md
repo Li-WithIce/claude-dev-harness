@@ -9,10 +9,10 @@ orchestrator 只负责 lite workflow：`PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE
 
 ## 真相源
 
-- 唯一阶段真相源：`docs/tasks/<task-id>/plan.md` frontmatter
+- 唯一阶段真相源：`docs/tasks/{task_id}/plan.md` frontmatter
 - 可选下一阶段默认来源：`agent-configs/workflows/harness-lite.yaml`
-- 可选附件：`docs/tasks/<task-id>/spec.md`
-- TEST 产物：`docs/tasks/<task-id>/test.md`
+- 可选附件：`docs/tasks/{task_id}/spec.md`
+- TEST 产物：`docs/tasks/{task_id}/test.md`
 - 共享运行时 mirror 只由 repo 脚本 `scripts/advance-stage.ps1` 重写；项目内入口是 `.assistant\entry\advance-stage.ps1`
 
 ## frontmatter 契约
@@ -40,16 +40,16 @@ updated: YYYY-MM-DD
 ## 入口规则
 
 1. 先判断请求是 `resume-current`、`switch-existing`、`new-task` 还是 `inbox-first`
-2. 只有 `new-task mode=workflow` 才进入 orchestrator；`mode=quick` 由入口 agent 直接处理并验证；`mode=ask` 是 iterative blocking clarification gate，必须停留在入口层，直到所有阻塞需求问题解除并重新路由到 `quick` 或 `workflow`
+2. 只有 `new-task mode=workflow` 才进入 orchestrator；`mode=quick` 由入口 agent 直接处理并验证；`mode=ask` 是 iterative blocking clarification gate，必须停留在入口层 until all blocking requirements are resolved，然后重新判断并 route to `quick` or `workflow`
 3. `new-task` 的显式覆盖词：`直接改` / `快修` 偏 `quick`；`走 workflow` / `留痕` / `review` / `test` 偏 `workflow`
 4. 进入 workflow 后先定 `task_id`；未显式指定时，当前 `PLAN` 默认写 `tool: codex`、`tool_profile: harness-default-codex`、`model: gpt-5.5/xhigh`
 5. 如果 `plan.md` 已存在，直接读 frontmatter 决定当前 `stage` 和 `tool`
-6. 输入不足时才创建 `docs/tasks/<task-id>/spec.md`
+6. 输入不足时才创建 `docs/tasks/{task_id}/spec.md`
 7. 不再维护 `current-flow.md`、`handoff.md`、`implementation-notes.md`、`review.md`
 
 ## 自动懒加载规则
 
-orchestrator 只能在 `new-task mode=workflow` 或已确认的 resume/switch workflow 任务中加载。`ask` 未解除阻塞前不得加载 orchestrator、创建 `docs/tasks/<task-id>/` 或进入 `PLAN`。进入 workflow 后按当前 stage 懒加载：
+orchestrator 只能在 `new-task mode=workflow` 或已确认的 resume/switch workflow 任务中加载。`ask` 未解除阻塞前不得加载 orchestrator、创建 `docs/tasks/{task_id}/` 或进入 `PLAN`。进入 workflow 后按当前 stage 懒加载：
 
 - `PLAN`：只加载 `plan`
 - `PLAN_REVIEW`：只加载 `review`
@@ -102,7 +102,7 @@ pwsh -File .assistant\entry\advance-stage.ps1 -TaskId <task-id> -Tool <claudecod
 - 重写 `运行时/tasks/<task-id>.md`
 - 重写 `运行时/当前任务.md`
 - 重写 `运行时/恢复索引.md`
-- best-effort 写入 `docs/tasks/<task-id>/skill-manifest.json`
+- best-effort 写入 `docs/tasks/{task_id}/skill-manifest.json`
 - 把 `resolved tool=<tool> via <source>` 写到 stderr，stdout 保持 `<stage> | <tool>`
 
 ## PreCompact 自检

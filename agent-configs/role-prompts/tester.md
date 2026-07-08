@@ -8,7 +8,7 @@ Drive the TEST stage. Produce evidence-backed test conclusions and handoff mater
 ## Authority
 - Read-only path prefixes:
   - .assistant/
-  - docs/tasks/<task-id>/
+  - docs/tasks/{task_id}/
 - Write: NONE under either prefix (leader is the sole vault writer)
 - Allowed skills: test
 

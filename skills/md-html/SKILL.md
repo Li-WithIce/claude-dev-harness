@@ -60,7 +60,7 @@ description: Use when a task involves Markdown/HTML conversion, HTML reports, we
 - source Markdown：仓库内 `.md` 文件，或任务明确给定的 Markdown 内容。
 - source HTML：仓库内 `.html` 文件、URL 抓取结果或用户提供的 HTML 片段。
 - template/style：可选的 HTML 模板、CSS、主题变量或发布配置。
-- output path：目标 `.md` / `.html` 路径必须明确；workflow 模式下写入 `docs/tasks/<task-id>/` 或任务声明的 artifact 路径。
+- output path：目标 `.md` / `.html` 路径必须明确；workflow 模式下写入 `docs/tasks/{task_id}/` 或任务声明的 artifact 路径。
 - fidelity expectation：说明目标是语义保真、结构保真、视觉预览还是发布交付；不要默认承诺像素级还原。
 
 ## 输出契约

@@ -1,6 +1,6 @@
 # Dev Harness
 
-Windows 优先的单仓库开发 harness。它把 `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST` 的可执行阶段、`DONE` frontmatter 终态、共享记忆 `.assistant/`、以及 `docs/tasks/<task-id>/` 产物统一到同一套协议里，当前仓库状态已经包含 Phase 1-7 与 shared-memory v2 的主线能力。
+Windows 优先的单仓库开发 harness。它把 `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST` 的可执行阶段、`DONE` frontmatter 终态、共享记忆 `.assistant/`、以及 `docs/tasks/{task_id}/` 产物统一到同一套协议里，当前仓库状态已经包含 Phase 1-7 与 shared-memory v2 的主线能力。
 
 ## 这份 README 面向谁
 
@@ -45,13 +45,15 @@ pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\dev-harn
 安装后的用户视角，日常基本只有 4 件事：
 
 1. 在目标工作区里直接发起开发任务，让入口文档先判定 `resume-current / switch-existing / new-task / inbox-first`；`new-task` 再轻量路由到 `quick / workflow / ask`。
-2. `quick` 直接完成并报告验证；`ask` 是阻塞澄清路由，不写 `docs/tasks/<task-id>/`、不改代码；`workflow` 才进入 `entry-router -> orchestrator` 并写 `docs/tasks/<task-id>/`。
+2. `quick` 直接完成并报告验证；`ask` 是阻塞澄清路由，不写 `docs/tasks/{task_id}/`、不改代码；`workflow` 才进入 `entry-router -> orchestrator` 并写 `docs/tasks/{task_id}/`。
 3. workflow 阶段完成后，用 `.assistant/entry/advance-stage.ps1` 推进到下一阶段。
 4. 会话中断后，说“继续”/“恢复”/`resume`，优先读取已存在的 runtime 指针；full vault 项目可按 `.assistant/工作流/长会话恢复.md` 的顺序恢复。
 
+各 route/stage 的工作纪律见 [`docs/工作流/stage-discipline-matrix.md`](docs/工作流/stage-discipline-matrix.md)。该矩阵只定义思考和审查视角，不新增 stage、frontmatter 字段、provider gate 或 validator hard gate；`quick` 仍是轻量 route，`ask` 仍是阻塞澄清 route，workflow 仍只认 `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`。
+
 ### Optional Context Providers
 
-Context providers 是可选辅助输入，不是 workflow 真相源。内置权威仍是 `docs/tasks/<task-id>/`、当前仓库文件和本地 `.assistant/`；CodeGraph、agentmemory、codedb-mcp 只能提供 advisory context provider 结果，且必须落回真实路径、命令、diff、review finding、Implementation Notes 或 test output。安装、更新和 validation 默认不会安装、注册或连接外部 provider；详细边界见 `docs/工作流/context-provider-boundary.md`，工具入口见 `docs/工具/context-providers.md`。
+Context providers 是可选辅助输入，不是 workflow 真相源。内置权威仍是 `docs/tasks/{task_id}/`、当前仓库文件和本地 `.assistant/`；CodeGraph、agentmemory、codedb-mcp 只能提供 advisory context provider 结果，且必须落回真实路径、命令、diff、review finding、Implementation Notes 或 test output。安装、更新和 validation 默认不会安装、注册或连接外部 provider；详细边界见 `docs/工作流/context-provider-boundary.md`，工具入口见 `docs/工具/context-providers.md`。
 
 最常用命令：
 
@@ -81,7 +83,7 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 
 入口判定仍先保留四类结果：`resume-current`、`switch-existing`、`new-task`、`inbox-first`。只有判定为 `new-task` 后，才增加一层 `mode: quick | workflow | ask`。
 
-- `quick`：quick only when all true：范围和验收清楚、风险低、能在当前对话内完成并验证、用户没有要求留痕 / review / test / 计划；默认不创建 `docs/tasks/<task-id>/`，不改共享指针。
+- `quick`：quick only when all true：范围和验收清楚、风险低、能在当前对话内完成并验证、用户没有要求留痕 / review / test / 计划；默认不创建 `docs/tasks/{task_id}/`，不改共享指针。
 - `workflow`：workflow when any of these is true：用户要求 workflow / 留痕 / review / test / 计划，或变更触碰入口协议、脚本、模板、validator、多文件 / 跨模块、高风险路径，或需要可审计决策 / 产物；进入 `entry-router -> orchestrator`。
 - `ask`：Deep Clarification Mode / iterative blocking clarification gate：缺少答案导致无法判断 intent、scope、acceptance criteria、constraints、risk、affected area、output format 或 quick/workflow route choice 时使用；默认每轮只问一个最高价值问题，用户回答后重新判断。Remain in ask until all blocking uncertainties are resolved，只有足够理解后才转 `quick` 或 `workflow`。
 
@@ -96,7 +98,7 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 - `quick`：只加载入口规则、用户偏好 / 必要配置，以及与本次请求直接相关的 skill 或 reference；不预读 orchestrator、全部 stage skill 或历史任务。
 - `workflow`：加载 `entry-router`、`orchestrator`，再按当前 stage 加载一个阶段 skill：`PLAN -> plan`、`PLAN_REVIEW -> review`、`IMPLEMENT -> implement`、`CODE_REVIEW -> review`、`TEST -> test`。
 - `resume-current` / `switch-existing`：先加载已存在的 `.assistant/运行时/恢复索引.md`、`.assistant/运行时/当前任务.md`、`运行时/tasks/<task-id>.md`；缺失运行时文件表示没有已记录的活动状态，不作为错误；必要时只读当前任务的 `plan.md` frontmatter 判定 stage，再加载当前 stage skill。
-- `ask`：不加载 workflow stage skill；不创建 `docs/tasks/<task-id>/`、不改代码、不推进阶段、不进入 quick/workflow/PLAN/IMPLEMENT。阻塞澄清到足以说明 User goal、Success / acceptance criteria、In scope、Out of scope / non-goals、Affected area、Constraints、Risk level、Expected output、Recommended route: quick or workflow、Why this route is safe。
+- `ask`：不加载 workflow stage skill；不创建 `docs/tasks/{task_id}/`、不改代码、不推进阶段；not enter quick/workflow/PLAN/IMPLEMENT。阻塞澄清到足以说明 User goal、Success / acceptance criteria、In scope、Out of scope / non-goals、Affected area、Constraints、Risk level、Expected output、Recommended route: quick or workflow、Why this route is safe。
 
 禁止 bulk-load 全部 skills、全部历史 `docs/tasks/*`、Claude 兼容 skill 或 `workflow-team`。只有用户显式切换 backend、当前 stage frontmatter / workflow descriptor 命中、或 `$env:AITEAMCODE_TEAM_MODE='1'` 等触发条件满足时，才加载这些兼容路径。
 
@@ -120,7 +122,7 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 
 `spec.md` / `plan.md` 是最需要人工审阅和介入的文档。若它们超过 160 行或含 8 个及以上 `##` 二级标题，且用户需要审阅/决策、Markdown 层次不够清晰，默认生成同目录 paired reading HTML（`plan.review.html` / `spec.review.html`，单一审阅文件可用 `review.html`）。该 HTML 使用固定模板，主动重组 summary、decision、risk、checkpoint、流程/架构、对比矩阵、信息卡片和折叠源章节，不替代 Markdown；内容变更仍改 `spec.md` / `plan.md` 后重新生成。
 
-仓库提供固定生成器：`pwsh -File .\scripts\render-review-html.ps1 -SourcePath .\docs\tasks\<task-id>\spec.md`。生成器只读取 Markdown，输出自包含 HTML fragment + inline CSS，并带 visual block 标记；当同目录同时存在 `spec.md` 与 `plan.md` 时，`review.html` 会被拒绝，需使用 `spec.review.html` / `plan.review.html`。
+仓库提供固定生成器：`pwsh -File .\scripts\render-review-html.ps1 -SourcePath .\docs\tasks\{task_id}\spec.md`。生成器只读取 Markdown，输出自包含 HTML fragment + inline CSS，并带 visual block 标记；当同目录同时存在 `spec.md` 与 `plan.md` 时，`review.html` 会被拒绝，需使用 `spec.review.html` / `plan.review.html`。
 
 局部 HTML 增强只允许用于卡片、对比区、流程区、信息网格；不得输出完整页面，不得把 HTML 放进代码块，不得使用 `script`、`iframe` 或外部 JS。paired reading HTML 默认不含 `doctype`、`html`、`head`、`body` 外壳；完整 HTML 页面只有用户明确要求时才生成。
 
@@ -138,27 +140,27 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 
 默认 descriptor 是 Codex-only：`PLAN`、`PLAN_REVIEW`、`IMPLEMENT`、`CODE_REVIEW`、`TEST` 都使用 `harness-default-codex`。`claudecode` 仍是合法 backend，但需要在任务 frontmatter 或推进命令中显式指定。
 
-唯一阶段真相源始终是 `docs/tasks/<task-id>/plan.md` frontmatter（`task_id` / `stage` / `tool` / `updated`，加可选 `tool_profile` / `model`）。字段枚举、约束和完整骨架只在 [`skills/orchestrator/references/lite-writing-guide.md`](skills/orchestrator/references/lite-writing-guide.md) 维护一份，本 README 不重复。
+唯一阶段真相源始终是 `docs/tasks/{task_id}/plan.md` frontmatter（`task_id` / `stage` / `tool` / `updated`，加可选 `tool_profile` / `model`）。字段枚举、约束和完整骨架只在 [`skills/orchestrator/references/lite-writing-guide.md`](skills/orchestrator/references/lite-writing-guide.md) 维护一份，本 README 不重复。
 
 ### 每个阶段写什么
 
 | Stage | 主要产物 | 说明 |
 |---|---|---|
-| `PLAN` | `docs/tasks/<task-id>/plan.md` | 含 frontmatter、Clarification、User Confirmation、Plan、Verification、Risks、Change Contract |
+| `PLAN` | `docs/tasks/{task_id}/plan.md` | 含 frontmatter、Clarification、User Confirmation、Plan、Verification、Risks、Change Contract |
 | `PLAN_REVIEW` | `plan.md` 里的 `## Plan Review` | append-only run，最新 run 决定下一步 |
 | `IMPLEMENT` | 代码改动 + `plan.md` 里的 `## Implementation Notes` | 只追加新 run，不回写旧 run |
 | `CODE_REVIEW` | `plan.md` 里的 `## Code Review` | append-only review run |
-| `TEST` | `docs/tasks/<task-id>/test.md` | 结论与 handoff |
+| `TEST` | `docs/tasks/{task_id}/test.md` | 结论与 handoff |
 | `DONE` | `plan.md` frontmatter | 终态，不再新开独立文档 |
 
 补充分支：
 
-- 输入不足时，可选创建 `docs/tasks/<task-id>/spec.md`
+- 输入不足时，可选创建 `docs/tasks/{task_id}/spec.md`
 - `spec.md` 现在支持可选 `front_keywords` frontmatter，用于跨任务检索和长会话恢复，但不是必填字段
 
 ### `work_type`、条件化模板与 reflection guidance
 
-`work_type`（可选 PLAN / Clarification 分诊信号，不写入 frontmatter、不被 `advance-stage.ps1` / validator 消费）、`bug` / `refactor` 条件化模板、Clarification 协议族写法、阶段原则路由（Socrates / Osborn / Hegel / First Principles / Occam / Feynman / Bayes / Debono 只作为阶段认知视角，不新增五转流程）、推理纪律、CODE_REVIEW 对抗性审查纪律，以及 IMPLEMENT / CODE_REVIEW 的 implementation reflection checks，写法与示例都在 [`skills/orchestrator/references/lite-writing-guide.md`](skills/orchestrator/references/lite-writing-guide.md) 与对应 stage skill 维护，本 README 不重复。
+`work_type`（可选 PLAN / Clarification 分诊信号，不写入 frontmatter、不被 `advance-stage.ps1` / validator 消费）、`bug` / `refactor` 条件化模板、Clarification 协议族写法、阶段纪律矩阵、推理纪律、CODE_REVIEW 对抗性审查纪律，以及 IMPLEMENT / CODE_REVIEW 的 implementation reflection checks，写法与示例都在 [`docs/工作流/stage-discipline-matrix.md`](docs/工作流/stage-discipline-matrix.md)、[`skills/orchestrator/references/lite-writing-guide.md`](skills/orchestrator/references/lite-writing-guide.md) 与对应 stage skill 维护，本 README 不重复。
 
 ### 推进规则
 
@@ -179,7 +181,7 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 
 ## `.assistant`、`docs/tasks`、validator、git 的职责
 
-### `docs/tasks/<task-id>/`
+### `docs/tasks/{task_id}/`
 
 这是任务的审阅面与阶段真相源。
 
@@ -199,7 +201,7 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 
 | 层 | 路径 | 角色 |
 |---|---|---|
-| artifact | `docs/tasks/<task-id>/` | 任务真相源 |
+| artifact | `docs/tasks/{task_id}/` | 任务真相源 |
 | runtime | `.assistant/运行时/` | 当前任务、恢复索引、task mirror、收件箱、wisdom 等运行时状态；minimal 下按需生成 |
 | config | `.assistant/配置/` | 用户偏好、工具、schema 版本；full vault 才默认安装 |
 | workflow | `.assistant/工作流/` | 协议与恢复说明；full vault 才默认安装 |
@@ -238,7 +240,7 @@ artifact drift 属于 advisory-first 检查，不是硬 gate：
 
 当前真实边界：
 
-- `docs/tasks/<task-id>/*` 是本地 workflow 任务产物，默认由 `.gitignore` 排除；需要沉淀长期协议时，把结论移入 `docs/工作流/`、`skills/`、`tests/` 或其他明确维护面
+- `docs/tasks/{task_id}/*` 是本地 workflow 任务产物，默认由 `.gitignore` 排除；需要沉淀长期协议时，把结论移入 `docs/工作流/`、`skills/`、`tests/` 或其他明确维护面
 - `.assistant/` 整体默认忽略，不应提交 live vault、runtime pointer、用户偏好或恢复视图
 - `.assistant/` 里的通用协议若需要进入仓库，应先提升到 `docs/工作流/`、`skills/` 或 `vault-template/`，再由安装/更新路径渲染到目标工作区
 - 仓库历史里可能曾保留 shared-memory migration 相关 `.assistant` 文件；当前索引不再跟踪 `.assistant/` 内容
@@ -274,7 +276,7 @@ pwsh -File .\scripts\check-shared-memory-layers.ps1 -VaultRoot <workspace-root>\
 
 ```powershell
 # ACP-style skill adapter
-pwsh -File .\scripts\invoke-harness-skill.ps1 -TaskId <task-id> -Stage PLAN_REVIEW -Skill review -Tool codex -WorkspaceRoot <workspace-root> -ArtifactRoot docs\tasks\<task-id> -Mode readonly -PayloadJson '{}'
+pwsh -File .\scripts\invoke-harness-skill.ps1 -TaskId <task-id> -Stage PLAN_REVIEW -Skill review -Tool codex -WorkspaceRoot <workspace-root> -ArtifactRoot docs\tasks\{task_id} -Mode readonly -PayloadJson '{}'
 
 # per-task skills index
 pwsh -File .\scripts\generate-skills-index.ps1 -TaskId <task-id> -Stage TEST -BackendHint codex
