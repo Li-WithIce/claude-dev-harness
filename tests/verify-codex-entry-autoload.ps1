@@ -72,15 +72,26 @@ foreach ($skill in @('workflow-team', 'codegraph', 'agentmemory', 'codedb-mcp', 
 
 Need-Text 'agent-configs/codex/AGENTS.md.template' 'entry-router` is the default auto-entry skill'
 Need-Text 'agent-configs/codex/AGENTS.md.template' 'must not bypass `plan.md` frontmatter stage truth'
+Need-Text 'agent-configs/codex/AGENTS.md.template' 'Deep Clarification Mode'
+Need-Text 'agent-configs/codex/AGENTS.md.template' 'minimum sufficient clarification set'
 Need-Text 'agent-configs/workspace/AGENTS.md.template' '.assistant\entry\AGENTS.md'
 Need-Text 'agent-configs/workspace/AGENTS.md.template' '`quick`, `workflow`, or `ask`'
 Need-Text 'agent-configs/workspace/AGENTS.md.template' 'PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST'
 Need-Text 'agent-configs/workspace/AGENTS.md.template' 'summaries are user-facing responses, not workflow stages'
+Need-Text 'agent-configs/workspace/AGENTS.md.template' 'Deep Clarification Mode'
+Need-Text 'agent-configs/workspace/AGENTS.md.template' 'minimum sufficient clarification set'
 Need-Text 'agent-configs/workspace/AGENTS.md.template' 'Provider indexes are opt-in.'
 Need-Text 'agent-configs/workspace/AGENTS.md.template' 'explicit provider opt-in'
 Need-Text 'agent-configs/workspace/AGENTS.md.template' 'CodeGraph, codedb-mcp, or agentmemory'
 Need-Text 'agent-configs/workspace/AGENTS.md.template' '`rg` / read / manual inspection'
 Need-Text 'agent-configs/workspace/AGENTS.md.template' 'Provider absence must never block `quick`, `workflow`, or `ask` routing.'
+Need-Text 'agent-configs/claude/CLAUDE.md.template' 'Deep Clarification Mode'
+Need-Text 'agent-configs/claude/CLAUDE.md.template' 'minimum sufficient clarification set'
+Need-Text 'vault-template/entry/AGENTS.md.template' 'Deep Clarification Mode'
+Need-Text 'vault-template/entry/AGENTS.md.template' 'Do not invoke other workflow skills before routing'
+Need-Text 'skills/entry-router/SKILL.md' 'Entry-router is the default first hop for development tasks'
+Need-Text 'skills/entry-router/SKILL.md' 'Do not invoke other workflow skills before routing'
+Need-Text 'skills/entry-router/SKILL.md' 'minimum sufficient clarification set'
 
 foreach ($stage in @('PLAN', 'PLAN_REVIEW', 'IMPLEMENT', 'CODE_REVIEW', 'TEST')) {
     Need-Text 'agent-configs/workspace/AGENTS.md.template' $stage
@@ -90,6 +101,20 @@ Reject-Regex 'agent-configs/workspace/AGENTS.md.template' 'PLAN\s*/\s*IMPLEMENT\
 Reject-Regex 'agent-configs/workspace/AGENTS.md.template' '(?m)^\s*-\s*REVIEW\b' 'workspace AGENTS template should not define REVIEW as a checklist stage'
 Reject-Regex 'agent-configs/workspace/AGENTS.md.template' '(?m)^\s*-\s*SUMMARY\b' 'workspace AGENTS template should not define SUMMARY as a checklist stage'
 Reject-Regex 'agent-configs/workspace/AGENTS.md.template' '同步初始化项目工作流、`codedb-mcp` 索引和 CodeGraph' 'workspace AGENTS template should not auto-bootstrap provider indexes'
+
+$oldBroadSkillPattern = ('1%' + ' chance') + '|' + ('ABSOLUTELY ' + 'MUST')
+$oldAskPattern = ('one minimal ' + 'question') + '|' + ('ask one ' + 'minimal')
+Reject-Regex 'skills/entry-router/SKILL.md' $oldBroadSkillPattern 'entry-router skill should not use obsolete broad skill invocation wording'
+foreach ($path in @(
+        'skills/entry-router/SKILL.md',
+        'vault-template/entry/AGENTS.md.template',
+        'agent-configs/workspace/AGENTS.md.template',
+        'agent-configs/codex/AGENTS.md.template',
+        'agent-configs/claude/CLAUDE.md.template',
+        'README.md'
+    )) {
+    Reject-Regex $path $oldAskPattern "$path should not use obsolete shallow ask wording"
+}
 
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Output "- $_" }

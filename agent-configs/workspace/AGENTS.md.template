@@ -46,7 +46,7 @@
 - `quick` loads only entry rules, user preferences / necessary config, and the directly relevant skill.
 - `workflow` loads `entry-router`, `orchestrator`, and the current-stage skill.
 - `resume-current` / `switch-existing` loads recovery runtime files first, then the current-stage skill.
-- `ask` does not load workflow skills; ask one minimal clarification question.
+- `ask` is Deep Clarification Mode: do not load workflow stage skills; ask the minimum sufficient clarification set until routing and acceptance are clear.
 - Clarification-family requests such as 需求澄清 / 需求确认 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认 follow `.assistant\entry\AGENTS.md` and land in existing `PLAN -> Clarification` when they need durable development decisions; they do not create a new stage.
 - Treat unresolved PLAN acceptance, non-goals, impact, rollback/compatibility, or implementation path that cannot guide IMPLEMENT as the same Clarification protocol.
 - In that protocol, answer code/doc-discoverable questions first, keep the base Clarification fields, ask remaining user decisions one at a time with a recommended answer, and keep `User Confirmation` draft while any `clarification_ledger` item is `decision: pending`.
@@ -60,7 +60,7 @@
 - Only `workflow` tasks use the canonical stage chain: `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`.
 - Do not use `REVIEW` or `SUMMARY` as frontmatter stage names; summaries are user-facing responses, not workflow stages.
 - `quick` tasks can be handled directly and summarized without creating task artifacts.
-- `ask` mode only clarifies missing requirements.
+- `ask` mode only clarifies missing requirements; it does not create `docs/tasks/<task-id>/`, edit code, or introduce a frontmatter stage.
 - `workflow` mode uses `docs/tasks/<task-id>/plan.md` and the canonical stages.
 - 任务中断后，继续时先恢复目标、已完成事项、待处理事项和验证状态。
 - 不为简单命令、报错解释、SQL 改写、配置查询创建额外任务目录。

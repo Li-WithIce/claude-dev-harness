@@ -21,7 +21,7 @@
 - `quick` loads only entry rules, user preferences / necessary config, and the directly relevant skill.
 - `workflow` loads `entry-router`, `orchestrator`, and the current-stage skill.
 - `resume-current` / `switch-existing` loads recovery runtime files first, then the current-stage skill.
-- `ask` does not load workflow skills; ask one minimal clarification question.
+- `ask` is Deep Clarification Mode: do not load workflow stage skills; ask the minimum sufficient clarification set until routing and acceptance are clear.
 - Clarification-family requests such as 需求澄清 / 需求确认 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认 follow the active workspace entry rules and land in existing `PLAN -> Clarification` when they need durable development decisions; they do not create a new stage.
 - Treat unresolved PLAN acceptance, non-goals, impact, rollback/compatibility, or implementation path that cannot guide IMPLEMENT as the same Clarification protocol.
 - In that protocol, answer code/doc-discoverable questions first, keep the base Clarification fields, ask remaining user decisions one at a time with a recommended answer, and keep `User Confirmation` draft while any `clarification_ledger` item is `decision: pending`.

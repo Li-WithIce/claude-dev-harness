@@ -83,7 +83,7 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 
 - `quick`：quick only when all true：范围和验收清楚、风险低、能在当前对话内完成并验证、用户没有要求留痕 / review / test / 计划；默认不创建 `docs/tasks/<task-id>/`，不改共享指针。
 - `workflow`：workflow when any of these is true：用户要求 workflow / 留痕 / review / test / 计划，或变更触碰入口协议、脚本、模板、validator、多文件 / 跨模块、高风险路径，或需要可审计决策 / 产物；进入 `entry-router -> orchestrator`。
-- `ask`：ask only when a missing answer blocks routing：缺少一个关键答案导致无法判断 quick/workflow、验收或风险边界时才使用，并只问一个最小澄清问题，优先给推荐答案。
+- `ask`：Deep Clarification Mode：缺少答案导致无法判断 quick/workflow、验收、范围、风险或输出边界时使用；提出 minimum sufficient clarification set，可多轮，但每轮只问足以解除当前阻塞的必要问题，并优先给推荐答案。
 
 显式覆盖词优先，但不能覆盖硬风险：用户说“直接改”“快修”时只有满足 `quick` 全部条件才偏 `quick`；用户说“走 workflow”“留痕”“review”“test”时直接偏 `workflow`。没有显式词时由入口 agent 按上面的 all/any 规则自主判断。
 
@@ -96,7 +96,7 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 - `quick`：只加载入口规则、用户偏好 / 必要配置，以及与本次请求直接相关的 skill 或 reference；不预读 orchestrator、全部 stage skill 或历史任务。
 - `workflow`：加载 `entry-router`、`orchestrator`，再按当前 stage 加载一个阶段 skill：`PLAN -> plan`、`PLAN_REVIEW -> review`、`IMPLEMENT -> implement`、`CODE_REVIEW -> review`、`TEST -> test`。
 - `resume-current` / `switch-existing`：先加载已存在的 `.assistant/运行时/恢复索引.md`、`.assistant/运行时/当前任务.md`、`运行时/tasks/<task-id>.md`；缺失运行时文件表示没有已记录的活动状态，不作为错误；必要时只读当前任务的 `plan.md` frontmatter 判定 stage，再加载当前 stage skill。
-- `ask`：不加载 workflow skill，只问一个最小澄清问题。
+- `ask`：不加载 workflow stage skill；用 Deep Clarification Mode 澄清到足以判断路由和验收边界，不创建 `docs/tasks/<task-id>/`、不改代码、不推进阶段。
 
 禁止 bulk-load 全部 skills、全部历史 `docs/tasks/*`、Claude 兼容 skill 或 `workflow-team`。只有用户显式切换 backend、当前 stage frontmatter / workflow descriptor 命中、或 `$env:AITEAMCODE_TEAM_MODE='1'` 等触发条件满足时，才加载这些兼容路径。
 
@@ -116,7 +116,7 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId <task-id>
 
 - `quick`：小文档直接转换、导入或生成。
 - `workflow`：复杂报告、网页原型、可审计交付先声明 Markdown source、HTML artifact、模板/样式边界和验证方式。
-- `ask`：缺少方向、用途、输出路径或样式边界时，只问一个澄清问题。
+- `ask`：缺少方向、用途、输出路径或样式边界时，用 Deep Clarification Mode 提出最小充分澄清问题集。
 
 `spec.md` / `plan.md` 是最需要人工审阅和介入的文档。若它们超过 160 行或含 8 个及以上 `##` 二级标题，且用户需要审阅/决策、Markdown 层次不够清晰，默认生成同目录 paired reading HTML（`plan.review.html` / `spec.review.html`，单一审阅文件可用 `review.html`）。该 HTML 使用固定模板，主动重组 summary、decision、risk、checkpoint、流程/架构、对比矩阵、信息卡片和折叠源章节，不替代 Markdown；内容变更仍改 `spec.md` / `plan.md` 后重新生成。
 

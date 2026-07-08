@@ -13,7 +13,9 @@ These shims delegate to the managed harness repo scripts and always use the inst
 
 `TEST -> DONE` also omits `-Tool`; non-DONE stages use the workflow descriptor when no explicit backend is passed.
 
-Mode routing: `quick` only when all true: scope and acceptance are clear, risk is low, the task can finish and be verified in the current conversation, and the user did not ask for durable notes / review / test / planning. Use `workflow` when any of these is true: the user asks for workflow / durable notes / review / test / planning, the change touches entry protocol, scripts, templates, validators, multiple modules, high-risk paths, or durable decisions/artifacts. Use `ask` only when a missing answer blocks routing, acceptance, or risk judgment; ask one minimal question and prefer a recommended answer. Clarification-family triggers such as `需求澄清` / `需求确认` / `拷问` / `头脑风暴` / `方案压力测试` / `边界确认` enter existing `PLAN -> Clarification` when a development task needs durable decisions.
+Mode routing: `quick` only when all true: scope and acceptance are clear, risk is low, the task can finish and be verified in the current conversation, and the user did not ask for durable notes / review / test / planning. Use `workflow` when any of these is true: the user asks for workflow / durable notes / review / test / planning, the change touches entry protocol, scripts, templates, validators, multiple modules, high-risk paths, or durable decisions/artifacts. Use `ask` as Deep Clarification Mode when missing answers block routing, acceptance, scope, risk, or output judgment; ask the minimum sufficient clarification set, prefer recommended answers, and continue across turns if needed. Clarification-family triggers such as `需求澄清` / `需求确认` / `拷问` / `头脑风暴` / `方案压力测试` / `边界确认` enter existing `PLAN -> Clarification` when a development task needs durable decisions.
+
+For development tasks, entry-router is the default first hop. Do not invoke other workflow skills before routing; after routing, load only the context required by the selected mode.
 
 Clarification trigger rule: unresolved PLAN acceptance, non-goals, impact, rollback/compatibility, or implementation path that cannot guide IMPLEMENT also enters the Clarification protocol.
 
@@ -28,5 +30,7 @@ Lazy loading:
 - `quick`: load only entry rules, user preferences / necessary config, and the directly relevant skill or reference.
 - `workflow`: load `entry-router`, `orchestrator`, then exactly one current-stage skill (`plan`, `review`, `implement`, or `test`).
 - `resume-current` / `switch-existing`: load existing runtime files only if present (`.assistant\运行时\恢复索引.md`, `.assistant\运行时\当前任务.md`, `运行时\tasks\<task-id>.md`), then the current-stage skill; missing runtime files mean no active recorded state.
-- `ask`: do not load workflow skills; ask one minimal clarification question.
+- `ask`: do not load workflow stage skills; use Deep Clarification Mode until routing and acceptance are clear. Do not create `docs/tasks/<task-id>/`, edit code, or advance workflow stages while still in ask.
 - Do not bulk-load all skills, all historical `docs/tasks/*`, Claude compatibility skills, or `workflow-team` unless an explicit backend, stage, or team-mode trigger requires it.
+
+Ask response format: state the blocker, list what is already clear, ask the minimum sufficient clarification set, and include a recommended answer that explains whether the next route is `quick` or `workflow`.

@@ -4,11 +4,7 @@ description: Canonical entry router for choosing quick, workflow, ask, resume, s
 ---
 
 <EXTREMELY-IMPORTANT>
-If you think there is even a 1% chance a skill might apply to what you are doing, you ABSOLUTELY MUST invoke the skill.
-
-IF A SKILL APPLIES TO YOUR TASK, YOU DO NOT HAVE A CHOICE. YOU MUST USE IT.
-
-This is not negotiable. This is not optional. You cannot rationalize your way out of this.
+Entry-router is the default first hop for development tasks. Do not invoke other workflow skills before routing. After routing, load only the minimum skill/context set required by the selected mode.
 </EXTREMELY-IMPORTANT>
 
 ## How to Access Skills
@@ -17,7 +13,7 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 
 # Using Skills
 
-**Invoke relevant or requested skills BEFORE any response or action.** Even a 1% chance a skill might apply means invoke to check; if it turns out wrong, you don't have to use it.
+For development tasks, route through this skill first. Load non-workflow/domain skills only after routing, and only when directly relevant or explicitly requested. Route-specific lazy loading wins over broad skill discovery.
 
 **输出语言：** 中文（非代码文本）；代码、命令、标识符保留英文。
 
@@ -64,7 +60,7 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 
 - **quick**：quick only when all true：范围和验收清楚、风险低、当前对话内可完成并验证、用户没有要求留痕 / review / test / 计划。默认不建 `docs/tasks/<task-id>/`，不改共享指针。
 - **workflow**：workflow when any of these is true：用户要求 workflow / 留痕 / review / test / 计划，或变更触碰入口协议、脚本、模板、validator、多文件 / 跨模块、高风险路径，或需要可审计决策 / 产物时，导向 `/orchestrator` 建 `plan.md`。
-- **ask**：ask only when a missing answer blocks routing：缺少一个关键答案导致无法判断 quick/workflow、验收或风险边界时，问一个最小澄清问题并优先给推荐答案。
+- **ask**：Deep Clarification Mode. 缺少答案导致无法判断 quick/workflow、验收、范围、风险或输出边界时使用；提出 minimum sufficient clarification set，可多轮，但每轮只问足以解除当前阻塞的必要问题，并优先给推荐答案。
 
 显式覆盖词：偏 quick（`直接改`、`快修`、`小改一下`、`不用 workflow`、`别走流程`），但必须满足 quick 全部条件；偏 workflow（`走 workflow`、`留痕`、`需要 review`、`需要 test`、`跑完整流程`、`写计划`）。无显式词时按 all/any 规则判断；quick 执行中影响面扩大或用户开始要留痕，停止扩大并切 workflow 或先确认。
 
@@ -73,9 +69,20 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 - `quick`：只加载入口规则、用户偏好 / 必要配置和直接相关 skill；不加载 orchestrator 或全部 stage skill。
 - `workflow`：加载本 skill + `orchestrator`，再按当前 stage 只加载一个阶段 skill（`PLAN→plan`、`PLAN_REVIEW/CODE_REVIEW→review`、`IMPLEMENT→implement`、`TEST→test`）。
 - `resume-current` / `switch-existing`：先读恢复运行时（恢复索引 / 当前任务 / tasks），再按 `plan.md` frontmatter stage 加载当前 stage skill。
-- `ask`：不加载 workflow skill，只问一个最小澄清问题。
+- `ask`：不加载 workflow stage skill；用 Deep Clarification Mode 澄清到足以判断路由和验收边界，不创建 `docs/tasks/<task-id>/`、不改代码、不推进阶段。
 
 禁止 bulk-load 全部 skills / 全部历史任务 / Claude 兼容 skill / `workflow-team`；仅在显式 backend override、frontmatter 命中或 `$env:AITEAMCODE_TEAM_MODE='1'` 时才加载这些路径。
+
+### ask response format
+
+Deep Clarification Mode 只输出足以解除阻塞的澄清内容，推荐格式：
+
+- `我会先按 ask 处理`：一句话说明阻塞点，例如路由、验收、范围、风险或输出边界不清楚。
+- `已能确定`：列出可由当前请求、代码或文档直接确定的事实。
+- `还需要确认`：提出 minimum sufficient clarification set，覆盖必要的意图、成功标准、范围 / 非范围、影响面、优先级、风险容忍、约束、输出格式、示例 / 反例、quick/workflow 归属、是否需要设计 / 实现 / review / testing、是否需要 durable artifacts。
+- `推荐答案`：给出默认建议，说明采用后会走 `quick` 还是 `workflow`。
+
+若用户回答后仍不足以安全路由或执行，可以继续 ask；一旦足够明确，转入 `quick` 或 `workflow`，但 `ask` 本身不是 frontmatter stage。
 
 ### 同族分支路由（按需，写法见对应单一真相源）
 
@@ -97,18 +104,18 @@ These thoughts mean STOP — you're rationalizing:
 
 | Thought | Reality |
 |---------|---------|
-| "This is just a simple question" | Questions are tasks. Check for skills. |
-| "I need more context first" | Skill check comes BEFORE clarifying questions. |
-| "Let me explore the codebase first" | Skills tell you HOW to explore. Check first. |
-| "I can check version control/files quickly" | Files lack conversation context. Check for skills. |
-| "Let me gather information first" | Skills tell you HOW to gather information. |
-| "This doesn't need a formal skill" | If a skill exists, use it. |
+| "This is just a simple question" | For development work, route first, then choose quick/workflow/ask. |
+| "I need more context first" | Entry routing decides whether context gathering is quick, workflow, or ask. |
+| "Let me explore the codebase first" | Route first, then load only the context needed for that route. |
+| "I can check version control/files quickly" | Files lack conversation context; entry routing keeps task state clear. |
+| "Let me gather information first" | Gathering is part of the selected route, not a pre-route detour. |
+| "This doesn't need a formal skill" | Low-risk work can still be quick after routing. |
 | "I remember this skill" | Skills evolve. Read current version. |
-| "This doesn't count as a task" | Action = task. Check for skills. |
-| "The skill is overkill" | Simple things become complex. Use it. |
-| "I'll just do this one thing first" | Check BEFORE doing anything. |
-| "This feels productive" | Undisciplined action wastes time. Skills prevent this. |
-| "I know what that means" | Knowing the concept ≠ using the skill. Invoke it. |
+| "This doesn't count as a task" | Actionable development work still needs mode routing. |
+| "The skill is overkill" | Use `quick` when all quick gates are true. |
+| "I'll just do this one thing first" | Do route selection before changing files or loading stage skills. |
+| "This feels productive" | Unrouted action can skip user constraints or durable workflow gates. |
+| "I know what that means" | Use the current entry rules, not remembered behavior. |
 
 开发流程同理：小改动也要先完成 `new-task` mode routing；workflow 模式先成计划再实现；用户或风险要求 workflow 时 review/test 不可跳过；输入不足才进 `spec`，不是默认回到全量需求流程。
 
