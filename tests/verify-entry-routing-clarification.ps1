@@ -52,11 +52,7 @@ $routingFiles = @(
     'skills/orchestrator/SKILL.md',
     'skills/orchestrator/references/lite-writing-guide.md',
     'skills/orchestrator/references/runbook.md',
-    'vault-template/entry/AGENTS.md.template',
     'vault-template/工作流/任务识别协议.md',
-    'agent-configs/workspace/AGENTS.md.template',
-    'agent-configs/codex/AGENTS.md.template',
-    'agent-configs/claude/CLAUDE.md.template',
     'skills/md-html/SKILL.md',
     'README.md'
 )
@@ -65,19 +61,37 @@ foreach ($path in $routingFiles) {
     Need-Text $path 'iterative blocking clarification'
 }
 
+$entryContractPath = 'policies/entry-contract.md'
+foreach ($caseId in @(
+        'new-readonly',
+        'new-bounded-mutation',
+        'new-durable-risky',
+        'new-ambiguous',
+        'bare-resume',
+        'active-status',
+        'resume-execute',
+        'inactive-status',
+        'durable-unowned'
+    )) {
+    Need-Text $entryContractPath ('`{0}`' -f $caseId)
+}
+Need-Text $entryContractPath 'identity never broadens authorization'
+Need-Text $entryContractPath 'Status/read-only recovery never replays fallback, syncs pointers, writes task/runtime state, or loads a stage skill'
+Need-Text $entryContractPath 'interactive ambiguity remains `ask` with zero writes'
+Need-Text $entryContractPath '`quick` loads only entry rules'
+Need-Text $entryContractPath '`workflow` loads `entry-router`, `orchestrator`, and only the current v1 stage skill'
+
 Need-Text 'skills/entry-router/SKILL.md' 'Remain in ask until all blocking uncertainties are resolved'
 Need-Text 'skills/entry-router/SKILL.md' 'after every user answer'
 Need-Text 'skills/entry-router/SKILL.md' 'Recommended route: quick or workflow'
 Need-Text 'skills/entry-router/SKILL.md' 'Why this route is safe'
-Need-Text 'vault-template/entry/AGENTS.md.template' 'Remain in ask until all blocking uncertainties are resolved'
 Need-Text 'skills/orchestrator/SKILL.md' 'until all blocking requirements are resolved'
 Need-Text 'skills/orchestrator/SKILL.md' 'route to `quick` or `workflow`'
 Need-Text 'skills/orchestrator/references/lite-writing-guide.md' 'ask cannot exit'
-Need-Text 'agent-configs/workspace/AGENTS.md.template' 'Recommended route: quick or workflow'
 Need-Text 'README.md' 'not enter quick/workflow/PLAN/IMPLEMENT'
 Need-Text 'docs/工作流/stage-discipline-matrix.md' 'high-risk code or production areas increase evidence depth but do not grant workflow artifact or write authority'
 
-foreach ($path in @('skills/entry-router/SKILL.md', 'vault-template/entry/AGENTS.md.template')) {
+foreach ($path in @('skills/entry-router/SKILL.md')) {
     Need-Text $path 'standalone project-scoped read-only'
     Need-Text $path 'route identity does not broaden requested action'
     Need-Text $path 'ambiguous read/write'
@@ -99,9 +113,6 @@ Need-Text 'skills/entry-router/SKILL.md' '交互式归属或读写歧义直接 `
 Need-Text 'skills/entry-router/SKILL.md' 'pure read-only/no-edit 的方案审查仍 quick'
 Need-Text 'skills/entry-router/SKILL.md' '`刚才做到哪里了 / what were we doing / status` 只做只读关联和三段式摘要'
 Need-Text 'skills/entry-router/SKILL.md' '只读恢复查询不重放'
-Need-Text 'vault-template/entry/AGENTS.md.template' 'clear target, scope, and output'
-Need-Text 'vault-template/entry/AGENTS.md.template' 'read-only inspect/status does none of those writes or stage loads'
-Need-Text 'vault-template/entry/AGENTS.md.template' 'without inbox write'
 Need-Text 'vault-template/工作流/任务识别协议.md' 'read-only inspect/status 不 replay、不 sync'
 Need-Text 'vault-template/工作流/任务识别协议.md' '交互式归属或读写歧义先 `ask`，不写 `收件箱.md`'
 Need-Text 'vault-template/工作流/恢复协议.md' '`刚才做到哪里了` / `what were we doing` / status：只读恢复查询'
@@ -124,10 +135,6 @@ foreach ($path in @(
     Reject-Regex $path '信息不足且无法判断归属时，先.*写入收件箱|仍不确定(?s:.*?)先写 `收件箱\.md`' "$path should ask interactive ambiguity before any inbox write"
     Reject-Regex $path 'resume-current.*switch-existing.*(?:then|再) load.*current-stage skill|resume-current.*switch-existing.*再加载当前 stage skill' "$path should not load a stage skill for read-only existing-task inspection"
 }
-Need-Text 'agent-configs/workspace/AGENTS.md.template' '只有 `mode=workflow` 才写入 `docs/tasks/{task_id}/`'
-Need-Text 'agent-configs/codex/AGENTS.md.template' 'Only `mode=workflow` writes task artifacts'
-Need-Text 'agent-configs/claude/CLAUDE.md.template' '多步骤 `mode=workflow` 任务'
-
 $inboxRecoveryContracts = @(
     'open inbox + existing docs/tasks/{task_id}/plan.md -> switch-existing',
     'quick success -> exact triage',

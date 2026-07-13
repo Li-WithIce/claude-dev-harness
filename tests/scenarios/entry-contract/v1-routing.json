@@ -1,0 +1,121 @@
+{
+  "schema_version": "thin-harness-entry-routing/v1",
+  "protocol": {
+    "default": "auto",
+    "auto_resolves_to": "v1",
+    "v2_entry_activation": "disabled"
+  },
+  "baseline": {
+    "commit": "aee525f6b3b0638f11bf6ab278482aa5b8c79d11",
+    "invariants": [
+      {
+        "id": "project-first-hop",
+        "source_path": "vault-template/entry/AGENTS.md.template",
+        "baseline_contains": "For project-scoped development and read-only engineering requests, entry-router is the default first hop. Do not invoke other workflow skills before routing; after routing, load only the context required by the selected mode.",
+        "canonical_contains": "For project-scoped development and read-only engineering requests, `entry-router` is the default first hop. Do not invoke other workflow skills before routing; after routing, load only the context required by the selected mode."
+      },
+      {
+        "id": "ask-zero-write-gate",
+        "source_path": "vault-template/entry/AGENTS.md.template",
+        "baseline_contains": "`ask`: iterative blocking clarification gate; do not load workflow stage skills, enter quick/workflow/stages, create task artifacts, edit code, or initialize providers. Remain in ask until all blocking uncertainties are resolved.",
+        "canonical_contains": "`ask` is an iterative blocking clarification gate: do not load workflow stage skills, create task artifacts, edit code, write shared runtime/inbox, or initialize providers until all blocking uncertainties are resolved"
+      },
+      {
+        "id": "ask-exit-criteria",
+        "source_path": "vault-template/entry/AGENTS.md.template",
+        "baseline_contains": "Ask exit criteria: ask cannot exit until the agent can state User goal, Success / acceptance criteria, In scope, Out of scope / non-goals, Affected area, Constraints, Risk level, Expected output, Recommended route: quick or workflow, and Why this route is safe.",
+        "canonical_contains": "Ask exit criteria: ask cannot exit until the agent can state User goal, Success / acceptance criteria, In scope, Out of scope / non-goals, Affected area, Constraints, Risk level, Expected output, Recommended route: quick or workflow, and Why this route is safe."
+      },
+      {
+        "id": "clarification-ledger",
+        "source_path": "vault-template/entry/AGENTS.md.template",
+        "baseline_contains": "Clarification ledger rule: answer code/doc-discoverable questions first, keep the base Clarification fields, ask remaining user decisions one at a time with a recommended answer, and keep `User Confirmation` draft while any `clarification_ledger` item is `decision: pending`.",
+        "canonical_contains": "Clarification ledger: answer code/doc-discoverable questions first, keep the base Clarification fields, ask remaining user decisions one at a time with a recommended answer, and keep `User Confirmation` draft while any `clarification_ledger` item is `decision: pending`."
+      },
+      {
+        "id": "readonly-resume-no-stage",
+        "source_path": "vault-template/entry/AGENTS.md.template",
+        "baseline_contains": "read-only inspect/status does none of those writes or stage loads",
+        "canonical_contains": "Status/read-only recovery never replays fallback, syncs pointers, writes task/runtime state, or loads a stage skill"
+      },
+      {
+        "id": "plan-frontmatter-stage-truth",
+        "source_path": "agent-configs/codex/AGENTS.md.template",
+        "baseline_contains": "must not bypass `plan.md` frontmatter stage truth",
+        "canonical_contains": "`plan.md` frontmatter is the sole stage truth"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "case_id": "non-project",
+      "condition": "request is not project-scoped",
+      "route": "host-native",
+      "writes": "none",
+      "stage_skill": "none"
+    },
+    {
+      "case_id": "new-readonly",
+      "condition": "clear standalone project read-only request",
+      "route": "quick",
+      "writes": "none",
+      "stage_skill": "none"
+    },
+    {
+      "case_id": "new-bounded-mutation",
+      "condition": "clear low-risk bounded mutation",
+      "route": "quick",
+      "writes": "requested-scope",
+      "stage_skill": "none"
+    },
+    {
+      "case_id": "new-durable-risky",
+      "condition": "durable, high-risk, cross-module, or staged-evidence mutation",
+      "route": "workflow",
+      "writes": "authorized-scope",
+      "stage_skill": "current-v1"
+    },
+    {
+      "case_id": "new-ambiguous",
+      "condition": "read/write intent or route identity is ambiguous",
+      "route": "ask",
+      "writes": "none",
+      "stage_skill": "none"
+    },
+    {
+      "case_id": "bare-resume",
+      "condition": "resume request lacks execute intent",
+      "route": "ask",
+      "writes": "none",
+      "stage_skill": "none"
+    },
+    {
+      "case_id": "active-status",
+      "condition": "status or read-only review of the current task",
+      "route": "resume-current/readonly",
+      "writes": "none",
+      "stage_skill": "none"
+    },
+    {
+      "case_id": "resume-execute",
+      "condition": "explicit resume-and-execute of the current task",
+      "route": "resume-current/workflow",
+      "writes": "authorized-scope",
+      "stage_skill": "current-v1"
+    },
+    {
+      "case_id": "inactive-status",
+      "condition": "status or read-only review of an inactive task",
+      "route": "switch-existing/readonly",
+      "writes": "none",
+      "stage_skill": "none"
+    },
+    {
+      "case_id": "durable-unowned",
+      "condition": "authorized actionable durable item lacks task identity",
+      "route": "inbox-first",
+      "writes": "inbox-row-only",
+      "stage_skill": "none"
+    }
+  ]
+}

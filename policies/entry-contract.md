@@ -1,15 +1,3 @@
-# Workspace Entry Host Overlay
-
-This installed shim still executes the v1 workflow and delegates to the managed harness repository:
-
-- Stage advance: `pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage>`; add `-Tool <claudecode|codex>` only to switch backend.
-- Explicit new/switch activation: add `-SyncOnly -ActivateCurrent`; never use it for read-only inspect/status.
-- Artifact validation: `pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId {task_id}`.
-- Harness repo: `{REPO_ROOT}`; shared vault: `{VAULT_PATH}`.
-- `TEST -> DONE` also omits `-Tool`; other stages use the workflow descriptor when no backend is supplied.
-
-<!-- BEGIN GENERATED ENTRY CONTRACT -->
-<!-- source-sha256: dd172b63ca8370e95d7490f9def9f31fcd6087b8e6ffeb322d3c750eb541c42f -->
 # Entry Contract
 
 Canonical shared routing contract. Host templates may add only host-specific overlays outside the generated markers.
@@ -43,4 +31,3 @@ Canonical shared routing contract. Host templates may add only host-specific ove
 - `inbox-first` is limited to already-authorized actionable durable capture; interactive ambiguity remains `ask` with zero writes.
 - Optional memory and provider indexes never block routing; absent or unavailable providers fall back to repository inspection.
 - v2 Requirement/Direct contracts remain inert until a later activation; v1 `entry-router`, `orchestrator`, five-stage tasks, and rollback paths remain authoritative.
-<!-- END GENERATED ENTRY CONTRACT -->

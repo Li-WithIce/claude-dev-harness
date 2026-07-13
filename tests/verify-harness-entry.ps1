@@ -49,6 +49,12 @@ function Add-Failure {
     $script:Failures += $Message
 }
 
+function Normalize-ContractText {
+    param([string]$Text)
+
+    return ([regex]::Replace($Text, "`r`n?", "`n")).TrimEnd([char[]]"`n")
+}
+
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 }
@@ -59,6 +65,9 @@ $script:Failures = @()
 $scratchRoot = Join-Path $RepoRoot ('tmp\harness-entry-regression-' + [guid]::NewGuid().ToString('N'))
 
 $harnessPath = Join-Path $RepoRoot 'harness.ps1'
+$entryContractPath = Join-Path $RepoRoot 'policies\entry-contract.md'
+$entryContractContent = Get-Content -LiteralPath $entryContractPath -Raw -Encoding utf8
+$entryContractDigest = (Get-FileHash -LiteralPath $entryContractPath -Algorithm SHA256).Hash.ToLowerInvariant()
 
 try {
 New-Item -ItemType Directory -Path $scratchRoot | Out-Null
@@ -104,21 +113,36 @@ if (-not (Test-Path -LiteralPath $entryShimPath -PathType Leaf)) {
     Add-Failure 'harness.ps1 should install the workspace entry shim'
 } else {
     $entryShimContent = Get-Content -LiteralPath $entryShimPath -Raw -Encoding utf8
-    if ($entryShimContent.Contains('standalone project-scoped read-only') -and
-        $entryShimContent.Contains('route identity does not broaden requested action') -and
-        $entryShimContent.Contains('clear target, scope, and output') -and
-        $entryShimContent.Contains('mixed mutation') -and
-        $entryShimContent.Contains('ambiguous read/write') -and
-        $entryShimContent.Contains('read-only inspect/status does none of those writes or stage loads') -and
-        $entryShimContent.Contains('without inbox write') -and
-        $entryShimContent.Contains('Deep Clarification Mode') -and
-        $entryShimContent.Contains('iterative blocking clarification gate') -and
-        $entryShimContent.Contains('Remain in ask until all blocking uncertainties are resolved') -and
-        $entryShimContent.Contains('Ask exit criteria') -and
-        $entryShimContent.Contains('Do not invoke other workflow skills before routing')) {
-        Add-Check 'workspace entry shim documents read-only/mutation/ask routing precedence'
+    $contractPattern = '(?ms)^<!-- BEGIN GENERATED ENTRY CONTRACT -->\r?\n<!-- source-sha256: (?<digest>[0-9a-f]{64}) -->\r?\n(?<body>.*?)\r?\n<!-- END GENERATED ENTRY CONTRACT -->$'
+    $contractMatches = [regex]::Matches($entryShimContent, $contractPattern)
+    if ($contractMatches.Count -ne 1) {
+        Add-Failure 'workspace entry shim should contain exactly one generated entry contract block'
     } else {
-        Add-Failure 'workspace entry shim should document read-only/mutation/ask routing precedence'
+        Add-Check 'workspace entry shim contains exactly one generated entry contract block'
+        $contractMatch = $contractMatches[0]
+        if ($contractMatch.Groups['digest'].Value -cne $entryContractDigest) {
+            Add-Failure 'workspace entry shim generated entry contract digest should match the canonical source'
+        } else {
+            Add-Check 'workspace entry shim generated entry contract digest matches the canonical source'
+        }
+
+        if ((Normalize-ContractText -Text $contractMatch.Groups['body'].Value) -cne (Normalize-ContractText -Text $entryContractContent)) {
+            Add-Failure 'workspace entry shim generated entry contract body should match the canonical source'
+        } else {
+            Add-Check 'workspace entry shim generated entry contract body matches the canonical source'
+        }
+    }
+
+    $vaultPath = Join-Path $workspaceRoot '.assistant'
+    if ($entryShimContent.Contains('Stage advance: `pwsh -File .assistant\entry\advance-stage.ps1') -and
+        $entryShimContent.Contains($RepoRoot) -and
+        $entryShimContent.Contains($vaultPath) -and
+        $entryShimContent.Contains('`TEST -> DONE`') -and
+        -not $entryShimContent.Contains('{REPO_ROOT}') -and
+        -not $entryShimContent.Contains('{VAULT_PATH}')) {
+        Add-Check 'workspace entry shim preserves the rendered v1 host overlay'
+    } else {
+        Add-Failure 'workspace entry shim should preserve the rendered v1 host overlay'
     }
 }
 if (Test-Path -LiteralPath (Join-Path $workspaceRoot '.assistant\工作流') -PathType Container) {

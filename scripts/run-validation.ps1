@@ -240,6 +240,7 @@ $coreScripts = @(
     'verify-context-provider-boundary.ps1',
     'verify-context-provider-install-isolation.ps1',
     'verify-entry-routing-clarification.ps1',
+    'verify-v2-entry-contract.ps1',
     'verify-harness-entry.ps1',
     'verify-lite-artifact-validator.ps1',
     'verify-lite-footprint.ps1',

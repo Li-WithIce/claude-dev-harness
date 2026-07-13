@@ -1,43 +1,44 @@
-# 全局指令
+# Claude Host Overlay
 
-每次对话开始时，先调用 `/entry-router` skill。
+- Call `/entry-router` at the start of each conversation.
+- Resolve the workspace via `DEV_HARNESS_WORKSPACE_ROOT` -> `WORKSPACE_ROOT` -> nearest parent containing `.assistant`; if environment values conflict or no unique workspace exists, stop shared-memory writes and request an explicit root.
+- The active workspace's `.assistant` is the only shared runtime source. Default language is Chinese and sensitive values must not be disclosed.
+- On resume, read existing recovery index, current task, task runtime, interruption, and last-session files in that order; missing files mean no recorded state.
+- Claude follows the workspace single-writer model. Multi-step `mode=workflow` start/switch/pause may sync runtime; standalone quick/read-only work does not.
 
-# Companion Starter 记忆规则
+<!-- BEGIN GENERATED ENTRY CONTRACT -->
+<!-- source-sha256: dd172b63ca8370e95d7490f9def9f31fcd6087b8e6ffeb322d3c750eb541c42f -->
+# Entry Contract
 
-- 当前工作区动态解析：`DEV_HARNESS_WORKSPACE_ROOT` -> `WORKSPACE_ROOT` -> 从当前工作目录向父目录查找包含 `.assistant` 的最近目录。
-- 多个环境变量指向不同目录，或无法找到唯一工作区时，停止共享记忆读写并要求显式指定工作区。
-- 共享记忆目录始终是当前工作区下的 `.assistant`，不得绑定安装时工作区。
-- 默认语言：中文。
+Canonical shared routing contract. Host templates may add only host-specific overlays outside the generated markers.
 
-## 高频硬规则
+- `protocol_default`: `auto`
+- `auto_resolves_to`: `v1`
+- `v2_entry_activation`: `disabled`
+- `stage_chain`: `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`
 
-1. 运行时真相源只看当前工作区的 `.assistant\运行时\`。
-2. `恢复索引.md` 是低成本恢复视图，不是独立真相源。
-3. 安装状态只看 `.assistant\配置\引导状态.md`，不要用它判断当前任务。
-4. 共享运行时文件采用单写者模型。
-5. 多步骤 `mode=workflow` 任务开始、切换、暂停时同步更新共享运行时；standalone quick/read-only 不写共享运行时。
-6. 新功能开发或功能修改以当前需求和业务正确性为准；不要为了兼容旧测试、旧快照或过期断言而保留或恢复旧行为。若旧测试与新需求冲突，应更新或删除旧测试并说明原因；只有用户明确要求历史兼容时才保留旧测试兼容。
+| case_id | condition | route | writes | stage_skill |
+| --- | --- | --- | --- | --- |
+| `non-project` | request is not project-scoped | `host-native` | `none` | `none` |
+| `new-readonly` | clear standalone project read-only request | `quick` | `none` | `none` |
+| `new-bounded-mutation` | clear low-risk bounded mutation | `quick` | `requested-scope` | `none` |
+| `new-durable-risky` | durable, high-risk, cross-module, or staged-evidence mutation | `workflow` | `authorized-scope` | `current-v1` |
+| `new-ambiguous` | read/write intent or route identity is ambiguous | `ask` | `none` | `none` |
+| `bare-resume` | resume request lacks execute intent | `ask` | `none` | `none` |
+| `active-status` | status or read-only review of the current task | `resume-current/readonly` | `none` | `none` |
+| `resume-execute` | explicit resume-and-execute of the current task | `resume-current/workflow` | `authorized-scope` | `current-v1` |
+| `inactive-status` | status or read-only review of an inactive task | `switch-existing/readonly` | `none` | `none` |
+| `durable-unowned` | authorized actionable durable item lacks task identity | `inbox-first` | `inbox-row-only` | `none` |
 
-## 恢复触发
-
-当收到“继续”“恢复”“resume”“刚才做到哪里了”等触发词时：
-
-- 先读当前工作区已存在的 `.assistant\运行时\恢复索引.md`。
-- 细节不足且文件存在时再读 `.assistant\运行时\当前任务.md`。
-- 有 `task_id` 且文件存在时读取 `.assistant\运行时\tasks\<task-id>.md`。
-- 最后按需读取 `.assistant\运行时\中断任务.md` 与 `.assistant\运行时\上次会话.md`。
-- 缺失运行时文件表示当前没有已记录的活动状态，不作为错误。
-
-## 懒加载边界
-
-Claude 是显式兼容 host，仍先调用 `/entry-router`，后续读取面跟随当前工作区入口路由：
-
-- `quick` 只加载入口规则、用户偏好 / 必要配置和直接相关 skill。
-- `workflow` 加载 `entry-router`、`orchestrator` 和当前 stage skill。
-- `resume-current` / `switch-existing` 先只读恢复 identity/runtime；只有用户明确继续 / 切换并执行时才加载 current stage skill 或写 runtime，read-only inspect/status 不执行这些动作。
-- `ask` 是 iterative blocking clarification gate：不加载 workflow stage skill，不创建 `docs/tasks/{task_id}/`，不改代码，不进入 quick/workflow/PLAN/IMPLEMENT；默认每轮只问一个最高价值问题，直到所有阻塞不确定性解除后再重新判断路由。
-- “需求澄清 / 需求确认 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认”等同族请求跟随工作区入口规则；需要可审计开发决策时只落到现有 `PLAN -> Clarification`，不新增 stage。
-- PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径仍不足以指导 IMPLEMENT 时，也按同一 Clarification 协议处理。
-- 进入 Clarification 协议后，先回答可由代码/文档查证的问题，保留 Clarification 最低字段，剩余用户决策按依赖顺序一次只问一个并给推荐答案；`clarification_ledger` 仍有 `decision: pending` 时，`User Confirmation` 保持 draft。
-- 阶段原则路由只作为认知视角，不新增五转流程：Entry/Clarification 用 Socrates，PLAN 用 Osborn/Hegel/First Principles/Occam，PLAN_REVIEW 用 Hegel+Bayes，IMPLEMENT 用 Ponytail/surgical change，CODE_REVIEW 用 Feynman，TEST 用 Bayes，revise 后用 Debono 保留仍成立的价值和约束。
-- 禁止 bulk-load 全部 skills、全部历史任务、Claude 兼容 skill 或 `workflow-team`，除非显式 backend、stage 或 team-mode 触发。
+- Resolve project/task identity before mode; identity never broadens authorization.
+- For project-scoped development and read-only engineering requests, `entry-router` is the default first hop. Do not invoke other workflow skills before routing; after routing, load only the context required by the selected mode.
+- `quick` loads only entry rules, necessary configuration, and the directly relevant skill; it creates no workflow artifact or shared pointer.
+- `workflow` loads `entry-router`, `orchestrator`, and only the current v1 stage skill; `plan.md` frontmatter is the sole stage truth.
+- `ask` is an iterative blocking clarification gate: do not load workflow stage skills, create task artifacts, edit code, write shared runtime/inbox, or initialize providers until all blocking uncertainties are resolved; ask one highest-value question at a time.
+- Ask exit criteria: ask cannot exit until the agent can state User goal, Success / acceptance criteria, In scope, Out of scope / non-goals, Affected area, Constraints, Risk level, Expected output, Recommended route: quick or workflow, and Why this route is safe.
+- Clarification ledger: answer code/doc-discoverable questions first, keep the base Clarification fields, ask remaining user decisions one at a time with a recommended answer, and keep `User Confirmation` draft while any `clarification_ledger` item is `decision: pending`.
+- Status/read-only recovery never replays fallback, syncs pointers, writes task/runtime state, or loads a stage skill; only explicit continue/switch-and-execute may do so within authorized `workflow` scope.
+- `inbox-first` is limited to already-authorized actionable durable capture; interactive ambiguity remains `ask` with zero writes.
+- Optional memory and provider indexes never block routing; absent or unavailable providers fall back to repository inspection.
+- v2 Requirement/Direct contracts remain inert until a later activation; v1 `entry-router`, `orchestrator`, five-stage tasks, and rollback paths remain authoritative.
+<!-- END GENERATED ENTRY CONTRACT -->
