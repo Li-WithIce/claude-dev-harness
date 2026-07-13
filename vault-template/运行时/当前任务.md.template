@@ -1,10 +1,12 @@
 ---
 tags: [运行时, 任务, 共享指针]
 created: __RENDER_AT_INSTALL__
-updated: __RENDER_AT_INSTALL__
+updated: __RUNTIME_TIMESTAMP__
+schema_version: current-task-pointer/v1.1
 task_id: none
+task_name: 无
 entry_host: unknown
-writer: Claude Code
+writer: install
 ---
 
 # 当前任务
@@ -16,5 +18,6 @@ writer: Claude Code
 | task_id | `none` |
 | 任务 | 无 |
 | 状态 | 空闲 |
-| 详细状态 | `运行时/tasks/` |
+| 当前文档 | none |
+| 工具 | none |
 | 下一步 | 等待新任务 |

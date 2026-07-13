@@ -18,17 +18,11 @@ param(
         [string]$Timestamp
     )
 
-    $updated = $false
     for ($i = 0; $i -lt $Lines.Count; $i++) {
         if ($Lines[$i] -match '^updated:\s*') {
             $Lines[$i] = "updated: $Timestamp"
-            $updated = $true
             break
         }
-    }
-
-    if (-not $updated) {
-        return ,$Lines
     }
 
     return ,$Lines
@@ -140,20 +134,6 @@ function Build-CandidateRow {
     return '| {0} | {1} | {2} | {3} | {4} | {5} | {6} | {7} |' -f $Columns[0], $Columns[1], $Columns[2], $Columns[3], $Columns[4], $Columns[5], $Columns[6], $Columns[7]
 }
 
-function Build-ArchiveRow {
-    param(
-        [string]$Id,
-        [string]$Date,
-        [string]$Type,
-        [string]$Summary,
-        [string]$Result,
-        [string]$TargetOrReason,
-        [string]$Note
-    )
-
-    return '| {0} | {1} | {2} | {3} | {4} | {5} | {6} |' -f $Id, $Date, $Type, $Summary, $Result, $TargetOrReason, $Note
-}
-
 function Write-Utf8Bom {
     param(
         [string]$Path,
@@ -252,7 +232,7 @@ $archiveRows = foreach ($item in $toArchive) {
     }
 
     $note = "source=$($item.Source); confirmation=$($item.Confirmation)"
-    Build-ArchiveRow -Id $item.Id -Date $today -Type $item.Type -Summary $item.Summary -Result $item.Status -TargetOrReason $targetOrReason -Note $note
+    '| {0} | {1} | {2} | {3} | {4} | {5} | {6} |' -f $item.Id, $today, $item.Type, $item.Summary, $item.Status, $targetOrReason, $note
 }
 
 $existingArchiveData = @()

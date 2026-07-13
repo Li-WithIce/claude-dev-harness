@@ -12,6 +12,8 @@ function Need($Path, $Needle) {
 }
 Need 'docs/工作流/context-provider-boundary.md' 'Provider output is evidence candidate, not workflow truth.'
 Need 'docs/工作流/context-provider-boundary.md' 'advisory context providers'
+Need 'docs/工作流/context-provider-boundary.md' 'Only after the user explicitly authorizes memory write'
+Need 'docs/工作流/context-provider-boundary.md' 'iterative blocking clarification gate'
 Need 'docs/工作流/context-provider-boundary.md' 'write `.assistant/运行时/*`'
 Need 'docs/工作流/context-provider-boundary.md' 'decide TEST pass/fail'
 Need 'docs/工作流/context-provider-boundary.md' 'fallback'

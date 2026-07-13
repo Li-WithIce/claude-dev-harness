@@ -13,14 +13,15 @@ permissions:
 jobs:
   validation:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Quick validation
+      - name: Full validation
         shell: pwsh
-        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation.ps1 -Suite quick
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation.ps1 -Suite all -CheckTimeoutSeconds 360
 
-      - name: Core validation
+      - name: Isolated installation verification
         shell: pwsh
-        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation.ps1 -Suite core
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-isolated-install-smoke.ps1 -RepoRoot $PWD

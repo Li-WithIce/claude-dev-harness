@@ -76,11 +76,14 @@ Need-Text $matrix 'ask` is an iterative blocking clarification route, not a stag
 Need-Text $matrix 'DONE` is a frontmatter terminal state, not an executable stage' "$matrixPath should state DONE is terminal frontmatter"
 Need-Text $matrix 'Handoff is a TEST/DONE communication discipline, not a stage' "$matrixPath should state Handoff is not a stage"
 Need-Text $matrix 'Provider tools remain opt-in and advisory' "$matrixPath should keep providers opt-in/advisory"
+Need-Text $matrix 'high-risk code or production areas increase evidence depth but do not grant workflow artifact or write authority' "$matrixPath should keep high-risk read-only work in quick"
+Need-Text $matrix 'if mutation scope or risk expands' "$matrixPath should scope risk-based escalation to mutation"
 Need-Text $matrix 'does not add frontmatter fields' "$matrixPath should not add frontmatter fields"
 Need-Text $matrix 'does not create new hard validator gates' "$matrixPath should not add hard validation gates"
 
 Reject-Regex $matrix '(?mi)^stage:\s*(ASK|QUICK|REVIEW|SUMMARY|HANDOFF)\b' "$matrixPath should not introduce non-canonical frontmatter stages"
 Reject-Regex $matrix '(?m)^```text\r?\n(?:.*\r?\n)*?(ASK|QUICK|REVIEW|SUMMARY|HANDOFF)\s*->' "$matrixPath should not list non-canonical names in the workflow chain"
+Reject-Regex $matrix 'Only use quick when scope and acceptance are clear, risk is low' "$matrixPath should not require low risk for pure read-only quick work"
 
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Output "- $_" }

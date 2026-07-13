@@ -6,58 +6,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Get-NormalizedPath {
-    param([string]$Path)
-
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        return $null
-    }
-
-    return [System.IO.Path]::GetFullPath($Path)
-}
-
-function C([int[]]$Points) {
-    return (-join ($Points | ForEach-Object { [char]$_ }))
-}
-
-function Get-LastExitCodeOrZero {
-    $variable = Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
-    if ($null -ne $variable -and $variable.Value -is [int]) {
-        return $variable.Value
-    }
-
-    return 0
-}
-
-function Invoke-RepoScript {
-    param(
-        [string]$UserProfile,
-        [string]$ScriptPath,
-        [hashtable]$Arguments = @{},
-        [string]$WorkingDirectory = ''
-    )
-
-    $originalUserProfile = $env:USERPROFILE
-    $originalLocation = $null
-    try {
-        $env:USERPROFILE = $UserProfile
-        if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
-            $originalLocation = (Get-Location).Path
-            Set-Location -LiteralPath $WorkingDirectory
-        }
-
-        $output = @(& $ScriptPath @Arguments 2>&1)
-        return [pscustomobject]@{
-            Output   = @($output | ForEach-Object { [string]$_ })
-            ExitCode = (Get-LastExitCodeOrZero)
-        }
-    } finally {
-        if (-not [string]::IsNullOrWhiteSpace($originalLocation)) {
-            Set-Location -LiteralPath $originalLocation
-        }
-        $env:USERPROFILE = $originalUserProfile
-    }
-}
+. (Join-Path $PSScriptRoot 'fixture-test-common.ps1')
 
 function Add-Check {
     param([string]$Message)
@@ -76,13 +25,11 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 $RepoRoot = Get-NormalizedPath -Path $RepoRoot
 $script:Checks = @()
 $script:Failures = @()
-$runtimeDirName = C @(36816, 34892, 26102)
-$memoryHealthReportFileName = ((C @(35760, 24518, 20307, 26816, 25253, 21578)) + '.md')
-$scratchRoot = Join-Path $RepoRoot 'tmp\memory-health-report-regression'
-if (Test-Path -LiteralPath $scratchRoot) {
-    Remove-Item -LiteralPath $scratchRoot -Recurse -Force
-}
+$runtimeDirName = Convert-CodePointsToString @(36816, 34892, 26102)
+$memoryHealthReportFileName = ((Convert-CodePointsToString @(35760, 24518, 20307, 26816, 25253, 21578)) + '.md')
+$scratchRoot = Join-Path $RepoRoot ('tmp\memory-health-report-regression-' + [guid]::NewGuid().ToString('N'))
 
+try {
 New-Item -ItemType Directory -Path $scratchRoot | Out-Null
 
 $healthyCaseRoot = Join-Path $scratchRoot 'healthy-custom-output'
@@ -181,6 +128,15 @@ if ($failingReportContent -notmatch [regex]::Escape('- **status**: FAIL')) {
     Add-Failure 'memory-health-report.ps1 should persist the failing checker status into the generated report'
 } else {
     Add-Check 'memory-health-report.ps1 persists the failing checker status into the generated report'
+}
+
+if ((Test-FileHasUtf8Bom -Path $healthyReportPath) -and (Test-FileHasUtf8Bom -Path $failingReportPath)) {
+    Add-Check 'memory-health-report.ps1 writes healthy and failing reports as UTF-8 with BOM'
+} else {
+    Add-Failure 'memory-health-report.ps1 should write healthy and failing reports as UTF-8 with BOM'
+}
+} finally {
+    Remove-DirectoryWithRetry -Path $scratchRoot
 }
 
 Write-Output 'Checks:'

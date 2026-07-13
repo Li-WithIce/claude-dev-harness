@@ -6,6 +6,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot 'fixture-test-common.ps1')
+
 function Add-Check {
     param([string]$Message)
     $script:Checks += $Message
@@ -14,15 +16,6 @@ function Add-Check {
 function Add-Failure {
     param([string]$Message)
     $script:Failures += $Message
-}
-
-function Write-Utf8Bom {
-    param(
-        [string]$Path,
-        [string]$Content
-    )
-
-    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($true)))
 }
 
 function Read-FileUtf8 {
@@ -40,43 +33,6 @@ function Read-FileUtf8 {
     return $content
 }
 
-function Remove-DirectoryWithRetry {
-    param([string]$Path)
-
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return
-    }
-
-    $lastError = $null
-    for ($attempt = 0; $attempt -lt 10; $attempt++) {
-        try {
-            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
-            return
-        } catch {
-            $lastError = $_
-            Start-Sleep -Milliseconds 200
-        }
-    }
-
-    if (Test-Path -LiteralPath $Path) {
-        Add-Failure ("cleanup failed for {0}: {1}" -f $Path, $lastError.Exception.Message)
-    }
-}
-
-function Copy-RepoPathToFixture {
-    param(
-        [string]$SourceRoot,
-        [string]$FixtureRoot,
-        [string]$RelativePath
-    )
-
-    $sourcePath = Join-Path $SourceRoot $RelativePath
-    $destinationPath = Join-Path $FixtureRoot $RelativePath
-    $destinationParent = Split-Path -Parent $destinationPath
-    New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
-    Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Recurse -Force
-}
-
 function New-IsolatedRepoFixture {
     param([string]$SourceRoot)
 
@@ -84,7 +40,11 @@ function New-IsolatedRepoFixture {
     New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'docs\tasks') -Force | Out-Null
     foreach ($relativePath in @(
         'scripts\advance-stage.ps1',
+        'scripts\lite-artifact-parser.ps1',
         'scripts\validate-lite-artifacts.ps1',
+        'skills\obsidian-memory\scripts\runtime-inbox-common.ps1',
+        'skills\obsidian-memory\scripts\runtime-state-common.ps1',
+        'skills\obsidian-memory\scripts\resolve-shared-memory-paths.ps1',
         'agent-configs\profiles',
         'agent-configs\workflows'
     )) {
@@ -125,6 +85,7 @@ function Invoke-AdvanceStageWithStreams {
     param(
         [string]$AdvancePath,
         [string]$TaskId,
+        [string]$ExpectedStage,
         [string]$VaultRoot,
         [string]$RepoRoot,
         [string]$WorkspaceRoot = "",
@@ -138,6 +99,7 @@ function Invoke-AdvanceStageWithStreams {
         '-ExecutionPolicy', 'Bypass',
         '-File', $AdvancePath,
         '-TaskId', $TaskId,
+        '-ExpectedStage', $ExpectedStage,
         '-VaultRoot', $VaultRoot,
         '-RepoRoot', $RepoRoot
     )
@@ -335,7 +297,7 @@ $RepoRoot = $fixtureRoot
 $validatorPath = Join-Path $RepoRoot 'scripts\validate-lite-artifacts.ps1'
 $advancePath = Join-Path $RepoRoot 'scripts\advance-stage.ps1'
 $taskBase = Join-Path $RepoRoot 'docs\tasks'
-$vaultRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('harness-workflow-descriptor-vault-' + [guid]::NewGuid().ToString('N'))
+$vaultRoot = Join-Path $RepoRoot '.assistant'
 $script:Checks = @()
 $script:Failures = @()
 $createdTaskDirs = @()
@@ -564,14 +526,15 @@ stages:
     $workspaceRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('harness-workflow-descriptor-workspace-' + [guid]::NewGuid().ToString('N'))
     $createdWorkspaceRoots += $workspaceRoot
     $workspaceTaskBase = Join-Path $workspaceRoot 'docs\tasks'
+    $workspaceVaultRoot = Join-Path $workspaceRoot '.assistant'
     New-Item -ItemType Directory -Path $workspaceTaskBase -Force | Out-Null
     $taskWorkspace = 'workflow-descriptor-workspace-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     $taskWorkspaceDir = Join-Path $workspaceTaskBase $taskWorkspace
     New-Item -ItemType Directory -Path $taskWorkspaceDir -Force | Out-Null
     Write-Utf8Bom -Path (Join-Path $taskWorkspaceDir 'plan.md') -Content (New-PlanContent -TaskId $taskWorkspace -Stage 'PLAN' -Tool 'claudecode')
-    $workspaceAdvanceResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskWorkspace -VaultRoot $vaultRoot -RepoRoot $RepoRoot -WorkspaceRoot $workspaceRoot
+    $workspaceAdvanceResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskWorkspace -ExpectedStage 'PLAN' -VaultRoot $workspaceVaultRoot -RepoRoot $RepoRoot -WorkspaceRoot $workspaceRoot
     $workspacePlan = Read-FileUtf8 -Path (Join-Path $taskWorkspaceDir 'plan.md')
-    $workspaceMirror = Read-FileUtf8 -Path (Join-Path $vaultRoot "运行时\tasks\$taskWorkspace.md")
+    $workspaceMirror = Read-FileUtf8 -Path (Join-Path $workspaceVaultRoot "运行时\tasks\$taskWorkspace.md")
     $workspaceManifestPath = Join-Path $taskWorkspaceDir 'skill-manifest.json'
     $repoTaskPath = Join-Path $taskBase $taskWorkspace
     $repoManifestPath = Join-Path $repoTaskPath 'skill-manifest.json'
@@ -599,7 +562,7 @@ stages:
     $createdTaskDirs += $taskCliToolDir
     New-Item -ItemType Directory -Path $taskCliToolDir -Force | Out-Null
     Write-Utf8Bom -Path (Join-Path $taskCliToolDir 'plan.md') -Content (New-PlanContent -TaskId $taskCliTool -Stage 'PLAN' -Tool 'claudecode' -ExtraFrontmatter @('tool_profile: harness-default-claude', 'model: claude-opus-4-7'))
-    $cliToolResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskCliTool -VaultRoot $vaultRoot -RepoRoot $RepoRoot -Tool 'codex'
+    $cliToolResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskCliTool -ExpectedStage 'PLAN' -VaultRoot $vaultRoot -RepoRoot $RepoRoot -Tool 'codex'
     $cliToolPlan = Read-FileUtf8 -Path (Join-Path $taskCliToolDir 'plan.md')
     $cliToolMirror = Read-FileUtf8 -Path (Join-Path $vaultRoot "运行时\tasks\$taskCliTool.md")
     if ($cliToolResult.ExitCode -eq 0 -and
@@ -616,7 +579,7 @@ stages:
     $createdTaskDirs += $taskCliProfileDir
     New-Item -ItemType Directory -Path $taskCliProfileDir -Force | Out-Null
     Write-Utf8Bom -Path (Join-Path $taskCliProfileDir 'plan.md') -Content (New-PlanContent -TaskId $taskCliProfile -Stage 'PLAN' -Tool 'claudecode')
-    $cliProfileResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskCliProfile -VaultRoot $vaultRoot -RepoRoot $RepoRoot -Profile 'harness-default-codex'
+    $cliProfileResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskCliProfile -ExpectedStage 'PLAN' -VaultRoot $vaultRoot -RepoRoot $RepoRoot -Profile 'harness-default-codex'
     if ($cliProfileResult.ExitCode -eq 0 -and
         $cliProfileResult.StdOut -eq 'PLAN_REVIEW | codex' -and
         $cliProfileResult.StdErr -match 'resolved tool=codex via cli-profile') {
@@ -630,7 +593,7 @@ stages:
     $createdTaskDirs += $taskCliProfileInvalidDir
     New-Item -ItemType Directory -Path $taskCliProfileInvalidDir -Force | Out-Null
     Write-Utf8Bom -Path (Join-Path $taskCliProfileInvalidDir 'plan.md') -Content (New-PlanContent -TaskId $taskCliProfileInvalid -Stage 'PLAN' -Tool 'claudecode')
-    $cliProfileInvalidResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskCliProfileInvalid -VaultRoot $vaultRoot -RepoRoot $RepoRoot -Profile 'harness-default-missing'
+    $cliProfileInvalidResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskCliProfileInvalid -ExpectedStage 'PLAN' -VaultRoot $vaultRoot -RepoRoot $RepoRoot -Profile 'harness-default-missing'
     $cliProfileInvalidPlan = Read-FileUtf8 -Path (Join-Path $taskCliProfileInvalidDir 'plan.md')
     $cliProfileInvalidMirrorPath = Join-Path $vaultRoot "运行时\tasks\$taskCliProfileInvalid.md"
     if ($cliProfileInvalidResult.ExitCode -ne 0 -and
@@ -649,7 +612,7 @@ stages:
     $createdTaskDirs += $taskWorkflowDefaultDir
     New-Item -ItemType Directory -Path $taskWorkflowDefaultDir -Force | Out-Null
     Write-Utf8Bom -Path (Join-Path $taskWorkflowDefaultDir 'plan.md') -Content (New-PlanContent -TaskId $taskWorkflowDefault -Stage 'PLAN' -Tool 'claudecode')
-    $workflowDefaultResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskWorkflowDefault -VaultRoot $vaultRoot -RepoRoot $RepoRoot
+    $workflowDefaultResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskWorkflowDefault -ExpectedStage 'PLAN' -VaultRoot $vaultRoot -RepoRoot $RepoRoot
     if ($workflowDefaultResult.ExitCode -eq 0 -and
         $workflowDefaultResult.StdOut -eq 'PLAN_REVIEW | codex' -and
         $workflowDefaultResult.StdErr -match 'resolved tool=codex via workflow-default') {
@@ -662,6 +625,13 @@ stages:
     $taskWorkflowDefaultTestDir = Join-Path $taskBase $taskWorkflowDefaultTest
     $createdTaskDirs += $taskWorkflowDefaultTestDir
     New-Item -ItemType Directory -Path $taskWorkflowDefaultTestDir -Force | Out-Null
+    $implementationPass = @"
+### Run 1 · 2026-04-09 10:20 · runner: Codex
+- changed: workflow descriptor fixture implementation
+- tests: targeted
+- risks: none
+- next: CODE_REVIEW
+"@
     $codeReviewPass = @"
 ### Run 1 · 2026-04-09 10:30 · runner: Codex
 - verdict: pass
@@ -669,9 +639,10 @@ stages:
 - next: TEST
 "@
     $workflowDefaultTestContent = New-PlanContent -TaskId $taskWorkflowDefaultTest -Stage 'CODE_REVIEW' -Tool 'claudecode'
+    $workflowDefaultTestContent = [regex]::Replace($workflowDefaultTestContent, '(?m)^## Implementation Notes\s*$', "## Implementation Notes`r`n$implementationPass")
     $workflowDefaultTestContent = [regex]::Replace($workflowDefaultTestContent, '(?m)^## Code Review\s*$', "## Code Review`r`n$codeReviewPass")
     Write-Utf8Bom -Path (Join-Path $taskWorkflowDefaultTestDir 'plan.md') -Content $workflowDefaultTestContent
-    $workflowDefaultTestResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskWorkflowDefaultTest -VaultRoot $vaultRoot -RepoRoot $RepoRoot
+    $workflowDefaultTestResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskWorkflowDefaultTest -ExpectedStage 'CODE_REVIEW' -VaultRoot $vaultRoot -RepoRoot $RepoRoot
     $workflowDefaultTestPlan = Read-FileUtf8 -Path (Join-Path $taskWorkflowDefaultTestDir 'plan.md')
     $workflowDefaultTestMirror = Read-FileUtf8 -Path (Join-Path $vaultRoot "运行时\tasks\$taskWorkflowDefaultTest.md")
     $workflowDefaultTestManifest = Read-FileUtf8 -Path (Join-Path $taskWorkflowDefaultTestDir 'skill-manifest.json') | ConvertFrom-Json
@@ -692,7 +663,7 @@ stages:
     $createdTaskDirs += $taskRequiresToolDir
     New-Item -ItemType Directory -Path $taskRequiresToolDir -Force | Out-Null
     Write-Utf8Bom -Path (Join-Path $taskRequiresToolDir 'plan.md') -Content (New-PlanContent -TaskId $taskRequiresTool -Stage 'PLAN' -Tool 'claudecode')
-    $requiresToolResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskRequiresTool -VaultRoot $vaultRoot -RepoRoot $RepoRoot
+    $requiresToolResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskRequiresTool -ExpectedStage 'PLAN' -VaultRoot $vaultRoot -RepoRoot $RepoRoot
     if ($requiresToolResult.ExitCode -ne 0 -and $requiresToolResult.Combined -match 'requires -Tool') {
         Add-Check 'B5 missing cli-tool/cli-profile/workflow-default still throws requires -Tool'
     } else {
@@ -706,7 +677,7 @@ stages:
     $createdTaskDirs += $taskCompatPassDir
     New-Item -ItemType Directory -Path $taskCompatPassDir -Force | Out-Null
     Write-Utf8Bom -Path (Join-Path $taskCompatPassDir 'plan.md') -Content (New-PlanContent -TaskId $taskCompatPass -Stage 'PLAN' -Tool 'claudecode')
-    $compatPassResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskCompatPass -VaultRoot $vaultRoot -RepoRoot $RepoRoot -Tool 'codex' -Profile 'harness-default-codex'
+    $compatPassResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskCompatPass -ExpectedStage 'PLAN' -VaultRoot $vaultRoot -RepoRoot $RepoRoot -Tool 'codex' -Profile 'harness-default-codex'
     $compatPassPlan = Read-FileUtf8 -Path (Join-Path $taskCompatPassDir 'plan.md')
     $compatPassMirror = Read-FileUtf8 -Path (Join-Path $vaultRoot "运行时\tasks\$taskCompatPass.md")
     if ($compatPassResult.ExitCode -eq 0 -and
@@ -722,7 +693,7 @@ stages:
     $createdTaskDirs += $taskCompatFailDir
     New-Item -ItemType Directory -Path $taskCompatFailDir -Force | Out-Null
     Write-Utf8Bom -Path (Join-Path $taskCompatFailDir 'plan.md') -Content (New-PlanContent -TaskId $taskCompatFail -Stage 'PLAN' -Tool 'claudecode')
-    $compatFailResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskCompatFail -VaultRoot $vaultRoot -RepoRoot $RepoRoot -Tool 'claudecode' -Profile 'harness-default-codex'
+    $compatFailResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskCompatFail -ExpectedStage 'PLAN' -VaultRoot $vaultRoot -RepoRoot $RepoRoot -Tool 'claudecode' -Profile 'harness-default-codex'
     if ($compatFailResult.ExitCode -ne 0 -and $compatFailResult.Combined -match 'does not match tool claudecode') {
         Add-Check 'C2 explicit tool/profile mismatch still reuses Phase 1 rejection'
     } else {
@@ -743,7 +714,7 @@ stages:
     New-Item -ItemType Directory -Path $taskBadDescriptorDir -Force | Out-Null
     Write-Utf8Bom -Path (Join-Path $taskBadDescriptorDir 'plan.md') -Content (New-PlanContent -TaskId $taskBadDescriptor -Stage 'PLAN' -Tool 'claudecode')
     $badDescriptorValidator = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskBadDescriptor -RepoRoot $RepoRoot
-    $badDescriptorAdvance = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskBadDescriptor -VaultRoot $vaultRoot -RepoRoot $RepoRoot -Tool 'codex'
+    $badDescriptorAdvance = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskBadDescriptor -ExpectedStage 'PLAN' -VaultRoot $vaultRoot -RepoRoot $RepoRoot -Tool 'codex'
     if ($badDescriptorValidator.ExitCode -eq 0 -and
         $badDescriptorValidator.Text -match 'workflow descriptor should contain version' -and
         $badDescriptorAdvance.ExitCode -eq 0 -and
@@ -761,7 +732,7 @@ stages:
     $createdTaskDirs += $taskStdoutDir
     New-Item -ItemType Directory -Path $taskStdoutDir -Force | Out-Null
     Write-Utf8Bom -Path (Join-Path $taskStdoutDir 'plan.md') -Content (New-PlanContent -TaskId $taskStdout -Stage 'PLAN' -Tool 'claudecode')
-    $stdoutResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskStdout -VaultRoot $vaultRoot -RepoRoot $RepoRoot
+    $stdoutResult = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskStdout -ExpectedStage 'PLAN' -VaultRoot $vaultRoot -RepoRoot $RepoRoot
     if ($stdoutResult.ExitCode -eq 0 -and
         $stdoutResult.StdOut -eq 'PLAN_REVIEW | codex' -and
         $stdoutResult.StdOut -notmatch 'resolved tool=' -and
@@ -776,7 +747,7 @@ stages:
     $createdTaskDirs += $taskF1Dir
     New-Item -ItemType Directory -Path $taskF1Dir -Force | Out-Null
     Write-Utf8Bom -Path (Join-Path $taskF1Dir 'plan.md') -Content (New-PlanContent -TaskId $taskF1 -Stage 'PLAN' -Tool 'claudecode' -ExtraFrontmatter @('tool_profile: harness-default-claude', 'model: claude-opus-4-7'))
-    $f1Result = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskF1 -VaultRoot $vaultRoot -RepoRoot $RepoRoot
+    $f1Result = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskF1 -ExpectedStage 'PLAN' -VaultRoot $vaultRoot -RepoRoot $RepoRoot
     $f1Plan = Read-FileUtf8 -Path (Join-Path $taskF1Dir 'plan.md')
     $f1Mirror = Read-FileUtf8 -Path (Join-Path $vaultRoot "运行时\tasks\$taskF1.md")
     if ($f1Result.ExitCode -eq 0 -and
@@ -795,7 +766,7 @@ stages:
     $createdTaskDirs += $taskF2Dir
     New-Item -ItemType Directory -Path $taskF2Dir -Force | Out-Null
     Write-Utf8Bom -Path (Join-Path $taskF2Dir 'plan.md') -Content (New-PlanContent -TaskId $taskF2 -Stage 'PLAN' -Tool 'claudecode' -ExtraFrontmatter @('tool_profile: harness-default-claude', 'model: claude-opus-4-8'))
-    $f2Result = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskF2 -VaultRoot $vaultRoot -RepoRoot $RepoRoot
+    $f2Result = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskF2 -ExpectedStage 'PLAN' -VaultRoot $vaultRoot -RepoRoot $RepoRoot
     $f2Plan = Read-FileUtf8 -Path (Join-Path $taskF2Dir 'plan.md')
     $f2Mirror = Read-FileUtf8 -Path (Join-Path $vaultRoot "运行时\tasks\$taskF2.md")
     if ($f2Result.ExitCode -eq 0 -and
@@ -820,7 +791,7 @@ stages:
     $createdTaskDirs += $taskF3Dir
     New-Item -ItemType Directory -Path $taskF3Dir -Force | Out-Null
     Write-Utf8Bom -Path (Join-Path $taskF3Dir 'plan.md') -Content (New-PlanContent -TaskId $taskF3 -Stage 'PLAN' -Tool 'codex' -ExtraFrontmatter @('tool_profile: harness-default-codex', 'model: gpt-5.5/xhigh'))
-    $f3Result = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskF3 -VaultRoot $vaultRoot -RepoRoot $RepoRoot
+    $f3Result = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskF3 -ExpectedStage 'PLAN' -VaultRoot $vaultRoot -RepoRoot $RepoRoot
     if ($f3Result.ExitCode -ne 0 -and $f3Result.Combined -match 'requires -Tool') {
         Add-Check 'F3 current-stage tool_profile does not substitute for workflow-default when descriptor lacks default_profile'
     } else {

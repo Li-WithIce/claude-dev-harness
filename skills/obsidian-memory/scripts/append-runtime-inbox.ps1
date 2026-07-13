@@ -1,6 +1,6 @@
 ﻿# 共享运行时收件箱追加脚本。
 # 负责创建规范化 inbox，并追加新的 open 项。
-# 任务 ID 未显式传入时，优先从 current-flow 解析。
+# 任务 ID 未显式传入时，以 canonical 当前任务为准；仅指针缺失时回退 legacy current-flow。
 
 [CmdletBinding()]
 param(
@@ -20,6 +20,7 @@ $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'resolve-shared-memory-paths.ps1')
 . (Join-Path $PSScriptRoot 'runtime-inbox-common.ps1')
+. (Join-Path $PSScriptRoot 'runtime-state-common.ps1')
 
 <#
 .SYNOPSIS
@@ -27,23 +28,23 @@ $ErrorActionPreference = 'Stop'
 
 .DESCRIPTION
 该入口会确保 inbox 文件是标准格式，并在追加前清理占位行。
-当调用方未提供 TaskId 时，脚本会优先使用 current-flow.task_id。
+当调用方未提供 TaskId 时，以 canonical 当前任务为准；只有指针缺失才回退 legacy current-flow。
 
 .OUTPUTS
 标准状态行，供 wrapper 和测试读取。
 #>
 
 $VaultRoot = Resolve-SharedMemoryVaultRoot -VaultRoot $VaultRoot
-$inbox = Read-RuntimeInbox -VaultRoot $VaultRoot -NormalizeExisting
+$runtimeMutex = Enter-CanonicalRuntimeMutex -VaultRoot $VaultRoot
+try {
 $entryTaskId = $TaskId
 if ([string]::IsNullOrWhiteSpace($entryTaskId)) {
     $entryTaskId = Resolve-EntryTaskId -VaultRoot $VaultRoot
 }
-
-$activeRows = @($inbox.Rows | Where-Object {
-    $_.CreatedAt -ne '-' -and $_.Summary -ne $script:RuntimeInboxPlaceholderSummary
-})
-$activeRows += [pscustomobject]@{
+if ($entryTaskId -cne 'unknown' -and -not (Test-CanonicalRuntimeTaskId -TaskId $entryTaskId)) {
+    throw "Inbox TaskId must be canonical or the exact lowercase unknown sentinel: $entryTaskId"
+}
+$newRow = [pscustomobject]@{
     CreatedAt = Get-CurrentTimestamp
     Source    = $Source
     TaskId    = $(if ([string]::IsNullOrWhiteSpace($entryTaskId)) { 'unknown' } else { $entryTaskId })
@@ -53,9 +54,18 @@ $activeRows += [pscustomobject]@{
     Payload   = $Payload
 }
 
+$inbox = Read-RuntimeInbox -VaultRoot $VaultRoot -NormalizeExisting
+$activeRows = @($inbox.Rows | Where-Object {
+    -not (Test-RuntimeInboxPlaceholderRow -Row $_)
+})
+$activeRows += $newRow
+
 Write-RuntimeInbox -InboxPath $inbox.Path -CreatedDate $inbox.CreatedDate -Rows $activeRows
 
 Write-Output 'STATUS: PASS'
 Write-Output ('InboxPath: {0}' -f $inbox.Path)
 Write-Output ('EntryTaskId: {0}' -f $(if ([string]::IsNullOrWhiteSpace($entryTaskId)) { 'unknown' } else { $entryTaskId }))
+} finally {
+    Exit-CanonicalRuntimeMutex -Mutex $runtimeMutex
+}
 exit 0

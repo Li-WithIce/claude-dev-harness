@@ -46,6 +46,8 @@ Multi-turn conversation (continue a previous session):
 
 ### Windows (PowerShell)
 
+Use PowerShell 7.3 or newer (`pwsh`). The Windows wrapper fails before doing any work under older hosts.
+
 The script path is:
 
 ```
@@ -55,25 +57,26 @@ The script path is:
 Minimal invocation:
 
 ```powershell
-& ~/.claude/skills/codex/scripts/ask_codex.ps1 "Your request in natural language"
+& "$HOME/.claude/skills/codex/scripts/ask_codex.ps1" "Your request in natural language"
 ```
 
 With file context:
 
 ```powershell
-& ~/.claude/skills/codex/scripts/ask_codex.ps1 "Refactor these components to use the new API" `
-  -f src/components/UserList.tsx `
-  -f src/components/UserDetail.tsx
+& "$HOME/.claude/skills/codex/scripts/ask_codex.ps1" "Refactor these components to use the new API" `
+  -File @('src/components/UserList.tsx', 'src/components/UserDetail.tsx')
 ```
 
 Multi-turn conversation (continue a previous session):
 
 ```powershell
-& ~/.claude/skills/codex/scripts/ask_codex.ps1 "Also add retry logic with exponential backoff" `
+& "$HOME/.claude/skills/codex/scripts/ask_codex.ps1" "Also add retry logic with exponential backoff" `
   -Session <session_id from previous run>
 ```
 
 ### Output format
+
+Both wrappers use the same success protocol below. The Windows PowerShell wrapper reports success only when Codex exits with code 0 and emits an agent response; nonzero exit, timeout, or an empty response leaves the requested output path unchanged. The Bash wrapper is a separate implementation and is not covered by that Windows atomic-publication guarantee.
 
 The script prints on success:
 
@@ -87,40 +90,58 @@ Read the file at `output_path` to get CodeX's response. Save `session_id` if you
 ## Workflow
 
 1. Understand the problem: read the key files to grasp what's broken or needed. Focus on being able to describe the problem and goal clearly — you don't need to design the full solution or enumerate every affected file. Codex will explore the codebase itself.
-2. Run the script with a focused task description: the goal, key constraints, and any non-obvious context. For discussion or analysis without changes, use `--read-only`.
-3. Pass 1-4 entry-point files with `--file` as starting hints. Codex has the same tools as Claude and will discover related files on its own — no need to enumerate everything upfront.
+2. Run the script with a focused task description: the goal, key constraints, and any non-obvious context. For discussion or analysis without changes, use the wrapper-specific read-only option below.
+3. Pass 1-4 entry-point files with Bash `--file` or PowerShell `-File` as starting hints. Codex has the same tools as Claude and will discover related files on its own — no need to enumerate everything upfront.
 4. Read the output — Codex executes changes and reports what it did.
 5. Review the changes in your workspace.
 
-For multi-step projects, use `--session <id>` to continue with full conversation history. For independent parallel tasks, use the Task tool with `run_in_background: true`.
+For multi-step projects, use Bash `--session <id>` or PowerShell `-Session <id>` to continue with full conversation history. For independent parallel tasks, use the Task tool with `run_in_background: true`.
 
 ## Failure handling
 
 - **`script: tcgetattr/ioctl: Operation not supported on socket`** (exit code 1): the `script` command probes stdin with `tcgetattr` at startup and only tolerates `ENOTTY`/`ENODEV` errors. When Claude Code connects stdin via a socketpair, the kernel returns `EOPNOTSUPP` instead — which `script` doesn't whitelist, so it exits immediately. The script detects this automatically by probing with `script -q /dev/null true` first and falls back to direct execution. Update to the latest version if you still see this error.
 - **Exit code 137**: the task was interrupted (user cancel or OOM). Not a Codex bug — retry or break the task into smaller pieces.
 - **`ERROR codex_core::codex: failed to load skill ...`** in stderr: one of Codex's own installed skills has a broken YAML file. This warning is harmless and doesn't affect the current task — ignore it.
-- **`(no response from codex)`** in the output file: Codex ran but produced no readable output. Check stderr for clues; the task may have hit a sandbox restriction.
+- **Codex exited successfully without an agent response** (Windows): the PowerShell wrapper returns nonzero and leaves the requested output path unchanged. Check stderr and the streamed progress for the underlying failure.
 
-## Options
+### Bash options
 
 - `--workspace <path>` — Target workspace directory (defaults to current directory).
 - `--file <path>` — Point CodeX to key entry-point files (repeatable, workspace-relative or absolute). Don't duplicate their contents in the prompt.
 - `--session <id>` — Resume a previous session for multi-turn conversation.
-- `--model <name>` — Override model (default: uses Codex config).
+- `--model <name>` — Override model for a new session (default: uses Codex config).
 - `--reasoning <level>` — Reasoning effort: `low`, `medium`, `high` (default: `medium`). Use `high` for code review, debugging, complex refactoring, or root cause analysis.
-- `--sandbox <mode>` — Override sandbox policy (default: workspace-write via full-auto).
-- `--read-only` — Read-only mode for pure discussion/analysis, no file changes.
-- `--ephemeral` — Do not persist Codex session files; useful for one-shot smoke tests that do not need resume.
+- `--sandbox <mode>` — Override sandbox policy for a new session.
+- `--read-only` — Read-only sandbox for a new session.
+- `--full-auto` — Full-auto for a new session; this is the Bash default unless sandbox/read-only is selected.
+- `--output <path>` — Response path.
+
+### Bash resume limitations
+
+The Bash wrapper's resume branch forwards the session id, reasoning effort, prompt/file context, and workspace working directory. Its parsed `--model`, `--sandbox`, `--read-only`, and `--full-auto` flags do not alter a resumed session; do not rely on them for resume isolation. The Bash wrapper has no `--ephemeral` option. Use the Windows PowerShell wrapper when resumed readonly or ephemeral behavior is required.
+
+### Windows PowerShell options
+
+- `-Workspace <path>` — Target workspace directory (defaults to the caller's current directory).
+- `-File @('<path1>', '<path2>')` / `-f @('<path1>', '<path2>')` — Priority entry-point files; bind the parameter once with a PowerShell array.
+- `-Session <id>` — Resume a previous session.
+- `-Model <name>` — Override model; otherwise use Codex config.
+- `-Reasoning <level>` — `low`, `medium`, or `high` (default: `medium`).
+- `-Sandbox <mode>` — `read-only`, `workspace-write`, or `danger-full-access`; no sandbox override is supplied by default.
+- `-ReadOnly` — Read-only mode for new and resumed sessions.
+- `-FullAuto` — Opt in to full-auto for a new session; it is not the Windows default and does not apply to resume.
+- `-Ephemeral` — Do not persist Codex session files.
+- `-TimeoutSeconds <seconds>` — Main-process timeout (default: 1800 seconds); timeout returns nonzero and closes the supported process tree.
+- `-Output <path>` / `-o <path>` — Response path; relative paths use the caller's current directory and successful output is published atomically.
 
 ## Resume mode limitations
 
-When using `--session` to resume a previous conversation, note these limitations:
+The current Windows wrapper uses the Codex 0.141 resume contract:
 
-- **Must run in a git repository** — The `codex exec resume` command requires a git-trusted directory. It does not support `--skip-git-repo-check`.
-- **Limited options** — Resume mode only supports `-c/--config` and `--last`. The following options are **not supported** in resume mode:
-  - `--sandbox`
-  - `--full-auto`
-  - `--read-only`
-  - `--model`
-  - `--workspace` (resumes in the original session's context)
-- **Text output only** — Resume mode returns plain text instead of JSON-structured output.
+- It passes `--json`, `--skip-git-repo-check`, `--ignore-user-config`, optional `--ephemeral`, and optional `-m/--model`.
+- The follow-up prompt is sent through stdin with the explicit trailing `-` prompt argument.
+- Resume has no direct `--sandbox` or `--cd` option. Windows `-ReadOnly` is enforced with `-c sandbox_mode="read-only"`; an explicit `-Sandbox` uses the same config key.
+- `-Workspace` sets the wrapper process working directory, but it does not rewrite the original session's stored context.
+- `-FullAuto` applies only to new sessions.
+
+These resume guarantees are specific to `ask_codex.ps1`. The Bash wrapper is a separate implementation and does not inherit the Windows hardening contract.

@@ -15,15 +15,6 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Write-Utf8NoBom {
-    param(
-        [string]$Path,
-        [string]$Content
-    )
-
-    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($false)))
-}
-
 function Split-InlineYamlList {
     param([string]$Value)
 
@@ -145,5 +136,5 @@ if (-not (Test-Path -LiteralPath $outputDirectory -PathType Container)) {
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 }
 
-Write-Utf8NoBom -Path $resolvedOutputPath -Content ($lines -join "`n")
+[System.IO.File]::WriteAllText($resolvedOutputPath, ($lines -join "`n"), (New-Object System.Text.UTF8Encoding($false)))
 Write-Output $resolvedOutputPath

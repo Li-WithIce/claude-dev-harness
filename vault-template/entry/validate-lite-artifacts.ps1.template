@@ -3,7 +3,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [string]$TaskId
+    [string]$TaskId,
+
+    [switch]$Quality
 )
 
 Set-StrictMode -Version Latest
@@ -16,9 +18,11 @@ Validate lite task artifacts from the workspace.
 This shim exposes the managed validator under `.assistant\entry` so project users do not need to know the harness repo path.
 .PARAMETER TaskId
 The task id under `docs/tasks/{task_id}/`.
+.PARAMETER Quality
+Enable review quality score validation.
 .OUTPUTS
 None.
 #>
 
-& '{REPO_ROOT}\scripts\validate-lite-artifacts.ps1' -TaskId $TaskId -RepoRoot '{REPO_ROOT}' -WorkspaceRoot '{WORKSPACE_ROOT}'
+& '{REPO_ROOT}\scripts\validate-lite-artifacts.ps1' -TaskId $TaskId -RepoRoot '{REPO_ROOT}' -WorkspaceRoot '{WORKSPACE_ROOT}' -Quality:$Quality
 exit $LASTEXITCODE

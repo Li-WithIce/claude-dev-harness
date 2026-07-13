@@ -2,40 +2,39 @@
 
 每次对话开始时，先调用 `/entry-router` skill。
 
-# currentDate
-Today's date is __RENDER_AT_INSTALL__
-
 # Companion Starter 记忆规则
 
-- 工作区: `{WORKSPACE_ROOT}`
-- 记忆目录: `{VAULT_PATH}`
-- 默认语言: 中文
+- 当前工作区动态解析：`DEV_HARNESS_WORKSPACE_ROOT` -> `WORKSPACE_ROOT` -> 从当前工作目录向父目录查找包含 `.assistant` 的最近目录。
+- 多个环境变量指向不同目录，或无法找到唯一工作区时，停止共享记忆读写并要求显式指定工作区。
+- 共享记忆目录始终是当前工作区下的 `.assistant`，不得绑定安装时工作区。
+- 默认语言：中文。
 
 ## 高频硬规则
-1. 运行时真相源只看 `运行时/`。
+
+1. 运行时真相源只看当前工作区的 `.assistant\运行时\`。
 2. `恢复索引.md` 是低成本恢复视图，不是独立真相源。
-3. 安装状态只看 `配置/引导状态.md`，不要用它判断当前任务。
+3. 安装状态只看 `.assistant\配置\引导状态.md`，不要用它判断当前任务。
 4. 共享运行时文件采用单写者模型。
-5. 多步骤任务开始、切换、暂停时同步更新共享运行时。
+5. 多步骤 `mode=workflow` 任务开始、切换、暂停时同步更新共享运行时；standalone quick/read-only 不写共享运行时。
 6. 新功能开发或功能修改以当前需求和业务正确性为准；不要为了兼容旧测试、旧快照或过期断言而保留或恢复旧行为。若旧测试与新需求冲突，应更新或删除旧测试并说明原因；只有用户明确要求历史兼容时才保留旧测试兼容。
 
 ## 恢复触发
 
 当收到“继续”“恢复”“resume”“刚才做到哪里了”等触发词时：
 
-- 先读已存在的 `{VAULT_PATH}\运行时\恢复索引.md`
-- 细节不足且文件存在时再读 `{VAULT_PATH}\运行时\当前任务.md`
-- 有 `task_id` 且文件存在时读取 `{VAULT_PATH}\运行时\tasks\<task-id>.md`
-- 最后按需读取已存在的 `{VAULT_PATH}\运行时\中断任务.md` 与 `{VAULT_PATH}\运行时\上次会话.md`
-- 缺失运行时文件表示当前没有已记录的活动状态，不作为错误
+- 先读当前工作区已存在的 `.assistant\运行时\恢复索引.md`。
+- 细节不足且文件存在时再读 `.assistant\运行时\当前任务.md`。
+- 有 `task_id` 且文件存在时读取 `.assistant\运行时\tasks\<task-id>.md`。
+- 最后按需读取 `.assistant\运行时\中断任务.md` 与 `.assistant\运行时\上次会话.md`。
+- 缺失运行时文件表示当前没有已记录的活动状态，不作为错误。
 
 ## 懒加载边界
 
-Claude 是显式兼容 host，仍先调用 `/entry-router`，但后续读取面跟随工作区入口路由：
+Claude 是显式兼容 host，仍先调用 `/entry-router`，后续读取面跟随当前工作区入口路由：
 
 - `quick` 只加载入口规则、用户偏好 / 必要配置和直接相关 skill。
 - `workflow` 加载 `entry-router`、`orchestrator` 和当前 stage skill。
-- `resume-current` / `switch-existing` 先加载恢复运行时文件，再加载当前 stage skill。
+- `resume-current` / `switch-existing` 先只读恢复 identity/runtime；只有用户明确继续 / 切换并执行时才加载 current stage skill 或写 runtime，read-only inspect/status 不执行这些动作。
 - `ask` 是 iterative blocking clarification gate：不加载 workflow stage skill，不创建 `docs/tasks/{task_id}/`，不改代码，不进入 quick/workflow/PLAN/IMPLEMENT；默认每轮只问一个最高价值问题，直到所有阻塞不确定性解除后再重新判断路由。
 - “需求澄清 / 需求确认 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认”等同族请求跟随工作区入口规则；需要可审计开发决策时只落到现有 `PLAN -> Clarification`，不新增 stage。
 - PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径仍不足以指导 IMPLEMENT 时，也按同一 Clarification 协议处理。

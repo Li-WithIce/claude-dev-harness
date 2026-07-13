@@ -19,16 +19,6 @@ function Add-Failure {
     $script:Failures += $Message
 }
 
-function Resolve-RepoRoot {
-    param([string]$RequestedRoot)
-
-    if (-not [string]::IsNullOrWhiteSpace($RequestedRoot)) {
-        return (Resolve-Path -LiteralPath $RequestedRoot).Path
-    }
-
-    return (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-}
-
 function Assert-Contains {
     param(
         [string]$Content,
@@ -80,7 +70,8 @@ function Remove-DirectoryWithRetry {
 
 $script:Checks = @()
 $script:Failures = @()
-$repoRootResolved = Resolve-RepoRoot -RequestedRoot $RepoRoot
+$repoRootCandidate = if ([string]::IsNullOrWhiteSpace($RepoRoot)) { Join-Path $PSScriptRoot '..' } else { $RepoRoot }
+$repoRootResolved = (Resolve-Path -LiteralPath $repoRootCandidate).Path
 $renderer = Join-Path $repoRootResolved 'scripts\render-review-html.ps1'
 $fixture = Join-Path $repoRootResolved 'tests\fixtures\md-html\long-spec.md'
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('harness-render-review-html-' + [guid]::NewGuid().ToString('N'))

@@ -6,15 +6,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Get-NormalizedPath {
-    param([string]$Path)
-
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        return $null
-    }
-
-    return [System.IO.Path]::GetFullPath($Path)
-}
+. (Join-Path $PSScriptRoot 'fixture-test-common.ps1')
 
 function Add-Check {
     param([string]$Message)
@@ -62,29 +54,6 @@ function Write-Utf8Bom {
     }
 
     [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($true)))
-}
-
-function Remove-DirectoryWithRetry {
-    param([string]$Path)
-
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return
-    }
-
-    $lastError = $null
-    for ($attempt = 0; $attempt -lt 10; $attempt++) {
-        try {
-            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
-            return
-        } catch {
-            $lastError = $_
-            Start-Sleep -Milliseconds 200
-        }
-    }
-
-    if (Test-Path -LiteralPath $Path) {
-        Add-Failure ("cleanup failed for {0}: {1}" -f $Path, $lastError.Exception.Message)
-    }
 }
 
 function New-LayersFixture {

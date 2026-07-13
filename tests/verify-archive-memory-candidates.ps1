@@ -6,58 +6,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Get-NormalizedPath {
-    param([string]$Path)
-
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        return $null
-    }
-
-    return [System.IO.Path]::GetFullPath($Path)
-}
-
-function C([int[]]$Points) {
-    return (-join ($Points | ForEach-Object { [char]$_ }))
-}
-
-function Get-LastExitCodeOrZero {
-    $variable = Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
-    if ($null -ne $variable -and $variable.Value -is [int]) {
-        return $variable.Value
-    }
-
-    return 0
-}
-
-function Invoke-RepoScript {
-    param(
-        [string]$UserProfile,
-        [string]$ScriptPath,
-        [hashtable]$Arguments = @{},
-        [string]$WorkingDirectory = ''
-    )
-
-    $originalUserProfile = $env:USERPROFILE
-    $originalLocation = $null
-    try {
-        $env:USERPROFILE = $UserProfile
-        if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
-            $originalLocation = (Get-Location).Path
-            Set-Location -LiteralPath $WorkingDirectory
-        }
-
-        $output = @(& $ScriptPath @Arguments 2>&1)
-        return [pscustomobject]@{
-            Output   = @($output | ForEach-Object { [string]$_ })
-            ExitCode = (Get-LastExitCodeOrZero)
-        }
-    } finally {
-        if (-not [string]::IsNullOrWhiteSpace($originalLocation)) {
-            Set-Location -LiteralPath $originalLocation
-        }
-        $env:USERPROFILE = $originalUserProfile
-    }
-}
+. (Join-Path $PSScriptRoot 'fixture-test-common.ps1')
 
 function Get-PowerShellHostPath {
     try {
@@ -138,34 +87,32 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 $RepoRoot = Get-NormalizedPath -Path $RepoRoot
 $script:Checks = @()
 $script:Failures = @()
-$runtimeDirName = C @(36816, 34892, 26102)
-$candidateStem = C @(35760, 24518, 20505, 36873)
-$archiveStem = C @(35760, 24518, 20505, 36873, 24402, 26723)
+$runtimeDirName = Convert-CodePointsToString @(36816, 34892, 26102)
+$candidateStem = Convert-CodePointsToString @(35760, 24518, 20505, 36873)
+$archiveStem = Convert-CodePointsToString @(35760, 24518, 20505, 36873, 24402, 26723)
 $candidateFileName = "$candidateStem.md"
 $archiveFileName = "$archiveStem.md"
-$runtimeTag = C @(36816, 34892, 26102)
-$memoryTag = C @(35760, 24518)
-$archiveTag = C @(24402, 26723)
-$dateHeader = C @(26085, 26399)
-$typeHeader = C @(31867, 22411)
-$contentSummaryHeader = C @(20869, 23481, 25688, 35201)
-$suggestedWriteHeader = C @(24314, 35758, 20889, 20837)
-$sourceHeader = C @(26469, 28304)
-$statusHeader = C @(29366, 24577)
-$userConfirmHeader = C @(29992, 25143, 30830, 35748)
-$archiveDateHeader = C @(24402, 26723, 26085, 26399)
-$resultHeader = C @(32467, 26524)
-$targetReasonHeader = C @(30446, 26631, 20301, 32622, 32, 47, 32, 21407, 22240)
-$notesHeader = C @(22791, 27880)
-$configPreferencePath = ((C @(37197, 32622, 47, 29992, 25143, 20559, 22909)) + '.md')
-$candidateEmptySummary = C @(24403, 21069, 26242, 26080, 20505, 36873, 39033)
-$archiveEmptySummary = C @(24403, 21069, 26242, 26080, 24402, 26723, 39033)
-$noneText = C @(26080)
-$scratchRoot = Join-Path $RepoRoot 'tmp\archive-memory-candidates-regression'
-if (Test-Path -LiteralPath $scratchRoot) {
-    Remove-Item -LiteralPath $scratchRoot -Recurse -Force
-}
+$runtimeTag = Convert-CodePointsToString @(36816, 34892, 26102)
+$memoryTag = Convert-CodePointsToString @(35760, 24518)
+$archiveTag = Convert-CodePointsToString @(24402, 26723)
+$dateHeader = Convert-CodePointsToString @(26085, 26399)
+$typeHeader = Convert-CodePointsToString @(31867, 22411)
+$contentSummaryHeader = Convert-CodePointsToString @(20869, 23481, 25688, 35201)
+$suggestedWriteHeader = Convert-CodePointsToString @(24314, 35758, 20889, 20837)
+$sourceHeader = Convert-CodePointsToString @(26469, 28304)
+$statusHeader = Convert-CodePointsToString @(29366, 24577)
+$userConfirmHeader = Convert-CodePointsToString @(29992, 25143, 30830, 35748)
+$archiveDateHeader = Convert-CodePointsToString @(24402, 26723, 26085, 26399)
+$resultHeader = Convert-CodePointsToString @(32467, 26524)
+$targetReasonHeader = Convert-CodePointsToString @(30446, 26631, 20301, 32622, 32, 47, 32, 21407, 22240)
+$notesHeader = Convert-CodePointsToString @(22791, 27880)
+$configPreferencePath = ((Convert-CodePointsToString @(37197, 32622, 47, 29992, 25143, 20559, 22909)) + '.md')
+$candidateEmptySummary = Convert-CodePointsToString @(24403, 21069, 26242, 26080, 20505, 36873, 39033)
+$archiveEmptySummary = Convert-CodePointsToString @(24403, 21069, 26242, 26080, 24402, 26723, 39033)
+$noneText = Convert-CodePointsToString @(26080)
+$scratchRoot = Join-Path $RepoRoot ('tmp\archive-memory-candidates-regression-' + [guid]::NewGuid().ToString('N'))
 
+try {
 New-Item -ItemType Directory -Path $scratchRoot | Out-Null
 
 $caseRoot = Join-Path $scratchRoot 'wrapper-forwarding-and-header-only-archive'
@@ -214,10 +161,12 @@ $archiveContent = @(
 Set-Content -LiteralPath $candidatePath -Value $candidateContent -Encoding utf8
 Set-Content -LiteralPath $archivePath -Value $archiveContent -Encoding utf8
 
+$archiveStartDate = Get-Date -Format 'yyyy-MM-dd'
 $archiveResult = Invoke-RepoScriptFreshHost -UserProfile $userProfile -ScriptPath (Join-Path $RepoRoot 'scripts\archive-memory-candidates.ps1') -Arguments @{
     VaultRoot        = (Join-Path $workspaceRoot '.assistant')
     TerminalStatuses = @('promoted')
 }
+$archiveEndDate = Get-Date -Format 'yyyy-MM-dd'
 $archiveOutput = $archiveResult.Output -join [Environment]::NewLine
 $candidateAfter = Get-Content -LiteralPath $candidatePath -Raw -Encoding utf8
 $archiveAfter = Get-Content -LiteralPath $archivePath -Raw -Encoding utf8
@@ -246,16 +195,22 @@ if ($candidateAfter -notmatch [regex]::Escape("| $noneText | - | - | $candidateE
     Add-Check 'archive-memory-candidates restores the standard placeholder row when the candidate table becomes empty'
 }
 
-if ($archiveAfter -notmatch [regex]::Escape('| memory-001 |')) {
-    Add-Failure 'archive-memory-candidates should append archived rows even when the archive table previously had only header and divider'
+$expectedArchiveRows = @(@($archiveStartDate, $archiveEndDate) | Select-Object -Unique | ForEach-Object { '| {0} | {1} | {2} | {3} | {4} | {5} | {6} |' -f 'memory-001', $_, 'preference', 'remember terminal status', 'promoted', $configPreferencePath, 'source=manual; confirmation=confirmed' })
+$archiveLines = @($archiveAfter -split '\r?\n')
+$matchingArchiveRows = @($archiveLines | Where-Object { $expectedArchiveRows -ccontains $_ })
+if ($matchingArchiveRows.Count -ne 1) {
+    Add-Failure 'archive-memory-candidates should append the exact seven-column archived row when the archive table previously had only header and divider'
 } else {
-    Add-Check 'archive-memory-candidates appends archived rows when the archive table previously had only header and divider'
+    Add-Check 'archive-memory-candidates appends the exact seven-column archived row when the archive table previously had only header and divider'
 }
 
 if ($archiveAfter -match [regex]::Escape("| $noneText | - | - | $archiveEmptySummary | - | - | - |")) {
     Add-Failure 'archive-memory-candidates should not leave the archive placeholder row behind once a real archived row exists'
 } else {
     Add-Check 'archive-memory-candidates removes the archive placeholder row once a real archived row exists'
+}
+} finally {
+    Remove-DirectoryWithRetry -Path $scratchRoot
 }
 
 Write-Output 'Checks:'

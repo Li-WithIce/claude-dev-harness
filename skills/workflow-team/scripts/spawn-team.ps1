@@ -5,6 +5,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$TaskId,
 
+    [ValidateSet('', 'PLAN', 'PLAN_REVIEW', 'IMPLEMENT', 'CODE_REVIEW', 'TEST', 'DONE')]
+    [string]$Stage = '',
+
     [string]$RepoRoot = ''
 )
 
@@ -87,6 +90,7 @@ function New-Result {
     param(
         [bool]$Ok,
         [string]$Reason,
+        [string]$Stage = '',
         [string[]]$SpawnedRoles = @(),
         [string]$FailedRole = '',
         [string[]]$Errors = @()
@@ -97,10 +101,35 @@ function New-Result {
         reason = $Reason
         task_id = $TaskId
         workflow = $WorkflowName
+        stage = $Stage
         spawned_roles = @($SpawnedRoles)
         failed_role = $FailedRole
         errors = @($Errors)
     }
+}
+
+function Resolve-ActiveStage {
+    param(
+        [string]$RequestedStage,
+        [string]$RepoRoot,
+        [string]$TaskId
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedStage)) {
+        return $RequestedStage
+    }
+
+    $planPath = Join-Path $RepoRoot ('docs\tasks\{0}\plan.md' -f $TaskId)
+    if (-not (Test-Path -LiteralPath $planPath -PathType Leaf)) {
+        throw "Team spawn requires -Stage or current plan.md: $planPath"
+    }
+
+    $match = Select-String -LiteralPath $planPath -Pattern '^stage:\s*(PLAN|PLAN_REVIEW|IMPLEMENT|CODE_REVIEW|TEST|DONE)\s*$' -Encoding utf8 | Select-Object -First 1
+    if ($null -eq $match) {
+        throw "Unable to resolve legal stage from plan.md: $planPath"
+    }
+
+    return $match.Matches[0].Groups[1].Value
 }
 
 $result = $null
@@ -114,6 +143,15 @@ try {
         $result = New-Result -Ok $false -Reason 'team_mode_disabled' -Errors @($message)
         $exitCode = 1
     } else {
+        $activeStage = Resolve-ActiveStage -RequestedStage $Stage -RepoRoot $RepoRoot -TaskId $TaskId
+        if ($activeStage -eq 'DONE') {
+            $message = 'Team spawn is not available for DONE; no active stage role remains.'
+            Write-Diagnostic $message
+            $result = New-Result -Ok $false -Reason 'stage_complete' -Stage $activeStage -Errors @($message)
+            $exitCode = 1
+        }
+
+        if ($null -eq $result) {
         Write-TraceDiagnostic 'spawn-team: before get-command'
         $spawnCommand = Get-Command -Name 'team_spawn_agent' -ErrorAction SilentlyContinue
         Write-TraceDiagnostic 'spawn-team: after get-command'
@@ -161,8 +199,13 @@ try {
             Write-TraceDiagnostic 'spawn-team: before preset read'
             $preset = Get-Content -LiteralPath $presetTempPath -Raw -Encoding utf8 | ConvertFrom-Json
             Write-TraceDiagnostic 'spawn-team: after preset read'
+            $stageMembers = @($preset.members | Where-Object { [string]$_.stage -eq $activeStage })
+            if ($stageMembers.Count -ne 1) {
+                throw ('Preset should contain exactly one member for stage {0}; got {1}' -f $activeStage, $stageMembers.Count)
+            }
+
             $spawnedRoles = New-Object System.Collections.Generic.List[string]
-            foreach ($member in @($preset.members)) {
+            foreach ($member in $stageMembers) {
                 Write-TraceDiagnostic ('spawn-team: member {0} begin' -f $member.role)
                 $rolePromptPath = Join-Path $RepoRoot (([string]$member.role_prompt_ref) -replace '/', '\')
                 if (-not (Test-Path -LiteralPath $rolePromptPath -PathType Leaf)) {
@@ -177,6 +220,7 @@ try {
                 $payload = [pscustomobject][ordered]@{
                     task_id = $TaskId
                     workflow = $WorkflowName
+                    stage = $activeStage
                     role = [string]$member.role
                     backend = [string]$member.backend
                     model = [string]$member.model
@@ -195,16 +239,17 @@ try {
                 } catch {
                     $message = ("team mode requested but team_spawn_agent failed for role {0}; reverting to single-agent flow: {1}" -f $member.role, $_.Exception.Message)
                     Write-Diagnostic $message
-                    $result = New-Result -Ok $false -Reason 'spawn_failed' -SpawnedRoles @($spawnedRoles) -FailedRole ([string]$member.role) -Errors @($message)
+                    $result = New-Result -Ok $false -Reason 'spawn_failed' -Stage $activeStage -SpawnedRoles @($spawnedRoles) -FailedRole ([string]$member.role) -Errors @($message)
                     $exitCode = 1
                     break
                 }
             }
 
             if ($null -eq $result) {
-                $result = New-Result -Ok $true -Reason 'spawned' -SpawnedRoles @($spawnedRoles)
+                $result = New-Result -Ok $true -Reason 'spawned' -Stage $activeStage -SpawnedRoles @($spawnedRoles)
             }
         }
+    }
     }
 } catch {
     Write-Diagnostic $_.Exception.Message

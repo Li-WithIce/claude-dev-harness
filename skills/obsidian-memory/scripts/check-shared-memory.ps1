@@ -8,6 +8,7 @@ $ErrorActionPreference = "Stop"
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $scriptRoot 'resolve-shared-memory-paths.ps1')
+. (Join-Path $scriptRoot 'runtime-state-common.ps1')
 $VaultRoot = Resolve-SharedMemoryVaultRoot -VaultRoot $VaultRoot -OrchestratorFlowPath $OrchestratorFlowPath
 
 $errors = @()
@@ -187,10 +188,6 @@ function Get-WorkspaceRootFromFlowPath {
 
     $flowDir = Split-Path -Parent $Path
     $assistantDir = Split-Path -Parent $flowDir
-
-    if ((Split-Path -Leaf $flowDir) -ieq 'orchestration' -and (Split-Path -Leaf $assistantDir) -ieq '.assistant') {
-        return (Split-Path -Parent $assistantDir)
-    }
 
     return (Split-Path -Parent $assistantDir)
 }
@@ -500,17 +497,9 @@ if ($taskArtifactPaths.Count -gt 0) {
 
 if (-not [string]::IsNullOrWhiteSpace($OrchestratorFlowPath)) {
     if (-not (Test-Path -LiteralPath $OrchestratorFlowPath -PathType Leaf)) {
-        Add-Error ('指定的 orchestrator current-flow 不存在: {0}' -f $OrchestratorFlowPath)
+        Add-Warning ('指定的 legacy current-flow 不存在: {0}' -f $OrchestratorFlowPath)
     } else {
-        if ([string]::IsNullOrWhiteSpace($taskIdFromFlow)) {
-            Add-Error ('指定的 orchestrator current-flow 未解析出 task_id: {0}' -f $OrchestratorFlowPath)
-        } elseif ([string]::IsNullOrWhiteSpace($taskIdFromCurrent)) {
-            Add-Error ('共享指针未解析出 task_id，但 orchestrator current-flow 指向 task_id={0}' -f $taskIdFromFlow)
-        } elseif ($taskIdFromFlow -ne $taskIdFromCurrent) {
-            Add-Error ('orchestrator current-flow task_id={0} 与共享指针 task_id={1} 不一致' -f $taskIdFromFlow, $taskIdFromCurrent)
-        } else {
-            Add-Check ('orchestrator current-flow 与共享指针 task_id 一致: {0}' -f $taskIdFromFlow)
-        }
+        Add-Info 'current-flow is a legacy migration input and is not a runtime truth source.'
     }
 }
 
@@ -572,25 +561,7 @@ if ($null -ne $taskValue -and $taskValue -notlike '无*' -and (Test-Path -Litera
         if (Test-Path -LiteralPath $taskStatePath) {
             Add-Check ('共享指针 task_id={0} 对应任务状态文件存在' -f $taskIdFromCurrent)
             if (-not [string]::IsNullOrWhiteSpace($OrchestratorFlowPath) -and (Test-Path -LiteralPath $OrchestratorFlowPath -PathType Leaf)) {
-                $flowStage = Get-YamlField -Path $OrchestratorFlowPath -Field 'stage'
-                $runtimeStage = Get-BulletValue -Path $taskStatePath -Key 'stage'
-                if (
-                    -not [string]::IsNullOrWhiteSpace($flowStage) -and
-                    -not [string]::IsNullOrWhiteSpace($runtimeStage) -and
-                    $flowStage -ne $runtimeStage
-                ) {
-                    Add-Error ('任务状态 stage 与 current-flow 不一致: runtime={0}, flow={1}' -f $runtimeStage, $flowStage)
-                }
-
-                $flowCurrentDoc = Normalize-StatePathValue -Value (Get-YamlField -Path $OrchestratorFlowPath -Field 'current_doc')
-                $runtimePrimaryArtifact = Normalize-StatePathValue -Value (Get-YamlField -Path $taskStatePath -Field 'primary_artifact')
-                if (
-                    -not [string]::IsNullOrWhiteSpace($flowCurrentDoc) -and
-                    -not [string]::IsNullOrWhiteSpace($runtimePrimaryArtifact) -and
-                    $flowCurrentDoc -ne $runtimePrimaryArtifact
-                ) {
-                    Add-Error ('任务状态 primary_artifact 与 current-flow current_doc 不一致: runtime={0}, flow={1}' -f $runtimePrimaryArtifact, $flowCurrentDoc)
-                }
+                Add-Info 'Skipped current-flow comparison; canonical runtime state is checked below.'
             }
         } else {
             Add-Error ('共享指针 task_id={0} 但无对应 运行时/tasks/{0}.md' -f $taskIdFromCurrent)
@@ -637,9 +608,120 @@ if (Test-Path -LiteralPath $tasksDir -PathType Container) {
         Add-Info ('历史任务状态文件存在疑似乱码（不阻塞当前 gate）: {0}' -f ($historicalTaskReports -join '; '))
     }
 
-    if (($null -eq $taskValue -or $taskValue -like '无*') -and $taskFiles.Count -gt 0) {
-        $latestTaskFile = $taskFiles | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-        Add-Warning ('共享指针显示为空，但存在任务状态文件: latest={0}' -f $latestTaskFile.FullName)
+}
+
+# --- Canonical runtime contract (v1.1) ---
+
+$canonicalCurrent = Get-CanonicalCurrentTaskState -Path $currentPath
+if ($canonicalCurrent.SchemaVersion -ne 'current-task-pointer/v1.1') {
+    Add-Error ('当前任务 schema_version 必须为 current-task-pointer/v1.1: {0}' -f $currentPath)
+}
+foreach ($field in @('TaskId', 'EntryHost', 'Writer', 'Updated', 'Stage', 'CurrentDoc')) {
+    if ([string]::IsNullOrWhiteSpace([string]$canonicalCurrent.$field)) {
+        Add-Error ('当前任务缺少 canonical 字段 {0}: {1}' -f $field, $currentPath)
+    }
+}
+try {
+    $null = [datetimeoffset]::Parse($canonicalCurrent.Updated)
+} catch {
+    Add-Error ('当前任务 updated 必须为带时区的秒级时间: {0}' -f $currentPath)
+}
+
+$canonicalRecords = Get-CanonicalTaskRuntimeRecords -TasksDirectory $tasksDir
+foreach ($invalidRecord in @($canonicalRecords | Where-Object { -not $_.IsValid })) {
+    Add-Error ('任务 runtime 不符合 task-runtime/v1.1: {0}' -f $invalidRecord.Path)
+}
+
+$canonicalIndexText = if (Test-Path -LiteralPath $indexPath -PathType Leaf) { Get-Content -LiteralPath $indexPath -Raw -Encoding utf8 } else { '' }
+if ((Get-CanonicalRuntimeYamlField -Text $canonicalIndexText -Key 'schema_version') -ne 'recovery-index/v1.1') {
+    Add-Error ('恢复索引 schema_version 必须为 recovery-index/v1.1: {0}' -f $indexPath)
+}
+if ((Get-CanonicalRuntimeYamlField -Text $canonicalIndexText -Key 'writer') -notin @('install', 'advance-stage', 'repair-shared-memory')) {
+    Add-Error ('恢复索引 writer 必须是 canonical runtime writer: {0}' -f $indexPath)
+}
+$canonicalIndexUpdated = Get-CanonicalRuntimeYamlField -Text $canonicalIndexText -Key 'updated'
+try {
+    $null = [datetimeoffset]::Parse($canonicalIndexUpdated)
+} catch {
+    Add-Error ('恢复索引 updated 必须为带时区的秒级时间: {0}' -f $indexPath)
+}
+$requiredIndexSources = @('运行时/当前任务.md', '运行时/tasks/')
+foreach ($source in $requiredIndexSources) {
+    if ($source -notin $recoveryDerivedFrom) {
+        Add-Error ('恢复索引 derived_from 缺少 canonical source: {0}' -f $source)
+    }
+}
+if (@($recoveryDerivedFrom | Where-Object { $_ -notin $requiredIndexSources }).Count -gt 0) {
+    Add-Error ('恢复索引 derived_from 包含非 canonical source: {0}' -f ($recoveryDerivedFrom -join ', '))
+}
+
+$currentIsIdle = $canonicalCurrent.TaskId -eq 'none'
+if ($currentIsIdle) {
+    if ($canonicalCurrent.Stage -ne '空闲' -or $canonicalCurrent.CurrentDoc -ne 'none') {
+        Add-Error '空闲当前任务必须使用 状态=空闲 且 当前文档=none。'
+    }
+    $latestUnfinishedRecord = @($canonicalRecords |
+        Where-Object { $_.IsValid -and $_.Stage -ne 'DONE' -and $_.TaskId -ne $canonicalCurrent.TaskId } |
+        Sort-Object @{ Expression = 'UpdatedValue'; Descending = $true }, @{ Expression = 'TaskId'; Descending = $false } |
+        Select-Object -First 1)
+    if ($latestUnfinishedRecord.Count -gt 0) {
+        Add-Warning ('共享指针显示为空，但存在未完成任务状态文件: task_id={0}; stage={1}; path={2}' -f
+            $latestUnfinishedRecord[0].TaskId,
+            $latestUnfinishedRecord[0].Stage,
+            $latestUnfinishedRecord[0].Path)
+    }
+} else {
+    if (-not (Test-CanonicalRuntimeTaskId -TaskId $canonicalCurrent.TaskId)) {
+        Add-Error ('当前任务 task_id 非法: {0}' -f $canonicalCurrent.TaskId)
+    }
+    if (-not (Test-CanonicalRuntimeStage -Stage $canonicalCurrent.Stage)) {
+        Add-Error ('当前任务状态非法: {0}' -f $canonicalCurrent.Stage)
+    }
+
+    $currentRecord = @($canonicalRecords | Where-Object { $_.TaskId -eq $canonicalCurrent.TaskId } | Select-Object -First 1)
+    if ($currentRecord.Count -eq 0) {
+        Add-Error ('当前任务缺少 task runtime mirror: {0}' -f $canonicalCurrent.TaskId)
+    } elseif ($currentRecord[0].IsValid) {
+        if ($currentRecord[0].Stage -ne $canonicalCurrent.Stage) {
+            Add-Error ('plan/current/mirror stage 漂移: current={0}, mirror={1}' -f $canonicalCurrent.Stage, $currentRecord[0].Stage)
+        }
+        if ($currentRecord[0].PrimaryArtifact -ne $canonicalCurrent.CurrentDoc) {
+            Add-Error ('current/mirror primary artifact 漂移: current={0}, mirror={1}' -f $canonicalCurrent.CurrentDoc, $currentRecord[0].PrimaryArtifact)
+        }
+    }
+
+    $workspaceRoot = Split-Path -Parent $VaultRoot
+    $planPath = Join-Path $workspaceRoot ('docs/tasks/{0}/plan.md' -f $canonicalCurrent.TaskId)
+    if (-not (Test-Path -LiteralPath $planPath -PathType Leaf)) {
+        Add-Error ('当前任务 plan.md 不存在: {0}' -f $planPath)
+    } else {
+        $planStage = Get-YamlField -Path $planPath -Field 'stage'
+        if ($planStage -ne $canonicalCurrent.Stage) {
+            Add-Error ('plan/current stage 漂移: plan={0}, current={1}' -f $planStage, $canonicalCurrent.Stage)
+        }
+    }
+}
+
+$expectedIndexTaskIdLine = ('- task_id: `{0}`' -f $canonicalCurrent.TaskId)
+if ($canonicalIndexText -notmatch [regex]::Escape($expectedIndexTaskIdLine)) {
+    Add-Error ('恢复索引未指向当前任务: {0}' -f $canonicalCurrent.TaskId)
+}
+$topSection = [regex]::Match($canonicalIndexText, '(?s)^## 未完成任务 Top \d+\s*(.*)$')
+if ($topSection.Success) {
+    $topRows = @([regex]::Matches($topSection.Groups[1].Value, '(?m)^- task_id: `([^`]+)` \| stage: ([A-Z_]+)'))
+    if ($topRows.Count -gt 3) {
+        Add-Error ('恢复索引未完成任务超过 Top N: {0}' -f $topRows.Count)
+    }
+    foreach ($row in $topRows) {
+        if ($row.Groups[2].Value -eq 'DONE' -or -not (Test-CanonicalRuntimeStage -Stage $row.Groups[2].Value)) {
+            Add-Error ('恢复索引包含非法或已完成任务: {0}' -f $row.Value)
+        }
+    }
+}
+
+foreach ($lastSessionField in @('日期', '任务', '状态', '摘要')) {
+    if ([string]::IsNullOrWhiteSpace((Get-TableValue -Path $lastSessionPath -Key $lastSessionField))) {
+        Add-Error ('上次会话缺少会话摘要字段 {0}: {1}' -f $lastSessionField, $lastSessionPath)
     }
 }
 

@@ -30,15 +30,6 @@ function Write-Diagnostic {
     }
 }
 
-function Write-Utf8NoBom {
-    param(
-        [string]$Path,
-        [string]$Content
-    )
-
-    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($false)))
-}
-
 function Split-InlineYamlList {
     param([string]$Value)
 
@@ -253,8 +244,9 @@ function ConvertTo-PresetYaml {
 
     $lines += 'members:'
     foreach ($member in @($Preset['members'])) {
+        $lines += ('  - stage: {0}' -f $member['stage'])
         $skillsLiteral = '[{0}]' -f ((@($member['skills_whitelist'])) -join ', ')
-        $lines += ('  - role: {0}' -f $member['role'])
+        $lines += ('    role: {0}' -f $member['role'])
         $lines += ('    backend: {0}' -f $member['backend'])
         $lines += ('    model: {0}' -f $member['model'])
         $lines += ('    skills_whitelist: {0}' -f $skillsLiteral)
@@ -289,6 +281,7 @@ try {
         Write-Diagnostic ("resolved profile={0} backend={1} model={2} role={3} skills_dir={4}" -f $profile.Name, $profile.Backend, $profile.Model, $stage['Role'], $skillsDir)
 
         $members.Add([ordered]@{
+            stage = [string]$stageName
             role = [string]$stage['Role']
             backend = [string]$profile.Backend
             model = [string]$profile.Model
@@ -319,7 +312,7 @@ try {
     } else {
         ConvertTo-PresetYaml -Preset $preset
     }
-    Write-Utf8NoBom -Path $tempPath -Content $content
+    [System.IO.File]::WriteAllText($tempPath, $content, (New-Object System.Text.UTF8Encoding($false)))
     Move-Item -LiteralPath $tempPath -Destination $outputPath -Force
     $tempPath = ''
 

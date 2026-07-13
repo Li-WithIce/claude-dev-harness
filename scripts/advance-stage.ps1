@@ -4,6 +4,10 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$TaskId,
 
+    [Parameter(Mandatory = $true)]
+    [ValidateSet('PLAN', 'PLAN_REVIEW', 'IMPLEMENT', 'CODE_REVIEW', 'TEST', 'DONE')]
+    [string]$ExpectedStage,
+
     [string]$Tool = "",
 
     [string]$Profile = "",
@@ -14,11 +18,19 @@ param(
 
     [string]$RepoRoot = "",
 
-    [string]$WorkspaceRoot = ""
+    [string]$WorkspaceRoot = "",
+
+    [switch]$SyncOnly,
+
+    [switch]$ActivateCurrent
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+. (Join-Path $PSScriptRoot 'lite-artifact-parser.ps1')
+
+Assert-LiteTaskId -TaskId $TaskId
 
 $ValidStages = @("PLAN", "PLAN_REVIEW", "IMPLEMENT", "CODE_REVIEW", "TEST", "DONE")
 $ValidTools = @("claudecode", "codex")
@@ -33,22 +45,38 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 } else {
     $repoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
 }
+$runtimeStatePath = Join-Path $repoRoot 'skills\obsidian-memory\scripts\runtime-state-common.ps1'
+if (-not (Test-Path -LiteralPath $runtimeStatePath -PathType Leaf)) {
+    throw "Missing canonical runtime state helper: $runtimeStatePath"
+}
+if (-not (Get-Command -Name Test-CanonicalRuntimeTaskId -CommandType Function -ErrorAction SilentlyContinue)) {
+    . $runtimeStatePath
+}
+$runtimeInboxPath = Join-Path $repoRoot 'skills\obsidian-memory\scripts\runtime-inbox-common.ps1'
+if (-not (Test-Path -LiteralPath $runtimeInboxPath -PathType Leaf)) {
+    throw "Missing canonical runtime inbox helper: $runtimeInboxPath"
+}
+. $runtimeInboxPath
+$sharedMemoryResolverPath = Join-Path $repoRoot 'skills\obsidian-memory\scripts\resolve-shared-memory-paths.ps1'
+if (-not (Test-Path -LiteralPath $sharedMemoryResolverPath -PathType Leaf)) {
+    throw "Missing canonical shared-memory resolver: $sharedMemoryResolverPath"
+}
+. $sharedMemoryResolverPath
 if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
     $workspaceRoot = $repoRoot
 } else {
     $workspaceRoot = [System.IO.Path]::GetFullPath($WorkspaceRoot)
 }
-$planPath = Join-Path $workspaceRoot "docs/tasks/$TaskId/plan.md"
-$testPath = Join-Path $workspaceRoot "docs/tasks/$TaskId/test.md"
-$tasksDir = Join-Path $VaultRoot "运行时/tasks"
-$taskMirrorPath = Join-Path $tasksDir "$TaskId.md"
-$indexPath = Join-Path $VaultRoot "运行时/恢复索引.md"
-$currentPath = Join-Path $VaultRoot "运行时/当前任务.md"
+$VaultRoot = Resolve-SharedMemoryVaultRoot -WorkspaceRoot $workspaceRoot -VaultRoot $VaultRoot
+$taskBase = Resolve-LiteContainedPath -Root $workspaceRoot -RelativePath 'docs\tasks' -Label 'task base'
+$taskRoot = Resolve-LiteContainedPath -Root $taskBase -RelativePath $TaskId -Label 'task root'
+$planPath = Resolve-LiteContainedPath -Root $taskRoot -RelativePath 'plan.md' -Label 'plan path'
+$testPath = Resolve-LiteContainedPath -Root $taskRoot -RelativePath 'test.md' -Label 'test path'
+$tasksDir = Resolve-LiteContainedPath -Root $VaultRoot -RelativePath '运行时\tasks' -Label 'runtime tasks root'
+$taskMirrorPath = Resolve-LiteContainedPath -Root $tasksDir -RelativePath ("{0}.md" -f $TaskId) -Label 'task mirror path'
+$indexPath = Resolve-LiteContainedPath -Root $VaultRoot -RelativePath '运行时\恢复索引.md' -Label 'recovery index path'
+$currentPath = Resolve-LiteContainedPath -Root $VaultRoot -RelativePath '运行时\当前任务.md' -Label 'current task path'
 $validatorPath = Join-Path $PSScriptRoot "validate-lite-artifacts.ps1"
-
-if (-not (Test-Path -LiteralPath $planPath -PathType Leaf)) {
-    throw "Missing $planPath"
-}
 
 function Invoke-LiteArtifactValidator {
     <#
@@ -76,7 +104,17 @@ function Invoke-LiteArtifactValidator {
 
     $shellPath = (Get-Process -Id $PID).Path
     $output = @(& $shellPath -NoProfile -File $ValidatorPath -TaskId $TaskId -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot 2>&1 | ForEach-Object { [string]$_ })
-    if ($LASTEXITCODE -eq 0) {
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -eq 0) {
+        $warningIndex = [Array]::IndexOf($output, 'Warnings:')
+        if ($warningIndex -ge 0) {
+            for ($index = $warningIndex + 1; $index -lt $output.Count; $index += 1) {
+                $line = $output[$index].Trim()
+                if ($line.StartsWith('- ') -and $line -ne '- none') {
+                    [Console]::Error.WriteLine(('validator warning: {0}' -f $line.Substring(2)))
+                }
+            }
+        }
         return
     }
 
@@ -106,58 +144,6 @@ function Invoke-LiteArtifactValidator {
     throw ('validate-lite-artifacts.ps1 failed for {0}: {1}' -f $TaskId, ($details -join '; '))
 }
 
-function Get-Frontmatter {
-    <#
-    .SYNOPSIS
-    解析 Markdown frontmatter。
-    .DESCRIPTION
-    读取 lite workflow 的 frontmatter，并返回键值表。
-    .PARAMETER Text
-    Markdown 全文。
-    .OUTPUTS
-    Hashtable。
-    #>
-    param([string]$Text)
-
-    if ($Text -notmatch "(?s)^---\r?\n(.*?)\r?\n---\r?\n") {
-        throw "Missing frontmatter."
-    }
-
-    $map = @{}
-    foreach ($line in ($Matches[1] -split "\r?\n")) {
-        if ($line -match "^\s*([^:]+):\s*(.+?)\s*$") {
-            $map[$Matches[1]] = $Matches[2]
-        }
-    }
-
-    return $map
-}
-
-function Get-Section {
-    <#
-    .SYNOPSIS
-    读取二级标题内容。
-    .DESCRIPTION
-    按 `## <name>` 截取 section，供 gate 检查使用。
-    .PARAMETER Text
-    Markdown 全文。
-    .PARAMETER Name
-    目标 section 名。
-    .OUTPUTS
-    String。
-    #>
-    param(
-        [string]$Text,
-        [string]$Name
-    )
-
-    if ($Text -match "(?ms)^## $([regex]::Escape($Name))\r?\n(.*?)(?=^## |\z)") {
-        return $Matches[1].Trim()
-    }
-
-    return ""
-}
-
 function Get-LatestRun {
     <#
     .SYNOPSIS
@@ -176,12 +162,11 @@ function Get-LatestRun {
         [string]$Name
     )
 
-    $runs = [regex]::Matches((Get-Section -Text $Text -Name $Name), "(?ms)^### Run .*?(?=^### Run |\z)")
-    if ($runs.Count -eq 0) {
-        return ""
+    $run = Get-LiteLatestRun -Sections @(Get-LiteSections -Content $Text) -Name $Name
+    if ($null -eq $run) {
+        return ''
     }
-
-    return $runs[$runs.Count - 1].Value.Trim()
+    return $run.Raw
 }
 
 function Get-RunVerdict {
@@ -202,104 +187,72 @@ function Get-RunVerdict {
         [string]$Name
     )
 
-    $run = Get-LatestRun -Text $Text -Name $Name
-    if ($run -match "(?m)^- verdict:\s*(pass|revise)\s*$") {
-        return $Matches[1]
+    $run = Get-LiteLatestRun -Sections @(Get-LiteSections -Content $Text) -Name $Name
+    if ($null -ne $run) {
+        $reviewContract = Get-LiteReviewRunContract -Run $run
+        Assert-LiteLatestReviewConsistency -Review $reviewContract
+        return $reviewContract.Verdict
     }
 
     return ""
 }
 
-function Get-RunTimestamp {
+function Open-TestSnapshot {
     <#
     .SYNOPSIS
-    读取 Run 标题时间。
+    打开 test.md 的只读共享句柄，并读取精确字节身份与 UTF-8 文本。
     .DESCRIPTION
-    IMPLEMENT gate 用它判断回修后是否追加了新证据。
-    .PARAMETER Text
-    Markdown 全文。
-    .PARAMETER Name
-    section 名。
-    .OUTPUTS
-    Nullable[datetime]。
+    FileShare.Read 允许 validator 读取，但在 plan commit 前拒绝 write/delete；
+    Base64 identity 继续用于 validator 前后及 commit 前的 byte-exact CAS。
     #>
-    param(
-        [string]$Text,
-        [string]$Name
-    )
+    param([string]$Path)
 
-    $run = Get-LatestRun -Text $Text -Name $Name
-    if ($run -match "(?m)^### Run \d+\s*·\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\s*·\s*runner:") {
-        return [datetime]::ParseExact($Matches[1], "yyyy-MM-dd HH:mm", [System.Globalization.CultureInfo]::InvariantCulture)
-    }
-
-    return $null
-}
-
-function Write-Utf8Bom {
-    <#
-    .SYNOPSIS
-    以 UTF-8 BOM 写文件。
-    .DESCRIPTION
-    共享运行时 markdown 延续仓库现有 BOM 写法，避免 Windows 下再次漂编码。
-    .PARAMETER Path
-    目标路径。
-    .PARAMETER Content
-    要写入的文本。
-    .OUTPUTS
-    None。
-    #>
-    param(
-        [string]$Path,
-        [string]$Content
-    )
-
-    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($true)))
-}
-
-function Write-Utf8NoBom {
-    <#
-    .SYNOPSIS
-    以 UTF-8 无 BOM 写文件。
-    .DESCRIPTION
-    skill-manifest.json 需要 UTF-8 无 BOM，避免被嵌入端再做额外清洗。
-    .PARAMETER Path
-    目标路径。
-    .PARAMETER Content
-    要写入的文本。
-    .OUTPUTS
-    None。
-    #>
-    param(
-        [string]$Path,
-        [string]$Content
-    )
-
-    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($false)))
-}
-
-function Get-PowerShellHostPath {
+    $handle = $null
     try {
-        $currentHostPath = (Get-Process -Id $PID -ErrorAction Stop).Path
-        if (-not [string]::IsNullOrWhiteSpace($currentHostPath) -and (Test-Path -LiteralPath $currentHostPath -PathType Leaf)) {
-            return $currentHostPath
+        $handle = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+        $bytes = [System.IO.File]::ReadAllBytes($Path)
+        $offset = if (
+            $bytes.Length -ge 3 -and
+            $bytes[0] -eq 0xEF -and
+            $bytes[1] -eq 0xBB -and
+            $bytes[2] -eq 0xBF
+        ) { 3 } else { 0 }
+        $encoding = New-Object System.Text.UTF8Encoding($false, $true)
+
+        [pscustomobject]@{
+            Handle = $handle
+            Identity = [Convert]::ToBase64String($bytes)
+            Text = $encoding.GetString($bytes, $offset, $bytes.Length - $offset)
         }
     } catch {
-        # Fall through to explicit discovery.
+        if ($null -ne $handle) { $handle.Dispose() }
+        throw
     }
+}
 
-    foreach ($commandName in @('pwsh', 'powershell.exe')) {
-        try {
-            $command = Get-Command $commandName -ErrorAction Stop | Select-Object -First 1
-            if (-not [string]::IsNullOrWhiteSpace($command.Source)) {
-                return $command.Source
-            }
-        } catch {
-            # Try the next candidate.
-        }
+function Test-TestSnapshotMatches {
+    param(
+        [string]$Path,
+        [string]$Identity
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $false
     }
+    return [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($Path)) -ceq $Identity
+}
 
-    throw 'Unable to locate a PowerShell host executable for shared-memory writeback fallback.'
+function Get-TestConclusion {
+    param([string]$Text)
+
+    $content = Get-LiteSectionContent `
+        -Sections @(Get-LiteSections -Content $Text) `
+        -Name 'Conclusion'
+    $lines = @($content -split '\r?\n' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($lines.Count -eq 0 -or $lines[0] -notin @('pass', 'fail', 'blocked')) {
+        throw 'test.md requires Conclusion: pass | fail | blocked.'
+    }
+    return $lines[0]
 }
 
 function Ensure-ParentDirectory {
@@ -311,37 +264,44 @@ function Ensure-ParentDirectory {
     }
 }
 
-function Invoke-AppendRuntimeInboxFallback {
+function Add-RuntimeWritebackFallback {
     param(
         [string]$VaultRoot,
         [string]$TaskId,
         [string]$Step,
-        [string]$Reason
+        [string]$Payload
     )
 
-    $appendScriptPath = Join-Path $PSScriptRoot 'append-runtime-inbox.ps1'
-    if (-not (Test-Path -LiteralPath $appendScriptPath -PathType Leaf)) {
-        throw 'append-runtime-inbox.ps1 is missing.'
-    }
-
-    $shellPath = Get-PowerShellHostPath
-    $argumentList = @('-NoProfile')
-    if ((Split-Path -Leaf $shellPath) -ieq 'powershell.exe') {
-        $argumentList += @('-ExecutionPolicy', 'Bypass')
-    }
-    $argumentList += @(
-        '-File', $appendScriptPath,
-        '-VaultRoot', $VaultRoot,
-        '-TaskId', $TaskId,
-        '-Type', 'writeback-fallback',
-        '-Summary', ('[writeback-fallback] {0}' -f $Step),
-        '-Payload', $Reason,
-        '-Source', 'advance-stage'
-    )
-
-    $null = @(& $shellPath @argumentList 2>&1 | ForEach-Object { [string]$_ })
-    if ($LASTEXITCODE -ne 0) {
-        throw ('append-runtime-inbox.ps1 exited with code {0}' -f $LASTEXITCODE)
+    $mutex = Enter-CanonicalRuntimeMutex -VaultRoot $VaultRoot
+    try {
+        $inbox = Read-RuntimeInbox -VaultRoot $VaultRoot -NormalizeExisting
+        $rows = @($inbox.Rows | Where-Object {
+            -not (Test-RuntimeInboxPlaceholderRow -Row $_)
+        })
+        $summary = Escape-InboxCell -Value ('[writeback-fallback] {0}' -f $Step)
+        $Payload = Escape-InboxCell -Value $Payload
+        $duplicate = @($rows | Where-Object {
+            $_.Source -ceq 'advance-stage' -and
+            $_.TaskId -ceq $TaskId -and
+            $_.Type -ceq 'writeback-fallback' -and
+            $_.Status -ceq 'open' -and
+            $_.Summary -ceq $summary -and
+            $_.Payload -ceq $Payload
+        }).Count -gt 0
+        if (-not $duplicate) {
+            $rows += [pscustomobject]@{
+                CreatedAt = Get-CurrentTimestamp
+                Source = 'advance-stage'
+                TaskId = $TaskId
+                Type = 'writeback-fallback'
+                Status = 'open'
+                Summary = $summary
+                Payload = $Payload
+            }
+            Write-RuntimeInbox -InboxPath $inbox.Path -CreatedDate $inbox.CreatedDate -Rows $rows
+        }
+    } finally {
+        Exit-CanonicalRuntimeMutex -Mutex $mutex
     }
 }
 
@@ -350,32 +310,109 @@ function Report-WritebackFallback {
         [string]$VaultRoot,
         [string]$TaskId,
         [string]$Step,
-        [string]$Reason
+        [string]$Reason,
+        [string]$Payload
     )
 
     $message = '[writeback-fallback] {0}: {1}' -f $Step, $Reason
     [Console]::Error.WriteLine($message)
 
     try {
-        Invoke-AppendRuntimeInboxFallback -VaultRoot $VaultRoot -TaskId $TaskId -Step $Step -Reason $Reason
+        Add-RuntimeWritebackFallback -VaultRoot $VaultRoot -TaskId $TaskId -Step $Step -Payload $Payload
+        return ''
     } catch {
         [Console]::Error.WriteLine('[writeback-fallback] inbox-note: {0}' -f $_.Exception.Message)
+        return $_.Exception.Message
     }
 }
 
-function Invoke-BestEffortRuntimeWrite {
+function Clear-RuntimeWritebackFallback {
     param(
         [string]$VaultRoot,
         [string]$TaskId,
-        [string]$Step,
-        [scriptblock]$Action
+        [switch]$ActivateCurrent
     )
 
+    $mutex = Enter-CanonicalRuntimeMutex -VaultRoot $VaultRoot
     try {
-        & $Action
-    } catch {
-        Report-WritebackFallback -VaultRoot $VaultRoot -TaskId $TaskId -Step $Step -Reason $_.Exception.Message
+        $paths = Get-RuntimeMarkdownPaths -VaultRoot $VaultRoot
+        if (-not (Test-Path -LiteralPath $paths.InboxPath -PathType Leaf)) {
+            return 0
+        }
+        $inbox = Read-RuntimeInbox -VaultRoot $VaultRoot
+        $coveredOperations = if ($ActivateCurrent.IsPresent) { @('activate', 'advance', 'sync') } else { @('advance', 'sync') }
+        $matches = @()
+        foreach ($row in $inbox.Rows) {
+            if ($row.Status -ne 'open' -or $row.TaskId -cne $TaskId -or $row.Type -cne 'writeback-fallback' -or $row.Source -cne 'advance-stage') {
+                continue
+            }
+            try {
+                $payload = $row.Payload | ConvertFrom-Json
+            } catch {
+                continue
+            }
+            if ($payload.schema_version -ceq 'writeback-fallback/v1' -and
+                $coveredOperations -ccontains [string]$payload.operation -and
+                $ValidStages -ccontains [string]$payload.expected_stage -and
+                -not [string]::IsNullOrWhiteSpace($payload.failed_step) -and
+                -not [string]::IsNullOrWhiteSpace($payload.reason) -and
+                $row.Summary -ceq ('[writeback-fallback] {0}' -f $payload.failed_step)) {
+                $matches += $row
+            }
+        }
+        if ($matches.Count -eq 0) {
+            return 0
+        }
+
+        $remaining = @($inbox.Rows | Where-Object {
+            $row = $_
+            @($matches | Where-Object {
+                $_.CreatedAt -ceq $row.CreatedAt -and
+                $_.Source -ceq $row.Source -and
+                $_.TaskId -ceq $row.TaskId -and
+                $_.Type -ceq $row.Type -and
+                $_.Status -ceq $row.Status -and
+                $_.Summary -ceq $row.Summary -and
+                $_.Payload -ceq $row.Payload
+            }).Count -eq 0
+        })
+        Write-RuntimeInbox -InboxPath $inbox.Path -CreatedDate $inbox.CreatedDate -Rows $remaining
+        return $matches.Count
+    } finally {
+        Exit-CanonicalRuntimeMutex -Mutex $mutex
     }
+}
+
+function Get-SyncReplayCommand {
+    param(
+        [string]$TaskId,
+        [string]$ExpectedStage,
+        [string]$RepoRoot,
+        [string]$WorkspaceRoot,
+        [string]$VaultRoot,
+        [switch]$ActivateCurrent
+    )
+
+    $command = 'pwsh -NoProfile -File "{0}" -TaskId "{1}" -ExpectedStage {2} -SyncOnly -RepoRoot "{3}" -WorkspaceRoot "{4}" -VaultRoot "{5}"' -f `
+        (Join-Path $PSScriptRoot 'advance-stage.ps1'), $TaskId, $ExpectedStage, $RepoRoot, $WorkspaceRoot, $VaultRoot
+    if ($ActivateCurrent.IsPresent) {
+        $command += ' -ActivateCurrent'
+    }
+    return $command
+}
+
+function New-CanonicalIdleCurrentContent {
+    param([string]$Updated)
+
+    return New-CanonicalCurrentTaskContent `
+        -TaskId 'none' `
+        -TaskName '无' `
+        -Stage '空闲' `
+        -CurrentDoc 'none' `
+        -Tool 'none' `
+        -EntryHost 'unknown' `
+        -NextStep '等待新任务' `
+        -Updated $Updated
 }
 
 function Test-FullModelId {
@@ -460,7 +497,7 @@ function Get-ToolProfile {
         throw ("Tool profile file name {0} does not match descriptor name {1}" -f $normalizedName, $fields['name'])
     }
 
-    if ($fields['backend'] -notin $ValidTools) {
+    if ($fields['backend'] -cnotin $ValidTools) {
         throw ("Tool profile {0} has unsupported backend: {1}" -f $normalizedName, $fields['backend'])
     }
 
@@ -778,7 +815,7 @@ function Write-SkillManifest {
         generated_at = (Get-Date).ToUniversalTime().ToString('o')
     }
 
-    Write-Utf8NoBom -Path $manifestPath -Content (($manifest | ConvertTo-Json -Depth 8 -Compress))
+    [System.IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 8 -Compress), (New-Object System.Text.UTF8Encoding($false)))
 }
 
 function Resolve-FallbackTool {
@@ -1083,301 +1120,329 @@ function Update-Frontmatter {
     return [regex]::Replace($Text, "(?s)^---\r?\n.*?\r?\n---\r?\n", $frontmatter, 1)
 }
 
-function New-CurrentTaskContent {
-    <#
-    .SYNOPSIS
-    生成共享运行时当前任务指针。
-    .DESCRIPTION
-    当前任务文件与 obsidian-memory 读取侧共用同一张表，避免阶段推进后写出不可读格式。
-    .PARAMETER TaskId
-    任务 ID。
-    .PARAMETER Status
-    当前阶段。
-    .PARAMETER CurrentDoc
-    当前主文档路径。
-    .PARAMETER Tool
-    当前阶段工具。
-    .PARAMETER EntryHost
-    当前阶段入口 host。
-    .PARAMETER ToolProfile
-    当前阶段 tool profile。
-    .PARAMETER Model
-    当前阶段模型。
-    .PARAMETER NextStep
-    下一步说明。
-    .OUTPUTS
-    String。
-    #>
-    param(
-        [string]$TaskId,
-        [string]$Status,
-        [string]$CurrentDoc,
-        [string]$Tool,
-        [string]$EntryHost,
-        [string]$ToolProfile = "",
-        [string]$Model = "",
-        [string]$NextStep
-    )
-
-    $lines = @(
-        '---'
-        ('updated: {0}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
-        ('task_id: {0}' -f $TaskId)
-        ('entry_host: {0}' -f $EntryHost)
-        'writer: advance-stage'
-        '---'
-        ''
-        '# 当前任务'
-        ''
-        '| 项目 | 值 |'
-        '|------|-----|'
-        ('| task_id | `{0}` |' -f $TaskId)
-        ('| 任务 | {0} |' -f $TaskId)
-        ('| 状态 | {0} |' -f $Status)
-        ('| 当前文档 | {0} |' -f $CurrentDoc)
-        ('| 工具 | {0} |' -f $Tool)
-    )
-
-    if (-not [string]::IsNullOrWhiteSpace($ToolProfile)) {
-        $lines += ('| Tool Profile | {0} |' -f $ToolProfile)
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($Model)) {
-        $lines += ('| Model | {0} |' -f $Model)
-    }
-
-    $lines += ('| 下一步 | {0} |' -f $NextStep)
-    return $lines -join "`r`n"
-}
-
-function Write-RecoveryIndex {
-    <#
-    .SYNOPSIS
-    重写恢复索引。
-    .DESCRIPTION
-    lite flow 只从 `运行时/tasks/*.md` 汇总任务，不再依赖 `中断任务.md`。
-    .PARAMETER TasksDirectory
-    任务 mirror 目录。
-    .PARAMETER Path
-    恢复索引文件路径。
-    .OUTPUTS
-    None。
-    #>
-    param(
-        [string]$TasksDirectory,
-        [string]$Path
-    )
-
-    $rows = @()
-    foreach ($file in Get-ChildItem -LiteralPath $TasksDirectory -Filter "*.md" -File | Sort-Object Name) {
-        $mirrorText = Get-Content -LiteralPath $file.FullName -Raw -Encoding utf8
-        $meta = Get-Frontmatter -Text $mirrorText
-        $rows += [pscustomobject]@{
-            TaskId  = $meta.task_id
-            Stage   = $meta.stage
-            Updated = $meta.updated
-        }
-    }
-
-    $ordered = $rows | Sort-Object Updated, TaskId -Descending
-    $content = @(
-        '---'
-        'tags: [运行时, 恢复索引]'
-        ('updated: {0}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
-        'derived_from: [运行时/tasks/]'
-        'schema_version: recovery-index/v1.1'
-        '---'
-        ''
-        '# 恢复索引'
-        ''
-    ) -join "`r`n"
-    foreach ($row in $ordered) {
-        $content += "- $($row.TaskId) | $($row.Stage) | $($row.Updated)`r`n"
-    }
-
-    Write-Utf8Bom -Path $Path -Content $content
-}
-
-$planText = Get-Content -LiteralPath $planPath -Raw -Encoding utf8
-$frontmatter = Get-Frontmatter -Text $planText
-$stage = $frontmatter.stage
-$currentTool = $frontmatter.tool
-$currentProfile = if ($frontmatter.ContainsKey('tool_profile')) { $frontmatter.tool_profile } else { "" }
-$currentModel = if ($frontmatter.ContainsKey('model')) { $frontmatter.model } else { "" }
-
-if ($frontmatter.task_id -ne $TaskId) {
-    throw "Frontmatter task_id '$($frontmatter.task_id)' does not match '$TaskId'."
-}
-
-if ($stage -notin $ValidStages) {
-    throw "Unsupported stage: $stage"
-}
-
-if ($stage -eq 'DONE') {
-    if ($currentTool -ne 'none') {
-        throw "DONE stage requires tool: none"
-    }
-} elseif ($currentTool -notin $ValidTools) {
-    throw "Unsupported plan tool: $currentTool"
-}
-
-Invoke-LiteArtifactValidator -ValidatorPath $validatorPath -TaskId $TaskId -RepoRoot $repoRoot -WorkspaceRoot $workspaceRoot
-
-$today = Get-Date -Format "yyyy-MM-dd"
-$nextStage = switch ($stage) {
-    "PLAN" {
-        $clarification = Get-Section -Text $planText -Name "Clarification"
-        $confirmation = Get-Section -Text $planText -Name "User Confirmation"
-        if ($clarification -notmatch "验收" -or
-            $clarification -notmatch "非目标" -or
-            $clarification -notmatch "受影响" -or
-            ($clarification -notmatch "回滚" -and $clarification -notmatch "兼容") -or
-            $clarification -notmatch "ui:") {
-            throw "PLAN clarification gate failed."
-        }
-        if ($confirmation -notmatch "(?m)^- status:\s*confirmed\s*$") {
-            throw "PLAN requires explicit user confirmation."
-        }
-        "PLAN_REVIEW"
-    }
-    "PLAN_REVIEW" {
-        $planVerdict = Get-RunVerdict -Text $planText -Name "Plan Review"
-        if (-not $planVerdict) {
-            throw "PLAN_REVIEW requires latest verdict."
-        }
-        if ($planVerdict -eq "pass") { "IMPLEMENT" } else { "PLAN" }
-    }
-    "IMPLEMENT" {
-        $implementationRun = Get-LatestRun -Text $planText -Name "Implementation Notes"
-        if (-not $implementationRun) {
-            throw "IMPLEMENT requires an Implementation Notes run."
-        }
-
-        $implementationTime = Get-RunTimestamp -Text $planText -Name "Implementation Notes"
-        $codeVerdict = Get-RunVerdict -Text $planText -Name "Code Review"
-        $codeReviewTime = Get-RunTimestamp -Text $planText -Name "Code Review"
-        if ($codeVerdict -eq "revise" -and $null -ne $codeReviewTime -and $implementationTime -le $codeReviewTime) {
-            throw "IMPLEMENT requires a fresh Implementation Notes run after CODE_REVIEW revise."
-        }
-
-        "CODE_REVIEW"
-    }
-    "CODE_REVIEW" {
-        $codeVerdict = Get-RunVerdict -Text $planText -Name "Code Review"
-        if (-not $codeVerdict) {
-            throw "CODE_REVIEW requires latest verdict."
-        }
-        if ($codeVerdict -eq "pass") { "TEST" } else { "IMPLEMENT" }
-    }
-    "TEST" {
-        if (-not (Test-Path -LiteralPath $testPath -PathType Leaf)) {
-            throw "Missing $testPath"
-        }
-
-        $testText = Get-Content -LiteralPath $testPath -Raw -Encoding utf8
-        if ($testText -notmatch "(?ms)^## Conclusion\r?\n(pass|fail|blocked)\s*$") {
-            throw "TEST requires Conclusion."
-        }
-        $conclusion = $Matches[1]
-        if ($testText -notmatch "(?m)^## Handoff\s*$") {
-            throw "TEST requires Handoff."
-        }
-        if ($conclusion -ne "pass") {
-            throw "TEST conclusion is $conclusion; stop and report."
-        }
-
-        "DONE"
-    }
-    "DONE" {
-        throw "Task is already DONE."
-    }
-}
-
-$fallbackResolution = Resolve-FallbackTool -NextStage $nextStage -CliTool $Tool -CliProfile $Profile -RepoRoot $repoRoot
-$toolCandidate = if ($nextStage -eq 'DONE') { $Tool } else { $fallbackResolution.Tool }
-$nextTool = Resolve-AssignedTool -Stage $nextStage -Tool $toolCandidate
-$profileSelection = Resolve-ProfileSelection -Stage $nextStage -Tool $nextTool -ExistingProfile $currentProfile -ExistingModel $currentModel -RequestedProfile $Profile -RequestedModel $Model -Source $fallbackResolution.Source -WorkflowProfile $fallbackResolution.WorkflowProfile -WorkflowModel $fallbackResolution.WorkflowModel -RepoRoot $repoRoot
-$nextProfile = $profileSelection.Profile
-$nextModel = $profileSelection.Model
-$updatedPlan = Update-Frontmatter -Text $planText -Task $TaskId -Stage $nextStage -Tool $nextTool -ToolProfile $nextProfile -Model $nextModel -Updated $today
-Write-Utf8Bom -Path $planPath -Content $updatedPlan
-
-$latestPlanReview = Get-RunVerdict -Text $updatedPlan -Name "Plan Review"
-if (-not $latestPlanReview) {
-    $latestPlanReview = "none"
-}
-
-$latestCodeReview = Get-RunVerdict -Text $updatedPlan -Name "Code Review"
-if (-not $latestCodeReview) {
-    $latestCodeReview = "none"
-}
-
-$currentDoc = if ($nextStage -eq 'DONE') {
-    "docs/tasks/$TaskId/test.md"
-} else {
-    "docs/tasks/$TaskId/plan.md"
-}
-$nextStep = if ($nextStage -eq 'DONE') {
-    '任务完成'
-} else {
-    "使用 $nextTool 继续 $nextStage"
-}
-$taskMirrorLines = @(
-    "---"
-    "task_id: $TaskId"
-    "stage: $nextStage"
-    "tool: $nextTool"
-    "entry_host: $nextTool"
-)
-
-if (-not [string]::IsNullOrWhiteSpace($nextProfile)) {
-    $taskMirrorLines += "tool_profile: $nextProfile"
-}
-
-if (-not [string]::IsNullOrWhiteSpace($nextModel)) {
-    $taskMirrorLines += "model: $nextModel"
-}
-
-$taskMirrorLines += @(
-    "updated: $today"
-    "---"
-    "# Task Mirror"
-    ""
-    "- pointer: $currentDoc"
-    "- assigned_tool: $nextTool"
-)
-
-if (-not [string]::IsNullOrWhiteSpace($nextProfile)) {
-    $taskMirrorLines += "- assigned_tool_profile: $nextProfile"
-}
-
-if (-not [string]::IsNullOrWhiteSpace($nextModel)) {
-    $taskMirrorLines += "- assigned_model: $nextModel"
-}
-
-$taskMirrorLines += @(
-    "- latest_plan_review: $latestPlanReview"
-    "- latest_code_review: $latestCodeReview"
-    ""
-)
-$taskMirror = $taskMirrorLines -join "`r`n"
-
-Invoke-BestEffortRuntimeWrite -VaultRoot $VaultRoot -TaskId $TaskId -Step 'tasks-mirror' -Action {
-    Ensure-ParentDirectory -Path $taskMirrorPath
-    Write-Utf8Bom -Path $taskMirrorPath -Content $taskMirror
-}
-Invoke-BestEffortRuntimeWrite -VaultRoot $VaultRoot -TaskId $TaskId -Step 'current-task' -Action {
-    Ensure-ParentDirectory -Path $currentPath
-    Write-Utf8Bom -Path $currentPath -Content (New-CurrentTaskContent -TaskId $TaskId -Status $nextStage -CurrentDoc $currentDoc -Tool $nextTool -EntryHost $nextTool -ToolProfile $nextProfile -Model $nextModel -NextStep $nextStep)
-}
-Invoke-BestEffortRuntimeWrite -VaultRoot $VaultRoot -TaskId $TaskId -Step 'recovery-index' -Action {
-    Ensure-ParentDirectory -Path $indexPath
-    Write-RecoveryIndex -TasksDirectory $tasksDir -Path $indexPath
-}
-
-Write-Output "$nextStage | $nextTool"
+$advanceMutex = $null
+$runtimeFailure = $null
+$fallbackClearFailure = $null
+$runtimeStage = ''
+$runtimeTool = ''
+$runtimeProfile = ''
+$runtimeModel = ''
+$testSnapshotBeforeValidation = $null
+$appendError = ''
+$operation = if ($ActivateCurrent.IsPresent) { 'activate' } elseif ($SyncOnly.IsPresent) { 'sync' } else { 'advance' }
 try {
-    Write-SkillManifest -RepoRoot $repoRoot -WorkspaceRoot $workspaceRoot -TaskId $TaskId -Stage $nextStage -Tool $nextTool
-} catch {
-    [Console]::Error.WriteLine("skill-manifest write skipped: $($_.Exception.Message)")
+    $advanceMutex = Enter-LitePlanMutex -TaskId $TaskId
+    if ($SyncOnly.IsPresent -and (
+        -not [string]::IsNullOrWhiteSpace($Tool) -or
+        -not [string]::IsNullOrWhiteSpace($Profile) -or
+        -not [string]::IsNullOrWhiteSpace($Model)
+    )) {
+        throw 'SyncOnly cannot be combined with Tool, Profile, or Model.'
+    }
+    if (-not (Test-Path -LiteralPath $planPath -PathType Leaf)) {
+        throw "Missing $planPath"
+    }
+
+    $planTextBeforeValidation = Get-Content -LiteralPath $planPath -Raw -Encoding utf8
+    $frontmatter = (Get-LiteFrontmatter -Content $planTextBeforeValidation).Fields
+    $allowedFrontmatterFields = @('task_id', 'stage', 'tool', 'tool_profile', 'model', 'updated')
+    $requiredFrontmatterFields = @('task_id', 'stage', 'tool', 'updated')
+    $unexpectedFrontmatterFields = @($frontmatter.Keys | Where-Object { $_ -notin $allowedFrontmatterFields })
+    $missingFrontmatterFields = @($requiredFrontmatterFields | Where-Object { -not $frontmatter.Contains($_) })
+    if ($unexpectedFrontmatterFields.Count -gt 0 -or $missingFrontmatterFields.Count -gt 0) {
+        throw 'Frontmatter fields are not legal for harness-lite stage synchronization.'
+    }
+    if ($frontmatter.updated -cnotmatch '^\d{4}-\d{2}-\d{2}$') {
+        throw 'Frontmatter updated must use YYYY-MM-DD.'
+    }
+    $stage = $frontmatter.stage
+    $currentTool = $frontmatter.tool
+    $currentProfile = if ($frontmatter.Contains('tool_profile')) { $frontmatter.tool_profile } else { '' }
+    $currentModel = if ($frontmatter.Contains('model')) { $frontmatter.model } else { '' }
+    if ($frontmatter.task_id -cne $TaskId) {
+        throw "Frontmatter task_id '$($frontmatter.task_id)' does not match '$TaskId'."
+    }
+    if ($stage -cnotin $ValidStages) {
+        throw "Unsupported stage: $stage"
+    }
+    if ($stage -ceq 'DONE') {
+        if ($currentTool -cne 'none') {
+            throw 'DONE stage requires tool: none'
+        }
+    } elseif ($currentTool -cnotin $ValidTools) {
+        throw "Unsupported plan tool: $currentTool"
+    }
+    if ($stage -cne $ExpectedStage) {
+        throw "ExpectedStage CAS mismatch: expected $ExpectedStage, actual $stage."
+    }
+    if ($ActivateCurrent.IsPresent -and $stage -eq 'DONE') {
+        throw 'ActivateCurrent cannot activate DONE.'
+    }
+
+    $planText = $planTextBeforeValidation
+    $updatedPlan = $planText
+    $latestCodeReviewBeforeValidation = if (-not $SyncOnly.IsPresent -and $stage -eq 'IMPLEMENT') {
+        Get-RunVerdict -Text $planTextBeforeValidation -Name 'Code Review'
+    } else {
+        ''
+    }
+    $initialFailRework = -not $SyncOnly.IsPresent -and
+        $stage -eq 'IMPLEMENT' -and
+        $latestCodeReviewBeforeValidation -eq 'pass'
+    $testExistsBeforeValidation = Test-Path -LiteralPath $testPath -PathType Leaf
+    if (-not $SyncOnly.IsPresent -and
+        ($stage -eq 'TEST' -or $initialFailRework) -and
+        -not $testExistsBeforeValidation) {
+        throw "Missing $testPath for $stage."
+    }
+    if (-not $SyncOnly.IsPresent -and ($stage -eq 'TEST' -or $initialFailRework)) {
+        $testSnapshotBeforeValidation = Open-TestSnapshot -Path $testPath
+    }
+    if ($SyncOnly.IsPresent) {
+        $runtimeStage = $stage
+        $runtimeTool = $currentTool
+        $runtimeProfile = if ($stage -eq 'DONE') { '' } else { $currentProfile }
+        $runtimeModel = if ($stage -eq 'DONE') { '' } else { $currentModel }
+    } else {
+        Invoke-LiteArtifactValidator -ValidatorPath $validatorPath -TaskId $TaskId -RepoRoot $repoRoot -WorkspaceRoot $workspaceRoot
+        $planText = Get-Content -LiteralPath $planPath -Raw -Encoding utf8
+        if ($planText -cne $planTextBeforeValidation) {
+            throw 'plan.md changed while validation was running; retry the stage advance.'
+        }
+        if ($null -ne $testSnapshotBeforeValidation -and
+            -not (Test-TestSnapshotMatches -Path $testPath -Identity $testSnapshotBeforeValidation.Identity)) {
+            throw 'test.md changed while validation was running; retry the stage advance.'
+        }
+
+        $nextStage = switch ($stage) {
+            'PLAN' {
+                $clarification = Get-LiteSectionContent `
+                    -Sections @(Get-LiteSections -Content $planText) `
+                    -Name 'Clarification'
+                $confirmationStatus = Get-LiteUserConfirmationStatus -Sections @(Get-LiteSections -Content $planText)
+                if (@(Get-LiteMissingClarificationAspects -Content $clarification).Count -gt 0) {
+                    throw 'PLAN clarification gate failed.'
+                }
+                if ($confirmationStatus -cne 'confirmed') {
+                    throw 'PLAN requires explicit user confirmation.'
+                }
+                'PLAN_REVIEW'
+            }
+            'PLAN_REVIEW' {
+                $planVerdict = Get-RunVerdict -Text $planText -Name 'Plan Review'
+                if (-not $planVerdict) {
+                    throw 'PLAN_REVIEW requires latest verdict.'
+                }
+                if ($planVerdict -eq 'pass') { 'IMPLEMENT' } else { 'PLAN' }
+            }
+            'IMPLEMENT' {
+                $implementationRun = Get-LatestRun -Text $planText -Name 'Implementation Notes'
+                if (-not $implementationRun) {
+                    throw 'IMPLEMENT requires an Implementation Notes run.'
+                }
+                'CODE_REVIEW'
+            }
+            'CODE_REVIEW' {
+                $codeVerdict = Get-RunVerdict -Text $planText -Name 'Code Review'
+                if (-not $codeVerdict) {
+                    throw 'CODE_REVIEW requires latest verdict.'
+                }
+                if ($codeVerdict -eq 'pass') { 'TEST' } else { 'IMPLEMENT' }
+            }
+            'TEST' {
+                $conclusion = Get-TestConclusion -Text $testSnapshotBeforeValidation.Text
+                if ($conclusion -eq 'pass') {
+                    'DONE'
+                } elseif ($conclusion -eq 'fail') {
+                    'IMPLEMENT'
+                } else {
+                    throw 'TEST conclusion is blocked; stay in TEST and report the unblock condition.'
+                }
+            }
+            'DONE' {
+                throw 'Task is already DONE.'
+            }
+        }
+        if ($ActivateCurrent.IsPresent -and $nextStage -eq 'DONE') {
+            throw 'ActivateCurrent cannot activate DONE.'
+        }
+
+        $fallbackResolution = Resolve-FallbackTool -NextStage $nextStage -CliTool $Tool -CliProfile $Profile -RepoRoot $repoRoot
+        $toolCandidate = if ($nextStage -eq 'DONE') { $Tool } else { $fallbackResolution.Tool }
+        $runtimeTool = Resolve-AssignedTool -Stage $nextStage -Tool $toolCandidate
+        $profileSelection = Resolve-ProfileSelection -Stage $nextStage -Tool $runtimeTool -ExistingProfile $currentProfile -ExistingModel $currentModel -RequestedProfile $Profile -RequestedModel $Model -Source $fallbackResolution.Source -WorkflowProfile $fallbackResolution.WorkflowProfile -WorkflowModel $fallbackResolution.WorkflowModel -RepoRoot $repoRoot
+        $runtimeStage = $nextStage
+        $runtimeProfile = $profileSelection.Profile
+        $runtimeModel = $profileSelection.Model
+        $updatedPlan = Update-Frontmatter -Text $planText -Task $TaskId -Stage $runtimeStage -Tool $runtimeTool -ToolProfile $runtimeProfile -Model $runtimeModel -Updated (Get-Date -Format 'yyyy-MM-dd')
+    }
+
+    $latestPlanReview = 'none'
+    $latestCodeReview = 'none'
+    try {
+        $parsedPlanReview = Get-RunVerdict -Text $updatedPlan -Name 'Plan Review'
+        if ($parsedPlanReview) { $latestPlanReview = $parsedPlanReview }
+        $parsedCodeReview = Get-RunVerdict -Text $updatedPlan -Name 'Code Review'
+        if ($parsedCodeReview) { $latestCodeReview = $parsedCodeReview }
+    } catch {
+        if (-not $SyncOnly.IsPresent) { throw }
+    }
+
+    $currentDoc = if ($runtimeStage -eq 'DONE') { "docs/tasks/$TaskId/test.md" } else { "docs/tasks/$TaskId/plan.md" }
+    $nextStep = if ($runtimeStage -eq 'DONE') { '任务完成' } else { "使用 $runtimeTool 继续 $runtimeStage" }
+    $runtimeUpdated = Get-CanonicalRuntimeTimestamp
+    $taskMirror = New-CanonicalTaskRuntimeContent `
+        -TaskId $TaskId `
+        -TaskName $TaskId `
+        -Stage $runtimeStage `
+        -WorkspaceRoot $workspaceRoot `
+        -PrimaryArtifact $currentDoc `
+        -Tool $runtimeTool `
+        -EntryHost $runtimeTool `
+        -ToolProfile $runtimeProfile `
+        -Model $runtimeModel `
+        -LatestPlanReview $latestPlanReview `
+        -LatestCodeReview $latestCodeReview `
+        -Updated $runtimeUpdated
+    $activeCurrentContent = if ($runtimeStage -eq 'DONE') {
+        New-CanonicalIdleCurrentContent -Updated $runtimeUpdated
+    } else {
+        New-CanonicalCurrentTaskContent `
+            -TaskId $TaskId `
+            -TaskName $TaskId `
+            -Stage $runtimeStage `
+            -CurrentDoc $currentDoc `
+            -Tool $runtimeTool `
+            -EntryHost $runtimeTool `
+            -ToolProfile $runtimeProfile `
+            -Model $runtimeModel `
+            -NextStep $nextStep `
+            -Updated $runtimeUpdated
+    }
+
+    $runtimeMutex = Enter-CanonicalRuntimeMutex -VaultRoot $VaultRoot
+    try {
+        $planTextAtCommit = Get-Content -LiteralPath $planPath -Raw -Encoding utf8
+        if ($planTextAtCommit -cne $planTextBeforeValidation) {
+            throw 'plan.md changed before stage/runtime commit; retry the operation.'
+        }
+        $currentState = Get-CanonicalCurrentTaskState -Path $currentPath
+        if ($currentState.Exists -and (
+            $currentState.SchemaVersion -ne 'current-task-pointer/v1.1' -or
+            [string]::IsNullOrWhiteSpace($currentState.TaskId)
+        )) {
+            throw 'Current task pointer is not canonical; repair it before stage transition.'
+        }
+        $currentMissing = -not $currentState.Exists
+        $currentIsActive = $currentState.Exists -and $currentState.TaskId -eq $TaskId
+        if (-not $SyncOnly.IsPresent) {
+            if ($null -ne $testSnapshotBeforeValidation -and
+                -not (Test-TestSnapshotMatches -Path $testPath -Identity $testSnapshotBeforeValidation.Identity)) {
+                throw 'test.md changed before stage/runtime commit; retry the operation.'
+            }
+            Write-LiteUtf8BomAtomic -Path $planPath -Content $updatedPlan
+            if ($null -ne $testSnapshotBeforeValidation) {
+                $testSnapshotBeforeValidation.Handle.Dispose()
+                $testSnapshotBeforeValidation.Handle = $null
+            }
+        }
+
+        $currentWriteContent = $null
+        if ($ActivateCurrent.IsPresent -or $currentIsActive) {
+            $currentWriteContent = $activeCurrentContent
+        } elseif ($currentMissing) {
+            $currentWriteContent = New-CanonicalIdleCurrentContent -Updated $runtimeUpdated
+        }
+
+        $runtimeSteps = @(
+            [pscustomobject]@{
+                Step = 'tasks-mirror'
+                Action = {
+                    Ensure-ParentDirectory -Path $taskMirrorPath
+                    Write-CanonicalRuntimeUtf8BomAtomic -Path $taskMirrorPath -Content $taskMirror
+                }
+            }
+        )
+        if ($null -ne $currentWriteContent) {
+            $runtimeSteps += [pscustomobject]@{
+                Step = 'current-task'
+                Action = {
+                    Ensure-ParentDirectory -Path $currentPath
+                    Write-CanonicalRuntimeUtf8BomAtomic -Path $currentPath -Content $currentWriteContent
+                }
+            }
+        }
+        $runtimeSteps += [pscustomobject]@{
+            Step = 'recovery-index'
+            Action = {
+                Ensure-ParentDirectory -Path $indexPath
+                $canonicalCurrent = Get-CanonicalCurrentTaskState -Path $currentPath
+                $canonicalRecords = Get-CanonicalTaskRuntimeRecords -TasksDirectory $tasksDir
+                Write-CanonicalRuntimeUtf8BomAtomic -Path $indexPath -Content (New-CanonicalRecoveryIndexContent -CurrentTask $canonicalCurrent -TaskRecords $canonicalRecords -Updated $runtimeUpdated)
+            }
+        }
+        foreach ($runtimeStep in $runtimeSteps) {
+            try {
+                & $runtimeStep.Action
+            } catch {
+                $runtimeFailure = [pscustomobject]@{
+                    Step = $runtimeStep.Step
+                    Reason = $_.Exception.Message
+                }
+                break
+            }
+        }
+    } finally {
+        Exit-CanonicalRuntimeMutex -Mutex $runtimeMutex
+    }
+    if ($null -ne $runtimeFailure) {
+        $fallbackPayload = [ordered]@{
+            schema_version = 'writeback-fallback/v1'
+            operation = $operation
+            expected_stage = $runtimeStage
+            failed_step = $runtimeFailure.Step
+            reason = $runtimeFailure.Reason
+        } | ConvertTo-Json -Compress
+        $appendError = Report-WritebackFallback -VaultRoot $VaultRoot -TaskId $TaskId -Step $runtimeFailure.Step -Reason $runtimeFailure.Reason -Payload $fallbackPayload
+    }
+    if ($null -eq $runtimeFailure) {
+        try {
+            $null = Clear-RuntimeWritebackFallback -VaultRoot $VaultRoot -TaskId $TaskId -ActivateCurrent:$ActivateCurrent.IsPresent
+        } catch {
+            $fallbackClearFailure = $_.Exception.Message
+        }
+    }
+    if ($null -eq $runtimeFailure -and $null -eq $fallbackClearFailure -and -not $SyncOnly.IsPresent) {
+        try {
+            Write-SkillManifest -RepoRoot $repoRoot -WorkspaceRoot $workspaceRoot -TaskId $TaskId -Stage $runtimeStage -Tool $runtimeTool
+        } catch {
+            [Console]::Error.WriteLine("skill-manifest write skipped: $($_.Exception.Message)")
+        }
+    }
+} finally {
+    try {
+        if ($null -ne $testSnapshotBeforeValidation -and $null -ne $testSnapshotBeforeValidation.Handle) {
+            $testSnapshotBeforeValidation.Handle.Dispose()
+        }
+    } finally {
+        Exit-LitePlanMutex -Mutex $advanceMutex
+    }
+}
+
+$replayCommand = Get-SyncReplayCommand -TaskId $TaskId -ExpectedStage $runtimeStage -RepoRoot $repoRoot -WorkspaceRoot $workspaceRoot -VaultRoot $VaultRoot -ActivateCurrent:$ActivateCurrent.IsPresent
+if ($null -ne $runtimeFailure) {
+    [Console]::Error.WriteLine("Replay: $replayCommand")
+    $appendSuffix = if ([string]::IsNullOrWhiteSpace($appendError)) { '' } else { " Fallback append failed: $appendError" }
+    throw "Runtime writeback failed at $($runtimeFailure.Step) after stage $runtimeStage.$appendSuffix Replay: $replayCommand"
+}
+
+if ($null -ne $fallbackClearFailure) {
+    [Console]::Error.WriteLine("Replay: $replayCommand")
+    throw "fallback clear failed: $fallbackClearFailure Replay: $replayCommand"
+}
+
+if ($SyncOnly.IsPresent) {
+    Write-Output "SYNCED | $runtimeStage | $runtimeTool"
+} else {
+    Write-Output "$runtimeStage | $runtimeTool"
 }

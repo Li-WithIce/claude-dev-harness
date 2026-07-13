@@ -41,7 +41,7 @@ updated: YYYY-MM-DD
 
 1. 先判断请求是 `resume-current`、`switch-existing`、`new-task` 还是 `inbox-first`
 2. 只有 `new-task mode=workflow` 才进入 orchestrator；`mode=quick` 由入口 agent 直接处理并验证；`mode=ask` 是 iterative blocking clarification gate，必须停留在入口层 until all blocking requirements are resolved，然后重新判断并 route to `quick` or `workflow`
-3. `new-task` 的显式覆盖词：`直接改` / `快修` 偏 `quick`；`走 workflow` / `留痕` / `review` / `test` 偏 `workflow`
+3. `new-task` 的 read-only / mutation / durable / ambiguous precedence 只由 `entry-router` 判定；`review` / `test` 等名词本身不把请求送入 orchestrator
 4. 进入 workflow 后先定 `task_id`；未显式指定时，当前 `PLAN` 默认写 `tool: codex`、`tool_profile: harness-default-codex`、`model: gpt-5.5/xhigh`
 5. 如果 `plan.md` 已存在，直接读 frontmatter 决定当前 `stage` 和 `tool`
 6. 输入不足时才创建 `docs/tasks/{task_id}/spec.md`
@@ -68,24 +68,26 @@ orchestrator 只能在 `new-task mode=workflow` 或已确认的 resume/switch wo
 - `IMPLEMENT`：调用 `implement` skill，写 `## Implementation Notes`
 - `CODE_REVIEW`：调用 `review` skill，写 `## Code Review`
 - `TEST`：调用 `test`，写 `test.md`
-- 优先调用 repo `scripts/invoke-harness-skill.ps1` 发起 `review` / `test` / `codex`；返回 `status=markdown-fallback` 时回退到原 Markdown skill 流程
+- `review` / `test` 直接加载现有 Markdown stage skill；只有显式 readonly `codex` 委派才调用 repo `scripts/invoke-harness-skill.ps1`
 - `implement` 不允许走 adapter；必须由主 agent / 人类直接执行
 
-**Team mode (documentation only)**: 当 leader 已设 `$env:AITEAMCODE_TEAM_MODE='1'` 时，可调用 `skills/workflow-team/scripts/spawn-team.ps1` 起 5 role 团队；env 校验由 `spawn-team.ps1` 自身 fail-closed 强制。env 未设时维持单 agent 流程，所有 Phase 1-3 行为零变化；orchestrator skill 本身不新增任何读 env 的可执行分支。
+**Team mode (documentation only)**: 当 leader 已设 `$env:AITEAMCODE_TEAM_MODE='1'` 时，可调用 `skills/workflow-team/scripts/spawn-team.ps1` 只启动当前 stage 的一个角色；env 校验由 `spawn-team.ps1` 自身 fail-closed 强制。env 未设时维持单 agent 流程，所有 Phase 1-3 行为零变化；orchestrator skill 本身不新增任何读 env 的可执行分支。
 
 ## 推进规则
 
 stage 只通过下面这条命令推进：
 
 ```powershell
-# Codex-only 默认路径：descriptor 为下一 stage 声明 default_profile 时可省略 -Tool/-Profile
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id}
+# Codex-only 默认路径：ExpectedStage 必须是调用方刚读取的 frontmatter stage
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage>
 # 可选：同时绑定下一阶段 profile/model
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -Tool <codex> -Profile harness-default-codex -Model gpt-5.5/xhigh
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Tool <codex> -Profile harness-default-codex -Model gpt-5.5/xhigh
 # 可选：只传 profile，backend 从 profile.backend 解析
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -Profile harness-default-codex
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Profile harness-default-codex
 # 可选：显式切到其他合法 backend
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -Tool <claudecode>
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Tool <claudecode>
+# 新建/切换任务只同步实际 stage，并显式激活 current
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -SyncOnly -ActivateCurrent
 ```
 
 规则：
@@ -95,13 +97,17 @@ pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -Tool <claudecod
 - `pure cli-tool`（显式 `-Tool`、未传 `-Profile/-Model`）会清空下一 stage 继承的 `tool_profile/model`
 - `cli-profile` 与 `cli-tool + explicit -Profile/-Model` 保持 Phase 1 mismatch rejection 语义
 - 用户可以在任意 stage 边界切换 `tool`
+- `-ExpectedStage` 是调用方提供的 compare-and-swap 前置条件；不匹配时零写入，shim 不会代读或代填
+- `-SyncOnly` 不推进 stage、不跑阶段完成度 gate，且拒绝 `-Tool/-Profile/-Model`；仅同步实际 frontmatter stage
+- `-ActivateCurrent` 只用于明确的新建/切换，不能激活 `DONE`
 
 它会转调 repo 内的 `advance-stage.ps1`，并先自动运行 validator，然后再：
 
 - 更新 `plan.md` frontmatter 的 `stage`、`tool` 和 `updated`
-- 重写 `运行时/tasks/<task-id>.md`
-- 重写 `运行时/当前任务.md`
-- 重写 `运行时/恢复索引.md`
+- 始终重写 `运行时/tasks/<task-id>.md`
+- task 已 active 或显式 `-ActivateCurrent` 时才重写 `运行时/当前任务.md`；background advance 不抢 current
+- active task 到 `DONE` 时把 current 重置为 canonical idle；background `DONE` 不改 current
+- 依据最终 current + mirrors 重写 `运行时/恢复索引.md`
 - best-effort 写入 `docs/tasks/{task_id}/skill-manifest.json`
 - 把 `resolved tool=<tool> via <source>` 写到 stderr，stdout 保持 `<stage> | <tool>`
 
@@ -110,12 +116,14 @@ pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -Tool <claudecod
 - 这是协议条款，不是注册到 Claude Code 内核的 hook。
 - 当你主观判断当前 context 已接近上限时，宁可早触发，也不要漏触发。
 - 每次 stage callback 结束前，leader 至少自检 3 件事：
-  - 是否存在还没提交的 wisdom 条目
+  - 是否存在用户已明确授权但还没提交的 wisdom 条目
   - 当前 task 是否已经具备推进条件
   - 若现在中断，会不会丢失下一位接手者恢复所需的最小上下文
-- wisdom 路径只允许 append：如需提交 pending wisdom，先走 `skills/obsidian-memory/scripts/append-runtime-inbox.ps1` 写入 `.assistant/运行时/收件箱.md`。
-- 收件箱后的分流仍走仓库现有 `promote-runtime-inbox.ps1` / `triage-runtime-inbox.ps1` 路径；不要手工直写 `.assistant/运行时/记忆-*.md`。
+- wisdom 路径只允许 append：只有用户明确要求记录/沉淀记忆后，才可提交 pending wisdom，并通过 `skills/obsidian-memory/scripts/append-runtime-inbox.ps1` 写入 `.assistant/运行时/收件箱.md`；普通 review/status 只提示可沉淀内容。
+- 收件箱任务分流回到 entry-router：使用 `triage-runtime-inbox.ps1 -List` 单行 JSON 中的 `open_items[].route_task_id` 作为 task identity，并保留同项临时 `row_id`；`task_plan_exists=true` 走 `switch-existing`，否则由 entry-router 选择 quick/workflow/ask。quick 交付与验证成功后立即用 `-RowId <row_id>` 精确 triage；workflow 完成 canonical PLAN、validator 与 background `-SyncOnly` 后再 triage；ask/pending、失败或仍需人工选择时 row 保持 open，并直接向用户提问。不要手工直写 runtime、decision 或记忆文件。
+- inbox recovery 的 machine contracts 以 `entry-router` 为唯一来源；本 skill 只执行其已选 route，不复制判定矩阵。
 - 若当前 stage 已可推进，非 append 写回只能委托 `.assistant\entry\advance-stage.ps1`；不要手工 patch `plan.md`、`运行时/tasks/<task-id>.md`、`运行时/当前任务.md` 或 `运行时/恢复索引.md`。
+- 用户明确继续 / 切换并执行 workflow、已进入 orchestrator 后，才处理 matching open `[writeback-fallback]`；runtime ladder 任一步失败都返回非零，释放锁后用相同 `TaskId/ExpectedStage` 执行 `-SyncOnly`，成功后只清除精确匹配的 fallback 行。
 - 触发 append 或 advance 前，先按 [docs/工作流/single-writer-precompact.md](../../docs/工作流/single-writer-precompact.md) 执行 `cooperative-yield` / single-writer 协议；不要与正在运行的 `advance-stage` 主流程竞争。
 
 ## TodoWrite Milestones（跨阶段，可选 host surface）
@@ -140,6 +148,7 @@ pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -Tool <claudecod
 - IMPLEMENT 没有新证据支撑回修
 - TEST 缺 `## Conclusion` 或 `## Handoff`
 - 当前 stage 的最新 run 没有合法 `verdict`
+- `-ExpectedStage` 与当前 frontmatter stage 不一致，或存在尚未收敛的 matching `[writeback-fallback]`
 - 非 `DONE` 推进时 `-Tool` / `-Profile` / workflow-default 都无法解析下一阶段 tool
 
 ## 响应头
@@ -150,7 +159,7 @@ pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -Tool <claudecod
 task_id: <task-id>
 stage: <stage>
 tool: <tool>
-advance_hint: pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id}
+advance_hint: pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage>
 ```
 
 `advance_hint` 默认走 workflow descriptor；需要临时切换 backend 时再追加 `-Tool <claudecode|codex>`。`TEST -> DONE` 时也可以省略 `-Tool`。

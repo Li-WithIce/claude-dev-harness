@@ -5,7 +5,6 @@ if (Test-Path -LiteralPath $sharedPathsHelper) {
 
 $script:RuntimeTouchingScripts = @(
     'append-runtime-inbox.ps1',
-    'promote-runtime-inbox.ps1',
     'triage-runtime-inbox.ps1',
     'repair-shared-memory.ps1',
     'archive-memory-candidates.ps1',

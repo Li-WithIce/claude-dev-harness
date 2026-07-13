@@ -9,7 +9,7 @@
 - `plan.md` 里的 append-only `Plan Review / Implementation Notes / Code Review`
 - `docs/tasks/{task_id}/test.md`
 
-本指南只约束 `new-task mode=workflow` 后的任务产物。`mode=quick` 默认不创建 `docs/tasks/{task_id}/`，只在当前对话内完成、验证并报告；若 quick 执行中发现需要留痕、review、test 或影响面扩大，应切换到 workflow。`mode=ask` 是 workflow 前的 iterative blocking clarification gate：未解除阻塞前不创建 `docs/tasks/{task_id}/`、不进入 PLAN、不修改代码。
+本指南只约束 `new-task mode=workflow` 后的任务产物。`mode=quick` 默认不创建 `docs/tasks/{task_id}/`，只在当前对话内完成、验证并报告；若 mutation 影响面扩大，或用户明确要求 durable workflow/review/test artifact/evidence，再切换到 workflow。read-only review/test 名词本身不触发切换。`mode=ask` 是 workflow 前的 iterative blocking clarification gate：未解除阻塞前不创建 `docs/tasks/{task_id}/`、不进入 PLAN、不修改代码。
 
 Stage discipline 的单一索引见 `docs/工作流/stage-discipline-matrix.md`。该矩阵只定义思考和审查视角，不新增 stage、frontmatter 字段或 validator hard gate；仅在需要澄清 route/stage discipline 或审查 stage 行为时加载。
 
@@ -96,7 +96,7 @@ If no provider was used, write `provider_context: none` only when useful, otherw
 
 - `docs/tasks/{task_id}/skill-manifest.json`：由 `advance-stage.ps1` 在成功推进后 best-effort 生成；不是新的真相源，也不写入 `.assistant/`
 - `docs/tasks/{task_id}/skills-index.md`：由 `scripts/generate-skills-index.ps1` 生成，给嵌入消费端或非原生 backend 展示当前 stage 的可用 skills
-- invocation trace 只允许以单行 `- invocation: ...` 追加到已有 `### Run N` 块内部；目标 section 没有 Run block 时必须跳过，不能新建 section 或 bare 顶层 bullet
+- 只有真实 `status=delegated` 的 invocation 才写 trace；trace 只允许以单行 `- invocation: ... status=delegated` 追加到已有 `### Run N` 块内部，目标 section 没有 Run block 时必须跳过
 
 ### 必备 section
 
@@ -143,7 +143,7 @@ If no provider was used, write `provider_context: none` only when useful, otherw
 - 回滚策略或兼容性约束
 - `ui: <expectation | not-applicable>`
 
-`clarification_ledger` 只补充问题树和决策留痕，不能替代上述最低字段；即使八类账本都已闭环，`advance-stage` / validator 仍依赖这些机器可读行。
+`clarification_ledger` 只补充待决或高影响决策，不能替代上述最低字段；只有不可逆高风险任务才展开完整八类账本。`advance-stage` / validator 始终依赖 Clarification 最低字段。
 
 #### 推理纪律：第一性原理 / 剃刀法则 / 贝叶斯
 
@@ -177,12 +177,12 @@ harness-lite 仍只有 `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`
 
 - 它们只改变 PLAN 写作方式，不新增 workflow stage、frontmatter 字段、runtime、validator hard gate 或第二 truth。
 - 触发范围包括显式触发词，也包括 PLAN 的验收、非目标、影响面、回滚/兼容任一项仍不确定，或实现路径仍不足以指导 IMPLEMENT。
-- 开发任务需要留痕或后续实现时，在 `PLAN -> ## Clarification` 中用 `clarification_ledger` 沉淀问题、证据、推荐答案、决策和影响；用户确认前 `## User Confirmation` 保持 `- status: draft`。
+- 开发任务需要留痕或后续实现时，在 `PLAN -> ## Clarification` 中仅把 pending 或高影响的 `clarification_ledger` 沉淀为问题、证据、推荐答案、决策和影响；用户确认前 `## User Confirmation` 保持 `- status: draft`。
 - `clarification_ledger` 是 `Clarification 最低要求` 的补充，不替代 `验收标准 / 非目标 / 受影响目录或模块 / 回滚策略或兼容性约束 / ui:`；这些字段必须继续出现在 `## Clarification` 中。
 - 信息不足以判断 quick/workflow 时才走 `ask`。Ask mode is an iterative blocking clarification gate：默认一次只问一个 highest-value clarification question；每次用户回答后重新判断是否足以路由；Remain in ask until all blocking uncertainties are resolved；只有阻塞问题全部解除后，才可进入 `quick` 或 `workflow`。
 - Ask exit criteria: ask cannot exit until the agent can state User goal, Success / acceptance criteria, In scope, Out of scope / non-goals, Affected area, Constraints, Risk level, Expected output, Recommended route: quick or workflow, and Why this route is safe. If any item is materially unknown and affects the work, remain in ask.
 - 触发后先自行查证能由代码库、文档或现有 artifact 回答的问题；剩余用户决策按依赖顺序一次只问一个，并给 `recommended_answer`。
-- `clarification_ledger` 分类限定为：`目标/验收`、`用户与权限`、`流程与状态`、`数据与边界`、`集成依赖`、`失败与回滚`、`非目标`、`验证证据`；触发协议时八类都必须有账本项。不适用类别写 `question: 该类别是否适用？`、`evidence: not-applicable`、`recommended_answer: 不适用`、`decision: accepted`、`impact: none`。
+- `clarification_ledger` 可使用：`目标/验收`、`用户与权限`、`流程与状态`、`数据与边界`、`集成依赖`、`失败与回滚`、`非目标`、`验证证据`。只有发布、权限/身份、迁移/破坏性恢复或不可逆外部效果，才要求八类完整覆盖；普通任务不写不适用占位。
 - 每个账本项使用字段 `category / question / evidence / recommended_answer / decision / impact`；`decision` 只能是 `pending | accepted | rejected`。存在 `pending` 时不得把 `## User Confirmation` 改成 `confirmed`。
 - 不得代替用户伪造决策：能由代码 / 文档 / artifact 自行闭环的问题，`evidence` 必须写明证据路径或事实；需要用户选择的问题，在用户回答前必须保持 `decision: pending`，用户回答后把简要回答写入 `evidence`。
 - `decision: accepted | rejected` 且 `impact` 不是 `none` 时，必须落到后续 `## Plan`、`## Verification` 或 `## Risks` 的对应 TODO / 命令 / 风险里；否则账本只是旁路记录，不算可执行决策。
@@ -356,7 +356,7 @@ harness-lite 仍只有 `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`
 
 ```markdown
 ## Verification
-- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/verify-workflow-contracts.ps1`
+- `pwsh -NoProfile -NonInteractive -File tests/verify-workflow-contracts.ps1`
 - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/verify-lite-footprint.ps1`
 ```
 
@@ -415,6 +415,8 @@ front_keywords: [shared-memory, long-session, recovery]
 ### Run <N> · YYYY-MM-DD HH:mm · runner: <Runner>
 ```
 
+阶段 freshness 只比较标题与 `test.md Evidence.executed_at` 书面值中的 `yyyy-MM-dd HH:mm`；候选分钟更早时拒绝，同分钟接受，不做本机时区或 UTC 换算。
+
 ### Plan Review / Code Review
 
 固定格式：
@@ -430,11 +432,14 @@ front_keywords: [shared-memory, long-session, recovery]
 
 规则：
 
-- `advance-stage.ps1` 只读取最新 run 的 `- verdict:`。
+- 每个 run 恰好写一个 `- verdict: pass | revise`，以及一个 findings 形态：inline `- findings: none`，或 `- findings:` 后只含缩进的 `P0/P1/P2/P3` 条目；两种形态不得混用或重复。
+- findings block 到下一个顶层 `- key:` 或 run 结束为止；空 block、普通文本、越界 severity 都非法。`next` / evidence 等 block 外文本中的 `P1:` 不算 finding。
+- `advance-stage.ps1` 只对最新 run 做一致性判断：`pass + P0/P1` 拒绝，`revise + none` 拒绝，`pass + 仅 P2/P3` 接受；历史 run 的旧矛盾不覆盖合法 latest run。
 - 没有 findings 时写 `- findings: none`，不要写空 severity 标题。
 - 只在真的有问题时使用 `P0/P1/P2/P3`。
 - Phase 3 adapter 的 invocation trace 只能追加到现有 run 末尾，不能手写到 section 顶层
 - PLAN_REVIEW / CODE_REVIEW 应把 artifact、affected_paths、实际 diff、Implementation Notes 和后续 Handoff 的 finish boundary 作为人工审查点；这是 append-only review 写作规则，不新增 stage，也不把 drift 升为 validator hard gate。
+- `CODE_REVIEW` 的最新 verdict 为 `pass` 时，该 run 分钟不得早于最新 Implementation run，避免复用 TEST 前的旧 pass；旧 `revise` 仍会返回 IMPLEMENT。
 
 #### 对抗性审查纪律（CODE_REVIEW）
 
@@ -446,7 +451,7 @@ front_keywords: [shared-memory, long-session, recovery]
 - **判断否决证据门槛**：若 finding 推翻的是“该不该做 / 是否过度 / 是否应删除”这类设计判断，必须附一个可执行反例验证或代码 / 文档证据；给不出时只作为非阻断提示，不直接作为 `verdict: revise` 的唯一理由。
 - **Debono 价值保留**：`verdict: revise` 后，在 `next` 或 finding 中保留仍成立的约束、价值或适用条件；不要把可复用的洞察随被否方案一起丢掉。
 
-命中问题用现有 `findings`（`P0/P1/P2/P3`）退回，`verdict: revise`；不引入新的硬校验。
+命中问题用现有 `findings`（`P0/P1/P2/P3`）退回，`verdict: revise`；不引入新 stage 或第二真相源。
 
 可选多 Agent 升级：复杂或高风险任务可显式 escalate 到多 agent 对抗审查——leader 在 `$env:AITEAMCODE_TEAM_MODE='1'` 下走 `skills/workflow-team`（或宿主提供的等效多 agent 能力），让独立 agent 分别承担否定式与追问式角色；Codex-only 默认单 agent 也必须完成上面三条纪律。结论仍 append 回同一个 `## Code Review` run，不另开真相源。
 
@@ -466,7 +471,8 @@ front_keywords: [shared-memory, long-session, recovery]
 
 - 回修后必须追加新 run，不能复用旧 run 充当“新证据”。
 - `changed` 写结果，不写空话。
-- `IMPLEMENT` 若是接 `CODE_REVIEW revise` 回来，最新 run 必须比那条 review 更晚。
+- `IMPLEMENT` 若是接 `CODE_REVIEW revise` 回来，最新 run 分钟不得早于那条 review。
+- `IMPLEMENT` 若是接 `TEST fail` 回来，保留失败 `test.md`，最新 run 分钟不得早于其 Evidence；不要在 IMPLEMENT 改写测试结论。
 
 #### Implementation reflection checks
 
@@ -511,6 +517,13 @@ IMPLEMENT 先执行 Minimal Safe Change ladder，再做实现。它要求最小�
 ## Findings
 - 关键发现；无则写 none。
 
+## Evidence
+- command: `pwsh -NoProfile -File ...`
+- exit_code: 0
+- executed_at: 2026-07-10T10:00:00+08:00
+- revision: 7-40 位十六进制 git revision，或 `dirty:<64hex>` workspace digest
+- evidence_path: `docs/tasks/{task_id}/test.md` 或其他 workspace 内已存在的相对路径
+
 ## Risks / Gaps
 - 残留风险或证据缺口；无则写 none。
 
@@ -535,11 +548,13 @@ pass
 规则：
 
 - `## Conclusion` 下第一行必须且只能是 `pass`、`fail`、`blocked`。
+- `## Evidence` 的五个字段必须各出现一次；`pass` 要求整数 `exit_code: 0`，`executed_at` 是含时区 ISO-8601，`revision` 是 7-40 位十六进制 git revision 或 `dirty:<64hex>`，`evidence_path` 是 workspace 内已存在文件的相对路径。
+- Evidence 分钟不得早于最新 Code Review；`pass -> DONE`，`fail -> IMPLEMENT`，`blocked` 保持 `TEST` 并报告解除条件。
 - `## Handoff` 必须存在。
-- `delivery` 与 `follow_up` 是最低必填，validator 只校验这两条。
+- `delivery` 与 `follow_up` 是最低必填；旧 task 若要推进，必须补齐 Evidence，不保留旧格式兼容。
 - 新任务的 finish boundary 应在 `## Handoff` 记录 4 项判断：artifact 是否存在或已交付、是否存在 artifact / diff drift、follow-up 是否需要拆新任务、是否需要 memory / spec update。
 - `current_state`、`key_decisions`、`next_actions` 为 opt-in 密度扩展，推荐长任务填写；不写不影响 validator。
-- 旧格式 Handoff（只含 delivery/follow_up）继续通过校验；validator 仍只硬校验既有最低字段，不要求旧任务回填 finish boundary。
+- `DONE` 表示结构化 TEST attestation 已通过，不表示 stage driver 已执行 Plan 中的任意命令；命令结果只能由 Evidence / CI 记录证明。
 - 不要把 review 发现写成独立 `review.md`。
 
 ## SKILL.md 拆分守则
@@ -581,5 +596,5 @@ pass
 - [ ] 触发 Clarification 协议时，`clarification_ledger` 无 `decision: pending`，且非 `impact: none` 决策已落到 Plan / Verification / Risks
 - [ ] append-only run 没有改写旧历史
 - [ ] review run 含 `verdict`
-- [ ] test.md 含 `Conclusion` 和 `Handoff`
+- [ ] test.md 含 `Conclusion`、`Evidence` 和 `Handoff`
 - [ ] 验证命令可直接执行

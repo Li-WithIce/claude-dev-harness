@@ -6,21 +6,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Get-NormalizedPath {
-    param([string]$Path)
-
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        return $null
-    }
-
-    return [System.IO.Path]::GetFullPath($Path)
-}
-
-function Convert-CodePointsToString {
-    param([int[]]$CodePoints)
-
-    return (-join ($CodePoints | ForEach-Object { [char]$_ }))
-}
+. (Join-Path $PSScriptRoot 'fixture-test-common.ps1')
 
 function Read-FileUtf8 {
     param([string]$Path)
@@ -42,32 +28,48 @@ function Write-RenderedHook {
     $content = Read-FileUtf8 -Path $TemplatePath
     $rendered = $content.Replace('{VAULT_PATH}', $VaultRoot.Replace('\', '\\'))
     Set-Content -LiteralPath $TargetPath -Value $rendered -Encoding utf8
-}
-
-function Enable-LockWriteCapture {
-    param(
-        [string]$HookPath,
-        [string]$CapturePath
-    )
-
-    $content = Read-FileUtf8 -Path $HookPath
-    $instrumented = $content.Replace(
-        '  fs.writeFileSync(lockPath, JSON.stringify(lock), "utf8");',
-        ('  fs.writeFileSync(lockPath, JSON.stringify(lock), "utf8");' + [Environment]::NewLine + '  fs.writeFileSync("' + $CapturePath.Replace('\', '\\') + '", JSON.stringify(lock), "utf8");')
-    )
-    Set-Content -LiteralPath $HookPath -Value $instrumented -Encoding utf8
+    Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $TemplatePath) 'workspace-resolver.js') -Destination (Join-Path (Split-Path -Parent $TargetPath) 'workspace-resolver.js') -Force
 }
 
 function Invoke-NodeHook {
     param(
         [string]$HookPath,
-        [string]$Stdin = ""
+        [string]$Stdin = "",
+        [string]$WorkingDirectory = "",
+        [hashtable]$Environment = @{}
     )
 
-    $output = if ([string]::IsNullOrEmpty($Stdin)) {
-        @(& node $HookPath 2>&1)
-    } else {
-        @($Stdin | & node $HookPath 2>&1)
+    $stdinWasBound = $PSBoundParameters.ContainsKey('Stdin')
+
+    if ([string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+        $WorkingDirectory = Split-Path -Parent $HookPath
+    }
+
+    $environmentNames = @('DEV_HARNESS_WORKSPACE_ROOT', 'CLAUDE_DEV_HARNESS_WORKSPACE_ROOT', 'WORKSPACE_ROOT')
+    $originalEnvironment = @{}
+    foreach ($name in $environmentNames) {
+        $originalEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+        [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+    }
+
+    try {
+        foreach ($name in $Environment.Keys) {
+            [Environment]::SetEnvironmentVariable($name, [string]$Environment[$name], 'Process')
+        }
+        Push-Location -LiteralPath $WorkingDirectory
+        try {
+            $output = if ($stdinWasBound) {
+                @($Stdin | & node $HookPath 2>&1)
+            } else {
+                @(& node $HookPath 2>&1)
+            }
+        } finally {
+            Pop-Location
+        }
+    } finally {
+        foreach ($name in $environmentNames) {
+            [Environment]::SetEnvironmentVariable($name, $originalEnvironment[$name], 'Process')
+        }
     }
 
     $text = ($output | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
@@ -229,18 +231,16 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 }
 
 $RepoRoot = Get-NormalizedPath -Path $RepoRoot
-$scratchRoot = Join-Path $RepoRoot "tmp\runtime-hooks-regression"
-
-if (Test-Path -LiteralPath $scratchRoot) {
-    Remove-Item -LiteralPath $scratchRoot -Recurse -Force
-}
-
-New-Item -ItemType Directory -Path $scratchRoot -Force | Out-Null
 $script:Checks = @()
 $script:Failures = @()
+$scratchRoot = Join-Path $RepoRoot "tmp\runtime-hooks-regression-$([guid]::NewGuid().ToString('N'))"
+$dynamicUnresolvedRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("dev-harness-runtime-hooks-unresolved-{0}" -f [guid]::NewGuid().ToString('N'))
+
+try {
+New-Item -ItemType Directory -Path $scratchRoot -Force | Out-Null
 
 $stopTemplatePath = Join-Path $RepoRoot "runtime-hooks\claude\stop.js"
-$postToolTemplatePath = Join-Path $RepoRoot "runtime-hooks\claude\posttooluse.js"
+$userPromptTemplatePath = Join-Path $RepoRoot "runtime-hooks\claude\userpromptsubmit.js"
 
 $stopIdleCase = Join-Path $scratchRoot "stop-idle"
 New-Item -ItemType Directory -Path $stopIdleCase -Force | Out-Null
@@ -262,7 +262,14 @@ $stopPointerIdleFlowActiveHookPath = Join-Path $stopPointerIdleFlowActiveCase "s
 Write-RenderedHook -TemplatePath $stopTemplatePath -TargetPath $stopPointerIdleFlowActiveHookPath -VaultRoot $stopPointerIdleFlowActiveFixture.VaultRoot
 $stopPointerIdleFlowActiveResult = Invoke-NodeHook -HookPath $stopPointerIdleFlowActiveHookPath
 $stopPointerIdleFlowActiveMessage = Get-JsonPropertyValue -Object $stopPointerIdleFlowActiveResult.Json -Name "systemMessage"
-if ($stopPointerIdleFlowActiveResult.ExitCode -ne 0 -or $null -eq $stopPointerIdleFlowActiveMessage -or $stopPointerIdleFlowActiveMessage -notmatch "status=TEST" -or $stopPointerIdleFlowActiveMessage -notmatch "current-flow") {
+if (
+    $stopPointerIdleFlowActiveResult.ExitCode -ne 0 -or
+    $null -eq $stopPointerIdleFlowActiveMessage -or
+    $stopPointerIdleFlowActiveMessage -notmatch "status=TEST" -or
+    $stopPointerIdleFlowActiveMessage -notmatch "current-flow" -or
+    $stopPointerIdleFlowActiveMessage -notmatch "does not authorize runtime writes" -or
+    $stopPointerIdleFlowActiveMessage -notmatch "read-only work may stop without refresh"
+) {
     Add-Failure "stop hook should warn when current-flow remains active after the shared pointer is idle"
 } else {
     Add-Check "stop hook warns when current-flow remains active after the shared pointer is idle"
@@ -275,7 +282,14 @@ $stopTestHookPath = Join-Path $stopTestCase "stop.js"
 Write-RenderedHook -TemplatePath $stopTemplatePath -TargetPath $stopTestHookPath -VaultRoot $stopTestFixture.VaultRoot
 $stopTestResult = Invoke-NodeHook -HookPath $stopTestHookPath
 $stopTestMessage = Get-JsonPropertyValue -Object $stopTestResult.Json -Name "systemMessage"
-if ($stopTestResult.ExitCode -ne 0 -or $null -eq $stopTestMessage -or $stopTestMessage -notmatch "status=TEST") {
+if (
+    $stopTestResult.ExitCode -ne 0 -or
+    $null -eq $stopTestMessage -or
+    $stopTestMessage -notmatch "status=TEST" -or
+    $stopTestMessage -notmatch "does not authorize runtime writes" -or
+    $stopTestMessage -notmatch "read-only work may stop without refresh" -or
+    $stopTestMessage -match "Refresh current-task or last-session before stopping"
+) {
     Add-Failure "stop-test-active should warn with status=TEST"
 } else {
     Add-Check "stop-test-active warns for TEST status"
@@ -288,118 +302,132 @@ $stopCodeReviewHookPath = Join-Path $stopCodeReviewCase "stop.js"
 Write-RenderedHook -TemplatePath $stopTemplatePath -TargetPath $stopCodeReviewHookPath -VaultRoot $stopCodeReviewFixture.VaultRoot
 $stopCodeReviewResult = Invoke-NodeHook -HookPath $stopCodeReviewHookPath
 $stopCodeReviewMessage = Get-JsonPropertyValue -Object $stopCodeReviewResult.Json -Name "systemMessage"
-if ($stopCodeReviewResult.ExitCode -ne 0 -or $null -eq $stopCodeReviewMessage -or $stopCodeReviewMessage -notmatch "status=CODE_REVIEW") {
+if (
+    $stopCodeReviewResult.ExitCode -ne 0 -or
+    $null -eq $stopCodeReviewMessage -or
+    $stopCodeReviewMessage -notmatch "status=CODE_REVIEW" -or
+    $stopCodeReviewMessage -notmatch "does not authorize runtime writes" -or
+    $stopCodeReviewMessage -notmatch "read-only work may stop without refresh" -or
+    $stopCodeReviewMessage -match "Refresh current-task or last-session before stopping"
+) {
     Add-Failure "stop-code-review-active should warn with status=CODE_REVIEW"
 } else {
     Add-Check "stop-code-review-active warns for CODE_REVIEW status"
 }
 
-$postToolCase = Join-Path $scratchRoot "posttooluse-lock-release"
-New-Item -ItemType Directory -Path $postToolCase -Force | Out-Null
-$postToolFixture = New-HookFixture -CaseRoot $postToolCase -PointerStatus "TEST"
-$postToolHookPath = Join-Path $postToolCase "posttooluse.js"
-Write-RenderedHook -TemplatePath $postToolTemplatePath -TargetPath $postToolHookPath -VaultRoot $postToolFixture.VaultRoot
-$postToolLockCapturePath = Join-Path $postToolCase 'lock-capture.json'
-Enable-LockWriteCapture -HookPath $postToolHookPath -CapturePath $postToolLockCapturePath
-$postToolResult = Invoke-NodeHook -HookPath $postToolHookPath
-$postToolMessage = Get-JsonPropertyValue -Object $postToolResult.Json -Name "systemMessage"
-$postToolRecoveryIndex = if (Test-Path -LiteralPath $postToolFixture.RecoveryIndexPath -PathType Leaf) {
-    Get-Content -LiteralPath $postToolFixture.RecoveryIndexPath -Raw -Encoding utf8
+$stopTemplateContent = Read-FileUtf8 -Path $stopTemplatePath
+if ($stopTemplateContent.Contains('Refresh current-task or last-session before stopping')) {
+    Add-Failure 'stop hook must not instruct read-only sessions to write runtime state'
 } else {
-    ''
+    Add-Check 'stop hook remains diagnostic and does not grant runtime write authority'
 }
-$postToolLockCapture = if (Test-Path -LiteralPath $postToolLockCapturePath -PathType Leaf) {
-    Get-Content -LiteralPath $postToolLockCapturePath -Raw -Encoding utf8
+
+$userPromptPositiveInputs = @(
+    '{"prompt":"resume"}', '{"prompt":"continue"}', '{"prompt":"what were we doing"}',
+    '{"prompt":"继续"}', '{"prompt":"恢复"}', '{"prompt":"继续刚才的任务"}', '{"prompt":"刚才做到哪里了"}',
+    '\u7ee7\u7eed', '\u6062\u590d', '\u7ee7\u7eed\u521a\u624d\u7684\u4efb\u52a1', '\u521a\u624d\u505a\u5230\u54ea\u91cc\u4e86'
+)
+$userPromptFailures = @(
+    foreach ($stdinCase in $userPromptPositiveInputs) {
+        $result = Invoke-NodeHook -HookPath $userPromptTemplatePath -Stdin $stdinCase
+        if ($result.ExitCode -ne 0 -or (Get-JsonPropertyValue -Object $result.Json -Name 'systemMessage') -notmatch 'Resume trigger detected') { $stdinCase }
+    }
+    foreach ($stdinCase in @('{"prompt":"unrelated"}', '{"prompt":"discontinue"}', '')) {
+        $result = Invoke-NodeHook -HookPath $userPromptTemplatePath -Stdin $stdinCase
+        if ($result.ExitCode -ne 0 -or $result.Output -cne '{}') { $stdinCase }
+    }
+)
+if ($userPromptFailures.Count -eq 0) {
+    Add-Check 'userpromptsubmit preserves the 14-case resume trigger corpus'
 } else {
-    ''
+    Add-Failure ("userpromptsubmit resume corpus mismatches: {0}" -f ($userPromptFailures -join ', '))
 }
-if (
-    $postToolResult.ExitCode -ne 0 -or
-    $null -eq $postToolResult.Json -or
-    $null -ne $postToolMessage -or
-    -not (Test-Path -LiteralPath $postToolFixture.RecoveryIndexPath -PathType Leaf) -or
-    (Test-Path -LiteralPath $postToolFixture.LockPath -PathType Leaf)
-) {
-    Add-Failure "posttooluse should refresh recovery-index and release runtime.lock.json"
+
+$dynamicActiveRoot = Join-Path $scratchRoot 'dynamic-active'
+$dynamicIdleRoot = Join-Path $scratchRoot 'dynamic-idle'
+$dynamicConflictRoot = Join-Path $scratchRoot 'dynamic-conflict'
+$sharedHookRoot = Join-Path $scratchRoot 'shared-hooks'
+New-Item -ItemType Directory -Path $dynamicActiveRoot,$dynamicIdleRoot,$dynamicConflictRoot,$dynamicUnresolvedRoot,$sharedHookRoot -Force | Out-Null
+$dynamicActiveFixture = New-HookFixture -CaseRoot $dynamicActiveRoot -PointerStatus 'TEST'
+$dynamicIdleFixture = New-HookFixture -CaseRoot $dynamicIdleRoot -PointerStatus '空闲' -TaskLabel '无' -FlowStatus 'DONE'
+$dynamicConflictFixture = New-HookFixture -CaseRoot $dynamicConflictRoot -PointerStatus 'CODE_REVIEW'
+$sharedStopHookPath = Join-Path $sharedHookRoot 'stop.js'
+Write-RenderedHook -TemplatePath $stopTemplatePath -TargetPath $sharedStopHookPath -VaultRoot $dynamicActiveFixture.VaultRoot
+
+$dynamicActiveResult = Invoke-NodeHook -HookPath $sharedStopHookPath -WorkingDirectory $dynamicActiveRoot
+$dynamicIdleResult = Invoke-NodeHook -HookPath $sharedStopHookPath -WorkingDirectory $dynamicIdleRoot
+$dynamicActiveMessage = Get-JsonPropertyValue -Object $dynamicActiveResult.Json -Name 'systemMessage'
+$dynamicIdleMessage = Get-JsonPropertyValue -Object $dynamicIdleResult.Json -Name 'systemMessage'
+if ($dynamicActiveResult.ExitCode -ne 0 -or $dynamicIdleResult.ExitCode -ne 0 -or $dynamicActiveMessage -notmatch 'status=TEST' -or $null -ne $dynamicIdleMessage) {
+    Add-Failure 'one installed hook should resolve different workspaces from each invocation cwd without cross-reading'
 } else {
-    Add-Check "posttooluse refreshes recovery-index and releases runtime.lock.json"
+    Add-Check 'one installed hook resolves the active workspace from each invocation cwd'
+}
+
+$workspaceResolutionCases = @(
+    [pscustomobject]@{
+        Name           = 'same-root environment candidates override cwd after normalization'
+        Environment    = @{
+            DEV_HARNESS_WORKSPACE_ROOT = $dynamicConflictRoot
+            WORKSPACE_ROOT             = "${dynamicConflictRoot}\."
+        }
+        ExpectedStatus = 'CODE_REVIEW'
+        ExpectEmpty    = $false
+    },
+    [pscustomobject]@{
+        Name           = 'conflicting environment candidates fail closed even with valid cwd'
+        Environment    = @{
+            DEV_HARNESS_WORKSPACE_ROOT = $dynamicActiveRoot
+            WORKSPACE_ROOT             = $dynamicConflictRoot
+        }
+        ExpectedStatus = $null
+        ExpectEmpty    = $true
+    },
+    [pscustomobject]@{
+        Name           = 'invalid environment candidate fails closed instead of using valid cwd'
+        Environment    = @{ DEV_HARNESS_WORKSPACE_ROOT = $dynamicUnresolvedRoot }
+        ExpectedStatus = $null
+        ExpectEmpty    = $true
+    },
+    [pscustomobject]@{
+        Name           = 'legacy environment candidate remains authoritative over cwd'
+        Environment    = @{ CLAUDE_DEV_HARNESS_WORKSPACE_ROOT = $dynamicConflictRoot }
+        ExpectedStatus = 'CODE_REVIEW'
+        ExpectEmpty    = $false
+    }
+)
+
+foreach ($case in $workspaceResolutionCases) {
+    $result = Invoke-NodeHook -HookPath $sharedStopHookPath -WorkingDirectory $dynamicActiveRoot -Environment $case.Environment
+    $message = Get-JsonPropertyValue -Object $result.Json -Name 'systemMessage'
+    $passed = if ($case.ExpectEmpty) {
+        $result.ExitCode -eq 0 -and $result.Output -ceq '{}' -and $null -ne $result.Json -and $null -eq $message
+    } else {
+        $result.ExitCode -eq 0 -and $null -ne $result.Json -and $message -match ("status={0}" -f [regex]::Escape($case.ExpectedStatus))
+    }
+
+    if ($passed) {
+        Add-Check $case.Name
+    } else {
+        Add-Failure ("{0}; output={1}" -f $case.Name, $result.Output)
+    }
 }
 
 if (
-    $postToolRecoveryIndex -notmatch [regex]::Escape('- task_id: `sample-task`') -or
-    $postToolRecoveryIndex -notmatch [regex]::Escape('- 当前文档: docs/tasks/sample-task/test.md') -or
-    $postToolRecoveryIndex -notmatch [regex]::Escape('derived_from: ["运行时/当前任务.md","运行时/tasks/"]')
+    (Test-Path -LiteralPath $dynamicActiveFixture.RecoveryIndexPath -PathType Leaf) -or
+    (Test-Path -LiteralPath $dynamicConflictFixture.RecoveryIndexPath -PathType Leaf)
 ) {
-    Add-Failure "posttooluse should write task_id, current_doc, and derived_from into recovery-index"
+    Add-Failure 'workspace resolution cases should remain read-only'
 } else {
-    Add-Check "posttooluse writes task_id, current_doc, and derived_from into recovery-index"
+    Add-Check 'workspace resolution cases remain read-only'
 }
 
-if ($postToolLockCapture -notmatch [regex]::Escape('"entry_host":"claudecode"')) {
-    Add-Failure 'posttooluse should write entry_host=claudecode into runtime.lock.json before rebuilding recovery-index'
-} else {
-    Add-Check 'posttooluse writes entry_host=claudecode into runtime.lock.json before rebuilding recovery-index'
-}
-
-$postToolFlowCase = Join-Path $scratchRoot "posttooluse-pointer-idle-flow-active"
-New-Item -ItemType Directory -Path $postToolFlowCase -Force | Out-Null
-$postToolFlowFixture = New-HookFixture -CaseRoot $postToolFlowCase -PointerStatus "空闲" -TaskLabel "无" -FlowStatus "TEST"
-$postToolFlowHookPath = Join-Path $postToolFlowCase "posttooluse.js"
-Write-RenderedHook -TemplatePath $postToolTemplatePath -TargetPath $postToolFlowHookPath -VaultRoot $postToolFlowFixture.VaultRoot
-$postToolFlowResult = Invoke-NodeHook -HookPath $postToolFlowHookPath
-$postToolFlowMessage = Get-JsonPropertyValue -Object $postToolFlowResult.Json -Name "systemMessage"
-$postToolFlowRecoveryIndex = if (Test-Path -LiteralPath $postToolFlowFixture.RecoveryIndexPath -PathType Leaf) {
-    Get-Content -LiteralPath $postToolFlowFixture.RecoveryIndexPath -Raw -Encoding utf8
-} else {
-    ''
-}
-if (
-    $postToolFlowResult.ExitCode -ne 0 -or
-    $null -ne $postToolFlowMessage -or
-    $postToolFlowRecoveryIndex -notmatch [regex]::Escape('- task_id: `sample-task`') -or
-    $postToolFlowRecoveryIndex -notmatch [regex]::Escape('- 任务: Sample Task') -or
-    $postToolFlowRecoveryIndex -notmatch [regex]::Escape('- 状态: TEST') -or
-    $postToolFlowRecoveryIndex -notmatch [regex]::Escape('- 当前文档: docs/tasks/sample-task/test.md') -or
-    $postToolFlowRecoveryIndex -notmatch [regex]::Escape('derived_from: ["运行时/当前任务.md","运行时/tasks/"]')
-) {
-    Add-Failure "posttooluse should rebuild recovery-index from current-flow when the shared pointer is idle"
-} else {
-    Add-Check "posttooluse rebuilds recovery-index from current-flow when the shared pointer is idle"
-}
-
-$postToolLockedCase = Join-Path $scratchRoot "posttooluse-respects-lock"
-New-Item -ItemType Directory -Path $postToolLockedCase -Force | Out-Null
-$postToolLockedFixture = New-HookFixture -CaseRoot $postToolLockedCase -PointerStatus "TEST"
-$postToolLockedHookPath = Join-Path $postToolLockedCase "posttooluse.js"
-Write-RenderedHook -TemplatePath $postToolTemplatePath -TargetPath $postToolLockedHookPath -VaultRoot $postToolLockedFixture.VaultRoot
-Set-Content -LiteralPath $postToolLockedFixture.LockPath -Value (@{
-        writer    = "other-writer"
-        task_id   = "sample-task"
-        locked_at = (Get-Date).ToString("s")
-        entry_host = "team-leader"
-    } | ConvertTo-Json) -Encoding utf8
-$postToolLockedResult = Invoke-NodeHook -HookPath $postToolLockedHookPath
-$postToolLockedMessage = Get-JsonPropertyValue -Object $postToolLockedResult.Json -Name "systemMessage"
-$postToolLockedInboxContent = if (Test-Path -LiteralPath $postToolLockedFixture.InboxPath -PathType Leaf) {
-    Get-Content -LiteralPath $postToolLockedFixture.InboxPath -Raw -Encoding utf8
-} else {
-    ''
-}
-if (
-    $postToolLockedResult.ExitCode -ne 0 -or
-    $null -eq $postToolLockedMessage -or
-    $postToolLockedMessage -notmatch "other-writer" -or
-    $postToolLockedMessage -notmatch "Recorded in runtime inbox" -or
-    (Test-Path -LiteralPath $postToolLockedFixture.RecoveryIndexPath -PathType Leaf) -or
-    -not (Test-Path -LiteralPath $postToolLockedFixture.LockPath -PathType Leaf) -or
-    -not (Test-Path -LiteralPath $postToolLockedFixture.InboxPath -PathType Leaf) -or
-    $postToolLockedInboxContent -notmatch 'lock-blocked' -or
-    $postToolLockedInboxContent -notmatch 'other-writer' -or
-    $postToolLockedInboxContent -notmatch 'entry_host=team-leader'
-) {
-    Add-Failure "posttooluse should respect an active runtime.lock.json from another writer and record the blocked write in inbox"
-} else {
-    Add-Check "posttooluse respects an active runtime.lock.json from another writer and records inbox fallback"
+} finally {
+    try {
+        Remove-DirectoryWithRetry -Path $dynamicUnresolvedRoot
+    } finally {
+        Remove-DirectoryWithRetry -Path $scratchRoot
+    }
 }
 
 Write-Output "Checks:"

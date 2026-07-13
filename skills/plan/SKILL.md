@@ -82,7 +82,7 @@ updated: 2026-04-09
 
 ## Clarification 协议族
 
-当用户要求需求澄清 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认等同族请求，或 PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径仍不足以指导 IMPLEMENT 时，仍只在 `PLAN` 阶段处理，不新增 stage：先自查代码 / 文档 / artifact，在 `## Clarification` 写 `clarification_ledger`，同时保留 Clarification 最低字段，剩余用户决策按依赖顺序一次只问一个并给 `recommended_answer`；所有 `decision` 解除 `pending` 前，`## User Confirmation` 保持 `draft`。详细写法见 guide。
+当用户要求需求澄清 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认等同族请求，或 PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径仍不足以指导 IMPLEMENT 时，仍只在 `PLAN` 阶段处理，不新增 stage：先自查代码 / 文档 / artifact；默认只把待决或高影响决策写入 `clarification_ledger`，同时保留 Clarification 最低字段，剩余用户决策按依赖顺序一次只问一个并给 `recommended_answer`；所有 `decision` 解除 `pending` 前，`## User Confirmation` 保持 `draft`。只有不可逆高风险任务才展开完整八类问题树。详细写法见 guide。
 
 ## 推理纪律（第一性原理 / 剃刀 / 贝叶斯）
 
@@ -104,7 +104,7 @@ Use the PLAN discipline from `docs/工作流/stage-discipline-matrix.md` when th
 1. 先读已批准输入和可选 `spec.md`
 2. 把 Clarification 补齐到能执行的粒度，写出精确文件路径、验证命令和风险；`clarification_ledger` 的非 `impact: none` 决策必须落到 Plan / Verification / Risks
 3. 用户确认且 `clarification_ledger` 没有 `decision: pending` 后，把 `User Confirmation` 改成 `confirmed`
-4. gate 满足后执行 `.assistant\entry\advance-stage.ps1 -TaskId {task_id}`（默认走 workflow descriptor 的 `harness-default-codex`，切换 backend 时追加 `-Tool <next-tool>`）
+4. gate 满足后执行 `.assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage PLAN`（默认走 workflow descriptor 的 `harness-default-codex`，切换 backend 时追加 `-Tool <next-tool>`）
 5. 如需单独排查文档问题，再手动跑 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId {task_id}`
 
 ## Context Providers

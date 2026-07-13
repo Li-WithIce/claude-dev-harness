@@ -14,7 +14,7 @@ description: Use when the task is in PLAN_REVIEW or CODE_REVIEW and a new append
 
 ## Run 写法
 
-append-only run 用 `### Run <N> · YYYY-MM-DD HH:mm · runner: X` 标题，必含 `- verdict: pass | revise`、`- findings:`、`- next:`；`advance-stage.ps1` 只读最新 run 的 `- verdict:`。完整格式（含 4-dim score 字段）见 [`../orchestrator/references/lite-writing-guide.md`](../orchestrator/references/lite-writing-guide.md) 的 Append-Only Run 契约。
+append-only run 用 `### Run <N> · YYYY-MM-DD HH:mm · runner: X` 标题，必含 `- verdict: pass | revise`、`- findings:`、`- next:`；`advance-stage.ps1` 只解析最新 run，并联合校验唯一的 verdict、唯一 findings 形态及二者一致性。CODE_REVIEW 的最新 verdict 为 `pass` 时，该 run 分钟不得早于最新 Implementation run，不能复用返修前的旧 pass；旧 `revise` 仍返回 IMPLEMENT。完整格式（含 4-dim score 字段）见 [`../orchestrator/references/lite-writing-guide.md`](../orchestrator/references/lite-writing-guide.md) 的 Append-Only Run 契约。
 
 ## 审查重点
 
@@ -31,13 +31,14 @@ Use the PLAN_REVIEW and CODE_REVIEW disciplines from `docs/工作流/stage-disci
 - 对 context provider 任务，按需读取 `references/adversarial-review-gate.md`、`references/code-intel-review.md`、`references/historical-recall-review.md`、`references/codedb-mcp-experimental.md`；provider finding 必须绑定真实证据。
 - 若 provider 输出影响计划或审查判断，检查 run 内是否有 `provider_context` 或等价的 grounded evidence；该记录不得进入 frontmatter、不得影响 stage advancement、不得直接决定 verdict。
 - 按阶段原则路由审查：PLAN_REVIEW 用 Hegel + Bayes，检查计划自洽、前提证据、未决项闭环；不要新增五转 stage 或第二 truth
-- 若用户通过“需求澄清 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认”等同族触发词进入 PLAN，或 PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径仍不足以指导 IMPLEMENT，确认该协议只落在 `## Clarification` 和 `## User Confirmation`，没有新增 stage、frontmatter 字段、runtime、validator hard gate 或第二 truth
+- 若用户通过“需求澄清 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认”等同族触发词进入 PLAN，或 PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径仍不足以指导 IMPLEMENT，确认该协议只落在 `## Clarification` 和 `## User Confirmation`，没有新增 stage、frontmatter 字段、runtime 或第二 truth；仅当已写 ledger 且存在 `decision: pending` 时由 validator 阻断推进
 - 对 Clarification 协议族或上述不确定任务，检查 `clarification_ledger` 没有替代 `## Clarification` 最低字段；缺少 `验收标准`、`非目标`、`受影响目录 / 模块`、`回滚策略或兼容性约束`、`ui:` 任一项时必须 `verdict: revise`
-- 对 Clarification 协议族或上述不确定任务，检查 `## Clarification` 是否包含 `clarification_ledger`，每项是否有 `category / question / evidence / recommended_answer / decision / impact`
-- 对 Clarification 协议族或上述不确定任务，若缺少账本、存在 `decision: pending`、或 `## User Confirmation` 已 `- status: confirmed` 但仍有未决项，必须 `verdict: revise`
-- 对 Clarification 协议族或上述不确定任务，检查八类问题树（目标/验收、用户与权限、流程与状态、数据与边界、集成依赖、失败与回滚、非目标、验证证据）是否均有账本项；不适用类别必须显式写 `evidence: not-applicable`，否则 `verdict: revise`
+- 对 Clarification 协议族或上述不确定任务，若存在 `clarification_ledger`，检查每项是否有 `category / question / evidence / recommended_answer / decision / impact`；普通任务只记录 pending 或高影响项，不要求占位账本
+- 对 Clarification 协议族或上述不确定任务，若存在 `decision: pending`、或 `## User Confirmation` 已 `- status: confirmed` 但仍有未决项，必须 `verdict: revise`
+- 只有发布、权限/身份、数据迁移/破坏性恢复或不可逆外部效果等高风险任务，才检查完整八类问题树（目标/验收、用户与权限、流程与状态、数据与边界、集成依赖、失败与回滚、非目标、验证证据）
 - 对 Clarification 协议族或上述不确定任务，检查 `decision: accepted | rejected` 是否有代码 / 文档 / artifact 证据或用户确认依据写入 `evidence`；agent 自行替用户作选择时必须 `verdict: revise`
 - 对 Clarification 协议族或上述不确定任务，检查每个 `impact` 非 `none` 的 accepted/rejected 决策是否已反映到 `## Plan`、`## Verification` 或 `## Risks`；没有落地时必须 `verdict: revise`
+- 对发布、权限/身份、迁移/破坏性恢复或不可逆外部效果，检查最新 review run 记录独立的 `reviewer_identity` 和 `evidence_digest`；普通任务不要求独立 reviewer 占位字段
 - 对 Clarification 协议族或上述不确定任务，检查关键问题是否一次一个、可由代码库回答的问题是否已先查证、仍需用户决策的问题是否带 `recommended_answer` 和可执行的决策边界
 - 若 `## Clarification` 含 `work_type:`，核对它是否只作为 PLAN 语义路由使用，且与验收标准、非目标、受影响路径和验证命令一致，没有替代 `Change Contract.change_type`、没有写入 frontmatter
 - 若 `work_type: bug`，检查 PLAN 是否说明复现步骤、期望/实际行为、影响范围/严重程度、根因定位动作和修复验证动作；不得退化为“见 issue”这类不可执行占位
@@ -87,7 +88,7 @@ Use the PLAN_REVIEW and CODE_REVIEW disciplines from `docs/工作流/stage-disci
 
 ## 推进
 
-写完最新 run 后执行 `.assistant\entry\advance-stage.ps1 -TaskId {task_id}`（自动调用 validator）。默认走 workflow descriptor 的 `harness-default-codex`；切换 backend 时显式传 `-Tool`（如用 profile 同步传 `-Profile` 和完整 `-Model`，profile 的 backend 必须等于 `-Tool`）。
+写完最新 run 后执行 `.assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <PLAN_REVIEW|CODE_REVIEW>`（按当前 frontmatter stage 传值，自动调用 validator）。默认走 workflow descriptor 的 `harness-default-codex`；切换 backend 时显式传 `-Tool`（如用 profile 同步传 `-Profile` 和完整 `-Model`，profile 的 backend 必须等于 `-Tool`）。
 
 ## 不要做的事
 

@@ -1,13 +1,13 @@
 ---
 name: workflow-team
-description: Use when harness-lite runs in explicit AiTeamCode team mode and the leader needs to spawn the five stage-aligned teammates through `spawn-team.ps1`.
+description: Use when harness-lite runs in explicit AiTeamCode team mode and the leader needs to spawn only the current stage role through `spawn-team.ps1`.
 ---
 
 # Workflow Team
 
 ## When To Use
 
-- 仅当 leader 已明确启用 `$env:AITEAMCODE_TEAM_MODE='1'`，并决定按 `harness-lite` 的五个 stage 角色起 team 时使用
+- 仅当 leader 已明确启用 `$env:AITEAMCODE_TEAM_MODE='1'`，并决定为当前 `harness-lite` stage 启动一个角色时使用
 - 单 agent 默认路径不激活这个 skill
 - env opt-in 的可执行强制点在 `scripts/spawn-team.ps1`，不是本说明文档本身
 
@@ -15,13 +15,14 @@ description: Use when harness-lite runs in explicit AiTeamCode team mode and the
 
 1. leader 调用 `skills/workflow-team/scripts/spawn-team.ps1`
 2. `spawn-team.ps1` 先做 env fail-closed 校验
-3. 校验通过后，脚本调用 `scripts/export-team-preset.ps1` 派生 preset
-4. 脚本按 stage 顺序调用 `team_spawn_agent`：
-   - `plan-author`
-   - `plan-reviewer`
-   - `implementer`
-   - `code-reviewer`
-   - `tester`
+3. 脚本从 `plan.md` frontmatter 读取当前 stage；没有 `plan.md` 时必须显式传 `-Stage`，不猜测
+4. 校验通过后，脚本调用 `scripts/export-team-preset.ps1` 派生 preset，并只调用一次 `team_spawn_agent`：
+   - `PLAN` -> `plan-author`
+   - `PLAN_REVIEW` -> `plan-reviewer`
+   - `IMPLEMENT` -> `implementer`
+   - `CODE_REVIEW` -> `code-reviewer`
+   - `TEST` -> `tester`
+   - `DONE` 不启动 member
 
 ## Auto Mode Propagation
 
@@ -35,11 +36,11 @@ description: Use when harness-lite runs in explicit AiTeamCode team mode and the
 ## PreCompact Callback
 
 - leader 派发 worker 任务时，应在消息体显式带上 PreCompact 提示：
-  - 若你主观判断 context 临近上限，先把 pending wisdom 通过 `append-runtime-inbox.ps1` 追加到 `.assistant/运行时/收件箱.md`
-  - 若当前 stage 已具备推进条件，再调用 `.assistant\entry\advance-stage.ps1` 落盘当前进度
-  - 完成后再 `team_send_message` 回 leader 或进入 stand by
-- worker 不得手工直写 `.assistant/运行时/记忆-*.md`、`plan.md` 或 shared pointer；非 append 写回只能委托现有 `advance-stage.ps1` 语义执行。
-- 触发 append/advance 前，先遵守 [docs/工作流/single-writer-precompact.md](../../docs/工作流/single-writer-precompact.md) 中的 `cooperative-yield` 协议；若怀疑 leader 正在推进 stage，就先让出写入窗口。
+  - 若你主观判断 context 临近上限，只通过 `team_send_message` 向 leader 回报 pending wisdom candidate；不得把回报解释为用户已授权记忆写入
+  - 若当前 stage 已具备推进条件，只通过 `team_send_message` 向 leader 回报 ready-to-advance
+  - 回报后进入 stand by，由 leader 决定写回与推进
+- worker 不得调用 `append-runtime-inbox.ps1` 或 `.assistant\entry\advance-stage.ps1`，也不得手工直写 `.assistant/`、`docs/tasks/{task_id}/` 或 shared pointer。
+- leader 收到回报后，先核验用户明确授权记忆写入；未授权时只保留消息并提示，授权后才可按 [docs/工作流/single-writer-precompact.md](../../docs/工作流/single-writer-precompact.md) append。stage advance 仍按 write-authorized workflow 与 `cooperative-yield` 规则执行；worker 不参与写入锁竞争。
 - 这条 callback 只约束 leader/worker 的自检与交接，不新增任何团队成员、队列或后台守护进程。
 
 ## Fallback

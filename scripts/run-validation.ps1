@@ -9,7 +9,10 @@ param(
 
     [switch]$IncludeCachedDiff,
 
-    [switch]$VerboseOutput
+    [switch]$VerboseOutput,
+
+    [ValidateRange(30, 900)]
+    [int]$CheckTimeoutSeconds = 360
 )
 
 Set-StrictMode -Version Latest
@@ -85,7 +88,8 @@ function Invoke-QuietProcess {
         [string]$Name,
         [string]$FilePath,
         [string]$Arguments,
-        [string]$WorkingDirectory
+        [string]$WorkingDirectory,
+        [int]$TimeoutSeconds
     )
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -103,18 +107,87 @@ function Invoke-QuietProcess {
     $process.StartInfo = $psi
 
     $timer = [System.Diagnostics.Stopwatch]::StartNew()
-    [void]$process.Start()
-    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-    $stderrTask = $process.StandardError.ReadToEndAsync()
-    $process.WaitForExit()
-    $timer.Stop()
+    $started = $false
+    $timedOut = $false
+    $exitCode = $null
+    $stdoutTask = $null
+    $stderrTask = $null
+    $stdout = ''
+    $stderr = ''
+    $primaryError = $null
+    $cleanupErrors = [System.Collections.Generic.List[string]]::new()
+
+    try {
+        [void]$process.Start()
+        $started = $true
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $timedOut = -not $process.WaitForExit($TimeoutSeconds * 1000)
+        if (-not $timedOut) {
+            $exitCode = $process.ExitCode
+        }
+    } catch {
+        $primaryError = $_
+    } finally {
+        if ($started) {
+            $cleanupDeadlineMilliseconds = $timer.ElapsedMilliseconds + 5000
+            try {
+                $process.Kill($true)
+            } catch {
+                $cleanupErrors.Add(('kill tree: ' + $_.Exception.Message))
+            }
+            try {
+                $remainingCleanupMilliseconds = [math]::Max(0, [int]($cleanupDeadlineMilliseconds - $timer.ElapsedMilliseconds))
+                if (-not $process.WaitForExit($remainingCleanupMilliseconds)) {
+                    throw 'root process did not exit within cleanup grace'
+                }
+            } catch {
+                $cleanupErrors.Add(('wait root: ' + $_.Exception.Message))
+            }
+            try {
+                $streamTasks = @($stdoutTask,$stderrTask | Where-Object { $null -ne $_ })
+                if ($streamTasks.Count -gt 0) {
+                    $drainTask = [System.Threading.Tasks.Task]::WhenAll([System.Threading.Tasks.Task[]]$streamTasks)
+                    $remainingCleanupMilliseconds = [math]::Max(0, [int]($cleanupDeadlineMilliseconds - $timer.ElapsedMilliseconds))
+                    if (-not $drainTask.Wait($remainingCleanupMilliseconds)) {
+                        throw 'stdout/stderr did not close within cleanup grace'
+                    }
+                    if ($null -ne $stdoutTask) { $stdout = $stdoutTask.GetAwaiter().GetResult() }
+                    if ($null -ne $stderrTask) { $stderr = $stderrTask.GetAwaiter().GetResult() }
+                }
+            } catch {
+                $cleanupErrors.Add(('drain output: ' + $_.Exception.Message))
+            }
+        }
+        try {
+            $process.Dispose()
+        } catch {
+            $cleanupErrors.Add(('dispose process: ' + $_.Exception.Message))
+        }
+        $timer.Stop()
+    }
+
+    if ($cleanupErrors.Count -gt 0) {
+        $primaryMessage = if ($null -ne $primaryError) {
+            $primaryError.Exception.Message
+        } elseif ($timedOut) {
+            "Validation check '$Name' timed out after $TimeoutSeconds seconds."
+        } else {
+            "Validation check '$Name' exited with code $exitCode but cleanup failed."
+        }
+        throw [System.InvalidOperationException]::new(($primaryMessage + ' Cleanup failures: ' + ($cleanupErrors -join '; ')), $(if ($null -ne $primaryError) { $primaryError.Exception } else { $null }))
+    }
+    if ($null -ne $primaryError) {
+        throw $primaryError
+    }
 
     return [pscustomobject]@{
         Name = $Name
-        ExitCode = $process.ExitCode
-        StdOut = $stdoutTask.Result
-        StdErr = $stderrTask.Result
+        ExitCode = $(if ($timedOut) { 124 } else { $exitCode })
+        StdOut = $stdout
+        StdErr = $stderr
         DurationSeconds = [math]::Round($timer.Elapsed.TotalSeconds, 2)
+        TimedOut = $timedOut
     }
 }
 
@@ -161,6 +234,7 @@ if ($IncludeCachedDiff) {
 
 $coreScripts = @(
     'verify-adversarial-review-gate.ps1',
+    'verify-ask-codex.ps1',
     'verify-codex-entry-autoload.ps1',
     'verify-code-intel-provider-boundary.ps1',
     'verify-context-provider-boundary.ps1',
@@ -180,6 +254,8 @@ $coreScripts = @(
     'verify-shared-memory-layers.ps1',
     'verify-stage-discipline-matrix.ps1',
     'verify-render-review-html.ps1',
+    'verify-release-validation.ps1',
+    'verify-runtime-state-contract.ps1',
     'verify-skill-manifest.ps1',
     'verify-task-artifact-drift-audit.ps1',
     'verify-aiteamcode-skill-contract.ps1',
@@ -224,7 +300,7 @@ foreach ($skip in $skips) {
 $failures = New-Object System.Collections.Generic.List[object]
 foreach ($check in $checks) {
     Write-Output ("[RUN ] {0}" -f $check.Name)
-    $result = Invoke-QuietProcess -Name $check.Name -FilePath $check.FilePath -Arguments $check.Arguments -WorkingDirectory $repoRootResolved
+    $result = Invoke-QuietProcess -Name $check.Name -FilePath $check.FilePath -Arguments $check.Arguments -WorkingDirectory $repoRootResolved -TimeoutSeconds $CheckTimeoutSeconds
     if ($result.ExitCode -eq 0) {
         Write-Output ("[PASS] {0} ({1}s)" -f $result.Name, $result.DurationSeconds)
         if ($VerboseOutput) {
@@ -233,7 +309,8 @@ foreach ($check in $checks) {
         }
     } else {
         $failures.Add($result) | Out-Null
-        Write-Output ("[FAIL] {0} ({1}s, exit {2})" -f $result.Name, $result.DurationSeconds, $result.ExitCode)
+        $failureSuffix = if ($result.TimedOut) { ", timeout {0}s" -f $CheckTimeoutSeconds } else { '' }
+        Write-Output ("[FAIL] {0} ({1}s, exit {2}{3})" -f $result.Name, $result.DurationSeconds, $result.ExitCode, $failureSuffix)
         if (-not [string]::IsNullOrWhiteSpace($result.StdOut)) {
             Write-Output '--- stdout ---'
             Write-Output $result.StdOut.TrimEnd()

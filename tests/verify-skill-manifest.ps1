@@ -6,6 +6,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot 'fixture-test-common.ps1')
+
 function Add-Check {
     param([string]$Message)
     $script:Checks += $Message
@@ -16,62 +18,6 @@ function Add-Failure {
     $script:Failures += $Message
 }
 
-function Write-Utf8Bom {
-    param(
-        [string]$Path,
-        [string]$Content
-    )
-
-    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($true)))
-}
-
-function Read-FileUtf8 {
-    param([string]$Path)
-
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        return ''
-    }
-
-    return (Get-Content -LiteralPath $Path -Raw -Encoding utf8)
-}
-
-function Remove-DirectoryWithRetry {
-    param([string]$Path)
-
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return
-    }
-
-    $lastError = $null
-    for ($attempt = 0; $attempt -lt 10; $attempt++) {
-        try {
-            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
-            return
-        } catch {
-            $lastError = $_
-            Start-Sleep -Milliseconds 200
-        }
-    }
-
-    if (Test-Path -LiteralPath $Path) {
-        Add-Failure ("cleanup failed for {0}: {1}" -f $Path, $lastError.Exception.Message)
-    }
-}
-
-function Copy-RepoPathToFixture {
-    param(
-        [string]$SourceRoot,
-        [string]$FixtureRoot,
-        [string]$RelativePath
-    )
-
-    $sourcePath = Join-Path $SourceRoot $RelativePath
-    $destinationPath = Join-Path $FixtureRoot $RelativePath
-    $destinationParent = Split-Path -Parent $destinationPath
-    New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
-    Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Recurse -Force
-}
-
 function New-IsolatedRepoFixture {
     param([string]$SourceRoot)
 
@@ -80,7 +26,11 @@ function New-IsolatedRepoFixture {
     foreach ($relativePath in @(
         'scripts\advance-stage.ps1',
         'scripts\generate-skills-index.ps1',
+        'scripts\lite-artifact-parser.ps1',
         'scripts\validate-lite-artifacts.ps1',
+        'skills\obsidian-memory\scripts\runtime-inbox-common.ps1',
+        'skills\obsidian-memory\scripts\runtime-state-common.ps1',
+        'skills\obsidian-memory\scripts\resolve-shared-memory-paths.ps1',
         'agent-configs\profiles',
         'agent-configs\workflows',
         'skills\entry-router',
@@ -142,6 +92,7 @@ function Invoke-AdvanceStageWithStreams {
     param(
         [string]$AdvancePath,
         [string]$TaskId,
+        [string]$ExpectedStage,
         [string]$Tool,
         [string]$VaultRoot,
         [string]$RepoRoot
@@ -152,6 +103,7 @@ function Invoke-AdvanceStageWithStreams {
         '-ExecutionPolicy', 'Bypass',
         '-File', $AdvancePath,
         '-TaskId', $TaskId,
+        '-ExpectedStage', $ExpectedStage,
         '-Tool', $Tool,
         '-VaultRoot', $VaultRoot,
         '-RepoRoot', $RepoRoot
@@ -164,8 +116,10 @@ function Invoke-AdvanceStageWithStreams {
 
     try {
         $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
-        $stdout = ([string](Read-FileUtf8 -Path $stdoutPath)).Trim()
-        $stderr = ([string](Read-FileUtf8 -Path $stderrPath)).Trim()
+        $stdoutRaw = Read-FileUtf8 -Path $stdoutPath
+        $stderrRaw = Read-FileUtf8 -Path $stderrPath
+        $stdout = if ($null -eq $stdoutRaw) { '' } else { ([string]$stdoutRaw).Trim() }
+        $stderr = if ($null -eq $stderrRaw) { '' } else { ([string]$stderrRaw).Trim() }
         $combined = @()
         if (-not [string]::IsNullOrWhiteSpace($stdout)) {
             $combined += $stdout
@@ -229,7 +183,7 @@ $script:Failures = @()
 $cleanupPaths = @($fixtureRoot)
 
 try {
-    $vaultRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('harness-skill-manifest-vault-' + [guid]::NewGuid().ToString('N'))
+    $vaultRoot = Join-Path $fixtureRoot '.assistant'
     $cleanupPaths += $vaultRoot
     New-Item -ItemType Directory -Path (Join-Path $vaultRoot '运行时\tasks') -Force | Out-Null
 
@@ -237,7 +191,7 @@ try {
     $taskE1Dir = Join-Path (Join-Path $fixtureRoot 'docs\tasks') $taskE1
     New-Item -ItemType Directory -Path $taskE1Dir -Force | Out-Null
     Write-Utf8Bom -Path (Join-Path $taskE1Dir 'plan.md') -Content (New-PlanContent -TaskId $taskE1)
-    $e1Result = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskE1 -Tool 'codex' -VaultRoot $vaultRoot -RepoRoot $fixtureRoot
+    $e1Result = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskE1 -ExpectedStage 'PLAN' -Tool 'codex' -VaultRoot $vaultRoot -RepoRoot $fixtureRoot
     $manifestPath = Join-Path $taskE1Dir 'skill-manifest.json'
     $manifestText = Read-FileUtf8 -Path $manifestPath
     $manifest = if ([string]::IsNullOrWhiteSpace($manifestText)) { $null } else { $manifestText | ConvertFrom-Json }
@@ -259,6 +213,12 @@ try {
         Add-Failure ("E1 manifest positive case failed, got stdout=[{0}] stderr=[{1}] manifest=[{2}] vaultCount=[{3}]" -f $e1Result.StdOut, $e1Result.StdErr, $manifestText, $vaultManifestCount)
     }
 
+    if ((Test-Path -LiteralPath $manifestPath -PathType Leaf) -and -not (Test-FileHasUtf8Bom -Path $manifestPath)) {
+        Add-Check 'E1 skill manifest is UTF-8 without BOM'
+    } else {
+        Add-Failure 'E1 skill manifest should be UTF-8 without BOM'
+    }
+
     $expectedSkills = @(Get-WorkflowStageSkills -WorkflowPath $workflowPath -Stage 'PLAN_REVIEW' | Sort-Object)
     $actualSkills = @($manifest.available_commands | ForEach-Object { $_.name } | Sort-Object)
     if ((@($expectedSkills) -join '|') -eq ((@($actualSkills)) -join '|')) {
@@ -275,7 +235,7 @@ try {
     [System.IO.File]::WriteAllText($lockedManifestPath, 'locked', (New-Object System.Text.UTF8Encoding($false)))
     $lockStream = [System.IO.File]::Open($lockedManifestPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
     try {
-        $e3Result = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskE3 -Tool 'codex' -VaultRoot $vaultRoot -RepoRoot $fixtureRoot
+        $e3Result = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskE3 -ExpectedStage 'PLAN' -Tool 'codex' -VaultRoot $vaultRoot -RepoRoot $fixtureRoot
     } finally {
         $lockStream.Dispose()
     }
@@ -298,9 +258,9 @@ try {
     $taskE5Dir = Join-Path (Join-Path $fixtureRoot 'docs\tasks') $taskE5
     New-Item -ItemType Directory -Path $taskE5Dir -Force | Out-Null
     $e5Plan = New-PlanContent -TaskId $taskE5 -Stage 'PLAN_REVIEW' -Tool 'codex'
-    $e5Plan = $e5Plan -replace '(?m)^## Plan Review\s*', "## Plan Review`r`n### Run 1 · 2026-04-25 10:00 · runner: harness-reviewer`r`n- verdict: revise`r`n- findings: none`r`n- next: route back to PLAN`r`n"
+    $e5Plan = $e5Plan -replace '(?m)^## Plan Review\s*', "## Plan Review`r`n### Run 1 · 2026-04-25 10:00 · runner: harness-reviewer`r`n- verdict: revise`r`n- findings:`r`n  - P2: fixture review requests revision`r`n- next: route back to PLAN`r`n"
     Write-Utf8Bom -Path (Join-Path $taskE5Dir 'plan.md') -Content $e5Plan
-    $e5Result = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskE5 -Tool 'codex' -VaultRoot $vaultRoot -RepoRoot $fixtureRoot
+    $e5Result = Invoke-AdvanceStageWithStreams -AdvancePath $advancePath -TaskId $taskE5 -ExpectedStage 'PLAN_REVIEW' -Tool 'codex' -VaultRoot $vaultRoot -RepoRoot $fixtureRoot
     $e5ManifestPath = Join-Path $taskE5Dir 'skill-manifest.json'
     $e5ManifestText = Read-FileUtf8 -Path $e5ManifestPath
     $e5Manifest = if ([string]::IsNullOrWhiteSpace($e5ManifestText)) { $null } else { $e5ManifestText | ConvertFrom-Json }
@@ -340,6 +300,108 @@ try {
         Add-Check 'E6 generate-skills-index uses entry-router for default PLAN commands'
     } else {
         Add-Failure ("E6 PLAN skills-index should use entry-router, got exit={0} output=[{1}] index=[{2}]" -f $e6ExitCode, ($e6Output -join ' | '), $e6IndexText)
+    }
+
+    if ((Test-Path -LiteralPath $e6OutputPath -PathType Leaf) -and -not (Test-FileHasUtf8Bom -Path $e6OutputPath)) {
+        Add-Check 'E6 skills index is UTF-8 without BOM'
+    } else {
+        Add-Failure 'E6 skills index should be UTF-8 without BOM'
+    }
+
+    $raceFixtureRoot = New-IsolatedRepoFixture -SourceRoot $RepoRoot
+    $cleanupPaths += $raceFixtureRoot
+    $raceAdvancePath = Join-Path $raceFixtureRoot 'scripts\advance-stage.ps1'
+    $raceVaultRoot = Join-Path $raceFixtureRoot '.assistant'
+    New-Item -ItemType Directory -Path (Join-Path $raceVaultRoot '运行时\tasks') -Force | Out-Null
+    $raceTask = 'skill-manifest-race-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $raceTaskDir = Join-Path $raceFixtureRoot ("docs\tasks\{0}" -f $raceTask)
+    New-Item -ItemType Directory -Path $raceTaskDir -Force | Out-Null
+    $racePlanPath = Join-Path $raceTaskDir 'plan.md'
+    Write-Utf8Bom -Path $racePlanPath -Content (New-PlanContent -TaskId $raceTask -Stage 'PLAN' -Tool 'codex')
+    $raceReadyName = 'harness-skill-manifest-ready-' + [guid]::NewGuid().ToString('N')
+    $raceProgressName = 'harness-skill-manifest-progress-' + [guid]::NewGuid().ToString('N')
+    $raceReady = [System.Threading.EventWaitHandle]::new($false, [System.Threading.EventResetMode]::ManualReset, $raceReadyName)
+    $raceProgress = [System.Threading.EventWaitHandle]::new($false, [System.Threading.EventResetMode]::AutoReset, $raceProgressName)
+    $raceSource = Get-Content -LiteralPath $raceAdvancePath -Raw -Encoding utf8
+    $raceMutexAnchor = '    $advanceMutex = Enter-LitePlanMutex -TaskId $TaskId'
+    $raceManifestAnchor = '            Write-SkillManifest -RepoRoot $repoRoot -WorkspaceRoot $workspaceRoot -TaskId $TaskId -Stage $runtimeStage -Tool $runtimeTool'
+    $raceMutexAnchorCount = [regex]::Matches($raceSource, [regex]::Escape($raceMutexAnchor)).Count
+    $raceManifestAnchorCount = [regex]::Matches($raceSource, [regex]::Escape($raceManifestAnchor)).Count
+    $raceFirst = $null
+    $raceSecond = $null
+    try {
+        if ($raceMutexAnchorCount -ne 1 -or $raceManifestAnchorCount -ne 1) {
+            Add-Failure ("E7 manifest race fixture should expose one mutex and one write anchor, found mutex={0} write={1}" -f $raceMutexAnchorCount, $raceManifestAnchorCount)
+        } else {
+            $raceStartSignal = @'
+    if ($ExpectedStage -eq 'PLAN_REVIEW') {
+        $progressEvent = [System.Threading.EventWaitHandle]::OpenExisting('__PROGRESS__')
+        try { [void]$progressEvent.Set() } finally { $progressEvent.Dispose() }
+    }
+'@
+            $raceBarrier = @'
+            if ($runtimeStage -eq 'PLAN_REVIEW') {
+                $readyEvent = [System.Threading.EventWaitHandle]::OpenExisting('__READY__')
+                try { [void]$readyEvent.Set() } finally { $readyEvent.Dispose() }
+                $progressEvent = [System.Threading.EventWaitHandle]::OpenExisting('__PROGRESS__')
+                try {
+                    $progressCount = if ($advanceMutex.SafeWaitHandle.IsClosed) { 2 } else { 1 }
+                    for ($i = 0; $i -lt $progressCount; $i++) {
+                        if (-not $progressEvent.WaitOne(15000)) { throw 'manifest race progress timed out.' }
+                    }
+                } finally {
+                    $progressEvent.Dispose()
+                }
+            }
+'@
+            $raceCompletionSignal = @'
+            if ($runtimeStage -eq 'IMPLEMENT') {
+                $progressEvent = [System.Threading.EventWaitHandle]::OpenExisting('__PROGRESS__')
+                try { [void]$progressEvent.Set() } finally { $progressEvent.Dispose() }
+            }
+'@
+            $raceStartSignal = $raceStartSignal.Replace('__PROGRESS__', $raceProgressName)
+            $raceBarrier = $raceBarrier.Replace('__READY__', $raceReadyName).Replace('__PROGRESS__', $raceProgressName)
+            $raceCompletionSignal = $raceCompletionSignal.Replace('__PROGRESS__', $raceProgressName)
+            $raceSource = $raceSource.Replace($raceMutexAnchor, ($raceStartSignal + "`r`n" + $raceMutexAnchor))
+            $raceSource = $raceSource.Replace($raceManifestAnchor, ($raceBarrier + "`r`n" + $raceManifestAnchor + "`r`n" + $raceCompletionSignal))
+            Write-Utf8Bom -Path $raceAdvancePath -Content $raceSource
+            $raceFirst = Start-RepoProcess -UserProfile $env:USERPROFILE -ScriptPath $raceAdvancePath -Arguments @('-TaskId', $raceTask, '-ExpectedStage', 'PLAN', '-Tool', 'codex', '-VaultRoot', $raceVaultRoot, '-RepoRoot', $raceFixtureRoot)
+            if (-not $raceReady.WaitOne(15000)) { throw 'first manifest writer did not reach the barrier.' }
+            $racePlan = Get-Content -LiteralPath $racePlanPath -Raw -Encoding utf8
+            $raceReview = @'
+### Run 1 · 2026-07-13 11:30 · runner: independent reviewer
+- verdict: pass
+- findings: none
+- next: IMPLEMENT
+'@
+            $racePlan = $racePlan.Replace('## Plan Review', ("## Plan Review`r`n" + $raceReview))
+            Write-Utf8Bom -Path $racePlanPath -Content $racePlan
+            $raceSecond = Start-RepoProcess -UserProfile $env:USERPROFILE -ScriptPath $raceAdvancePath -Arguments @('-TaskId', $raceTask, '-ExpectedStage', 'PLAN_REVIEW', '-VaultRoot', $raceVaultRoot, '-RepoRoot', $raceFixtureRoot)
+            $firstExited = $raceFirst.Process.WaitForExit(30000)
+            $secondExited = $raceSecond.Process.WaitForExit(30000)
+            $firstStdErr = $raceFirst.StdErr.Result
+            $secondStdErr = $raceSecond.StdErr.Result
+            $raceFinalPlan = Get-Content -LiteralPath $racePlanPath -Raw -Encoding utf8
+            $raceManifest = Get-Content -LiteralPath (Join-Path $raceTaskDir 'skill-manifest.json') -Raw -Encoding utf8 | ConvertFrom-Json
+            if ($firstExited -and $secondExited -and
+                $raceFirst.Process.ExitCode -eq 0 -and $raceSecond.Process.ExitCode -eq 0 -and
+                $raceFinalPlan -match '(?m)^stage:\s*IMPLEMENT\s*$' -and
+                $raceManifest.stage -eq 'IMPLEMENT') {
+                Add-Check 'E7 same-task mutex keeps a delayed older manifest writer from overwriting the latest stage'
+            } else {
+                Add-Failure ("E7 manifest race should finish at IMPLEMENT: first={0}; second={1}; manifest={2}; stderr={3} | {4}" -f $raceFirst.Process.ExitCode, $raceSecond.Process.ExitCode, $raceManifest.stage, $firstStdErr, $secondStdErr)
+            }
+        }
+    } finally {
+        [void]$raceProgress.Set()
+        foreach ($state in @($raceFirst, $raceSecond)) {
+            if ($null -eq $state) { continue }
+            if (-not $state.Process.HasExited) { $state.Process.Kill(); $state.Process.WaitForExit() }
+            $state.Process.Dispose()
+        }
+        $raceReady.Dispose()
+        $raceProgress.Dispose()
     }
 } finally {
     foreach ($path in $cleanupPaths) {

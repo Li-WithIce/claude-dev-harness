@@ -1,9 +1,10 @@
 ---
 tags: [运行时, 恢复索引]
 created: __RENDER_AT_INSTALL__
-updated: __RENDER_AT_INSTALL__
+updated: __RUNTIME_TIMESTAMP__
 schema_version: recovery-index/v1.1
-derived_from: [运行时/当前任务.md, 运行时/tasks/, 运行时/中断任务.md]
+derived_from: [运行时/当前任务.md, 运行时/tasks/]
+writer: install
 ---
 
 # 恢复索引
@@ -15,4 +16,9 @@ derived_from: [运行时/当前任务.md, 运行时/tasks/, 运行时/中断任�
 - task_id: `none`
 - 任务: 无
 - 状态: 空闲
+- 当前文档: none
 - 下一步: 等待新任务
+
+## 未完成任务 Top 3
+
+- 无

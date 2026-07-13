@@ -21,14 +21,17 @@
 
 1. Write `docs/tasks/{task_id}/plan.md` frontmatter.
 2. Mirror to `.assistant/运行时/tasks/<task-id>.md`.
-3. Refresh `.assistant/运行时/当前任务.md`.
+3. Refresh `.assistant/运行时/当前任务.md` only when the task is already active or explicitly activated.
 4. Refresh `.assistant/运行时/恢复索引.md`.
+
+Background advances never replace the current pointer. Active `DONE` writes the canonical idle pointer; background `DONE` leaves current unchanged. Any runtime-ladder failure stops later writes, returns nonzero, and appends an open `[writeback-fallback]` after locks are released. A successful `-SyncOnly` releases the runtime mutex, reacquires it in stage-to-runtime order while retaining the same-task stage mutex, and clears matching fallback rows before releasing the stage mutex. Resume/switch readers inspect fallback rows before normal runtime pointers.
 
 ### Direction Rules
 
 - Each step may read the previous step as input.
 - Reverse writes are forbidden.
 - Shared pointer files are owned by the current `entry_host`.
+- Every advance/sync/activate uses caller-supplied `ExpectedStage` compare-and-swap; `SyncOnly` changes no artifact stage, while `ActivateCurrent` is the only explicit current switch.
 - `team_task_update` may mirror vault state after writeback, but never writes back into the vault.
 
 ## Forbidden Reverse Edges

@@ -17,7 +17,7 @@
 ## Read Order
 
 - Orientation: read existing optional files only if present: `.assistant\首页.md` -> `.assistant\工作流\项目约定.md` -> `.assistant\配置\系统信息.md` -> `.assistant\配置\用户偏好.md` -> `.assistant\配置\工具与组件.md`
-- Resume: read existing runtime files only if present: `.assistant\运行时\恢复索引.md` -> `.assistant\运行时\当前任务.md` -> `.assistant\运行时\tasks\<task-id>.md` -> `.assistant\运行时\中断任务.md` -> `.assistant\运行时\上次会话.md`; missing runtime files mean no active recorded state
+- Resume: first inspect open `[writeback-fallback]` rows in `.assistant\运行时\收件箱.md`; then read existing runtime files only if present: `.assistant\运行时\恢复索引.md` -> `.assistant\运行时\当前任务.md` -> `.assistant\运行时\tasks\<task-id>.md` -> `.assistant\运行时\中断任务.md` -> `.assistant\运行时\上次会话.md`; missing runtime files mean no active recorded state
 
 ## Code Understanding
 
@@ -45,7 +45,7 @@
 - After task recognition, follow `.assistant\entry\AGENTS.md` mode rules.
 - `quick` loads only entry rules, user preferences / necessary config, and the directly relevant skill.
 - `workflow` loads `entry-router`, `orchestrator`, and the current-stage skill.
-- `resume-current` / `switch-existing` loads recovery runtime files first, then the current-stage skill.
+- `resume-current` / `switch-existing` reads recovery identity/runtime first; only explicit continue/switch-and-execute loads the current-stage skill or writes runtime. Read-only inspect/status remains minimal and read-only.
 - `ask` is an iterative blocking clarification gate: do not load workflow stage skills, create `docs/tasks/{task_id}/`, edit code, or enter quick/workflow/PLAN/IMPLEMENT until all blocking uncertainties are resolved. Ask one highest-value question at a time by default, then reassess.
 - Clarification-family requests such as 需求澄清 / 需求确认 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认 follow `.assistant\entry\AGENTS.md` and land in existing `PLAN -> Clarification` when they need durable development decisions; they do not create a new stage.
 - Treat unresolved PLAN acceptance, non-goals, impact, rollback/compatibility, or implementation path that cannot guide IMPLEMENT as the same Clarification protocol.
@@ -57,7 +57,7 @@
 ## Task Workflow
 
 - 小任务直接处理，不额外创建计划文档。
-- Development tasks must first pass through `.assistant\entry\AGENTS.md` routing. For new work, route to `quick`, `workflow`, or `ask`.
+- Project-scoped development and read-only engineering requests must first pass through `.assistant\entry\AGENTS.md` routing. For new work, route to `quick`, `workflow`, or `ask`.
 - Only `workflow` tasks use the canonical stage chain: `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`.
 - Do not use `REVIEW` or `SUMMARY` as frontmatter stage names; summaries are user-facing responses, not workflow stages.
 - `quick` tasks can be handled directly and summarized without creating task artifacts.
@@ -65,7 +65,7 @@
 - `workflow` mode uses `docs/tasks/{task_id}/plan.md` and the canonical stages.
 - 任务中断后，继续时先恢复目标、已完成事项、待处理事项和验证状态。
 - 不为简单命令、报错解释、SQL 改写、配置查询创建额外任务目录。
-- 只有长期任务或多轮开发任务才写入 `docs/tasks/{task_id}/`；该目录默认是本地 workflow 产物。
+- 只有 `mode=workflow` 才写入 `docs/tasks/{task_id}/`；standalone quick/read-only 即使较长或多轮也不因此创建任务产物。
 - 任务文档采用追加记录，不覆盖关键历史。
 
 ## Memory Writeback

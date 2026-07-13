@@ -15,6 +15,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot 'lite-artifact-parser.ps1')
+
+Assert-LiteTaskId -TaskId $TaskId
+
 $script:AllowedStages = @("PLAN", "PLAN_REVIEW", "IMPLEMENT", "CODE_REVIEW", "TEST", "DONE")
 $script:AllowedTools = @("claudecode", "codex")
 $script:AllowedFrontmatterFields = @("task_id", "stage", "tool", "tool_profile", "model", "updated")
@@ -40,6 +44,7 @@ $script:TestSections = @(
     "Inputs Reviewed",
     "Test Approach",
     "Findings",
+    "Evidence",
     "Risks / Gaps",
     "Conclusion",
     "Handoff"
@@ -96,41 +101,13 @@ function Add-Warning {
     $script:Warnings += $Message
 }
 
-function Get-Frontmatter {
-    <#
-    .SYNOPSIS
-    解析 markdown 顶部 frontmatter。
-    .DESCRIPTION
-    harness-lite 只接受位于文档开头、由两段 `---` 包住的最小 YAML 样式 frontmatter。
-    .PARAMETER Content
-    完整 markdown 文本。
-    .OUTPUTS
-    PSCustomObject。
-    #>
-    param([string]$Content)
+function Test-MinuteNotEarlier {
+    param(
+        [string]$Candidate,
+        [string]$Baseline
+    )
 
-    $match = [regex]::Match($Content, '\A---\r?\n(.*?)\r?\n---\r?\n', [System.Text.RegularExpressions.RegexOptions]::Singleline)
-    if (-not $match.Success) {
-        throw "missing frontmatter block"
-    }
-
-    $fields = [ordered]@{}
-    foreach ($line in ($match.Groups[1].Value -split "\r?\n")) {
-        if ([string]::IsNullOrWhiteSpace($line)) {
-            continue
-        }
-
-        if ($line -notmatch '^([a-z_]+):\s*(.+)$') {
-            throw "invalid frontmatter line: $line"
-        }
-
-        $fields[$matches[1]] = $matches[2].Trim()
-    }
-
-    [pscustomobject]@{
-        Fields = $fields
-        Body = $Content.Substring($match.Length)
-    }
+    return [string]::CompareOrdinal($Candidate, $Baseline) -ge 0
 }
 
 function Get-Sections {
@@ -146,16 +123,12 @@ function Get-Sections {
     #>
     param([string]$Content)
 
-    $sections = @()
-    $matches = [regex]::Matches($Content, '(?ms)^##\s+(.+?)\r?\n(.*?)(?=^##\s+|\z)')
-    foreach ($match in $matches) {
-        $sections += [pscustomobject]@{
-            Name = $match.Groups[1].Value.Trim()
-            Content = $match.Groups[2].Value.Trim()
-        }
+    try {
+        return @(Get-LiteSections -Content $Content)
+    } catch {
+        Add-Failure $_.Exception.Message
+        return ,@()
     }
-
-    return $sections
 }
 
 function Test-FullModelId {
@@ -417,13 +390,14 @@ function Get-TopLevelPlanBullets {
 
         if ($capturingConvergence -and $line -match '^\s{2,}-\s+(.+?)\s*$') {
             $criterion = $Matches[1].Trim()
-            if (-not [string]::IsNullOrWhiteSpace($criterion)) {
+            if (Test-LitePlainScalar -Value $criterion) {
                 $convergenceItems += $criterion
             }
             continue
         }
 
-        if ($line -match '^- .+$') {
+        $ordinaryBullet = [regex]::Match($line, '^-[ \t]+(.+)$')
+        if ($ordinaryBullet.Success -and (Test-LitePlainScalar -Value $ordinaryBullet.Groups[1].Value)) {
             if ($capturingConvergence) {
                 $capturingConvergence = $false
             }
@@ -581,7 +555,7 @@ function Get-ChangeContractAffectedPaths {
         }
     }
 
-    return @($pathEntries | Where-Object { $_ -and $_ -ne '<path>' } | Select-Object -Unique)
+    return @($pathEntries | Where-Object { $_ -and $_ -ne '<path>' -and (Test-LitePlainScalar -Value $_) } | Select-Object -Unique)
 }
 
 function Get-GitChangedPathsForAudit {
@@ -719,33 +693,6 @@ function Assert-ArtifactDriftAdvisory {
             }
         }
     }
-}
-
-function Get-AllowedWorkflowSkills {
-    <#
-    .SYNOPSIS
-    返回 workflow descriptor 允许引用的 skill 白名单。
-    .DESCRIPTION
-    直接读取仓库当前 `skills/` 目录，和 footprint 测试锁定的技能集合保持同步。
-    .PARAMETER RepoRoot
-    仓库根目录。
-    .OUTPUTS
-    String[]。
-    #>
-    param([string]$RepoRoot)
-
-    return @(
-        'codex',
-        'entry-router',
-        'implement',
-        'md-html',
-        'obsidian-memory',
-        'orchestrator',
-        'plan',
-        'review',
-        'spec',
-        'test'
-    )
 }
 
 function Get-WorkflowDescriptorForAudit {
@@ -897,6 +844,18 @@ function Assert-WorkflowDescriptorAdvisory {
         return
     }
 
+    $allowedSkills = @(
+        'codex',
+        'entry-router',
+        'implement',
+        'md-html',
+        'obsidian-memory',
+        'orchestrator',
+        'plan',
+        'review',
+        'spec',
+        'test'
+    )
     $expectedStages = $script:ExpectedWorkflowStages
     $actualStages = @($descriptor.Stages.Keys)
     if (($actualStages -join '|') -ne ($expectedStages -join '|')) {
@@ -939,7 +898,6 @@ function Assert-WorkflowDescriptorAdvisory {
             continue
         }
 
-        $allowedSkills = @(Get-AllowedWorkflowSkills -RepoRoot $RepoRoot)
         foreach ($skill in $stageDescriptor.SkillsWhitelist) {
             if ($skill.ToLowerInvariant() -in $script:ForbiddenWorkflowProviderNames) {
                 Add-Warning ("workflow descriptor stage {0} must not whitelist provider skill: {1}" -f $stageName, $skill)
@@ -1057,7 +1015,7 @@ function Assert-ToolProfileBinding {
 
     Add-Check ("tool_profile descriptor exists: {0}" -f $profile.Name)
 
-    if ($script:AllowedTools -contains $profile.Backend) {
+    if ($script:AllowedTools -ccontains $profile.Backend) {
         Add-Check "tool_profile backend is legal"
     } else {
         Add-Failure ("tool_profile backend should be one of [{0}], got [{1}]" -f ($script:AllowedTools -join ', '), $profile.Backend)
@@ -1094,38 +1052,11 @@ function Assert-SectionOrder {
     )
 
     $actual = @($Sections | ForEach-Object { $_.Name })
-    if (($actual -join '|') -eq ($Expected -join '|')) {
+    if (($actual -join '|') -ceq ($Expected -join '|')) {
         Add-Check ("{0} sections complete and ordered" -f $Label)
     } else {
         Add-Failure ('{0} sections should be [{1}], got [{2}]' -f $Label, ($Expected -join ' -> '), ($actual -join ' -> '))
     }
-}
-
-function Get-SectionContent {
-    <#
-    .SYNOPSIS
-    返回指定 section 正文。
-    .DESCRIPTION
-    section 不存在时返回空字符串，调用方自行决定这是允许状态还是失败。
-    .PARAMETER Sections
-    section 列表。
-    .PARAMETER Name
-    section 名称。
-    .OUTPUTS
-    String。
-    #>
-    param(
-        [object[]]$Sections,
-        [string]$Name
-    )
-
-    foreach ($section in $Sections) {
-        if ($section.Name -eq $Name) {
-            return $section.Content
-        }
-    }
-
-    return ""
 }
 
 function Get-RunBlocks {
@@ -1141,22 +1072,12 @@ function Get-RunBlocks {
     #>
     param([string]$SectionContent)
 
-    if ([string]::IsNullOrWhiteSpace($SectionContent)) {
-        return @()
+    try {
+        return @(Get-LiteRunBlocks -SectionContent $SectionContent)
+    } catch {
+        Add-Failure $_.Exception.Message
+        return
     }
-
-    $runs = @()
-    $matches = [regex]::Matches($SectionContent, '(?ms)^###\s+Run\s+(\d+)\s*·\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s*·\s*runner:\s*(.+?)\r?\n(.*?)(?=^###\s+Run\s+\d+|\z)')
-    foreach ($match in $matches) {
-        $runs += [pscustomobject]@{
-            Number = [int]$match.Groups[1].Value
-            When = [datetime]::ParseExact($match.Groups[2].Value, 'yyyy-MM-dd HH:mm', $null)
-            Runner = $match.Groups[3].Value.Trim()
-            Body = $match.Groups[4].Value.Trim()
-        }
-    }
-
-    return $runs
 }
 
 function Assert-RunSequence {
@@ -1222,24 +1143,37 @@ function Assert-ReviewRuns {
 
     Assert-RunSequence -Runs $runs -Label $Label
 
+    $latestRunNumber = $runs[-1].Number
     foreach ($run in $runs) {
-        $verdictMatch = [regex]::Match($run.Body, '(?m)^- verdict:\s*(pass|revise)\s*$')
-        if (-not $verdictMatch.Success) {
-            Add-Failure ('{0} Run {1} should contain - verdict: pass | revise' -f $Label, $run.Number)
+        try {
+            $reviewContract = Get-LiteReviewRunContract -Run $run
+            Add-Check ('{0} Run {1} has unique verdict/findings grammar' -f $Label, $run.Number)
+        } catch {
+            Add-Failure ('{0} Run {1} review grammar invalid: {2}' -f $Label, $run.Number, $_.Exception.Message)
             continue
         }
 
-        $hasFindingsNone = $run.Body -match '(?m)^- findings:\s*none\s*$'
-        $hasFindingsList = $run.Body -match '(?m)^- findings:\s*$' -and $run.Body -match '(?m)^\s+- P[0-3]:\s+.+$'
-        if (-not ($hasFindingsNone -or $hasFindingsList)) {
-            Add-Failure ('{0} Run {1} should contain - findings: none or a P0-P3 findings list' -f $Label, $run.Number)
+        if ($run.Number -eq $latestRunNumber) {
+            try {
+                Assert-LiteLatestReviewConsistency -Review $reviewContract
+                Add-Check ('{0} latest verdict/findings are consistent' -f $Label)
+            } catch {
+                Add-Failure ('{0} latest run is inconsistent: {1}' -f $Label, $_.Exception.Message)
+            }
         }
 
-        if ($run.Body -notmatch '(?m)^- next:\s+.+$') {
+        if (-not (Test-LiteTopLevelFieldValue -Content $run.Body -FieldPattern 'next')) {
             Add-Failure ('{0} Run {1} should contain - next:' -f $Label, $run.Number)
         }
 
         if (-not $Quality.IsPresent) {
+            continue
+        }
+
+        if ($run.Number -ne $latestRunNumber) {
+            if ($run.Body -match '(?m)^- score\.') {
+                Add-Warning ('{0} Run {1} is historical; -Quality only evaluates the latest run' -f $Label, $run.Number)
+            }
             continue
         }
 
@@ -1280,7 +1214,7 @@ function Assert-ReviewRuns {
 
         $averageScore = [math]::Floor($scoreSum / $script:QualityScoreDimensions.Count)
         $expectedVerdict = if ($hasBlockingDimension) { 'revise' } elseif ($averageScore -ge 80) { 'pass' } else { 'revise' }
-        $actualVerdict = $verdictMatch.Groups[1].Value
+        $actualVerdict = $reviewContract.Verdict
 
         if ($actualVerdict -eq $expectedVerdict) {
             Add-Check ('{0} Run {1} verdict matches 4-dim score threshold' -f $Label, $run.Number)
@@ -1320,13 +1254,63 @@ function Assert-ImplementationRuns {
 
     foreach ($run in $runs) {
         foreach ($field in @('changed', 'tests', 'risks', 'next')) {
-            if ($run.Body -notmatch ("(?m)^- {0}:\s+.+" -f [regex]::Escape($field))) {
+            if (-not (Test-LiteTopLevelFieldValue -Content $run.Body -FieldPattern ([regex]::Escape($field)))) {
                 Add-Failure ('Implementation Notes Run {0} should contain - {1}:' -f $run.Number, $field)
             }
         }
     }
 
     return $runs
+}
+
+function Assert-ClarificationLedger {
+    <#
+    .SYNOPSIS
+    Validates optional clarification ledger decisions.
+    .DESCRIPTION
+    A ledger is optional for routine work. Once present, an unresolved
+    decision is a hard gate for every later stage until it is resolved.
+    #>
+    param([string]$SectionContent)
+
+    if ($SectionContent -notmatch '(?m)^-\s*clarification_ledger:\s*$') {
+        Add-Check 'Clarification ledger is not required for this task'
+        return
+    }
+
+    $ledgerMarker = [regex]::Match($SectionContent, '(?m)^-\s*clarification_ledger:\s*$')
+    $ledgerContent = $SectionContent.Substring($ledgerMarker.Index + $ledgerMarker.Length)
+    $itemStarts = @([regex]::Matches($ledgerContent, '(?m)^[ \t]{2}-\s+'))
+    if ($itemStarts.Count -eq 0) {
+        Add-Failure 'clarification_ledger should contain at least one item'
+        return
+    }
+
+    $pendingCount = 0
+    for ($index = 0; $index -lt $itemStarts.Count; $index++) {
+        $itemEnd = if ($index + 1 -lt $itemStarts.Count) { $itemStarts[$index + 1].Index } else { $ledgerContent.Length }
+        $item = $ledgerContent.Substring($itemStarts[$index].Index, $itemEnd - $itemStarts[$index].Index)
+        $decisionMatches = @([regex]::Matches($item, '(?m)^[ \t]{4,}decision:\s*(.*?)\s*$'))
+        if ($decisionMatches.Count -ne 1) {
+            Add-Failure ('clarification_ledger item {0} should contain exactly one decision' -f ($index + 1))
+            continue
+        }
+
+        $decision = $decisionMatches[0].Groups[1].Value.Trim()
+        if ($decision -cnotmatch '^(pending|accepted|rejected)$') {
+            Add-Failure ('clarification_ledger item {0} decision should be exactly pending | accepted | rejected, got [{1}]' -f ($index + 1), $decision)
+            continue
+        }
+        if ($decision -eq 'pending') {
+            $pendingCount += 1
+        }
+    }
+
+    if ($pendingCount -gt 0) {
+        Add-Failure ('clarification_ledger has {0} pending decision(s); resolve them before stage advance' -f $pendingCount)
+    } else {
+        Add-Check 'clarification_ledger has no pending decision'
+    }
 }
 
 function Assert-ChangeContract {
@@ -1379,7 +1363,7 @@ function Assert-ChangeContract {
         }
     }
 
-    $validEntries = @($pathEntries | Where-Object { $_ -and $_ -ne '<path>' })
+    $validEntries = @($pathEntries | Where-Object { $_ -and $_ -ne '<path>' -and (Test-LitePlainScalar -Value $_) })
     if ($validEntries.Count -ge 1) {
         Add-Check "Change Contract affected_paths has at least one entry"
     } else {
@@ -1408,31 +1392,31 @@ function Assert-PlanContract {
     )
 
     $content = Get-Content -LiteralPath $PlanPath -Raw -Encoding utf8
-    $frontmatter = Get-Frontmatter -Content $content
+    $frontmatter = Get-LiteFrontmatter -Content $content
     $fields = $frontmatter.Fields
 
     $fieldNames = @($fields.Keys)
     Assert-FrontmatterFields -FieldNames $fieldNames
 
-    if (($fields['task_id']) -eq $TaskId) {
+    if (($fields['task_id']) -ceq $TaskId) {
         Add-Check "plan.md task_id matches task directory"
     } else {
         Add-Failure ('plan.md task_id should be [{0}], got [{1}]' -f $TaskId, $fields['task_id'])
     }
 
-    if ($script:AllowedStages -contains $fields['stage']) {
+    if ($script:AllowedStages -ccontains $fields['stage']) {
         Add-Check "plan.md stage is legal"
     } else {
         Add-Failure ('plan.md stage should be one of [{0}], got [{1}]' -f ($script:AllowedStages -join ', '), $fields['stage'])
     }
 
-    if ($fields['stage'] -eq 'DONE') {
-        if ($fields['tool'] -eq 'none') {
+    if ($fields['stage'] -ceq 'DONE') {
+        if ($fields['tool'] -ceq 'none') {
             Add-Check "plan.md DONE tool is legal"
         } else {
             Add-Failure ('plan.md DONE tool should be [none], got [{0}]' -f $fields['tool'])
         }
-    } elseif ($script:AllowedTools -contains $fields['tool']) {
+    } elseif ($script:AllowedTools -ccontains $fields['tool']) {
         Add-Check "plan.md tool is legal"
     } else {
         Add-Failure ('plan.md tool should be one of [{0}], got [{1}]' -f ($script:AllowedTools -join ', '), $fields['tool'])
@@ -1451,7 +1435,7 @@ function Assert-PlanContract {
     Assert-SectionOrder -Sections $requiredSections -Expected $script:PlanSections -Label "plan.md"
 
     $sectionNames = @($sections | ForEach-Object { $_.Name })
-    $changeContracts = @($sections | Where-Object { $_.Name -eq 'Change Contract' })
+    $changeContracts = @($sections | Where-Object { $_.Name -ceq 'Change Contract' })
     $affectedPaths = @()
     if ($changeContracts.Count -gt 1) {
         Add-Failure "plan.md should contain at most one Change Contract section"
@@ -1466,44 +1450,33 @@ function Assert-PlanContract {
         }
 
         $changeContract = $changeContracts[0]
-        Assert-ChangeContract -SectionContent $changeContract.Content
-        $affectedPaths = @(Get-ChangeContractAffectedPaths -SectionContent $changeContract.Content)
+        Assert-ChangeContract -SectionContent $changeContract.VisibleContent
+        $affectedPaths = @(Get-ChangeContractAffectedPaths -SectionContent $changeContract.VisibleContent)
     }
 
-    $clarification = Get-SectionContent -Sections $sections -Name 'Clarification'
-    # 只校验语义要素是否出现，容忍常见同义写法（受影响目录/受影响模块、回滚/兼容）。
-    # 与 advance-stage.ps1 的 PLAN clarification gate 保持同一套口径，避免一个误判两套标准。
-    $clarificationAspects = @(
-        @{ Label = '验收'; AnyOf = @('验收') },
-        @{ Label = '非目标'; AnyOf = @('非目标') },
-        @{ Label = '受影响'; AnyOf = @('受影响') },
-        @{ Label = '回滚 或 兼容'; AnyOf = @('回滚', '兼容') },
-        @{ Label = 'ui:'; AnyOf = @('ui:') }
-    )
-    foreach ($aspect in $clarificationAspects) {
-        $present = $false
-        foreach ($pattern in $aspect.AnyOf) {
-            if ($clarification -match [regex]::Escape($pattern)) {
-                $present = $true
-                break
-            }
-        }
-
-        if ($present) {
-            Add-Check ('Clarification contains [{0}]' -f $aspect.Label)
+    $clarification = Get-LiteSectionContent -Sections $sections -Name 'Clarification'
+    $missingClarificationAspects = @(Get-LiteMissingClarificationAspects -Content $clarification)
+    foreach ($label in @('验收', '非目标', '受影响', '回滚 或 兼容', 'ui:')) {
+        if ($label -notin $missingClarificationAspects) {
+            Add-Check ('Clarification contains [{0}]' -f $label)
         } else {
-            Add-Failure ('Clarification should contain [{0}]' -f $aspect.Label)
+            Add-Failure ('Clarification should contain [{0}]' -f $label)
         }
     }
 
-    $confirmation = Get-SectionContent -Sections $sections -Name 'User Confirmation'
-    if ($confirmation -match '(?m)^- status:\s*(draft|confirmed)\s*$') {
-        Add-Check "User Confirmation status is machine-readable"
-    } else {
-        Add-Failure 'User Confirmation should contain - status: draft | confirmed'
+    try {
+        $confirmationStatus = Get-LiteUserConfirmationStatus -Sections $sections
+        if ($fields['stage'] -ne 'PLAN' -and $confirmationStatus -cne 'confirmed') {
+            Add-Failure 'post-PLAN stages require User Confirmation status: confirmed'
+        } else {
+            Add-Check "User Confirmation status is machine-readable and stage-consistent"
+        }
+    } catch {
+        Add-Failure $_.Exception.Message
     }
+    Assert-ClarificationLedger -SectionContent $clarification
 
-    $planBody = Get-SectionContent -Sections $sections -Name 'Plan'
+    $planBody = Get-LiteSectionContent -Sections $sections -Name 'Plan'
     $planMetadata = Get-TopLevelPlanBullets -Content $planBody
     Assert-ArtifactDriftAdvisory -Stage $fields['stage'] -WorkspaceRoot $WorkspaceRoot -Artifacts $planMetadata.ArtifactsItems -AffectedPaths $affectedPaths
     if ($planMetadata.OrdinaryBullets.Count -gt 0) {
@@ -1512,37 +1485,46 @@ function Assert-PlanContract {
         Add-Failure "Plan should contain at least one ordinary bullet"
     }
 
-    $verification = Get-SectionContent -Sections $sections -Name 'Verification'
-    if ($verification -match '(?m)^- `.+`$') {
+    $verification = Get-LiteSectionContent -Sections $sections -Name 'Verification'
+    $verificationCommands = @([regex]::Matches($verification, '(?m)^- `(.+)`$'))
+    if (@($verificationCommands | Where-Object { Test-LitePlainScalar -Value $_.Groups[1].Value -Literal }).Count -gt 0) {
         Add-Check "Verification contains executable commands"
     } else {
         Add-Failure "Verification should contain backticked commands"
     }
 
-    $risks = Get-SectionContent -Sections $sections -Name 'Risks'
-    if (-not [string]::IsNullOrWhiteSpace($risks)) {
+    $risks = Get-LiteSectionContent -Sections $sections -Name 'Risks'
+    $riskBullets = @([regex]::Matches($risks, '(?m)^-[ \t]+(.+)$'))
+    if (@($riskBullets | Where-Object { Test-LitePlainScalar -Value $_.Groups[1].Value }).Count -gt 0) {
         Add-Check "Risks section is not empty"
     } else {
         Add-Failure "Risks section should not be empty"
     }
 
-    $planReviewRuns = @(Assert-ReviewRuns -SectionContent (Get-SectionContent -Sections $sections -Name 'Plan Review') -Label 'Plan Review')
-    $implementationRuns = @(Assert-ImplementationRuns -SectionContent (Get-SectionContent -Sections $sections -Name 'Implementation Notes'))
-    $codeReviewRuns = @(Assert-ReviewRuns -SectionContent (Get-SectionContent -Sections $sections -Name 'Code Review') -Label 'Code Review')
+    $null = @(Assert-ReviewRuns -SectionContent (Get-LiteSectionContent -Sections $sections -Name 'Plan Review') -Label 'Plan Review')
+    $implementationRuns = @(Assert-ImplementationRuns -SectionContent (Get-LiteSectionContent -Sections $sections -Name 'Implementation Notes'))
+    $codeReviewRuns = @(Assert-ReviewRuns -SectionContent (Get-LiteSectionContent -Sections $sections -Name 'Code Review') -Label 'Code Review')
 
-    if ($fields['stage'] -eq 'IMPLEMENT' -and $codeReviewRuns.Count -gt 0) {
-        $latestCodeReview = $codeReviewRuns[-1]
-        if ($latestCodeReview.Body -match '(?m)^- verdict:\s*revise\s*$') {
-            if ($implementationRuns.Count -eq 0 -or $implementationRuns[-1].When -le $latestCodeReview.When) {
-                Add-Failure "IMPLEMENT after CODE_REVIEW revise requires a fresh Implementation Notes run"
-            } else {
-                Add-Check "IMPLEMENT has fresh evidence after latest revise"
-            }
+    $latestImplementation = if ($implementationRuns.Count -gt 0) { $implementationRuns[-1] } else { $null }
+    $latestCodeReview = if ($codeReviewRuns.Count -gt 0) { $codeReviewRuns[-1] } else { $null }
+    $latestCodeReviewVerdict = ''
+    if ($null -ne $latestCodeReview) {
+        try {
+            $latestCodeReviewVerdict = (Get-LiteReviewRunContract -Run $latestCodeReview).Verdict
+        } catch {
+            # Assert-ReviewRuns already records the grammar failure.
         }
     }
 
     [pscustomobject]@{
         Stage = $fields['stage']
+        LatestImplementationMinute = if ($null -ne $latestImplementation) {
+            $latestImplementation.When.ToString('yyyy-MM-dd HH:mm', [System.Globalization.CultureInfo]::InvariantCulture)
+        } else { '' }
+        LatestCodeReviewMinute = if ($null -ne $latestCodeReview) {
+            $latestCodeReview.When.ToString('yyyy-MM-dd HH:mm', [System.Globalization.CultureInfo]::InvariantCulture)
+        } else { '' }
+        LatestCodeReviewVerdict = $latestCodeReviewVerdict
     }
 }
 
@@ -1575,30 +1557,90 @@ function Assert-TestContract {
     .PARAMETER CurrentStage
     当前 stage，用于补充 DONE 的额外约束。
     .OUTPUTS
-    None。
+    包含 Conclusion 与书面执行分钟的对象。
     #>
     param(
         [string]$TestPath,
-        [string]$CurrentStage
+        [string]$CurrentStage,
+        [string]$WorkspaceRoot
     )
 
     $content = Get-Content -LiteralPath $TestPath -Raw -Encoding utf8
     $sections = Get-Sections -Content $content
     Assert-SectionOrder -Sections $sections -Expected $script:TestSections -Label "test.md"
 
-    $conclusion = Get-SectionContent -Sections $sections -Name 'Conclusion'
+    $conclusion = Get-LiteSectionContent -Sections $sections -Name 'Conclusion'
     $lines = @($conclusion -split "\r?\n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $conclusionValue = $null
     if ($lines.Count -gt 0 -and ($lines[0] -in @('pass', 'fail', 'blocked'))) {
+        $conclusionValue = $lines[0]
         Add-Check "test.md Conclusion is legal"
     } else {
         Add-Failure "test.md Conclusion first line should be pass | fail | blocked"
     }
 
-    $handoff = Get-SectionContent -Sections $sections -Name 'Handoff'
-    if ($handoff -match '(?m)^- delivery:\s+.+$' -and $handoff -match '(?m)^- follow_up:\s+.+$') {
+    $handoff = Get-LiteSectionContent -Sections $sections -Name 'Handoff'
+    if ((Test-LiteTopLevelFieldValue -Content $handoff -FieldPattern 'delivery') -and
+        (Test-LiteTopLevelFieldValue -Content $handoff -FieldPattern 'follow_up')) {
         Add-Check "test.md Handoff contains delivery and follow_up"
     } else {
         Add-Failure 'test.md Handoff should contain - delivery: and - follow_up:'
+    }
+
+    $evidence = Get-LiteSectionContent -Sections $sections -Name 'Evidence'
+    $evidenceValues = @{}
+    foreach ($field in @('command', 'exit_code', 'executed_at', 'revision', 'evidence_path')) {
+        $fieldMatches = @([regex]::Matches($evidence, ("(?m)^- {0}:\s*(.*?)\s*$" -f [regex]::Escape($field))))
+        $hasVisibleValue = $fieldMatches.Count -eq 1 -and
+            ($field -ne 'command' -or (Test-LiteTopLevelFieldValue -Content $evidence -FieldPattern 'command'))
+        if ($fieldMatches.Count -eq 1 -and -not [string]::IsNullOrWhiteSpace($fieldMatches[0].Groups[1].Value) -and $hasVisibleValue) {
+            $evidenceValues[$field] = $fieldMatches[0].Groups[1].Value.Trim()
+            Add-Check ('test.md Evidence contains {0}' -f $field)
+        } else {
+            Add-Failure ('test.md Evidence should contain exactly one non-empty - {0}:' -f $field)
+        }
+    }
+
+    $executedAtMinute = ''
+    if ($evidenceValues.Count -eq 5) {
+        $exitCode = 0
+        if (-not [int]::TryParse($evidenceValues['exit_code'], [ref]$exitCode)) {
+            Add-Failure 'test.md Evidence exit_code should be an integer'
+        } elseif ($lines.Count -gt 0 -and $lines[0] -eq 'pass' -and $exitCode -ne 0) {
+            Add-Failure 'passing test.md requires Evidence exit_code: 0'
+        } else {
+            Add-Check 'test.md Evidence exit_code is consistent with Conclusion'
+        }
+
+        $executedAt = [datetimeoffset]::MinValue
+        $executedAtValue = $evidenceValues['executed_at']
+        $isoTimestamp = [regex]::Match($executedAtValue, '^(?<minute>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}):\d{2}(?:\.\d{1,7})?(?:Z|[+-]\d{2}:\d{2})$')
+        if (-not $isoTimestamp.Success -or -not [datetimeoffset]::TryParse($executedAtValue, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$executedAt)) {
+            Add-Failure 'test.md Evidence executed_at should be an ISO-8601 timestamp with timezone'
+        } else {
+            $executedAtMinute = $isoTimestamp.Groups['minute'].Value.Replace('T', ' ')
+            Add-Check 'test.md Evidence executed_at is ISO-8601'
+        }
+
+        if ($evidenceValues['revision'] -cnotmatch '^(?:[0-9a-fA-F]{7,40}|dirty:[0-9a-fA-F]{64})$') {
+            Add-Failure 'test.md Evidence revision should be a 7-40 character git hash or dirty:<64hex>'
+        } else {
+            Add-Check 'test.md Evidence revision is verifiable'
+        }
+
+        $evidencePathValue = $evidenceValues['evidence_path'].Trim('`')
+        try {
+            if ([System.IO.Path]::IsPathRooted($evidencePathValue)) {
+                throw 'evidence_path must be workspace-relative'
+            }
+            $resolvedEvidencePath = Resolve-LiteContainedPath -Root $WorkspaceRoot -RelativePath ($evidencePathValue -replace '/', '\') -Label 'test evidence path'
+            if (-not (Test-Path -LiteralPath $resolvedEvidencePath -PathType Leaf)) {
+                throw "evidence file does not exist: $resolvedEvidencePath"
+            }
+            Add-Check 'test.md Evidence evidence_path exists inside WorkspaceRoot'
+        } catch {
+            Add-Failure ('test.md Evidence evidence_path should name an existing workspace file: {0}' -f $_.Exception.Message)
+        }
     }
 
     if ($CurrentStage -eq 'DONE') {
@@ -1607,6 +1649,11 @@ function Assert-TestContract {
         } else {
             Add-Failure "DONE stage requires test.md Conclusion to be pass"
         }
+    }
+
+    [pscustomobject]@{
+        Conclusion = $conclusionValue
+        ExecutedAtMinute = $executedAtMinute
     }
 }
 
@@ -1622,10 +1669,11 @@ $script:Failures = @()
 $script:Warnings = @()
 $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
 $WorkspaceRoot = [System.IO.Path]::GetFullPath($WorkspaceRoot)
-$taskRoot = Join-Path (Join-Path $WorkspaceRoot 'docs\tasks') $TaskId
-$planPath = Join-Path $taskRoot 'plan.md'
-$specPath = Join-Path $taskRoot 'spec.md'
-$testPath = Join-Path $taskRoot 'test.md'
+$taskBase = Resolve-LiteContainedPath -Root $WorkspaceRoot -RelativePath 'docs\tasks' -Label 'task base'
+$taskRoot = Resolve-LiteContainedPath -Root $taskBase -RelativePath $TaskId -Label 'task root'
+$planPath = Resolve-LiteContainedPath -Root $taskRoot -RelativePath 'plan.md' -Label 'plan path'
+$specPath = Resolve-LiteContainedPath -Root $taskRoot -RelativePath 'spec.md' -Label 'spec path'
+$testPath = Resolve-LiteContainedPath -Root $taskRoot -RelativePath 'test.md' -Label 'test path'
 
 if (Test-Path -LiteralPath $taskRoot -PathType Container) {
     Add-Check ("task directory exists: docs/tasks/{0}" -f $TaskId)
@@ -1642,16 +1690,61 @@ if (Test-Path -LiteralPath $planPath -PathType Leaf) {
         Assert-SpecContract -SpecPath $specPath
     }
 
-    if ($planState.Stage -in @('TEST', 'DONE')) {
-        if (Test-Path -LiteralPath $testPath -PathType Leaf) {
-            Add-Check "test.md exists for TEST/DONE"
-            Assert-TestContract -TestPath $testPath -CurrentStage $planState.Stage
+    $initialFailRework = $planState.Stage -eq 'IMPLEMENT' -and
+        $planState.LatestCodeReviewVerdict -eq 'pass'
+    $testRequired = $planState.Stage -in @('TEST', 'DONE') -or $initialFailRework
+    $testState = $null
+    if (Test-Path -LiteralPath $testPath -PathType Leaf) {
+        Add-Check $(if ($testRequired) { 'test.md exists for the current stage' } else { 'test.md exists' })
+        $testState = Assert-TestContract -TestPath $testPath -CurrentStage $planState.Stage -WorkspaceRoot $WorkspaceRoot
+    } elseif ($initialFailRework) {
+        Add-Failure 'IMPLEMENT after TEST fail requires test.md Conclusion: fail'
+    } elseif ($testRequired) {
+        Add-Failure 'TEST/DONE requires docs/tasks/{task_id}/test.md'
+    }
+
+    if ($planState.Stage -eq 'IMPLEMENT' -and $planState.LatestCodeReviewVerdict -eq 'revise') {
+        if ([string]::IsNullOrWhiteSpace($planState.LatestImplementationMinute) -or
+            [string]::IsNullOrWhiteSpace($planState.LatestCodeReviewMinute) -or
+            -not (Test-MinuteNotEarlier -Candidate $planState.LatestImplementationMinute -Baseline $planState.LatestCodeReviewMinute)) {
+            Add-Failure 'IMPLEMENT after CODE_REVIEW revise requires a fresh Implementation Notes run'
         } else {
-            Add-Failure "TEST/DONE requires docs/tasks/{task_id}/test.md"
+            Add-Check 'IMPLEMENT has fresh evidence after latest CODE_REVIEW revise'
         }
-    } elseif (Test-Path -LiteralPath $testPath -PathType Leaf) {
-        Add-Check "test.md exists"
-        Assert-TestContract -TestPath $testPath -CurrentStage $planState.Stage
+    }
+
+    if ($initialFailRework -and $null -ne $testState) {
+        if ($testState.Conclusion -ne 'fail') {
+            Add-Failure 'IMPLEMENT after TEST fail requires test.md Conclusion: fail'
+        } elseif ([string]::IsNullOrWhiteSpace($planState.LatestImplementationMinute) -or
+            [string]::IsNullOrWhiteSpace($testState.ExecutedAtMinute) -or
+            -not (Test-MinuteNotEarlier -Candidate $planState.LatestImplementationMinute -Baseline $testState.ExecutedAtMinute)) {
+            Add-Failure 'IMPLEMENT after TEST fail requires a fresh Implementation Notes run'
+        } else {
+            Add-Check 'IMPLEMENT has fresh evidence after TEST fail'
+        }
+    }
+
+    if ($planState.Stage -eq 'CODE_REVIEW' -and $planState.LatestCodeReviewVerdict -eq 'pass') {
+        if ([string]::IsNullOrWhiteSpace($planState.LatestImplementationMinute) -or
+            [string]::IsNullOrWhiteSpace($planState.LatestCodeReviewMinute) -or
+            -not (Test-MinuteNotEarlier -Candidate $planState.LatestCodeReviewMinute -Baseline $planState.LatestImplementationMinute)) {
+            Add-Failure 'CODE_REVIEW requires a fresh Code Review run after latest Implementation Notes'
+        } else {
+            Add-Check 'CODE_REVIEW is not older than latest Implementation Notes'
+        }
+    }
+
+    if ($planState.Stage -in @('TEST', 'DONE') -and $null -ne $testState) {
+        if ([string]::IsNullOrWhiteSpace($planState.LatestCodeReviewMinute) -or
+            $planState.LatestCodeReviewVerdict -ne 'pass') {
+            Add-Failure 'TEST/DONE requires latest Code Review verdict: pass'
+        } elseif ([string]::IsNullOrWhiteSpace($testState.ExecutedAtMinute) -or
+            -not (Test-MinuteNotEarlier -Candidate $testState.ExecutedAtMinute -Baseline $planState.LatestCodeReviewMinute)) {
+            Add-Failure 'TEST/DONE requires fresh TEST Evidence after latest Code Review'
+        } else {
+            Add-Check 'TEST Evidence is not older than latest Code Review'
+        }
     }
 } else {
     Add-Failure "plan.md should exist"

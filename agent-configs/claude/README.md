@@ -4,7 +4,7 @@
 
 - `CLAUDE.md.template`: Claude 全局指令模板
 - `settings.json.example`: 不含密钥的示例配置
-- `settings.local.shared.json.template`: 共享 hooks 与共享权限模板
+- `settings.local.shared.json.template`: 共享 hooks 模板
 - `settings.local.user.example.json`: 用户本地 overlay 示例
 
 边界：

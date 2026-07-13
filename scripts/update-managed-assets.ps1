@@ -4,7 +4,9 @@ param(
     [string]$RepoRoot = "",
     [ValidateSet('All')]
     [string]$Scope = 'All',
-    [switch]$SkipVerify
+    [switch]$SkipVerify,
+    [switch]$RebaselineLegacyInstallState,
+    [string]$ExpectedRebaselinePlanDigest = ''
 )
 
 Set-StrictMode -Version Latest
@@ -152,12 +154,15 @@ function Invoke-Step {
         [hashtable]$Arguments
     )
 
-    $output = @()
+    $capturedOutput = New-Object System.Collections.ArrayList
     $exitCode = 0
     $stepThrew = $false
+    $stepError = $null
 
     try {
-        $output = @(& $ScriptPath @Arguments 2>&1)
+        & $ScriptPath @Arguments 2>&1 | ForEach-Object {
+            [void]$capturedOutput.Add($_)
+        }
         $scriptSucceeded = $?
         $exitCode = if ($ScriptPath -like '*.ps1' -and $scriptSucceeded) {
             0
@@ -168,31 +173,56 @@ function Invoke-Step {
         }
     } catch {
         $stepThrew = $true
-        $output = @($_.Exception.Message)
+        $stepError = $_.Exception.Message
+        [void]$capturedOutput.Add($stepError)
         $exitCode = 2
     }
 
-    $lines = Convert-ToLineArray -Output $output
+    $lines = Convert-ToLineArray -Output @($capturedOutput)
     $text = $lines -join [Environment]::NewLine
-    $status = if (-not $stepThrew -and $Name -eq 'install.ps1') {
-        'PASS'
+    $status = if ($text -match '(?im)^STATUS:\s+REBASELINE_PLAN_REQUIRED\s*$') {
+        'REBASELINE_PLAN_REQUIRED'
     } elseif ($text -match '(?im)^STATUS:\s+(PASS|WARN|FAIL)\s*$') {
         $matches[1].ToUpperInvariant()
-    } elseif ($exitCode -eq 0) {
+    } elseif ((-not $stepThrew -and $Name -eq 'install.ps1') -or $exitCode -eq 0) {
         'PASS'
     } else {
         'FAIL'
+    }
+
+    $errors = @(Get-SectionItems -Lines $lines -SectionName 'Errors')
+    if (-not [string]::IsNullOrWhiteSpace($stepError) -and $errors -notcontains $stepError) {
+        $errors += $stepError
+    }
+    $commitState = if ($text -match '(?im)^STATUS:\s+(REBASELINE_COMMITTED|REBASELINE_ALREADY_COMMITTED)\s*$') {
+        $matches[1].ToUpperInvariant()
+    } else {
+        $null
     }
 
     return [pscustomobject]@{
         Name     = $Name
         Status   = $status
         ExitCode = $exitCode
+        CommitState = $commitState
         Checks   = @(Get-SectionItems -Lines $lines -SectionName 'Checks')
         Warnings = @(Get-SectionItems -Lines $lines -SectionName 'Warnings')
-        Errors   = @(Get-SectionItems -Lines $lines -SectionName 'Errors')
+        Errors   = $errors
         Output   = $lines
     }
+}
+
+function Test-ExactPassResult {
+    param($Result)
+
+    if ($null -eq $Result -or $Result.ExitCode -ne 0) {
+        return $false
+    }
+
+    $statusLines = @($Result.Output | Where-Object {
+            ([string]$_).Trim() -match '^STATUS:\s+\S+\s*$'
+        })
+    return $statusLines.Count -eq 1 -and ([string]$statusLines[0]).Trim() -ceq 'STATUS: PASS'
 }
 
 function Get-OverallStatus {
@@ -209,6 +239,21 @@ function Get-OverallStatus {
     return 'PASS'
 }
 
+$hasExpectedRebaselinePlanDigest = -not [string]::IsNullOrWhiteSpace($ExpectedRebaselinePlanDigest)
+$isRebaselineApply = $RebaselineLegacyInstallState.IsPresent -and $hasExpectedRebaselinePlanDigest
+
+if ($hasExpectedRebaselinePlanDigest -and -not $RebaselineLegacyInstallState.IsPresent) {
+    Write-Output 'STATUS: FAIL'
+    Write-Output 'Error: ExpectedRebaselinePlanDigest requires RebaselineLegacyInstallState.'
+    exit 2
+}
+
+if ($isRebaselineApply -and $SkipVerify.IsPresent) {
+    Write-Output 'STATUS: FAIL'
+    Write-Output 'Error: SkipVerify cannot be used with digest-bound legacy rebaseline apply.'
+    exit 2
+}
+
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent $PSScriptRoot
 }
@@ -220,11 +265,25 @@ $WorkspaceRoot = Resolve-WorkspaceRoot -ExplicitPath $WorkspaceRoot
 $results = @()
 
 if ($Scope -eq 'All') {
-    $installResult = Invoke-Step -Name 'install.ps1' -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @{
+    $installArguments = @{
         WorkspaceRoot = $WorkspaceRoot
         RepoRoot      = $RepoRoot
     }
+    if ($RebaselineLegacyInstallState.IsPresent) {
+        $installArguments.RebaselineLegacyInstallState = $true
+    }
+    if ($hasExpectedRebaselinePlanDigest) {
+        $installArguments.ExpectedRebaselinePlanDigest = $ExpectedRebaselinePlanDigest
+    }
+
+    $installResult = Invoke-Step -Name 'install.ps1' -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments $installArguments
     $results += $installResult
+    if ($installResult.Status -eq 'REBASELINE_PLAN_REQUIRED') {
+        foreach ($line in $installResult.Output) {
+            Write-Output $line
+        }
+        exit 1
+    }
     if ($installResult.Status -eq 'FAIL') {
         $overallStatus = 'FAIL'
     } else {
@@ -243,7 +302,11 @@ if ($overallStatus -ne 'FAIL' -and -not $SkipVerify) {
     $results += $verifyResult
 }
 
-if ($overallStatus -ne 'FAIL') {
+if ($isRebaselineApply -and
+    -not [string]::IsNullOrWhiteSpace([string]$installResult.CommitState) -and
+    ($installResult.Status -ne 'PASS' -or -not (Test-ExactPassResult -Result $verifyResult))) {
+    $overallStatus = 'UPDATE_COMMITTED_UNVERIFIED'
+} elseif ($overallStatus -ne 'FAIL') {
     $overallStatus = Get-OverallStatus -Results $results
 }
 
@@ -276,6 +339,11 @@ foreach ($result in $results) {
 }
 if ($SkipVerify) {
     Write-Output '- verify-installation.ps1: skipped by request'
+}
+if ($overallStatus -eq 'UPDATE_COMMITTED_UNVERIFIED') {
+    Write-Output '- Legacy rebaseline is committed, but the subsequent install or verification path did not complete with exact STATUS: PASS.'
+    Write-Output '- Rollback: not performed.'
+    Write-Output '- Retry: verify-installation.ps1, update-managed-assets.ps1, or uninstall.ps1 remain available and enforce their own safety checks.'
 }
 
 switch ($overallStatus) {

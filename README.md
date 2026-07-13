@@ -44,10 +44,10 @@ pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\dev-harn
 
 安装后的用户视角，日常基本只有 4 件事：
 
-1. 在目标工作区里直接发起开发任务，让入口文档先判定 `resume-current / switch-existing / new-task / inbox-first`；`new-task` 再轻量路由到 `quick / workflow / ask`。
+1. 在目标工作区里发起开发或只读工程请求，让入口文档先判定 `resume-current / switch-existing / new-task / authorized durable inbox-first`；`new-task` 再轻量路由到 `quick / workflow / ask`。
 2. `quick` 直接完成并报告验证；`ask` 是阻塞澄清路由，不写 `docs/tasks/{task_id}/`、不改代码；`workflow` 才进入 `entry-router -> orchestrator` 并写 `docs/tasks/{task_id}/`。
-3. workflow 阶段完成后，用 `.assistant/entry/advance-stage.ps1` 推进到下一阶段。
-4. 会话中断后，说“继续”/“恢复”/`resume`，优先读取已存在的 runtime 指针；full vault 项目可按 `.assistant/工作流/长会话恢复.md` 的顺序恢复。
+3. 只有明确继续 / 切换并执行 workflow 时才用 `-SyncOnly -ActivateCurrent` 激活或处理 fallback；read-only inspect/status 只读 identity/runtime/artifact，不写 pointer/mirror、不加载 stage skill。
+4. 会话中断后，明确说“继续”/“恢复并执行”/`resume-and-execute` 才处理 open `[writeback-fallback]` 并恢复执行；裸“恢复一下”/`resume` 若意图不明则 ask，只问状态时仅读取。full vault 项目可按 `.assistant/工作流/恢复协议.md` 的顺序恢复。
 
 各 route/stage 的工作纪律见 [`docs/工作流/stage-discipline-matrix.md`](docs/工作流/stage-discipline-matrix.md)。该矩阵只定义思考和审查视角，不新增 stage、frontmatter 字段、provider gate 或 validator hard gate；`quick` 仍是轻量 route，`ask` 仍是阻塞澄清 route，workflow 仍只认 `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`。
 
@@ -58,20 +58,23 @@ Context providers 是可选辅助输入，不是 workflow 真相源。内置权�
 最常用命令：
 
 ```powershell
-# Codex-only 默认路径：下一阶段已有 descriptor default_profile 时可省略 -Tool/-Profile
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id}
+# Codex-only 默认路径：ExpectedStage 是调用方刚读取的 frontmatter stage
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage>
 
 # 显式指定 profile，backend 从 profile.backend 解析
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -Profile harness-default-codex
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Profile harness-default-codex
 
 # 显式指定 tool + profile + model
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -Tool codex -Profile harness-default-codex -Model gpt-5.5/xhigh
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Tool codex -Profile harness-default-codex -Model gpt-5.5/xhigh
 
 # 仍可显式切到其他合法 backend
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -Tool claudecode
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Tool claudecode
 
-# TEST -> DONE 可省略 -Tool
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id}
+# TEST 按 Conclusion 进入 DONE / IMPLEMENT，可省略 -Tool
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage TEST
+
+# 新建/切换 workflow task：不推进 stage，只同步并显式激活 current
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -SyncOnly -ActivateCurrent
 
 # 单独校验任务产物
 pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId {task_id}
@@ -83,11 +86,11 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId {task_id}
 
 入口判定仍先保留四类结果：`resume-current`、`switch-existing`、`new-task`、`inbox-first`。只有判定为 `new-task` 后，才增加一层 `mode: quick | workflow | ask`。
 
-- `quick`：quick only when all true：范围和验收清楚、风险低、能在当前对话内完成并验证、用户没有要求留痕 / review / test / 计划；默认不创建 `docs/tasks/{task_id}/`，不改共享指针。
-- `workflow`：workflow when any of these is true：用户要求 workflow / 留痕 / review / test / 计划，或变更触碰入口协议、脚本、模板、validator、多文件 / 跨模块、高风险路径，或需要可审计决策 / 产物；进入 `entry-router -> orchestrator`。
-- `ask`：Deep Clarification Mode / iterative blocking clarification gate：缺少答案导致无法判断 intent、scope、acceptance criteria、constraints、risk、affected area、output format 或 quick/workflow route choice 时使用；默认每轮只问一个最高价值问题，用户回答后重新判断。Remain in ask until all blocking uncertainties are resolved，只有足够理解后才转 `quick` 或 `workflow`。
+- `quick`：project-scoped standalone read-only answer/explain/inspect/review/status/diagnose 在目标、范围和输出清楚时直接完成，不创建 task artifact；含 mutation 时仍只有范围/验收清楚、风险低、可在当前对话完成验证且未要求 durable workflow/artifact 才 quick。
+- `workflow`：用户明确要求 durable workflow、计划/留痕或 staged review/test evidence，或 mutation 触碰入口协议、脚本、模板、validator、多文件/跨模块、高风险路径时，进入 `entry-router -> orchestrator`。
+- `ask`：读写意图、任务归属或其他阻塞条件仍不清楚时进入 iterative blocking clarification gate；默认每轮只问一个最高价值问题，用户回答后重新判断。Remain in ask until all blocking uncertainties are resolved，只有足够理解后才转 `quick` 或 `workflow`。
 
-显式覆盖词优先，但不能覆盖硬风险：用户说“直接改”“快修”时只有满足 `quick` 全部条件才偏 `quick`；用户说“走 workflow”“留痕”“review”“test”时直接偏 `workflow`。没有显式词时由入口 agent 按上面的 all/any 规则自主判断。
+先判 active task 归属，但 route identity does not broaden requested action；只问状态不能因此写 Run 或推进 stage。真正非项目请求仍由宿主处理。`review` / `test` / `plan` 等名词本身不决定 mode：pure read-only 默认 quick，mixed mutation 回到 low/high-risk 门，durable artifact 才 workflow，ambiguous read/write 才 ask。
 
 “需求澄清”“需求确认”“拷问需求”“拷问方案”“头脑风暴”“方案压力测试”“设计访谈”“边界确认”“验收标准确认”“非目标确认”，以及 `clarify`、`brainstorm`、`pressure test`、`challenge this plan`、`ask me questions` 等表达属于 Clarification 协议族；PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径仍不足以指导 IMPLEMENT 时也按该协议处理。它们不是新 stage：开发任务需要可审计决策或后续实现时，进入现有 `PLAN -> ## Clarification`，用 `clarification_ledger` 记录 `category / question / evidence / recommended_answer / decision / impact`，但账本不替代 Clarification 最低字段；用户确认前 `## User Confirmation` 保持 `draft`，账本仍有 `decision: pending` 时不得确认。进入 workflow 前，只有任务归属、目标或风险边界不足以判断时才走 `ask`；ask 不创建任务产物、不进入 PLAN，直到阻塞问题解除；能通过代码库、文档或 artifact 回答的问题，入口 agent 应先查证，剩余用户决策按依赖顺序一次只问一个并给推荐答案。
 
@@ -97,7 +100,7 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId {task_id}
 
 - `quick`：只加载入口规则、用户偏好 / 必要配置，以及与本次请求直接相关的 skill 或 reference；不预读 orchestrator、全部 stage skill 或历史任务。
 - `workflow`：加载 `entry-router`、`orchestrator`，再按当前 stage 加载一个阶段 skill：`PLAN -> plan`、`PLAN_REVIEW -> review`、`IMPLEMENT -> implement`、`CODE_REVIEW -> review`、`TEST -> test`。
-- `resume-current` / `switch-existing`：先加载已存在的 `.assistant/运行时/恢复索引.md`、`.assistant/运行时/当前任务.md`、`运行时/tasks/<task-id>.md`；缺失运行时文件表示没有已记录的活动状态，不作为错误；必要时只读当前任务的 `plan.md` frontmatter 判定 stage，再加载当前 stage skill。
+- `resume-current` / `switch-existing`：先只读 identity/runtime/artifact；只有明确继续 / 切换并执行时才处理 fallback、用 `-SyncOnly` 收敛/激活并加载 current stage skill。read-only inspect/status 不写 runtime、不加载 stage skill；缺失 runtime 文件表示没有已记录状态。
 - `ask`：不加载 workflow stage skill；不创建 `docs/tasks/{task_id}/`、不改代码、不推进阶段；not enter quick/workflow/PLAN/IMPLEMENT。阻塞澄清到足以说明 User goal、Success / acceptance criteria、In scope、Out of scope / non-goals、Affected area、Constraints、Risk level、Expected output、Recommended route: quick or workflow、Why this route is safe。
 
 禁止 bulk-load 全部 skills、全部历史 `docs/tasks/*`、Claude 兼容 skill 或 `workflow-team`。只有用户显式切换 backend、当前 stage frontmatter / workflow descriptor 命中、或 `$env:AITEAMCODE_TEAM_MODE='1'` 等触发条件满足时，才加载这些兼容路径。
@@ -167,7 +170,9 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 当前 `advance-stage.ps1` 的真实语义如下：
 
 - 所有阶段推进都必须走 `advance-stage.ps1`
+- 所有 advance/sync/activate 都要求调用方显式传刚读取的 `-ExpectedStage`；CAS 不匹配时零写入，shim 不会代读或代填
 - 推进前自动调用 `validate-lite-artifacts.ps1`
+- `-SyncOnly` 不推进 stage、不运行阶段完成度 gate，且不能与 `-Tool/-Profile/-Model` 同用；`-ActivateCurrent` 只用于明确的新建/切换并拒绝 `DONE`
 - 非 `DONE` 推进的 tool 解析顺序：
   - 显式 `-Tool`
   - 显式 `-Profile`
@@ -177,7 +182,10 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 - `PLAN_REVIEW` / `CODE_REVIEW` 的最新 run 若 `verdict: revise`，下一步会回到对应修订阶段
   - `PLAN_REVIEW revise -> PLAN`
   - `CODE_REVIEW revise -> IMPLEMENT`
-- `TEST fail/blocked` 不自动回退，停在报告层处理
+- `TEST pass -> DONE`；`fail -> IMPLEMENT`；`blocked` 保持 `TEST` 并报告解除条件。`fail` 回环沿用同一推进命令，不新增 reopen 操作
+- validator 用 append-only run 与 `Evidence.executed_at` 的书面 `yyyy-MM-dd HH:mm` 建立 freshness 链；更早分钟拒绝，同分钟沿用既有合同视为 fresh
+- mirror 始终同步实际 stage；active advance 更新 current，background advance 不抢 current；active `DONE` 将 current 重置为 canonical idle，background `DONE` 不改 current
+- runtime ladder 任一步失败都返回非零并追加 `[writeback-fallback]`；只有明确继续 / 切换并执行 workflow 时，resume/switch 才处理 fallback 并用相同 `TaskId/ExpectedStage -SyncOnly` 幂等重放
 
 ## `.assistant`、`docs/tasks`、validator、git 的职责
 
@@ -211,8 +219,8 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 - `.assistant/运行时/tasks/<task-id>.md` 是从任务产物镜像出来的 task-runtime，按需生成
 - `.assistant/运行时/当前任务.md` / `恢复索引.md` 是共享 pointer / derived view，按需生成
 - `.assistant/工作流/长会话恢复.md` 只在 full vault 中默认存在，用于汇总恢复触发词、读取顺序和单写者场景
-- 新事项先进入 `.assistant/运行时/收件箱.md`，文件不存在时由写入入口创建
-- pending wisdom 不直接落到 `记忆-*.md`，而是先走收件箱，再 promote/triage
+- 只有已授权持久捕获的 actionable/durable 新事项才进入 `.assistant/运行时/收件箱.md`；交互式归属或读写歧义先 ask，不写 inbox
+- 只有用户明确要求记录/沉淀记忆后，pending wisdom 才可先走收件箱再 promote/triage；普通 review/status 只提示可沉淀内容
 
 ### `validate-lite-artifacts.ps1`
 
@@ -263,7 +271,7 @@ pwsh -File .\harness.ps1 -WorkspaceRoot <workspace-root>
 pwsh -File .\scripts\update-managed-assets.ps1 -WorkspaceRoot <workspace-root>
 
 # 推进与校验
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} [-Tool <backend>] [-Profile <profile>] [-Model <full-model-id>]
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> [-SyncOnly] [-ActivateCurrent] [-Tool <backend>] [-Profile <profile>] [-Model <full-model-id>]
 pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId {task_id} [-Quality]
 
 # 共享记忆
@@ -272,11 +280,23 @@ pwsh -File .\scripts\repair-shared-memory.ps1 -VaultRoot <workspace-root>\.assis
 pwsh -File .\scripts\check-shared-memory-layers.ps1 -VaultRoot <workspace-root>\.assistant
 ```
 
+旧安装状态只能通过同一个维护入口显式收敛，并分成只读 plan 与 digest-bound apply 两步：
+
+```powershell
+# 只读生成计划；预期以非零状态 REBASELINE_PLAN_REQUIRED 返回 digest 与计数
+pwsh -File .\scripts\update-managed-assets.ps1 -WorkspaceRoot <workspace-root> -RebaselineLegacyInstallState
+
+# 人工核对计划后，携原 digest 执行 apply；状态漂移会拒绝执行
+pwsh -File .\scripts\update-managed-assets.ps1 -WorkspaceRoot <workspace-root> -RebaselineLegacyInstallState -ExpectedRebaselinePlanDigest <digest-from-plan-only>
+```
+
+这是显式的 digest-bound TOFU：legacy v1.1 没有历史 payload digest，因此只能绑定当前可读来源、恢复计划与 live identity，不能证明过去从未被篡改。apply 禁止 `-SkipVerify`，只有后续 install 完成且 verifier 精确返回 `STATUS: PASS` 才成功；若 rebaseline 已提交而后续 install 或 verifier 未精确完成，命令以非零 `STATUS: UPDATE_COMMITTED_UNVERIFIED` 返回，不声称 rollback，调用方可按各入口自身的安全校验重试 verify、update 或 uninstall。
+
 ### 高级 / 维护入口
 
 ```powershell
-# ACP-style skill adapter
-pwsh -File .\scripts\invoke-harness-skill.ps1 -TaskId {task_id} -Stage PLAN_REVIEW -Skill review -Tool codex -WorkspaceRoot <workspace-root> -ArtifactRoot docs\tasks\{task_id} -Mode readonly -PayloadJson '{}'
+# explicit readonly Codex delegation
+pwsh -File .\scripts\invoke-harness-skill.ps1 -TaskId {task_id} -Stage PLAN_REVIEW -Skill codex -Tool codex -WorkspaceRoot <workspace-root> -Mode readonly -PayloadJson '{"task":"Review the current plan"}'
 
 # per-task skills index
 pwsh -File .\scripts\generate-skills-index.ps1 -TaskId {task_id} -Stage TEST -BackendHint codex
@@ -292,10 +312,11 @@ pwsh -File .\skills\workflow-team\scripts\spawn-team.ps1 -TaskId {task_id}
 
 截至当前仓库状态：
 
-- `skills/` 下有 `12` 个 skill 目录（含 `.system`、`codex` 和按需 artifact skill `md-html`）
-- `scripts/` 下有 `20` 个 PowerShell 脚本
-- `runtime-hooks/claude/` 下有 `3` 个 hooks
-- `tests/` 下有 `38` 个 `verify-*.ps1` 回归脚本
+组件数量随仓库演进动态生成，避免 README 数字漂移：
+
+```powershell
+pwsh -NoProfile -File .\scripts\get-repo-inventory.ps1
+```
 
 关键组件分布：
 
@@ -337,11 +358,11 @@ pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite core
 - `core`：跑 `git diff --check` 加核心协议脚本，包括 context-provider guardrails、artifact validator、footprint、workflow contracts / descriptor、shared-memory layers、review HTML renderer、skill manifest、AiTeamCode skill contract、tool profile，以及安装路径无 Node/npm/npx 强依赖检查。
 - `all`：跑 `git diff --check` 加除 `verify-installation.ps1` 外所有 `tests/verify-*.ps1`；需要安装验证时额外传 `-WorkspaceRoot`。
 
-GitHub Actions 在 `main` 与 `codex/harness-distribution` 的 push，以及 pull request 上运行 Windows quick/core validation。CI 不安装、注册或连接外部 provider，也不要求 Node.js。
+GitHub Actions 在 `main` 与 `codex/harness-distribution` 的 push，以及 pull request 上运行 Windows `Suite all`，并在临时 workspace/user profile 做一次安装验证。job 上限为 30 分钟，单个 verify 脚本上限为 360 秒，为重型 install/uninstall 隔离回归保留稳定余量。CI 不安装、注册或连接外部 provider，也不要求 Node.js。
 
 ### 跑完整 verify 套件
 
-当前共有 `38` 个 `verify-*.ps1`；其中 `verify-installation.ps1` 需要显式传 `-WorkspaceRoot`。
+完整清单由 `scripts/run-validation.ps1` 动态发现 `tests/verify-*.ps1`；其中 `verify-installation.ps1` 需要显式传 `-WorkspaceRoot`，不要在文档中维护易失真的固定数量。
 
 ```powershell
 # 跑可直接执行的验证脚本；verify-installation.ps1 需要 WorkspaceRoot 时单独传入

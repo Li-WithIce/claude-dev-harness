@@ -7,6 +7,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot 'fixture-test-common.ps1')
+
 function Add-Check {
     param([string]$Message)
     $script:Checks += $Message
@@ -15,52 +17,6 @@ function Add-Check {
 function Add-Failure {
     param([string]$Message)
     $script:Failures += $Message
-}
-
-function Write-Utf8Bom {
-    param(
-        [string]$Path,
-        [string]$Content
-    )
-
-    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($true)))
-}
-
-function Remove-DirectoryWithRetry {
-    param([string]$Path)
-
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return
-    }
-
-    $lastError = $null
-    for ($attempt = 0; $attempt -lt 10; $attempt++) {
-        try {
-            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
-            return
-        } catch {
-            $lastError = $_
-            Start-Sleep -Milliseconds 200
-        }
-    }
-
-    if (Test-Path -LiteralPath $Path) {
-        Add-Failure ("cleanup failed for {0}: {1}" -f $Path, $lastError.Exception.Message)
-    }
-}
-
-function Copy-RepoPathToFixture {
-    param(
-        [string]$SourceRoot,
-        [string]$FixtureRoot,
-        [string]$RelativePath
-    )
-
-    $sourcePath = Join-Path $SourceRoot $RelativePath
-    $destinationPath = Join-Path $FixtureRoot $RelativePath
-    $destinationParent = Split-Path -Parent $destinationPath
-    New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
-    Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Recurse -Force
 }
 
 function New-IsolatedRepoFixture {
@@ -96,6 +52,7 @@ function Invoke-AdvanceStage {
     param(
         [string]$AdvancePath,
         [string]$TaskId,
+        [string]$ExpectedStage,
         [string]$Tool,
         [string]$VaultRoot,
         [string]$RepoRoot,
@@ -108,6 +65,7 @@ function Invoke-AdvanceStage {
         '-ExecutionPolicy', 'Bypass',
         '-File', $AdvancePath,
         '-TaskId', $TaskId,
+        '-ExpectedStage', $ExpectedStage,
         '-Tool', $Tool,
         '-VaultRoot', $VaultRoot,
         '-RepoRoot', $RepoRoot
@@ -228,7 +186,11 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 $SourceRoot = [System.IO.Path]::GetFullPath($RepoRoot)
 $fixtureRoot = New-IsolatedRepoFixture -SourceRoot $SourceRoot -RelativePaths @(
     'scripts\advance-stage.ps1',
+    'scripts\lite-artifact-parser.ps1',
     'scripts\validate-lite-artifacts.ps1',
+    'skills\obsidian-memory\scripts\runtime-inbox-common.ps1',
+    'skills\obsidian-memory\scripts\runtime-state-common.ps1',
+    'skills\obsidian-memory\scripts\resolve-shared-memory-paths.ps1',
     'agent-configs\profiles'
 )
 $RepoRoot = $fixtureRoot
@@ -311,7 +273,7 @@ try {
         Add-Failure ("short model alias should fail, got: {0}" -f ($aliasResult.Output -join ' | '))
     }
 
-    $vaultRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('harness-profile-vault-' + [guid]::NewGuid().ToString('N'))
+    $vaultRoot = Join-Path $RepoRoot '.assistant'
     New-Item -ItemType Directory -Path (Join-Path $vaultRoot '运行时\tasks') -Force | Out-Null
 
     $taskAdvanceClearing = 'tool-profile-advance-clearing-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
@@ -319,7 +281,7 @@ try {
     $createdTaskDirs += $taskAdvanceClearingDir
     New-Item -ItemType Directory -Path $taskAdvanceClearingDir -Force | Out-Null
     Write-Utf8Bom -Path (Join-Path $taskAdvanceClearingDir 'plan.md') -Content (New-PlanContent -TaskId $taskAdvanceClearing -Stage 'PLAN' -Tool 'claudecode' -ExtraFrontmatter @('tool_profile: harness-default-claude', 'model: claude-opus-4-7'))
-    $advanceClearing = Invoke-AdvanceStage -AdvancePath $advancePath -TaskId $taskAdvanceClearing -Tool 'codex' -VaultRoot $vaultRoot -RepoRoot $RepoRoot
+    $advanceClearing = Invoke-AdvanceStage -AdvancePath $advancePath -TaskId $taskAdvanceClearing -ExpectedStage 'PLAN' -Tool 'codex' -VaultRoot $vaultRoot -RepoRoot $RepoRoot
     $clearingPlan = Get-Content -LiteralPath (Join-Path $taskAdvanceClearingDir 'plan.md') -Raw -Encoding utf8
     $clearingMirror = Get-Content -LiteralPath (Join-Path $vaultRoot "运行时\tasks\$taskAdvanceClearing.md") -Raw -Encoding utf8
     if ($advanceClearing.ExitCode -eq 0 -and
@@ -342,7 +304,7 @@ try {
     $createdTaskDirs += $vaultRoot
     New-Item -ItemType Directory -Path $taskAdvanceDir -Force | Out-Null
     Write-Utf8Bom -Path (Join-Path $taskAdvanceDir 'plan.md') -Content (New-PlanContent -TaskId $taskAdvance -Stage 'PLAN' -Tool 'claudecode')
-    $advanceOutput = (& $advancePath -TaskId $taskAdvance -Tool 'codex' -Profile 'harness-default-codex' -VaultRoot $vaultRoot -RepoRoot $RepoRoot | Out-String).Trim()
+    $advanceOutput = (& $advancePath -TaskId $taskAdvance -ExpectedStage 'PLAN' -Tool 'codex' -Profile 'harness-default-codex' -VaultRoot $vaultRoot -RepoRoot $RepoRoot | Out-String).Trim()
     $advancedPlan = Get-Content -LiteralPath (Join-Path $taskAdvanceDir 'plan.md') -Raw -Encoding utf8
     $advancedMirror = Get-Content -LiteralPath (Join-Path $vaultRoot "运行时\tasks\$taskAdvance.md") -Raw -Encoding utf8
     if ($advanceOutput -eq 'PLAN_REVIEW | codex' -and

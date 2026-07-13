@@ -8,6 +8,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot 'fixture-test-common.ps1')
+
 function Add-Check {
     <#
     .SYNOPSIS
@@ -40,70 +42,14 @@ function Add-Failure {
     $script:Failures += $Message
 }
 
-function Write-Utf8Bom {
-    <#
-    .SYNOPSIS
-    以 UTF-8 BOM 写文件。
-    .DESCRIPTION
-    夹具需要和仓库 active PowerShell 编码保持一致，避免 Windows PowerShell 解析差异。
-    .PARAMETER Path
-    目标路径。
-    .PARAMETER Content
-    文件内容。
-    .OUTPUTS
-    None。
-    #>
-    param(
-        [string]$Path,
-        [string]$Content
-    )
-
-    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($true)))
-}
-
-function Remove-DirectoryWithRetry {
-    param([string]$Path)
-
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return
-    }
-
-    $lastError = $null
-    for ($attempt = 0; $attempt -lt 10; $attempt++) {
-        try {
-            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
-            return
-        } catch {
-            $lastError = $_
-            Start-Sleep -Milliseconds 200
-        }
-    }
-
-    if (Test-Path -LiteralPath $Path) {
-        Add-Failure ("cleanup failed for {0}: {1}" -f $Path, $lastError.Exception.Message)
-    }
-}
-
-function Copy-RepoPathToFixture {
-    param(
-        [string]$SourceRoot,
-        [string]$FixtureRoot,
-        [string]$RelativePath
-    )
-
-    $sourcePath = Join-Path $SourceRoot $RelativePath
-    $destinationPath = Join-Path $FixtureRoot $RelativePath
-    $destinationParent = Split-Path -Parent $destinationPath
-    New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
-    Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Recurse -Force
-}
-
 function New-IsolatedRepoFixture {
     param([string]$SourceRoot)
 
     $fixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('harness-lite-validator-repo-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'docs\tasks') -Force | Out-Null
+    Copy-RepoPathToFixture -SourceRoot $SourceRoot -FixtureRoot $fixtureRoot -RelativePath 'scripts\lite-artifact-parser.ps1'
     Copy-RepoPathToFixture -SourceRoot $SourceRoot -FixtureRoot $fixtureRoot -RelativePath 'scripts\validate-lite-artifacts.ps1'
+    Copy-RepoPathToFixture -SourceRoot $SourceRoot -FixtureRoot $fixtureRoot -RelativePath 'skills\obsidian-memory\scripts\runtime-state-common.ps1'
     if (Test-Path -LiteralPath (Join-Path $SourceRoot 'agent-configs\profiles') -PathType Container) {
         Copy-RepoPathToFixture -SourceRoot $SourceRoot -FixtureRoot $fixtureRoot -RelativePath 'agent-configs\profiles'
     }
@@ -346,11 +292,18 @@ function New-TestReport {
     #>
     param(
         [string]$Conclusion = "pass",
-        [bool]$IncludeHandoff = $true
+        [bool]$IncludeHandoff = $true,
+        [bool]$IncludeEvidence = $true,
+        [string]$ExecutedAt = "2026-07-10T10:00:00+08:00"
     )
 
     $handoff = if ($IncludeHandoff) {
         "## Handoff`r`n- delivery: 输出测试结论。`r`n- follow_up: none`r`n"
+    } else {
+        ""
+    }
+    $evidence = if ($IncludeEvidence) {
+        "## Evidence`r`n- command: ``pwsh -NoProfile -File tests/verify-lite-artifact-validator.ps1```r`n- exit_code: 0`r`n- executed_at: $ExecutedAt`r`n- revision: 0123456789abcdef0123456789abcdef01234567`r`n- evidence_path: scripts/validate-lite-artifacts.ps1`r`n"
     } else {
         ""
     }
@@ -373,6 +326,8 @@ function New-TestReport {
 ## Findings
 - none
 
+$evidence
+
 ## Risks / Gaps
 - none
 
@@ -392,6 +347,7 @@ $fixtureRoot = New-IsolatedRepoFixture -SourceRoot $SourceRoot
 $RepoRoot = $fixtureRoot
 $validatorPath = Join-Path $RepoRoot 'scripts\validate-lite-artifacts.ps1'
 $taskBase = Join-Path $RepoRoot 'docs\tasks'
+. (Join-Path $RepoRoot 'scripts\lite-artifact-parser.ps1')
 $script:Checks = @()
 $script:Failures = @()
 $createdTaskDirs = @()
@@ -436,6 +392,297 @@ try {
         Add-Failure ("valid task should pass validator, got: {0}" -f ($validResult.Output -join ' | '))
     }
 
+    $confirmationGrammarCases = @(
+        [pscustomobject]@{ Name = 'draft'; Body = '- status: draft'; Expected = 'draft' }
+        [pscustomobject]@{ Name = 'confirmed'; Body = '- status: confirmed'; Expected = 'confirmed' }
+        [pscustomobject]@{ Name = 'boundary-blank'; Body = "`r`n- status: confirmed`r`n"; Expected = 'confirmed' }
+        [pscustomobject]@{ Name = 'horizontal-space'; Body = "- status:`tconfirmed `t"; Expected = 'confirmed' }
+        [pscustomobject]@{ Name = 'zero'; Body = '- note: missing'; Expected = $null }
+        [pscustomobject]@{ Name = 'duplicate'; Body = "- status: confirmed`r`n- status: confirmed"; Expected = $null }
+        [pscustomobject]@{ Name = 'contradictory'; Body = "- status: draft`r`n- status: confirmed"; Expected = $null }
+        [pscustomobject]@{ Name = 'legal-plus-illegal'; Body = "- status: confirmed`r`n- status: invalid"; Expected = $null }
+        [pscustomobject]@{ Name = 'case-key'; Body = '- Status: confirmed'; Expected = $null }
+        [pscustomobject]@{ Name = 'case-value'; Body = '- status: CONFIRMED'; Expected = $null }
+        [pscustomobject]@{ Name = 'indent'; Body = '  - status: confirmed'; Expected = $null }
+        [pscustomobject]@{ Name = 'comment'; Body = "<!--`r`n- status: confirmed`r`n-->"; Expected = $null }
+        [pscustomobject]@{ Name = 'fence'; Body = "~~~text`r`n- status: confirmed`r`n~~~"; Expected = $null }
+        [pscustomobject]@{ Name = 'extra'; Body = "- status: confirmed`r`nextra"; Expected = $null }
+    )
+    $confirmationGrammarFailures = @()
+    foreach ($case in $confirmationGrammarCases) {
+        $sections = @(Get-LiteSections -Content ("## User Confirmation`r`n{0}`r`n## Plan`r`n- test" -f $case.Body))
+        try {
+            $actual = Get-LiteUserConfirmationStatus -Sections $sections
+        } catch {
+            $actual = $null
+        }
+        if (($null -eq $case.Expected -and $null -ne $actual) -or
+            ($null -ne $case.Expected -and $actual -cne $case.Expected)) {
+            $confirmationGrammarFailures += $case.Name
+        }
+    }
+    if ($confirmationGrammarFailures.Count -eq 0) {
+        Add-Check 'User Confirmation grammar accepts only one case-exact top-level status line with boundary blanks'
+    } else {
+        Add-Failure ("User Confirmation grammar matrix failed: {0}" -f ($confirmationGrammarFailures -join ', '))
+    }
+
+    $plainScalarCases = @(
+        [pscustomobject]@{ Name = 'plain'; Value = 'visible text'; Expected = $true }
+        [pscustomobject]@{ Name = 'backticked-path'; Value = '`/root/reviewer`'; Expected = $true }
+        [pscustomobject]@{ Name = 'empty-link'; Value = '[](https://example.test/hidden)'; Expected = $false }
+        [pscustomobject]@{ Name = 'link-only'; Value = '[note](https://example.test/hidden)'; Expected = $false }
+        [pscustomobject]@{ Name = 'format-only'; Value = [string][char]0x200B; Expected = $false }
+        [pscustomobject]@{ Name = 'html-only'; Value = '<span>hidden</span>'; Expected = $false }
+        [pscustomobject]@{ Name = 'entity-only'; Value = '&ZeroWidthSpace;'; Expected = $false }
+        [pscustomobject]@{ Name = 'literal-brackets'; Value = '[System.IO.File]::Exists($path)'; Expected = $true; Literal = $true }
+        [pscustomobject]@{ Name = 'literal-invocation'; Value = '& pwsh -NoProfile'; Expected = $true; Literal = $true }
+        [pscustomobject]@{ Name = 'literal-redirection'; Value = '< input.txt'; Expected = $true; Literal = $true }
+        [pscustomobject]@{ Name = 'matched-double-code-span'; Value = '``[System.IO.File]``'; Expected = $true }
+        [pscustomobject]@{ Name = 'short-closing-code-span'; Value = '``[](https://example.test/hidden)`'; Expected = $false }
+        [pscustomobject]@{ Name = 'long-closing-code-span'; Value = '`[](https://example.test/hidden)``'; Expected = $false }
+        [pscustomobject]@{ Name = 'extra-closing-code-span'; Value = '``[](https://example.test/hidden)```'; Expected = $false }
+        [pscustomobject]@{ Name = 'multiple-single-code-spans'; Value = '`!` [](https://example.test/hidden) `!`'; Expected = $false }
+        [pscustomobject]@{ Name = 'multiple-double-code-spans'; Value = '``!`` [](https://example.test/hidden) ``!``'; Expected = $false }
+    )
+    $plainScalarFailures = @($plainScalarCases | Where-Object {
+        $literal = $_.PSObject.Properties.Name -contains 'Literal' -and $_.Literal
+        (Test-LitePlainScalar -Value $_.Value -Literal:$literal) -ne $_.Expected
+    })
+    if ($plainScalarFailures.Count -eq 0) {
+        Add-Check 'machine scalar grammar requires a plain visible value'
+    } else {
+        Add-Failure ("machine scalar grammar failed: {0}" -f (($plainScalarFailures | ForEach-Object Name) -join ', '))
+    }
+
+    $blockFieldCases = @(
+        [pscustomobject]@{ Name = 'inline'; Content = '- field: visible'; Expected = $true }
+        [pscustomobject]@{ Name = 'indented-list'; Content = "- field:`r`n  - visible"; Expected = $true }
+        [pscustomobject]@{ Name = 'blank-then-indented'; Content = "- field:`r`n`r`n  visible"; Expected = $true }
+        [pscustomobject]@{ Name = 'heading-boundary'; Content = "- field:`r`n### unrelated`r`n  - later"; Expected = $false }
+        [pscustomobject]@{ Name = 'paragraph-boundary'; Content = "- field:`r`nunrelated`r`n  - later"; Expected = $false }
+        [pscustomobject]@{ Name = 'thematic-break-boundary'; Content = "- field:`r`n---`r`n  - later"; Expected = $false }
+        [pscustomobject]@{ Name = 'tab-sibling-boundary'; Content = "- field:`r`n-`tshadow:`r`n  - later"; Expected = $false }
+    )
+    $blockFieldFailures = @($blockFieldCases | Where-Object {
+        (Test-LiteTopLevelFieldValue -Content $_.Content -FieldPattern 'field') -ne $_.Expected
+    })
+    if ($blockFieldFailures.Count -eq 0) {
+        Add-Check 'block machine values stop at the first nonblank unindented boundary'
+    } else {
+        Add-Failure ("block machine value boundaries failed: {0}" -f (($blockFieldFailures | ForEach-Object Name) -join ', '))
+    }
+
+    $taskDuplicateConfirmation = 'lite-validator-duplicate-confirm-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskDuplicateConfirmationDir = Join-Path $taskBase $taskDuplicateConfirmation
+    $createdTaskDirs += $taskDuplicateConfirmationDir
+    New-Item -ItemType Directory -Path $taskDuplicateConfirmationDir -Force | Out-Null
+    $duplicateConfirmationPlan = (New-PlanContent -TaskId $taskDuplicateConfirmation -Stage 'PLAN' -Tool 'codex').Replace(
+        '- status: confirmed',
+        "- status: draft`r`n- status: confirmed"
+    )
+    Write-Utf8Bom -Path (Join-Path $taskDuplicateConfirmationDir 'plan.md') -Content $duplicateConfirmationPlan
+    $duplicateConfirmationResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskDuplicateConfirmation -RepoRoot $RepoRoot
+    if ($duplicateConfirmationResult.ExitCode -ne 0 -and
+        ($duplicateConfirmationResult.Output -join "`n") -match 'exactly one case-exact top-level status line') {
+        Add-Check 'validator rejects contradictory User Confirmation status lines'
+    } else {
+        Add-Failure ("contradictory User Confirmation should fail validator, got: {0}" -f ($duplicateConfirmationResult.Output -join ' | '))
+    }
+
+    $taskPostPlanDraft = 'lite-validator-post-plan-draft-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskPostPlanDraftDir = Join-Path $taskBase $taskPostPlanDraft
+    $createdTaskDirs += $taskPostPlanDraftDir
+    New-Item -ItemType Directory -Path $taskPostPlanDraftDir -Force | Out-Null
+    Write-Utf8Bom -Path (Join-Path $taskPostPlanDraftDir 'plan.md') -Content (New-PlanContent `
+        -TaskId $taskPostPlanDraft `
+        -Stage 'PLAN_REVIEW' `
+        -Tool 'codex' `
+        -ConfirmationStatus 'draft' `
+        -PlanReviewRuns $planReviewPass)
+    $postPlanDraftResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskPostPlanDraft -RepoRoot $RepoRoot
+    if ($postPlanDraftResult.ExitCode -ne 0 -and
+        ($postPlanDraftResult.Output -join "`n") -match 'post-PLAN stages require User Confirmation status: confirmed') {
+        Add-Check 'post-PLAN stages require confirmed User Confirmation state'
+    } else {
+        Add-Failure ("post-PLAN draft confirmation should fail validator: {0}" -f ($postPlanDraftResult.Output -join ' | '))
+    }
+
+    $hiddenSectionVectors = @(
+        [pscustomobject]@{ Name = 'html-comment'; Open = '<!--'; Close = '-->'; Error = 'plan\.md sections should be' }
+        [pscustomobject]@{ Name = 'tilde-fence'; Open = '~~~powershell'; Close = '~~~'; Error = 'plan\.md sections should be' }
+        [pscustomobject]@{ Name = 'raw-html'; Open = '<script>'; Close = '</script>'; Error = 'Block-position angle-bracket syntax' }
+        [pscustomobject]@{ Name = 'tab-pseudo-close'; Open = "~~~text`r`n`t~~~"; Close = '~~~'; Error = 'plan\.md sections should be' }
+    )
+    $hiddenSectionFailures = @()
+    foreach ($vector in $hiddenSectionVectors) {
+        $taskHiddenSections = 'lite-validator-hidden-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $taskHiddenSectionsDir = Join-Path $taskBase $taskHiddenSections
+        $createdTaskDirs += $taskHiddenSectionsDir
+        New-Item -ItemType Directory -Path $taskHiddenSectionsDir -Force | Out-Null
+        $hiddenSectionsPlan = (New-PlanContent -TaskId $taskHiddenSections -Stage 'PLAN' -Tool 'codex').Replace(
+            '# Sample Plan',
+            "# Sample Plan`r`n$($vector.Open)"
+        ).Replace(
+            '## Plan Review',
+            "$($vector.Close)`r`n## Plan Review"
+        )
+        Write-Utf8Bom -Path (Join-Path $taskHiddenSectionsDir 'plan.md') -Content $hiddenSectionsPlan
+        $hiddenSectionsResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskHiddenSections -RepoRoot $RepoRoot
+        if ($hiddenSectionsResult.ExitCode -eq 0 -or
+            ($hiddenSectionsResult.Output -join "`n") -notmatch $vector.Error) {
+            $hiddenSectionFailures += $vector.Name
+        }
+    }
+    if ($hiddenSectionFailures.Count -eq 0) {
+        Add-Check 'validator rejects workflow headings hidden across HTML comments, fenced code, and raw HTML'
+    } else {
+        Add-Failure ("validator accepted or misclassified hidden workflow sections: {0}" -f ($hiddenSectionFailures -join ', '))
+    }
+
+    $taskInlineComment = 'lite-validator-inline-comment-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskInlineCommentDir = Join-Path $taskBase $taskInlineComment
+    $createdTaskDirs += $taskInlineCommentDir
+    New-Item -ItemType Directory -Path $taskInlineCommentDir -Force | Out-Null
+    $inlineCommentPlan = (New-PlanContent -TaskId $taskInlineComment -Stage 'PLAN' -Tool 'codex').Replace(
+        '- ui: not-applicable',
+        ('- ui: not-applicable' + "`r`n" + '- literal: `<!--`')
+    )
+    Write-Utf8Bom -Path (Join-Path $taskInlineCommentDir 'plan.md') -Content $inlineCommentPlan
+    $inlineCommentResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskInlineComment -RepoRoot $RepoRoot
+    if ($inlineCommentResult.ExitCode -eq 0 -and
+        ($inlineCommentResult.Output -join "`n") -match 'STATUS: PASS') {
+        Add-Check 'validator keeps block headings visible after an inline HTML-comment literal'
+    } else {
+        Add-Failure ("inline HTML-comment literal should not hide later sections: {0}" -f ($inlineCommentResult.Output -join ' | '))
+    }
+
+    $taskLiteralVerification = 'lite-validator-literal-command-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskLiteralVerificationDir = Join-Path $taskBase $taskLiteralVerification
+    $createdTaskDirs += $taskLiteralVerificationDir
+    New-Item -ItemType Directory -Path $taskLiteralVerificationDir -Force | Out-Null
+    $literalVerificationPlan = (New-PlanContent -TaskId $taskLiteralVerification -Stage 'PLAN' -Tool 'codex').Replace(
+        '- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/verify-lite-artifact-validator.ps1`',
+        '- `[System.IO.File]::Exists("x")`'
+    )
+    Write-Utf8Bom -Path (Join-Path $taskLiteralVerificationDir 'plan.md') -Content $literalVerificationPlan
+    $literalVerificationResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskLiteralVerification -RepoRoot $RepoRoot
+    if ($literalVerificationResult.ExitCode -eq 0) {
+        Add-Check 'Verification accepts visible literal command syntax inside a code span'
+    } else {
+        Add-Failure ("literal Verification command should pass: {0}" -f ($literalVerificationResult.Output -join ' | '))
+    }
+
+    $hiddenClarificationBodies = @(
+        '- note: <!-- 验收 非目标 受影响 回滚 ui: -->'
+        '- [note](https://example.test/验收/非目标/受影响/回滚/ui:)'
+    )
+    $hiddenClarificationFailures = @()
+    foreach ($clarificationBody in $hiddenClarificationBodies) {
+        $taskHiddenClarification = 'lite-validator-hidden-clarification-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $taskHiddenClarificationDir = Join-Path $taskBase $taskHiddenClarification
+        $createdTaskDirs += $taskHiddenClarificationDir
+        New-Item -ItemType Directory -Path $taskHiddenClarificationDir -Force | Out-Null
+        Write-Utf8Bom -Path (Join-Path $taskHiddenClarificationDir 'plan.md') -Content (New-PlanContent `
+            -TaskId $taskHiddenClarification `
+            -Stage 'PLAN' `
+            -Tool 'codex' `
+            -ClarificationBody $clarificationBody)
+        $hiddenClarificationResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskHiddenClarification -RepoRoot $RepoRoot
+        if ($hiddenClarificationResult.ExitCode -eq 0 -or
+            ($hiddenClarificationResult.Output -join "`n") -notmatch 'Clarification should contain') {
+            $hiddenClarificationFailures += $clarificationBody
+        }
+    }
+    if ($hiddenClarificationFailures.Count -eq 0) {
+        Add-Check 'validator requires explicit visible Clarification fields and values'
+    } else {
+        Add-Failure ("hidden Clarification values satisfied the contract: {0}" -f ($hiddenClarificationFailures -join ' | '))
+    }
+
+    $taskInterruptedClarification = 'lite-validator-interrupted-clarification-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskInterruptedClarificationDir = Join-Path $taskBase $taskInterruptedClarification
+    $createdTaskDirs += $taskInterruptedClarificationDir
+    New-Item -ItemType Directory -Path $taskInterruptedClarificationDir -Force | Out-Null
+    $interruptedClarification = @'
+- 验收:
+### unrelated
+  - payload-after-heading
+- 非目标: 不改无关脚本
+- 受影响目录: scripts
+- 回滚策略: 回退改动
+- ui: not-applicable
+'@
+    Write-Utf8Bom -Path (Join-Path $taskInterruptedClarificationDir 'plan.md') -Content (New-PlanContent `
+        -TaskId $taskInterruptedClarification `
+        -Stage 'PLAN' `
+        -Tool 'codex' `
+        -ClarificationBody $interruptedClarification)
+    $interruptedClarificationResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskInterruptedClarification -RepoRoot $RepoRoot
+    if ($interruptedClarificationResult.ExitCode -ne 0 -and
+        ($interruptedClarificationResult.Output -join "`n") -match 'Clarification should contain') {
+        Add-Check 'Clarification block values cannot cross an unindented Markdown boundary'
+    } else {
+        Add-Failure ("interrupted Clarification block should fail validator: {0}" -f ($interruptedClarificationResult.Output -join ' | '))
+    }
+
+    $taskUnicodeHeading = 'lite-validator-unicode-heading-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskUnicodeHeadingDir = Join-Path $taskBase $taskUnicodeHeading
+    $createdTaskDirs += $taskUnicodeHeadingDir
+    New-Item -ItemType Directory -Path $taskUnicodeHeadingDir -Force | Out-Null
+    $unicodeHeadingPlan = (New-PlanContent -TaskId $taskUnicodeHeading -Stage 'PLAN' -Tool 'codex').Replace(
+        '## User Confirmation',
+        ("##{0}User Confirmation" -f [char]0x00A0)
+    )
+    Write-Utf8Bom -Path (Join-Path $taskUnicodeHeadingDir 'plan.md') -Content $unicodeHeadingPlan
+    $unicodeHeadingResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskUnicodeHeading -RepoRoot $RepoRoot
+    if ($unicodeHeadingResult.ExitCode -ne 0 -and
+        ($unicodeHeadingResult.Output -join "`n") -match 'plan\.md sections should be') {
+        Add-Check 'validator rejects non-CommonMark whitespace in structural heading separators'
+    } else {
+        Add-Failure ("Unicode heading separator should not create a workflow section: {0}" -f ($unicodeHeadingResult.Output -join ' | '))
+    }
+
+    $taskCountBeforeInvalidIds = @(Get-ChildItem -LiteralPath $taskBase -Force).Count
+    $invalidTaskIds = @('..\..\outside', 'Bad-Task', 'bad_task', 'bad.task', ('a' * 65))
+    $invalidTaskIdsRejected = $true
+    foreach ($invalidTaskId in $invalidTaskIds) {
+        $invalidTaskIdResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $invalidTaskId -RepoRoot $RepoRoot
+        if ($invalidTaskIdResult.ExitCode -eq 0 -or ($invalidTaskIdResult.Output -join "`n") -notmatch 'TaskId must be a lowercase slug') {
+            $invalidTaskIdsRejected = $false
+        }
+    }
+    if ($invalidTaskIdsRejected -and @(Get-ChildItem -LiteralPath $taskBase -Force).Count -eq $taskCountBeforeInvalidIds) {
+        Add-Check 'validator rejects traversal, uppercase, underscore, dot, and 65-character TaskIds before task-tree access'
+    } else {
+        Add-Failure 'invalid TaskIds should fail without task-tree writes'
+    }
+
+    $taskMaxLength = 'a' * 64
+    $taskMaxLengthDir = Join-Path $taskBase $taskMaxLength
+    $createdTaskDirs += $taskMaxLengthDir
+    New-Item -ItemType Directory -Path $taskMaxLengthDir -Force | Out-Null
+    Write-Utf8Bom -Path (Join-Path $taskMaxLengthDir 'plan.md') -Content (New-PlanContent -TaskId $taskMaxLength -Stage 'PLAN' -Tool 'codex')
+    $taskMaxLengthResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskMaxLength -RepoRoot $RepoRoot
+    if ($taskMaxLengthResult.ExitCode -eq 0) {
+        Add-Check 'validator accepts a canonical 64-character TaskId'
+    } else {
+        Add-Failure ("canonical 64-character TaskId should pass, got: {0}" -f ($taskMaxLengthResult.Output -join ' | '))
+    }
+
+    $taskDuplicate = 'lite-validator-duplicate-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskDuplicateDir = Join-Path $taskBase $taskDuplicate
+    $createdTaskDirs += $taskDuplicateDir
+    New-Item -ItemType Directory -Path $taskDuplicateDir -Force | Out-Null
+    $duplicatePlan = (New-PlanContent -TaskId $taskDuplicate -Stage 'PLAN' -Tool 'codex') -replace "stage: PLAN", "stage: PLAN`r`nstage: TEST"
+    Write-Utf8Bom -Path (Join-Path $taskDuplicateDir 'plan.md') -Content $duplicatePlan
+    $duplicateResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskDuplicate -RepoRoot $RepoRoot
+    if ($duplicateResult.ExitCode -ne 0 -and ($duplicateResult.Output -join "`n") -match 'duplicate frontmatter field: stage') {
+        Add-Check 'validator rejects duplicate frontmatter fields'
+    } else {
+        Add-Failure ("duplicate frontmatter should fail, got: {0}" -f ($duplicateResult.Output -join ' | '))
+    }
+
     # Format-loosening: clarification accepts 同义写法 (受影响模块 / 兼容) aligned with advance-stage.
     $taskLenientClarify = 'lite-validator-clarify-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     $taskLenientClarifyDir = Join-Path $taskBase $taskLenientClarify
@@ -476,6 +723,30 @@ try {
         Add-Failure ("tight Run heading spacing should pass, got: {0}" -f ($tightRunResult.Output -join ' | '))
     }
 
+    $taskMalformedLatestRun = 'lite-validator-malformed-run-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskMalformedLatestRunDir = Join-Path $taskBase $taskMalformedLatestRun
+    $createdTaskDirs += $taskMalformedLatestRunDir
+    New-Item -ItemType Directory -Path $taskMalformedLatestRunDir -Force | Out-Null
+    $malformedLatestRuns = @'
+### Run 1 · 2026-04-09 10:00 · runner: Codex
+- verdict: pass
+- findings: none
+- next: IMPLEMENT
+
+### Run 2 · malformed-time · runner: Codex
+- verdict: revise
+- findings:
+  - P1: malformed latest run must not disappear
+- next: PLAN
+'@
+    Write-Utf8Bom -Path (Join-Path $taskMalformedLatestRunDir 'plan.md') -Content (New-PlanContent -TaskId $taskMalformedLatestRun -Stage 'PLAN_REVIEW' -Tool 'codex' -PlanReviewRuns $malformedLatestRuns)
+    $malformedLatestRunResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskMalformedLatestRun -RepoRoot $RepoRoot
+    if ($malformedLatestRunResult.ExitCode -ne 0 -and ($malformedLatestRunResult.Output -join "`n") -match 'invalid Run heading or unparsed Run block') {
+        Add-Check 'malformed latest Run fails closed instead of falling back to an older pass'
+    } else {
+        Add-Failure ("malformed latest Run should fail validator, got: {0}" -f ($malformedLatestRunResult.Output -join ' | '))
+    }
+
     $workspaceRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('harness-lite-validator-workspace-' + [guid]::NewGuid().ToString('N'))
     $createdTaskDirs += $workspaceRoot
     $workspaceTaskBase = Join-Path $workspaceRoot 'docs\tasks'
@@ -494,6 +765,199 @@ try {
         Add-Check 'validator reads task artifacts from WorkspaceRoot while using RepoRoot for harness config'
     } else {
         Add-Failure ("WorkspaceRoot task should pass without a repo-local task, got: {0}" -f ($workspaceResult.Output -join ' | '))
+    }
+
+    $taskJunction = 'lite-validator-junction-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskJunctionTarget = Join-Path ([System.IO.Path]::GetTempPath()) ('harness-lite-validator-target-' + [guid]::NewGuid().ToString('N'))
+    $taskJunctionPath = Join-Path $taskBase $taskJunction
+    $createdTaskDirs += @($taskJunctionPath, $taskJunctionTarget)
+    New-Item -ItemType Directory -Path $taskJunctionTarget -Force | Out-Null
+    $taskJunctionPlan = Join-Path $taskJunctionTarget 'plan.md'
+    Write-Utf8Bom -Path $taskJunctionPlan -Content (New-PlanContent -TaskId $taskJunction -Stage 'PLAN' -Tool 'codex')
+    New-Item -ItemType Junction -Path $taskJunctionPath -Target $taskJunctionTarget | Out-Null
+    $taskJunctionHash = (Get-FileHash -LiteralPath $taskJunctionPlan -Algorithm SHA256).Hash
+    $taskJunctionResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskJunction -RepoRoot $RepoRoot
+    if ($taskJunctionResult.ExitCode -ne 0 -and
+        ($taskJunctionResult.Output -join "`n") -match 'reparse point' -and
+        (Get-FileHash -LiteralPath $taskJunctionPlan -Algorithm SHA256).Hash -eq $taskJunctionHash) {
+        Add-Check 'validator rejects a task junction before reading or mutating its external target'
+    } else {
+        Add-Failure ("task junction should fail closed, got: {0}" -f ($taskJunctionResult.Output -join ' | '))
+    }
+    Remove-Item -LiteralPath $taskJunctionPath -Force
+
+    $workspaceRootTarget = Join-Path ([System.IO.Path]::GetTempPath()) ('harness-lite-validator-root-target-' + [guid]::NewGuid().ToString('N'))
+    $workspaceRootJunction = Join-Path ([System.IO.Path]::GetTempPath()) ('harness-lite-validator-root-link-' + [guid]::NewGuid().ToString('N'))
+    $rootJunctionTask = 'lite-validator-root-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $rootJunctionTaskDir = Join-Path (Join-Path $workspaceRootTarget 'docs\tasks') $rootJunctionTask
+    $createdTaskDirs += @($workspaceRootJunction, $workspaceRootTarget)
+    New-Item -ItemType Directory -Path $rootJunctionTaskDir -Force | Out-Null
+    Write-Utf8Bom -Path (Join-Path $rootJunctionTaskDir 'plan.md') -Content (New-PlanContent -TaskId $rootJunctionTask -Stage 'PLAN' -Tool 'codex')
+    New-Item -ItemType Junction -Path $workspaceRootJunction -Target $workspaceRootTarget | Out-Null
+    $rootJunctionResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $rootJunctionTask -RepoRoot $RepoRoot -WorkspaceRoot $workspaceRootJunction
+    if ($rootJunctionResult.ExitCode -ne 0 -and ($rootJunctionResult.Output -join "`n") -match 'reparse point') {
+        Add-Check 'validator rejects a reparse-point WorkspaceRoot itself'
+    } else {
+        Add-Failure ("reparse-point WorkspaceRoot should fail closed, got: {0}" -f ($rootJunctionResult.Output -join ' | '))
+    }
+    Remove-Item -LiteralPath $workspaceRootJunction -Force
+
+    $reviewContractCases = @(
+        [pscustomobject]@{
+            Suffix = 'duplicate-verdict'
+            ShouldPass = $false
+            Runs = @'
+### Run 1 · 2026-04-09 10:00 · runner: Codex
+- verdict: pass
+- verdict: revise
+- findings: none
+- next: none
+'@
+        }
+        [pscustomobject]@{
+            Suffix = 'mixed-findings'
+            ShouldPass = $false
+            Runs = @'
+### Run 1 · 2026-04-09 10:00 · runner: Codex
+- verdict: pass
+- findings: none
+- findings:
+  - P1: duplicate findings must fail
+- next: none
+'@
+        }
+        [pscustomobject]@{
+            Suffix = 'inline-none-nested-finding'
+            ShouldPass = $false
+            Runs = @'
+### Run 1 · 2026-04-09 10:00 · runner: Codex
+- verdict: pass
+- findings: none
+  - P1: inline none cannot hide a blocking finding
+- next: none
+'@
+        }
+        [pscustomobject]@{
+            Suffix = 'inline-none-nested-text'
+            ShouldPass = $false
+            Runs = @'
+### Run 1 · 2026-04-09 10:00 · runner: Codex
+- verdict: pass
+- findings: none
+  ordinary nested text is also a mixed findings form
+- next: none
+'@
+        }
+        [pscustomobject]@{
+            Suffix = 'pass-blocking'
+            ShouldPass = $false
+            Runs = @'
+### Run 1 · 2026-04-09 10:00 · runner: Codex
+- verdict: pass
+- findings:
+  - P1: blocking finding contradicts pass
+- next: none
+'@
+        }
+        [pscustomobject]@{
+            Suffix = 'revise-none'
+            ShouldPass = $false
+            Runs = @'
+### Run 1 · 2026-04-09 10:00 · runner: Codex
+- verdict: revise
+- findings: none
+- next: none
+'@
+        }
+        [pscustomobject]@{
+            Suffix = 'pass-advisory'
+            ShouldPass = $true
+            Runs = @'
+### Run 1 · 2026-04-09 10:00 · runner: Codex
+- verdict: pass
+- findings:
+  - P2: advisory finding is non-blocking
+  - P3: minor finding is non-blocking
+- next: text outside findings may mention P1: without becoming a finding
+'@
+        }
+        [pscustomobject]@{
+            Suffix = 'history-superseded'
+            ShouldPass = $true
+            Runs = @'
+### Run 1 · 2026-04-09 10:00 · runner: Codex
+- verdict: pass
+- findings:
+  - P1: historical contradiction is retained
+- next: superseded
+
+### Run 2 · 2026-04-09 10:10 · runner: Codex
+- verdict: pass
+- findings: none
+- next: proceed
+'@
+        }
+        [pscustomobject]@{
+            Suffix = 'hidden-run-fence'
+            ShouldPass = $false
+            Runs = @'
+~~~text
+### Run 1 · 2026-04-09 10:00 · runner: Codex
+- verdict: pass
+- findings: none
+- next: proceed
+~~~
+'@
+        }
+        [pscustomobject]@{
+            Suffix = 'hidden-fields-comment'
+            ShouldPass = $false
+            Runs = @'
+### Run 1 · 2026-04-09 10:00 · runner: Codex
+<!--
+- verdict: pass
+- findings: none
+- next: proceed
+-->
+'@
+        }
+        [pscustomobject]@{
+            Suffix = 'runner-empty-link'
+            ShouldPass = $false
+            Runs = @'
+### Run 1 · 2026-04-09 10:00 · runner: [](https://example.test/hidden)
+- verdict: pass
+- findings: none
+- next: proceed
+'@
+        }
+        [pscustomobject]@{
+            Suffix = 'next-empty-link'
+            ShouldPass = $false
+            Runs = @'
+### Run 1 · 2026-04-09 10:00 · runner: Codex
+- verdict: pass
+- findings: none
+- next: [](https://example.test/hidden)
+'@
+        }
+    )
+    $reviewContractMatrixPassed = $true
+    foreach ($reviewCase in $reviewContractCases) {
+        $taskReviewContract = 'lite-review-' + $reviewCase.Suffix + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $taskReviewContractDir = Join-Path $taskBase $taskReviewContract
+        $createdTaskDirs += $taskReviewContractDir
+        New-Item -ItemType Directory -Path $taskReviewContractDir -Force | Out-Null
+        Write-Utf8Bom -Path (Join-Path $taskReviewContractDir 'plan.md') -Content (New-PlanContent -TaskId $taskReviewContract -Stage 'PLAN_REVIEW' -Tool 'codex' -PlanReviewRuns $reviewCase.Runs)
+        $reviewContractResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskReviewContract -RepoRoot $RepoRoot
+        if (($reviewContractResult.ExitCode -eq 0) -ne $reviewCase.ShouldPass) {
+            $reviewContractMatrixPassed = $false
+        }
+    }
+    if ($reviewContractMatrixPassed) {
+        Add-Check 'review grammar and latest verdict/findings consistency matrix fail closed without scanning historical or next text'
+    } else {
+        Add-Failure 'review grammar and latest consistency matrix should enforce duplicate, blocking, advisory, and historical cases'
     }
 
     $validQualityResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskValid -RepoRoot $RepoRoot -Quality
@@ -761,6 +1225,137 @@ try {
         Add-Failure ("score verdict mismatch should fail in -Quality mode, got: {0}" -f ($qualityMismatchResult.Output -join ' | '))
     }
 
+    $taskQualityHistorical = 'lite-validator-quality-history-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskQualityHistoricalDir = Join-Path $taskBase $taskQualityHistorical
+    $createdTaskDirs += $taskQualityHistoricalDir
+    New-Item -ItemType Directory -Path $taskQualityHistoricalDir -Force | Out-Null
+    $qualityHistoricalRuns = @"
+### Run 1 · 2026-04-09 10:00 · runner: Codex
+- verdict: pass
+- score.completeness: 50
+- score.consistency: 50
+- score.accuracy: 50
+- score.depth: 50
+- findings: none
+- next: superseded
+
+### Run 2 · 2026-04-09 10:10 · runner: Codex
+- verdict: pass
+- score.completeness: 88
+- score.consistency: 82
+- score.accuracy: 90
+- score.depth: 84
+- findings: none
+- next: proceed
+"@
+    Write-Utf8Bom -Path (Join-Path $taskQualityHistoricalDir 'plan.md') -Content (New-PlanContent -TaskId $taskQualityHistorical -Stage 'PLAN_REVIEW' -Tool 'codex' -PlanReviewRuns $qualityHistoricalRuns)
+    $qualityHistoricalResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskQualityHistorical -RepoRoot $RepoRoot -Quality
+    if ($qualityHistoricalResult.ExitCode -eq 0 -and ($qualityHistoricalResult.Output -join "`n") -match 'historical; -Quality only evaluates the latest run') {
+        Add-Check 'historical quality contradictions are warning-only while latest run passes'
+    } else {
+        Add-Failure ("historical quality contradictions should not fail -Quality, got: {0}" -f ($qualityHistoricalResult.Output -join ' | '))
+    }
+
+    $taskPendingLedger = 'lite-validator-pending-ledger-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskPendingLedgerDir = Join-Path $taskBase $taskPendingLedger
+    $createdTaskDirs += $taskPendingLedgerDir
+    New-Item -ItemType Directory -Path $taskPendingLedgerDir -Force | Out-Null
+    $pendingLedgerClarification = @"
+- 验收标准: validator blocks unresolved decisions.
+- 非目标: no unrelated changes.
+- 受影响目录: scripts/, tests/
+- 回滚策略: revert the task.
+- ui: not-applicable
+- clarification_ledger:
+  - category: 验证证据
+    question: 是否接受当前覆盖范围？
+    evidence: pending user decision
+    recommended_answer: accept the documented scope
+    decision: pending
+    impact: tests
+"@
+    Write-Utf8Bom -Path (Join-Path $taskPendingLedgerDir 'plan.md') -Content (New-PlanContent -TaskId $taskPendingLedger -Stage 'PLAN' -Tool 'codex' -ConfirmationStatus 'draft' -ClarificationBody $pendingLedgerClarification)
+    $pendingLedgerResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskPendingLedger -RepoRoot $RepoRoot
+    if ($pendingLedgerResult.ExitCode -ne 0 -and ($pendingLedgerResult.Output -join "`n") -match 'pending decision') {
+        Add-Check 'pending clarification ledger decision blocks validator'
+    } else {
+        Add-Failure ("pending clarification ledger decision should block validator, got: {0}" -f ($pendingLedgerResult.Output -join ' | '))
+    }
+
+    $ledgerHeader = @(
+        '- 验收标准: validator parses every ledger item.'
+        '- 非目标: no unrelated changes.'
+        '- 受影响目录: scripts/, tests/'
+        '- 回滚策略: revert the task.'
+        '- ui: not-applicable'
+        '- clarification_ledger:'
+    )
+    $validLedgerLines = @(
+        '  - category: 目标/验收'
+        '    question: accept?'
+        '    evidence: yes'
+        '    recommended_answer: accept'
+        '    decision: accepted'
+        '    impact: tests'
+        '  - category: 非目标'
+        '    question: reject?'
+        '    evidence: yes'
+        '    recommended_answer: reject'
+        '    decision: rejected'
+        '    impact: none'
+    )
+    $taskValidLedger = 'lite-validator-valid-ledger-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskValidLedgerDir = Join-Path $taskBase $taskValidLedger
+    $createdTaskDirs += $taskValidLedgerDir
+    New-Item -ItemType Directory -Path $taskValidLedgerDir -Force | Out-Null
+    Write-Utf8Bom -Path (Join-Path $taskValidLedgerDir 'plan.md') -Content (New-PlanContent -TaskId $taskValidLedger -Stage 'PLAN' -Tool 'codex' -ClarificationBody (@($ledgerHeader + $validLedgerLines) -join "`r`n"))
+    $validLedgerResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskValidLedger -RepoRoot $RepoRoot
+    if ($validLedgerResult.ExitCode -eq 0) {
+        Add-Check 'accepted and rejected clarification ledger items pass strict item parsing'
+    } else {
+        Add-Failure ("valid clarification ledger should pass, got: {0}" -f ($validLedgerResult.Output -join ' | '))
+    }
+
+    $invalidLedgerCases = @(
+        [pscustomobject]@{
+            Suffix = 'trailing'
+            Expected = 'decision should be exactly'
+            Lines = @(
+                '  - category: 验证证据'
+                '    decision: pending # still unresolved'
+                '  - category: 非目标'
+                '    decision: accepted'
+            )
+        }
+        [pscustomobject]@{
+            Suffix = 'missing'
+            Expected = 'should contain exactly one decision'
+            Lines = @('  - category: 验证证据', '    evidence: missing decision')
+        }
+        [pscustomobject]@{
+            Suffix = 'duplicate'
+            Expected = 'should contain exactly one decision'
+            Lines = @('  - category: 验证证据', '    decision: accepted', '    decision: rejected')
+        }
+    )
+    $invalidLedgerCasesRejected = $true
+    foreach ($ledgerCase in $invalidLedgerCases) {
+        $taskInvalidLedger = 'lite-validator-ledger-' + $ledgerCase.Suffix + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $taskInvalidLedgerDir = Join-Path $taskBase $taskInvalidLedger
+        $createdTaskDirs += $taskInvalidLedgerDir
+        New-Item -ItemType Directory -Path $taskInvalidLedgerDir -Force | Out-Null
+        Write-Utf8Bom -Path (Join-Path $taskInvalidLedgerDir 'plan.md') -Content (New-PlanContent -TaskId $taskInvalidLedger -Stage 'PLAN' -Tool 'codex' -ClarificationBody (@($ledgerHeader + $ledgerCase.Lines) -join "`r`n"))
+        $invalidLedgerResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskInvalidLedger -RepoRoot $RepoRoot
+        if ($invalidLedgerResult.ExitCode -eq 0 -or ($invalidLedgerResult.Output -join "`n") -notmatch [regex]::Escape($ledgerCase.Expected)) {
+            $invalidLedgerCasesRejected = $false
+        }
+    }
+    if ($invalidLedgerCasesRejected) {
+        Add-Check 'ledger items with trailing, missing, or duplicate decisions fail closed'
+    } else {
+        Add-Failure 'ledger items with trailing, missing, or duplicate decisions should fail strict parsing'
+    }
+
     $taskExtraField = 'lite-validator-extra-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     $taskExtraFieldDir = Join-Path $taskBase $taskExtraField
     $createdTaskDirs += $taskExtraFieldDir
@@ -773,14 +1368,42 @@ try {
         Add-Failure ("extra frontmatter field should fail validator, got: {0}" -f ($extraFieldResult.Output -join ' | '))
     }
 
+    $taskInvalidStageCase = 'lite-validator-stage-case-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskInvalidStageCaseDir = Join-Path $taskBase $taskInvalidStageCase
+    $createdTaskDirs += $taskInvalidStageCaseDir
+    New-Item -ItemType Directory -Path $taskInvalidStageCaseDir -Force | Out-Null
+    Write-Utf8Bom -Path (Join-Path $taskInvalidStageCaseDir 'plan.md') -Content (New-PlanContent -TaskId $taskInvalidStageCase -Stage 'plan' -Tool 'codex')
+    $invalidStageCaseResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskInvalidStageCase -RepoRoot $RepoRoot
+    if ($invalidStageCaseResult.ExitCode -ne 0 -and ($invalidStageCaseResult.Output -join "`n") -match 'plan.md stage should be one of') {
+        Add-Check 'case-variant stage values are rejected'
+    } else {
+        Add-Failure ("case-variant stage should fail validator: {0}" -f ($invalidStageCaseResult.Output -join ' | '))
+    }
+
+    $taskInvalidIdCase = 'lite-validator-id-case-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskInvalidIdCaseDir = Join-Path $taskBase $taskInvalidIdCase
+    $createdTaskDirs += $taskInvalidIdCaseDir
+    New-Item -ItemType Directory -Path $taskInvalidIdCaseDir -Force | Out-Null
+    $invalidIdCasePlan = (New-PlanContent -TaskId $taskInvalidIdCase -Stage 'PLAN' -Tool 'codex').Replace(
+        "task_id: $taskInvalidIdCase",
+        "task_id: $($taskInvalidIdCase.ToUpperInvariant())"
+    )
+    Write-Utf8Bom -Path (Join-Path $taskInvalidIdCaseDir 'plan.md') -Content $invalidIdCasePlan
+    $invalidIdCaseResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskInvalidIdCase -RepoRoot $RepoRoot
+    if ($invalidIdCaseResult.ExitCode -ne 0 -and ($invalidIdCaseResult.Output -join "`n") -match 'plan.md task_id should be') {
+        Add-Check 'case-variant task_id values are rejected'
+    } else {
+        Add-Failure ("case-variant task_id should fail validator: {0}" -f ($invalidIdCaseResult.Output -join ' | '))
+    }
+
     $taskInvalidTool = 'lite-validator-tool-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     $taskInvalidToolDir = Join-Path $taskBase $taskInvalidTool
     $createdTaskDirs += $taskInvalidToolDir
     New-Item -ItemType Directory -Path $taskInvalidToolDir -Force | Out-Null
-    Write-Utf8Bom -Path (Join-Path $taskInvalidToolDir 'plan.md') -Content (New-PlanContent -TaskId $taskInvalidTool -Stage 'PLAN' -Tool 'claude-codex-gemini-default')
+    Write-Utf8Bom -Path (Join-Path $taskInvalidToolDir 'plan.md') -Content (New-PlanContent -TaskId $taskInvalidTool -Stage 'PLAN' -Tool 'CODEX')
     $invalidToolResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskInvalidTool -RepoRoot $RepoRoot
     if ($invalidToolResult.ExitCode -ne 0 -and ($invalidToolResult.Output -join "`n") -match 'plan.md tool should be one of') {
-        Add-Check 'invalid tool values are rejected'
+        Add-Check 'case-variant tool values are rejected'
     } else {
         Add-Failure ("invalid tool should fail validator, got: {0}" -f ($invalidToolResult.Output -join ' | '))
     }
@@ -802,6 +1425,26 @@ try {
         Add-Check 'empty severity headings are rejected'
     } else {
         Add-Failure ("empty severity headings should fail validator, got: {0}" -f ($emptySeverityResult.Output -join ' | '))
+    }
+
+    $taskHiddenImplementation = 'lite-validator-hidden-implementation-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskHiddenImplementationDir = Join-Path $taskBase $taskHiddenImplementation
+    $createdTaskDirs += $taskHiddenImplementationDir
+    New-Item -ItemType Directory -Path $taskHiddenImplementationDir -Force | Out-Null
+    $hiddenImplementation = @'
+### Run 1 · 2026-04-09 10:00 · runner: Codex
+- changed: [](https://example.test/hidden)
+- tests: targeted regression
+- risks: none
+- next: CODE_REVIEW
+'@
+    Write-Utf8Bom -Path (Join-Path $taskHiddenImplementationDir 'plan.md') -Content (New-PlanContent -TaskId $taskHiddenImplementation -Stage 'IMPLEMENT' -Tool 'codex' -PlanReviewRuns $planReviewPass -ImplementationRuns $hiddenImplementation)
+    $hiddenImplementationResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskHiddenImplementation -RepoRoot $RepoRoot
+    if ($hiddenImplementationResult.ExitCode -ne 0 -and
+        ($hiddenImplementationResult.Output -join "`n") -match 'Implementation Notes Run 1 should contain - changed:') {
+        Add-Check 'Markdown-only Implementation Notes values are rejected'
+    } else {
+        Add-Failure ("Markdown-only Implementation Notes value should fail validator: {0}" -f ($hiddenImplementationResult.Output -join ' | '))
     }
 
     $taskStaleImplement = 'lite-validator-stale-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
@@ -830,6 +1473,196 @@ try {
         Add-Failure ("stale implementation evidence should fail validator, got: {0}" -f ($staleImplementResult.Output -join ' | '))
     }
 
+    $taskSameMinuteImplement = 'lite-validator-same-minute-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskSameMinuteImplementDir = Join-Path $taskBase $taskSameMinuteImplement
+    $createdTaskDirs += $taskSameMinuteImplementDir
+    New-Item -ItemType Directory -Path $taskSameMinuteImplementDir -Force | Out-Null
+    $sameMinuteImplementation = @"
+### Run 1 · 2026-04-09 10:30 · runner: Codex
+- changed: follow-up implementation
+- tests: targeted regression
+- risks: none
+- next: return to CODE_REVIEW
+"@
+    Write-Utf8Bom -Path (Join-Path $taskSameMinuteImplementDir 'plan.md') -Content (New-PlanContent -TaskId $taskSameMinuteImplement -Stage 'IMPLEMENT' -Tool 'codex' -PlanReviewRuns $planReviewPass -ImplementationRuns $sameMinuteImplementation -CodeReviewRuns $reviseCodeReview)
+    $sameMinuteImplementResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskSameMinuteImplement -RepoRoot $RepoRoot
+    if ($sameMinuteImplementResult.ExitCode -eq 0) {
+        Add-Check 'same-minute implementation evidence does not false-fail freshness'
+    } else {
+        Add-Failure ("same-minute implementation evidence should not false-fail freshness, got: {0}" -f ($sameMinuteImplementResult.Output -join ' | '))
+    }
+
+    $newFreshnessImplementationRun = {
+        param(
+            [int]$Number,
+            [string]$When
+        )
+@"
+### Run $Number · $When · runner: Codex
+- changed: freshness fixture implementation $Number
+- tests: direct validator fixture
+- risks: none
+- next: hand off to CODE_REVIEW
+"@
+    }
+    $newFreshnessReviewRun = {
+        param(
+            [int]$Number,
+            [string]$When
+        )
+@"
+### Run $Number · $When · runner: Codex
+- verdict: pass
+- findings: none
+- next: continue workflow
+"@
+    }
+
+    $freshnessPlanReview = & $newFreshnessReviewRun -Number 1 -When '2026-07-10 09:00'
+    $preFailImplementation = & $newFreshnessImplementationRun -Number 1 -When '2026-07-10 09:30'
+    $preFailCodeReview = & $newFreshnessReviewRun -Number 1 -When '2026-07-10 10:00'
+    $postFailImplementation = & $newFreshnessImplementationRun -Number 2 -When '2026-07-10 11:01'
+    $initialFailReworkImplementation = @($preFailImplementation, $postFailImplementation) -join "`r`n"
+    $freshnessContractFailures = @()
+
+    $initialFailReworkCases = @(
+        [pscustomobject]@{ Name = 'initial-fail-rework-missing-report'; Conclusion = $null }
+        [pscustomobject]@{ Name = 'initial-fail-rework-non-fail-report'; Conclusion = 'pass' }
+    )
+    foreach ($case in $initialFailReworkCases) {
+        $taskFreshness = 'fresh-initial-' + $case.Name.Substring('initial-fail-rework-'.Length) + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $taskFreshnessDir = Join-Path $taskBase $taskFreshness
+        $createdTaskDirs += $taskFreshnessDir
+        New-Item -ItemType Directory -Path $taskFreshnessDir -Force | Out-Null
+        Write-Utf8Bom -Path (Join-Path $taskFreshnessDir 'plan.md') -Content (New-PlanContent `
+            -TaskId $taskFreshness `
+            -Stage 'IMPLEMENT' `
+            -Tool 'codex' `
+            -PlanReviewRuns $freshnessPlanReview `
+            -ImplementationRuns $initialFailReworkImplementation `
+            -CodeReviewRuns $preFailCodeReview)
+        if ($null -ne $case.Conclusion) {
+            Write-Utf8Bom -Path (Join-Path $taskFreshnessDir 'test.md') -Content (New-TestReport `
+                -Conclusion $case.Conclusion `
+                -ExecutedAt '2026-07-10T11:00:00+08:00')
+        }
+
+        $freshnessResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskFreshness -RepoRoot $RepoRoot
+        $freshnessOutput = $freshnessResult.Output -join "`n"
+        if ($freshnessResult.ExitCode -eq 0) {
+            $freshnessContractFailures += ($case.Name + ' was accepted')
+        } elseif ($freshnessOutput -notmatch 'IMPLEMENT after TEST fail requires test\.md Conclusion: fail') {
+            $freshnessContractFailures += ($case.Name + ' lacked the fail-report diagnostic')
+        }
+    }
+
+    $freshnessCases = @(
+        [pscustomobject]@{ Name = 'fail-evidence-to-implementation-earlier'; Edge = 'fail-implementation'; Candidate = '2026-07-10 10:59'; Accept = $false; Diagnostic = 'IMPLEMENT after TEST fail requires a fresh Implementation Notes run' }
+        [pscustomobject]@{ Name = 'fail-evidence-to-implementation-same-minute'; Edge = 'fail-implementation'; Candidate = '2026-07-10 11:00'; Accept = $true; Diagnostic = '' }
+        [pscustomobject]@{ Name = 'fail-evidence-to-implementation-later'; Edge = 'fail-implementation'; Candidate = '2026-07-10 11:01'; Accept = $true; Diagnostic = '' }
+        [pscustomobject]@{ Name = 'implementation-to-code-review-earlier'; Edge = 'implementation-review'; Candidate = '2026-07-10 10:59'; Accept = $false; Diagnostic = 'CODE_REVIEW requires a fresh Code Review run after latest Implementation Notes' }
+        [pscustomobject]@{ Name = 'implementation-to-code-review-same-minute'; Edge = 'implementation-review'; Candidate = '2026-07-10 11:00'; Accept = $true; Diagnostic = '' }
+        [pscustomobject]@{ Name = 'implementation-to-code-review-later'; Edge = 'implementation-review'; Candidate = '2026-07-10 11:01'; Accept = $true; Diagnostic = '' }
+        [pscustomobject]@{ Name = 'implementation-to-code-review-missing-implementation'; Edge = 'missing-implementation'; Candidate = ''; Accept = $false; Diagnostic = 'CODE_REVIEW requires a fresh Code Review run after latest Implementation Notes' }
+        [pscustomobject]@{ Name = 'code-review-to-test-evidence-earlier'; Edge = 'review-test'; Candidate = '2026-07-10T10:59:00+08:00'; Accept = $false; Diagnostic = '(?:TEST|TEST/DONE) requires fresh TEST Evidence after latest Code Review' }
+        [pscustomobject]@{ Name = 'code-review-to-test-evidence-same-minute'; Edge = 'review-test'; Candidate = '2026-07-10T11:00:00+08:00'; Accept = $true; Diagnostic = '' }
+        [pscustomobject]@{ Name = 'code-review-to-test-evidence-later'; Edge = 'review-test'; Candidate = '2026-07-10T11:01:00+08:00'; Accept = $true; Diagnostic = '' }
+        [pscustomobject]@{ Name = 'code-review-to-test-evidence-missing-review'; Edge = 'missing-review'; Candidate = '2026-07-10T11:00:00+08:00'; Accept = $false; Diagnostic = 'TEST/DONE requires latest Code Review verdict: pass' }
+    )
+    foreach ($case in $freshnessCases) {
+        $taskFreshness = 'fresh-edge-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $taskFreshnessDir = Join-Path $taskBase $taskFreshness
+        $createdTaskDirs += $taskFreshnessDir
+        New-Item -ItemType Directory -Path $taskFreshnessDir -Force | Out-Null
+
+        $stage = ''
+        $implementationRuns = ''
+        $codeReviewRuns = ''
+        $reportConclusion = $null
+        $reportExecutedAt = $null
+        switch ($case.Edge) {
+            'fail-implementation' {
+                $stage = 'IMPLEMENT'
+                $candidateImplementation = & $newFreshnessImplementationRun -Number 2 -When $case.Candidate
+                $implementationRuns = @($preFailImplementation, $candidateImplementation) -join "`r`n"
+                $codeReviewRuns = $preFailCodeReview
+                $reportConclusion = 'fail'
+                $reportExecutedAt = '2026-07-10T11:00:00+08:00'
+            }
+            'implementation-review' {
+                $stage = 'CODE_REVIEW'
+                $implementationRuns = & $newFreshnessImplementationRun -Number 1 -When '2026-07-10 11:00'
+                $codeReviewRuns = & $newFreshnessReviewRun -Number 1 -When $case.Candidate
+            }
+            'missing-implementation' {
+                $stage = 'CODE_REVIEW'
+                $codeReviewRuns = & $newFreshnessReviewRun -Number 1 -When '2026-07-10 11:00'
+            }
+            'review-test' {
+                $stage = 'TEST'
+                $implementationRuns = & $newFreshnessImplementationRun -Number 1 -When '2026-07-10 10:30'
+                $codeReviewRuns = & $newFreshnessReviewRun -Number 1 -When '2026-07-10 11:00'
+                $reportConclusion = 'pass'
+                $reportExecutedAt = $case.Candidate
+            }
+            'missing-review' {
+                $stage = 'TEST'
+                $implementationRuns = & $newFreshnessImplementationRun -Number 1 -When '2026-07-10 10:30'
+                $reportConclusion = 'pass'
+                $reportExecutedAt = $case.Candidate
+            }
+            default {
+                throw ('unknown freshness edge: {0}' -f $case.Edge)
+            }
+        }
+
+        Write-Utf8Bom -Path (Join-Path $taskFreshnessDir 'plan.md') -Content (New-PlanContent `
+            -TaskId $taskFreshness `
+            -Stage $stage `
+            -Tool 'codex' `
+            -PlanReviewRuns $freshnessPlanReview `
+            -ImplementationRuns $implementationRuns `
+            -CodeReviewRuns $codeReviewRuns)
+        if ($null -ne $reportConclusion) {
+            Write-Utf8Bom -Path (Join-Path $taskFreshnessDir 'test.md') -Content (New-TestReport `
+                -Conclusion $reportConclusion `
+                -ExecutedAt $reportExecutedAt)
+        }
+
+        $freshnessResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskFreshness -RepoRoot $RepoRoot
+        $freshnessOutput = $freshnessResult.Output -join "`n"
+        if ($case.Accept) {
+            if ($freshnessResult.ExitCode -ne 0 -or $freshnessOutput -notmatch 'STATUS: PASS') {
+                $freshnessContractFailures += ($case.Name + ' was rejected: ' + ($freshnessResult.Output -join ' | '))
+            }
+        } elseif ($freshnessResult.ExitCode -eq 0) {
+            $freshnessContractFailures += ($case.Name + ' was accepted')
+        } elseif ($freshnessOutput -notmatch $case.Diagnostic) {
+            $freshnessContractFailures += ($case.Name + ' lacked the edge diagnostic: ' + ($freshnessResult.Output -join ' | '))
+        }
+    }
+
+    if ($freshnessContractFailures.Count -eq 0) {
+        Add-Check 'TEST fail rework requires its report and all three adjacent evidence edges fail closed on missing or earlier predecessors'
+    } else {
+        Add-Failure ("TEST failure freshness matrix failed: {0}" -f ($freshnessContractFailures -join '; '))
+    }
+
+    $taskCaseHandoff = 'lite-validator-case-handoff-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskCaseHandoffDir = Join-Path $taskBase $taskCaseHandoff
+    $createdTaskDirs += $taskCaseHandoffDir
+    New-Item -ItemType Directory -Path $taskCaseHandoffDir -Force | Out-Null
+    Write-Utf8Bom -Path (Join-Path $taskCaseHandoffDir 'plan.md') -Content (New-PlanContent -TaskId $taskCaseHandoff -Stage 'DONE' -Tool 'none' -PlanReviewRuns $planReviewPass -ImplementationRuns $implementationPass -CodeReviewRuns $codeReviewPass)
+    $caseHandoffReport = (New-TestReport -Conclusion 'pass').Replace('## Handoff', '## handoff')
+    Write-Utf8Bom -Path (Join-Path $taskCaseHandoffDir 'test.md') -Content $caseHandoffReport
+    $caseHandoffResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskCaseHandoff -RepoRoot $RepoRoot
+    if ($caseHandoffResult.ExitCode -ne 0 -and
+        ($caseHandoffResult.Output -join "`n") -match 'test\.md sections should be') {
+        Add-Check 'machine-readable section names are case-exact'
+    } else {
+        Add-Failure ("case-variant Handoff should fail validator: {0}" -f ($caseHandoffResult.Output -join ' | '))
+    }
+
     $taskMissingHandoff = 'lite-validator-handoff-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     $taskMissingHandoffDir = Join-Path $taskBase $taskMissingHandoff
     $createdTaskDirs += $taskMissingHandoffDir
@@ -841,6 +1674,87 @@ try {
         Add-Check 'missing Handoff fields are rejected'
     } else {
         Add-Failure ("missing Handoff should fail validator, got: {0}" -f ($missingHandoffResult.Output -join ' | '))
+    }
+
+    $taskHiddenTestValues = 'lite-validator-hidden-test-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskHiddenTestValuesDir = Join-Path $taskBase $taskHiddenTestValues
+    $createdTaskDirs += $taskHiddenTestValuesDir
+    New-Item -ItemType Directory -Path $taskHiddenTestValuesDir -Force | Out-Null
+    Write-Utf8Bom -Path (Join-Path $taskHiddenTestValuesDir 'plan.md') -Content (New-PlanContent -TaskId $taskHiddenTestValues -Stage 'DONE' -Tool 'none' -PlanReviewRuns $planReviewPass -ImplementationRuns $implementationPass -CodeReviewRuns $codeReviewPass)
+    $hiddenTestValues = (New-TestReport -Conclusion 'pass').Replace(
+        '- command: `pwsh -NoProfile -File tests/verify-lite-artifact-validator.ps1`',
+        '- command: [](https://example.test/hidden)'
+    ).Replace(
+        '- delivery: 提供当前 task 的验证结论。',
+        '- delivery: [](https://example.test/hidden)'
+    ).Replace(
+        '- follow_up: none',
+        '- follow_up: [](https://example.test/hidden)'
+    )
+    Write-Utf8Bom -Path (Join-Path $taskHiddenTestValuesDir 'test.md') -Content $hiddenTestValues
+    $hiddenTestValuesResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskHiddenTestValues -RepoRoot $RepoRoot
+    if ($hiddenTestValuesResult.ExitCode -ne 0 -and
+        ($hiddenTestValuesResult.Output -join "`n") -match 'Handoff should contain|Evidence should contain') {
+        Add-Check 'Markdown-only TEST machine values are rejected'
+    } else {
+        Add-Failure ("Markdown-only TEST values should fail validator: {0}" -f ($hiddenTestValuesResult.Output -join ' | '))
+    }
+
+    $taskMissingEvidence = 'lite-validator-evidence-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskMissingEvidenceDir = Join-Path $taskBase $taskMissingEvidence
+    $createdTaskDirs += $taskMissingEvidenceDir
+    New-Item -ItemType Directory -Path $taskMissingEvidenceDir -Force | Out-Null
+    Write-Utf8Bom -Path (Join-Path $taskMissingEvidenceDir 'plan.md') -Content (New-PlanContent -TaskId $taskMissingEvidence -Stage 'DONE' -Tool 'none' -PlanReviewRuns $planReviewPass -ImplementationRuns $implementationPass -CodeReviewRuns $codeReviewPass)
+    Write-Utf8Bom -Path (Join-Path $taskMissingEvidenceDir 'test.md') -Content (New-TestReport -Conclusion 'pass' -IncludeEvidence $false)
+    $missingEvidenceResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskMissingEvidence -RepoRoot $RepoRoot
+    if ($missingEvidenceResult.ExitCode -ne 0 -and ($missingEvidenceResult.Output -join "`n") -match 'Evidence should contain') {
+        Add-Check 'missing test evidence fields are rejected'
+    } else {
+        Add-Failure ("missing test evidence should fail validator, got: {0}" -f ($missingEvidenceResult.Output -join ' | '))
+    }
+
+    $invalidEvidenceCases = @(
+        [pscustomobject]@{ Suffix = 'exit-text'; Old = '- exit_code: 0'; New = '- exit_code: banana'; Expected = 'exit_code should be an integer' }
+        [pscustomobject]@{ Suffix = 'exit-nonzero'; Old = '- exit_code: 0'; New = '- exit_code: 1'; Expected = 'passing test.md requires Evidence exit_code: 0' }
+        [pscustomobject]@{ Suffix = 'time'; Old = '- executed_at: 2026-07-10T10:00:00+08:00'; New = '- executed_at: never'; Expected = 'executed_at should be an ISO-8601' }
+        [pscustomobject]@{ Suffix = 'revision'; Old = '- revision: 0123456789abcdef0123456789abcdef01234567'; New = '- revision: imaginary'; Expected = 'revision should be a 7-40 character git hash' }
+        [pscustomobject]@{ Suffix = 'missing-path'; Old = '- evidence_path: scripts/validate-lite-artifacts.ps1'; New = '- evidence_path: docs/missing-evidence.txt'; Expected = 'evidence_path should name an existing workspace file' }
+        [pscustomobject]@{ Suffix = 'escape-path'; Old = '- evidence_path: scripts/validate-lite-artifacts.ps1'; New = '- evidence_path: ../outside-evidence.txt'; Expected = 'evidence_path should name an existing workspace file' }
+        [pscustomobject]@{ Suffix = 'duplicate'; Old = '- revision: 0123456789abcdef0123456789abcdef01234567'; New = "- revision: 0123456789abcdef0123456789abcdef01234567`r`n- revision: 89abcdef0123456789abcdef0123456789abcdef"; Expected = 'exactly one non-empty - revision:' }
+    )
+    $invalidEvidenceCasesRejected = $true
+    foreach ($evidenceCase in $invalidEvidenceCases) {
+        $taskInvalidEvidence = 'lite-validator-evidence-' + $evidenceCase.Suffix + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $taskInvalidEvidenceDir = Join-Path $taskBase $taskInvalidEvidence
+        $createdTaskDirs += $taskInvalidEvidenceDir
+        New-Item -ItemType Directory -Path $taskInvalidEvidenceDir -Force | Out-Null
+        Write-Utf8Bom -Path (Join-Path $taskInvalidEvidenceDir 'plan.md') -Content (New-PlanContent -TaskId $taskInvalidEvidence -Stage 'DONE' -Tool 'none' -PlanReviewRuns $planReviewPass -ImplementationRuns $implementationPass -CodeReviewRuns $codeReviewPass)
+        $invalidEvidenceReport = (New-TestReport -Conclusion 'pass').Replace($evidenceCase.Old, $evidenceCase.New)
+        Write-Utf8Bom -Path (Join-Path $taskInvalidEvidenceDir 'test.md') -Content $invalidEvidenceReport
+        $invalidEvidenceResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskInvalidEvidence -RepoRoot $RepoRoot
+        if ($invalidEvidenceResult.ExitCode -eq 0 -or ($invalidEvidenceResult.Output -join "`n") -notmatch [regex]::Escape($evidenceCase.Expected)) {
+            $invalidEvidenceCasesRejected = $false
+        }
+    }
+    if ($invalidEvidenceCasesRejected) {
+        Add-Check 'arbitrary, duplicate, nonzero-pass, missing, and escaping Evidence values fail closed'
+    } else {
+        Add-Failure 'invalid TEST Evidence semantics should fail validator'
+    }
+
+    $taskDirtyEvidence = 'lite-validator-evidence-dirty-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $taskDirtyEvidenceDir = Join-Path $taskBase $taskDirtyEvidence
+    $createdTaskDirs += $taskDirtyEvidenceDir
+    New-Item -ItemType Directory -Path $taskDirtyEvidenceDir -Force | Out-Null
+    Write-Utf8Bom -Path (Join-Path $taskDirtyEvidenceDir 'plan.md') -Content (New-PlanContent -TaskId $taskDirtyEvidence -Stage 'DONE' -Tool 'none' -PlanReviewRuns $planReviewPass -ImplementationRuns $implementationPass -CodeReviewRuns $codeReviewPass)
+    $dirtyRevision = 'dirty:' + ('a' * 64)
+    $dirtyEvidenceReport = (New-TestReport -Conclusion 'pass').Replace('0123456789abcdef0123456789abcdef01234567', $dirtyRevision)
+    Write-Utf8Bom -Path (Join-Path $taskDirtyEvidenceDir 'test.md') -Content $dirtyEvidenceReport
+    $dirtyEvidenceResult = Invoke-Validator -ValidatorPath $validatorPath -TaskId $taskDirtyEvidence -RepoRoot $RepoRoot
+    if ($dirtyEvidenceResult.ExitCode -eq 0) {
+        Add-Check 'dirty:<64hex> is accepted as an explicit dirty workspace revision digest'
+    } else {
+        Add-Failure ("dirty revision digest should pass validator, got: {0}" -f ($dirtyEvidenceResult.Output -join ' | '))
     }
 
     $taskBadSpec = 'lite-validator-spec-' + [guid]::NewGuid().ToString('N').Substring(0, 8)

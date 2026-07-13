@@ -8,22 +8,8 @@
     return [System.IO.Path]::GetFullPath($Path)
 }
 
-function Test-PathUnderRoot {
-    param(
-        [string]$Path,
-        [string]$Root
-    )
-
-    $normalizedPath = Resolve-NormalizedPath -Path $Path
-    $normalizedRoot = Resolve-NormalizedPath -Path $Root
-    if ([string]::IsNullOrWhiteSpace($normalizedPath) -or [string]::IsNullOrWhiteSpace($normalizedRoot)) {
-        return $false
-    }
-
-    $trimmedPath = $normalizedPath.TrimEnd('\', '/')
-    $trimmedRoot = $normalizedRoot.TrimEnd('\', '/')
-    return $trimmedPath.Equals($trimmedRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
-        $trimmedPath.StartsWith(($trimmedRoot + '\'), [System.StringComparison]::OrdinalIgnoreCase)
+if (-not (Get-Command -Name Assert-CanonicalRuntimeVaultRoot -CommandType Function -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot 'runtime-state-common.ps1')
 }
 
 function Find-ParentDirectoryNamed {
@@ -48,6 +34,11 @@ function Find-ParentDirectoryNamed {
     while (-not [string]::IsNullOrWhiteSpace($current)) {
         if ((Split-Path -Leaf $current) -ieq $DirectoryName) {
             return $current
+        }
+
+        $childDirectory = Join-Path $current $DirectoryName
+        if (Test-Path -LiteralPath $childDirectory -PathType Container) {
+            return (Resolve-NormalizedPath -Path $childDirectory)
         }
 
         $parent = Split-Path -Parent $current
@@ -140,23 +131,7 @@ function Get-DefaultAgentRoots {
 function Assert-ProjectLocalVault {
     param([string]$VaultRoot)
 
-    $normalizedVaultRoot = Resolve-NormalizedPath -Path $VaultRoot
-    if ([string]::IsNullOrWhiteSpace($normalizedVaultRoot)) {
-        return $normalizedVaultRoot
-    }
-
-    $runtimeDirectory = Join-Path $normalizedVaultRoot '运行时'
-    if (-not (Test-Path -LiteralPath $runtimeDirectory -PathType Container)) {
-        return $normalizedVaultRoot
-    }
-
-    foreach ($agentRoot in Get-DefaultAgentRoots) {
-        if (Test-PathUnderRoot -Path $normalizedVaultRoot -Root $agentRoot) {
-            throw "[vault-layer-violation] user-level agent home cannot host runtime layer: $normalizedVaultRoot"
-        }
-    }
-
-    return $normalizedVaultRoot
+    return Assert-CanonicalRuntimeVaultRoot -VaultRoot $VaultRoot -AgentRoots (Get-DefaultAgentRoots)
 }
 
 function Resolve-SharedMemoryVaultRoot {
@@ -193,19 +168,33 @@ function Resolve-SharedMemoryVaultRoot {
         }
     }
 
+    $explicitVaultRoot = Resolve-NormalizedPath -Path $VaultRoot
+    $explicitWorkspaceVaultRoot = if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+        ''
+    } else {
+        Resolve-NormalizedPath -Path (Join-Path $WorkspaceRoot '.assistant')
+    }
+    if (-not [string]::IsNullOrWhiteSpace($explicitVaultRoot) -and
+        -not [string]::IsNullOrWhiteSpace($explicitWorkspaceVaultRoot) -and
+        -not $explicitVaultRoot.Equals($explicitWorkspaceVaultRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Explicit VaultRoot and WorkspaceRoot disagree: vault=$explicitVaultRoot workspace=$WorkspaceRoot"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($explicitVaultRoot)) {
+        return (Assert-ProjectLocalVault -VaultRoot $explicitVaultRoot)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($explicitWorkspaceVaultRoot)) {
+        return (Assert-ProjectLocalVault -VaultRoot $explicitWorkspaceVaultRoot)
+    }
+
     $tierA = New-CandidateBucket
     $tierB = New-CandidateBucket
     $fallback = New-CandidateBucket
 
-    Add-CandidateToBucket -Bucket $tierA -Value $VaultRoot
     Add-CandidateToBucket -Bucket $tierA -Value $env:DEV_HARNESS_VAULT_PATH
     Add-CandidateToBucket -Bucket $tierA -Value $env:CLAUDE_DEV_HARNESS_VAULT_PATH
     Add-CandidateToBucket -Bucket $tierA -Value $env:OBSIDIAN_SHARED_VAULT
     Add-CandidateToBucket -Bucket $tierA -Value (Get-FlowSharedVaultRoot -OrchestratorFlowPath $OrchestratorFlowPath)
 
-    if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
-        Add-CandidateToBucket -Bucket $tierB -Value (Join-Path $WorkspaceRoot '.assistant')
-    }
     if (-not [string]::IsNullOrWhiteSpace($env:DEV_HARNESS_WORKSPACE_ROOT)) {
         Add-CandidateToBucket -Bucket $tierB -Value (Join-Path $env:DEV_HARNESS_WORKSPACE_ROOT '.assistant')
     }
@@ -218,33 +207,48 @@ function Resolve-SharedMemoryVaultRoot {
     Add-CandidateToBucket -Bucket $tierB -Value (Get-FlowWorkspaceVaultRoot -OrchestratorFlowPath $OrchestratorFlowPath)
 
     try {
-        Add-CandidateToBucket -Bucket $fallback -Value (Join-Path (Get-Location).Path '.assistant')
+        $locationVault = Join-Path (Get-Location).Path '.assistant'
+        if (Test-Path -LiteralPath $locationVault -PathType Container) {
+            Add-CandidateToBucket -Bucket $fallback -Value $locationVault
+        }
         Add-CandidateToBucket -Bucket $fallback -Value (Find-ParentDirectoryNamed -StartPath (Get-Location).Path -DirectoryName '.assistant')
     } catch {
         # Ignore location resolution failures.
     }
 
-    if ($tierA.Items.Count -gt 1) {
-        $uniqueTierA = @($tierA.Items | Sort-Object -Unique)
-        if ($uniqueTierA.Count -gt 1) {
-            [Console]::Error.WriteLine(
-                "[vault-ambiguous] multiple explicit shared-memory vault candidates resolved; using {0} (others: {1})" -f
-                $tierA.Items[0],
-                (($uniqueTierA | Select-Object -Skip 1) -join ', ')
-            )
+    foreach ($tier in @(
+            [pscustomobject]@{ Name = 'vault'; Bucket = $tierA },
+            [pscustomobject]@{ Name = 'workspace'; Bucket = $tierB }
+        )) {
+        $uniqueCandidates = @($tier.Bucket.Items | Sort-Object -Unique)
+        if ($uniqueCandidates.Count -gt 1) {
+            throw ("[vault-ambiguous] conflicting {0} candidates: {1}" -f $tier.Name, ($uniqueCandidates -join ', '))
         }
     }
 
+    if ($tierA.Items.Count -gt 0 -and
+        $tierB.Items.Count -gt 0 -and
+        -not $tierA.Items[0].Equals($tierB.Items[0], [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw ("[vault-ambiguous] vault and workspace candidates disagree: vault={0}, workspace={1}" -f $tierA.Items[0], $tierB.Items[0])
+    }
+
+    if ($tierA.Items.Count -gt 0 -and
+        $tierB.Items.Count -eq 0 -and
+        $fallback.Items.Count -gt 0 -and
+        -not $tierA.Items[0].Equals($fallback.Items[0], [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw ("[vault-ambiguous] vault and cwd workspace candidates disagree: vault={0}, workspace={1}" -f $tierA.Items[0], $fallback.Items[0])
+    }
+
     if ($tierA.Items.Count -gt 0) {
-        return $tierA.Items[0]
+        return (Assert-ProjectLocalVault -VaultRoot $tierA.Items[0])
     }
 
     if ($tierB.Items.Count -gt 0) {
-        return $tierB.Items[0]
+        return (Assert-ProjectLocalVault -VaultRoot $tierB.Items[0])
     }
 
     if ($fallback.Items.Count -gt 0) {
-        return $fallback.Items[0]
+        return (Assert-ProjectLocalVault -VaultRoot $fallback.Items[0])
     }
 
     throw 'Unable to resolve shared memory vault root. Pass -VaultRoot, set DEV_HARNESS_VAULT_PATH, or provide -OrchestratorFlowPath.'

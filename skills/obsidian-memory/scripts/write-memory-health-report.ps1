@@ -7,15 +7,6 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Write-Utf8Bom {
-    param(
-        [string]$Path,
-        [string]$Content
-    )
-
-    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($true)))
-}
-
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $scriptRoot 'resolve-shared-memory-paths.ps1')
 $VaultRoot = Resolve-SharedMemoryVaultRoot -VaultRoot $VaultRoot -OrchestratorFlowPath $OrchestratorFlowPath
@@ -72,7 +63,7 @@ $report = @(
     '```'
 ) -join [Environment]::NewLine
 
-Write-Utf8Bom -Path $OutputPath -Content $report
+[System.IO.File]::WriteAllText($OutputPath, $report, (New-Object System.Text.UTF8Encoding($true)))
 
 Write-Output ("STATUS: {0}" -f $(if ($exitCode -eq 0) { 'PASS' } elseif ($exitCode -eq 1) { 'WARN' } else { 'FAIL' }))
 Write-Output "Report: $OutputPath"

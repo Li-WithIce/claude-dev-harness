@@ -6,6 +6,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot 'fixture-test-common.ps1')
+
 function Add-Check {
     param([string]$Message)
     $script:Checks += $Message
@@ -14,62 +16,6 @@ function Add-Check {
 function Add-Failure {
     param([string]$Message)
     $script:Failures += $Message
-}
-
-function Write-Utf8Bom {
-    param(
-        [string]$Path,
-        [string]$Content
-    )
-
-    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($true)))
-}
-
-function Read-FileUtf8 {
-    param([string]$Path)
-
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        return ''
-    }
-
-    return (Get-Content -LiteralPath $Path -Raw -Encoding utf8)
-}
-
-function Remove-DirectoryWithRetry {
-    param([string]$Path)
-
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return
-    }
-
-    $lastError = $null
-    for ($attempt = 0; $attempt -lt 10; $attempt++) {
-        try {
-            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
-            return
-        } catch {
-            $lastError = $_
-            Start-Sleep -Milliseconds 200
-        }
-    }
-
-    if (Test-Path -LiteralPath $Path) {
-        Add-Failure ("cleanup failed for {0}: {1}" -f $Path, $lastError.Exception.Message)
-    }
-}
-
-function Copy-RepoPathToFixture {
-    param(
-        [string]$SourceRoot,
-        [string]$FixtureRoot,
-        [string]$RelativePath
-    )
-
-    $sourcePath = Join-Path $SourceRoot $RelativePath
-    $destinationPath = Join-Path $FixtureRoot $RelativePath
-    $destinationParent = Split-Path -Parent $destinationPath
-    New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
-    Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Recurse -Force
 }
 
 function New-IsolatedRepoFixture {
@@ -83,7 +29,8 @@ function New-IsolatedRepoFixture {
         'agent-configs\profiles',
         'agent-configs\workflows',
         'agent-configs\role-prompts',
-        'docs\team-write-authority.md'
+        'docs\team-write-authority.md',
+        'docs\工作流\single-writer-precompact.md'
     )) {
         Copy-RepoPathToFixture -SourceRoot $SourceRoot -FixtureRoot $fixtureRoot -RelativePath $relativePath
     }
@@ -127,25 +74,6 @@ function ConvertTo-PowerShellLiteral {
     return "'{0}'" -f (($Value.ToString()) -replace "'", "''")
 }
 
-function Assert-SingleLineJson {
-    param(
-        [string]$JsonText,
-        [string]$Label
-    )
-
-    if ([string]::IsNullOrWhiteSpace($JsonText) -or $JsonText -match "\r?\n") {
-        Add-Failure ("{0} stdout should be a single JSON line" -f $Label)
-        return $null
-    }
-
-    try {
-        return ($JsonText | ConvertFrom-Json)
-    } catch {
-        Add-Failure ("{0} stdout should be valid JSON: {1}" -f $Label, $_.Exception.Message)
-        return $null
-    }
-}
-
 function Get-PathPrefixesFromAuthorityDoc {
     param([string]$Path)
 
@@ -169,6 +97,7 @@ function Invoke-SpawnTeam {
         [string]$ScriptPath,
         [string]$RepoRoot,
         [string]$TaskId,
+        [string]$Stage = 'PLAN',
         [string]$TeamModeValue,
         [string]$MockMode,
         [string]$LogPath
@@ -181,6 +110,7 @@ function Invoke-SpawnTeam {
     $scriptLiteral = ConvertTo-PowerShellLiteral -Value $ScriptPath
     $repoRootLiteral = ConvertTo-PowerShellLiteral -Value $RepoRoot
     $taskLiteral = ConvertTo-PowerShellLiteral -Value $TaskId
+    $stageLiteral = ConvertTo-PowerShellLiteral -Value $Stage
 
     $wrapperContent = @"
 if ($teamModeLiteral -eq '') {
@@ -199,12 +129,12 @@ if (`$global:MockMode -ne 'none') {
         if (-not [string]::IsNullOrWhiteSpace(`$global:TeamSpawnLogPath)) {
             [System.IO.File]::AppendAllText(`$global:TeamSpawnLogPath, `$PayloadJson + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding(`$false)))
         }
-        if (`$global:MockMode -eq 'fail-on-third' -and `$global:CallCount -eq 3) {
-            throw 'mock failure on call 3'
+        if (`$global:MockMode -eq 'fail-on-first' -and `$global:CallCount -eq 1) {
+            throw 'mock failure on call 1'
         }
     }
 }
-& $scriptLiteral -WorkflowName 'harness-lite' -TaskId $taskLiteral -RepoRoot $repoRootLiteral
+& $scriptLiteral -WorkflowName 'harness-lite' -TaskId $taskLiteral -Stage $stageLiteral -RepoRoot $repoRootLiteral
 exit `$LASTEXITCODE
 "@
 
@@ -226,7 +156,9 @@ $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
 $fixtureRoot = New-IsolatedRepoFixture -SourceRoot $RepoRoot
 $spawnScriptPath = Join-Path $fixtureRoot 'skills\workflow-team\scripts\spawn-team.ps1'
 $orchestratorSkillPath = Join-Path $fixtureRoot 'skills\orchestrator\SKILL.md'
+$workflowTeamSkillPath = Join-Path $fixtureRoot 'skills\workflow-team\SKILL.md'
 $authorityPath = Join-Path $fixtureRoot 'docs\team-write-authority.md'
+$preCompactPath = Join-Path $fixtureRoot 'docs\工作流\single-writer-precompact.md'
 $rolePromptsRoot = Join-Path $fixtureRoot 'agent-configs\role-prompts'
 $script:Checks = @()
 $script:Failures = @()
@@ -254,14 +186,16 @@ try {
     $o2Json = Assert-SingleLineJson -JsonText $o2Result.StdOut -Label 'O2'
     $o2PayloadLines = @(((Read-FileUtf8 -Path $o2LogPath) -split "\r?\n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     $o2Payloads = @($o2PayloadLines | ForEach-Object { $_ | ConvertFrom-Json })
-    $expectedRoles = @('plan-author', 'plan-reviewer', 'implementer', 'code-reviewer', 'tester')
+    $expectedRoles = @('plan-author')
     $actualRoles = @($o2Payloads | ForEach-Object { [string]$_.role })
     if ($o2Result.ExitCode -eq 0 -and
         $null -ne $o2Json -and
         $o2Json.ok -and
         ((@($actualRoles) -join '|') -eq ($expectedRoles -join '|')) -and
-        ((@($o2Json.spawned_roles) -join '|') -eq ($expectedRoles -join '|'))) {
-        Add-Check 'O2 spawn-team calls team_spawn_agent exactly five times in workflow stage order when env opt-in is enabled'
+        ((@($o2Json.spawned_roles) -join '|') -eq ($expectedRoles -join '|')) -and
+        $orchestratorSkill.Contains('只启动当前 stage 的一个角色') -and
+        -not $orchestratorSkill.Contains('起 5 role 团队')) {
+        Add-Check 'O2 spawn-team calls team_spawn_agent exactly once for the active PLAN role when env opt-in is enabled'
     } else {
         Add-Failure ("O2 spawn order failed, stdout=[{0}] stderr=[{1}] roles=[{2}]" -f $o2Result.StdOut, $o2Result.StdErr, ($actualRoles -join ', '))
     }
@@ -289,14 +223,14 @@ try {
     }
 
     if ($payloadOk) {
-        Add-Check 'O3 spawn payload includes the expected role, backend, model, system prompt seed, and skills whitelist for every member'
+        Add-Check 'O3 spawn payload includes the expected active-stage role, backend, model, system prompt seed, and skills whitelist'
     } else {
         Add-Failure 'O3 spawn payload parity failed'
     }
 
     $o4LogPath = Join-Path ([System.IO.Path]::GetTempPath()) ('spawn-team-o4-' + [guid]::NewGuid().ToString('N') + '.log')
     $cleanupPaths += $o4LogPath
-    $o4Result = Invoke-SpawnTeam -ScriptPath $spawnScriptPath -RepoRoot $fixtureRoot -TaskId 'phase4-o4' -TeamModeValue '1' -MockMode 'fail-on-third' -LogPath $o4LogPath
+    $o4Result = Invoke-SpawnTeam -ScriptPath $spawnScriptPath -RepoRoot $fixtureRoot -TaskId 'phase4-o4' -Stage 'IMPLEMENT' -TeamModeValue '1' -MockMode 'fail-on-first' -LogPath $o4LogPath
     $o4Json = Assert-SingleLineJson -JsonText $o4Result.StdOut -Label 'O4'
     $o4PayloadLines = @(((Read-FileUtf8 -Path $o4LogPath) -split "\r?\n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     if ($o4Result.ExitCode -ne 0 -and
@@ -304,8 +238,8 @@ try {
         -not $o4Json.ok -and
         $o4Json.reason -eq 'spawn_failed' -and
         $o4Json.failed_role -eq 'implementer' -and
-        $o4PayloadLines.Count -eq 3 -and
-        $o4Result.StdErr -match 'mock failure on call 3') {
+        $o4PayloadLines.Count -eq 1 -and
+        $o4Result.StdErr -match 'mock failure on call 1') {
         Add-Check 'O4 spawn-team stops on the first team_spawn_agent failure and returns single-line fallback JSON'
     } else {
         Add-Failure ("O4 fallback failed, stdout=[{0}] stderr=[{1}] calls={2}" -f $o4Result.StdOut, $o4Result.StdErr, $o4PayloadLines.Count)
@@ -349,6 +283,48 @@ Set-Content $repo/docs/tasks/x/plan.md 'x'
         Add-Check 'O6 MCP availability does not bypass the env opt-in gate when AITEAMCODE_TEAM_MODE is unset'
     } else {
         Add-Failure ("O6 MCP bypass guard failed, O1 stdout=[{0}] O6 stdout=[{1}] O6 calls={2}" -f $o1Result.StdOut, $o6Result.StdOut, $o6PayloadLines.Count)
+    }
+
+    $o7TaskId = 'phase4-o7'
+    $o7PlanPath = Join-Path $fixtureRoot "docs\tasks\$o7TaskId\plan.md"
+    New-Item -ItemType Directory -Path (Split-Path -Parent $o7PlanPath) -Force | Out-Null
+    @"
+---
+task_id: $o7TaskId
+stage: TEST
+tool: codex
+updated: 2026-07-10
+---
+"@ | Set-Content -LiteralPath $o7PlanPath -Encoding utf8
+    $o7LogPath = Join-Path ([System.IO.Path]::GetTempPath()) ('spawn-team-o7-' + [guid]::NewGuid().ToString('N') + '.log')
+    $cleanupPaths += $o7LogPath
+    $o7Result = Invoke-SpawnTeam -ScriptPath $spawnScriptPath -RepoRoot $fixtureRoot -TaskId $o7TaskId -Stage '' -TeamModeValue '1' -MockMode 'capture' -LogPath $o7LogPath
+    $o7Json = Assert-SingleLineJson -JsonText $o7Result.StdOut -Label 'O7'
+    $o7Payloads = @(((Read-FileUtf8 -Path $o7LogPath) -split "\r?\n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_ | ConvertFrom-Json })
+    if ($o7Result.ExitCode -eq 0 -and $null -ne $o7Json -and $o7Json.stage -eq 'TEST' -and $o7Payloads.Count -eq 1 -and $o7Payloads[0].role -eq 'tester') {
+        Add-Check 'O7 spawn-team resolves plan.md stage and starts only its tester role'
+    } else {
+        Add-Failure ("O7 plan stage routing failed, stdout=[{0}] stderr=[{1}]" -f $o7Result.StdOut, $o7Result.StdErr)
+    }
+
+    $workflowTeamSkill = Read-FileUtf8 -Path $workflowTeamSkillPath
+    $preCompactDoc = Read-FileUtf8 -Path $preCompactPath
+    $workerReportsOnly =
+        $workflowTeamSkill.Contains('只通过 `team_send_message` 向 leader 回报 pending wisdom candidate') -and
+        $workflowTeamSkill.Contains('用户明确授权记忆写入') -and
+        $preCompactDoc.Contains('用户明确授权记忆写入') -and
+        $preCompactDoc.Contains('未授权时保持消息态') -and
+        $workflowTeamSkill.Contains('只通过 `team_send_message` 向 leader 回报 ready-to-advance') -and
+        $workflowTeamSkill.Contains('worker 不得调用 `append-runtime-inbox.ps1` 或 `.assistant\entry\advance-stage.ps1`') -and
+        -not $workflowTeamSkill.Contains('先把 pending wisdom 通过 `append-runtime-inbox.ps1`') -and
+        $preCompactDoc.Contains('worker 只允许通过 `team_send_message`') -and
+        $preCompactDoc.Contains('不得执行动作 A 或动作 B') -and
+        $preCompactDoc.Contains('不调用收件箱 append、stage advance') -and
+        -not $preCompactDoc.Contains('应回退到收件箱 append 路径')
+    if ($workerReportsOnly) {
+        Add-Check 'O8 PreCompact keeps workers message-only and reserves inbox append and stage advance for the leader'
+    } else {
+        Add-Failure 'O8 PreCompact worker/leader write authority contract is inconsistent'
     }
 } finally {
     foreach ($path in $cleanupPaths) {

@@ -7,10 +7,10 @@ Context providers are advisory context providers. They help recall, search, and 
 - Workflow stays `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`; `DONE` is only a frontmatter terminal state.
 - `quick` does not create `docs/tasks/{task_id}/` and does not update shared pointers.
 - `workflow` enters `entry-router -> orchestrator` and writes task artifacts.
-- `ask` asks one minimal question and does not load workflow skills.
+- `ask` is an iterative blocking clarification gate: ask one highest-value question per turn by default, reassess, and remain in ask until all blocking uncertainties are resolved; it does not load workflow skills.
 - `plan.md` frontmatter is the only stage truth.
 - `.assistant/运行时/*` is derived runtime view, not provider state.
-- Pending wisdom goes to `.assistant/运行时/收件箱.md` before triage or promotion.
+- Provider-derived pending wisdom stays advisory and write-free. Only after the user explicitly authorizes memory write may the consuming entry host append it to `.assistant/运行时/收件箱.md` before triage or promotion.
 - Installer and updater do not mutate user-private `%USERPROFILE%\.codex\config.toml`.
 
 ## Provider Capabilities

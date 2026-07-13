@@ -457,7 +457,7 @@ $bomTargets = @(
     'uninstall.ps1'
 )
 $bomTargets += Get-ChildItem -LiteralPath (Join-Path $script:RepoRoot 'scripts') -Filter '*.ps1' -File | ForEach-Object { Get-RepoRelativePath -TargetPath $_.FullName }
-$bomTargets += Get-ChildItem -LiteralPath (Join-Path $script:RepoRoot 'tests') -Filter 'verify-*.ps1' -File | ForEach-Object { Get-RepoRelativePath -TargetPath $_.FullName }
+$bomTargets += Get-ChildItem -LiteralPath (Join-Path $script:RepoRoot 'tests') -Filter '*.ps1' -File | ForEach-Object { Get-RepoRelativePath -TargetPath $_.FullName }
 $bomTargets += Get-ChildItem -LiteralPath (Join-Path $script:RepoRoot 'skills') -Recurse -Filter '*.ps1' -File | ForEach-Object { Get-RepoRelativePath -TargetPath $_.FullName }
 
 foreach ($bomTarget in ($bomTargets | Sort-Object -Unique)) {

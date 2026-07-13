@@ -281,26 +281,6 @@ function Convert-MarkdownToBodyHtml {
     return ($html -join "`n")
 }
 
-function New-TocHtml {
-    param([hashtable]$HeadingMap)
-
-    $tocItems = New-Object System.Collections.Generic.List[string]
-    foreach ($key in ($HeadingMap.Keys | Sort-Object)) {
-        $heading = $HeadingMap[$key]
-        if ($heading.Level -lt 2 -or $heading.Level -gt 3) {
-            continue
-        }
-
-        $tocItems.Add(('<li class="toc-level-{0}"><a href="#{1}">{2}</a></li>' -f $heading.Level, $heading.Id, (Convert-InlineMarkdown -Text $heading.Text))) | Out-Null
-    }
-
-    if ($tocItems.Count -eq 0) {
-        return '<nav class="toc" aria-label="Document sections"><p>No H2/H3 sections detected.</p></nav>'
-    }
-
-    return "<nav class=""toc"" aria-label=""Document sections"">`n<h2>Contents</h2>`n<ul>`n$($tocItems -join "`n")`n</ul>`n</nav>"
-}
-
 function Get-DocumentTitle {
     param(
         [string[]]$Lines,
@@ -496,7 +476,6 @@ $lines = @($rawLines | Select-Object -Skip $contentStart)
 $headingMap = New-HeadingMap -Lines $lines
 $title = Get-DocumentTitle -Lines $lines -Fallback ([System.IO.Path]::GetFileNameWithoutExtension($sourcePath))
 $displaySource = ConvertTo-DisplayPath -Path $sourcePath -Root $repoRootResolved
-$bodyHtml = Convert-MarkdownToBodyHtml -Lines $lines -HeadingMap $headingMap
 $headingEntries = Get-HeadingEntries -HeadingMap $headingMap
 $h2Entries = @($headingEntries | Where-Object { $_.Level -eq 2 })
 $allTables = Get-MarkdownTables -Lines $lines

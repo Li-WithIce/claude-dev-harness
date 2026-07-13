@@ -15,26 +15,26 @@ Claude、Codex 共用同一份 Obsidian 记忆仓库：
 
 - 用户说“继续”“恢复”“resume”
 - 任务需要项目偏好、工具路径、系统边界或历史上下文
-- 多步骤任务开始、切换、暂停或收尾时，需要写回共享运行时状态
+- 多步骤 `mode=workflow` 任务明确开始、切换、暂停或收尾时，需要写回共享运行时状态；read-only inspect/status 不写回
 - 需要判断一条信息该写到运行时、配置还是收件箱
 
 ## Read Order
 
 - 快速了解：`首页.md` -> `配置\系统信息.md` -> `配置\用户偏好.md` -> `配置\工具与组件.md`
-- 恢复任务：`运行时\恢复索引.md` -> `运行时\当前任务.md`（共享指针） -> `运行时\tasks\<task-id>.md`（任务级详细状态） -> `运行时\中断任务.md` -> `运行时\上次会话.md`
+- 恢复任务：先检查 `运行时\收件箱.md` 中 open `[writeback-fallback]` 行，再读 `运行时\恢复索引.md` -> `运行时\当前任务.md`（共享指针） -> `运行时\tasks\<task-id>.md`（任务级详细状态） -> `运行时\中断任务.md` -> `运行时\上次会话.md`
 - 长期稳定记忆：优先只读 `配置\*.md`，按需补读 `工作流\*.md` 与 `运行时\记忆候选归档.md`
 
 ## Writeback
 
 - 单写者：只有当前入口 host 写 `当前任务.md`、`中断任务.md`、`上次会话.md`、`恢复索引.md`
-- Codex 若不是当前入口 host，只写 `docs/tasks/{task_id}/*` 和 `运行时\tasks\<task-id>.md`
-- 多步骤任务开始、切换或继续：当前入口 host 更新 `运行时\当前任务.md`（共享指针） + `运行时\tasks\<task-id>.md`
-- 任务暂停或待续：当前入口 host 同步更新 `运行时\tasks\<task-id>.md` 和 `运行时\中断任务.md`
-- 阶段完成：当前入口 host 更新 `运行时\上次会话.md` 并刷新 `运行时\恢复索引.md`
-- 未确认的稳定偏好先写 `运行时\记忆候选.md`
-- 已结束生命周期的候选移入 `运行时\记忆候选归档.md`
-- 新事项先写 `运行时\收件箱.md`
-- 收件箱条目可通过 `..\..\scripts\append-runtime-inbox.ps1`、`..\..\scripts\promote-runtime-inbox.ps1`、`..\..\scripts\triage-runtime-inbox.ps1` 维护
+- Codex 若不是当前入口 host，只有 write-authorized `mode=workflow` 才写 `docs/tasks/{task_id}/*` 和 `运行时\tasks\<task-id>.md`；read-only inspect/status 零写
+- 用户明确开始、切换或继续 write-authorized `mode=workflow`：当前入口 host 更新 `运行时\当前任务.md`（共享指针） + `运行时\tasks\<task-id>.md`
+- write-authorized workflow 暂停或待续：当前入口 host 同步更新 `运行时\tasks\<task-id>.md` 和 `运行时\中断任务.md`
+- write-authorized workflow 阶段完成：当前入口 host 更新 `运行时\上次会话.md` 并刷新 `运行时\恢复索引.md`
+- 发现可能值得沉淀的稳定偏好时只向用户提示；只有用户明确要求记录/沉淀记忆后才写 `运行时\记忆候选.md`
+- 只有用户明确请求或已授权的记忆维护任务，才把已结束生命周期的候选移入 `运行时\记忆候选归档.md`
+- 只有用户或外部来源已授权持久捕获的 actionable/durable 新事项才写 `运行时\收件箱.md`；交互式归属/读写歧义直接 ask，不写 inbox
+- open 收件箱行保持可恢复；需要人工选择时直接向用户提问，任务创建/切换走 entry-router 与 canonical stage driver，处理后再精确 triage
 
 ## Wisdom 4 类写入约束
 

@@ -6,15 +6,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Get-NormalizedPath {
-    param([string]$Path)
-
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        return $null
-    }
-
-    return [System.IO.Path]::GetFullPath($Path)
-}
+. (Join-Path $PSScriptRoot 'fixture-test-common.ps1')
 
 function Invoke-RepoScript {
     param(
@@ -55,26 +47,6 @@ function Invoke-RepoScript {
         }
         $env:USERPROFILE = $originalUserProfile
     }
-}
-
-function Get-StatusLineValue {
-    param(
-        $Output,
-        [string]$Prefix
-    )
-
-    $line = @($Output | Where-Object { [string]$_ -match ("^{0}:\s+" -f [regex]::Escape($Prefix)) } | Select-Object -First 1)
-    if ($line.Count -eq 0) {
-        return $null
-    }
-
-    return ([string]$line[0] -replace ("^{0}:\s+" -f [regex]::Escape($Prefix)), '')
-}
-
-function Add-Warning {
-    param([string]$Message)
-
-    $script:Warnings += $Message
 }
 
 function Assert-GitIgnoreEntriesExactlyOnce {
@@ -245,7 +217,7 @@ function Remove-DirectoryWithRetry {
     }
 
     if (Test-Path -LiteralPath $Path) {
-        Add-Warning ("cleanup failed for scratch root {0}: {1}" -f $Path, $lastError.Exception.Message)
+        $script:Warnings += ("cleanup failed for scratch root {0}: {1}" -f $Path, $lastError.Exception.Message)
         return $false
     }
 
@@ -347,6 +319,56 @@ function Invoke-ManagedAssetsCase {
     }
 }
 
+function New-WrapperContractFixture {
+    param(
+        [string]$Name,
+        [string]$InstallScript,
+        [string]$VerifyScript
+    )
+
+    $caseRoot = Join-Path $scratchRoot ("wrapper-contract-{0}" -f $Name)
+    $fixtureRepoRoot = Join-Path $caseRoot 'repo'
+    $fixtureScriptsRoot = Join-Path $fixtureRepoRoot 'scripts'
+    $fixtureTestsRoot = Join-Path $fixtureRepoRoot 'tests'
+    $userProfile = Join-Path $caseRoot 'user'
+    $workspaceRoot = Join-Path $caseRoot 'workspace'
+    foreach ($path in @($fixtureScriptsRoot, $fixtureTestsRoot, $userProfile, (Join-Path $workspaceRoot '.assistant'))) {
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+    }
+
+    Copy-Item -LiteralPath (Join-Path $RepoRoot 'scripts\update-managed-assets.ps1') -Destination (Join-Path $fixtureScriptsRoot 'update-managed-assets.ps1') -Force
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText((Join-Path $fixtureRepoRoot 'install.ps1'), $InstallScript, $encoding)
+    [System.IO.File]::WriteAllText((Join-Path $fixtureTestsRoot 'verify-installation.ps1'), $VerifyScript, $encoding)
+
+    return [pscustomobject]@{
+        RepoRoot      = $fixtureRepoRoot
+        UserProfile   = $userProfile
+        WorkspaceRoot = $workspaceRoot
+    }
+}
+
+function Invoke-WrapperContractCheck {
+    param(
+        [string]$Name,
+        [scriptblock]$Action
+    )
+
+    try {
+        & $Action
+        $script:Checks += [pscustomobject]@{
+            Name   = $Name
+            Status = 'PASS'
+        }
+    } catch {
+        $script:Failures += [pscustomobject]@{
+            Name   = $Name
+            Reason = $_.Exception.Message
+            Output = ''
+        }
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 }
@@ -360,6 +382,346 @@ $script:Failures = @()
 
 try {
     New-Item -ItemType Directory -Path $scratchRoot -Force | Out-Null
+
+    Invoke-WrapperContractCheck -Name 'legacy-rebaseline-plan-is-forwarded-without-verify' -Action {
+        $fixture = New-WrapperContractFixture `
+            -Name 'plan' `
+            -InstallScript @'
+[CmdletBinding()]
+param(
+    [string]$WorkspaceRoot,
+    [string]$RepoRoot,
+    [switch]$RebaselineLegacyInstallState,
+    [string]$ExpectedRebaselinePlanDigest = ''
+)
+if (-not $RebaselineLegacyInstallState.IsPresent -or -not [string]::IsNullOrWhiteSpace($ExpectedRebaselinePlanDigest)) {
+    Write-Output 'STATUS: FAIL'
+    exit 2
+}
+Write-Output 'STATUS: REBASELINE_PLAN_REQUIRED'
+Write-Output 'RebaselinePlanDigest: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+Write-Output 'SourceManifestCount: 3'
+Write-Output 'TargetCount: 7'
+return
+'@ `
+            -VerifyScript @'
+param([string]$WorkspaceRoot, [string]$RepoRoot, [string]$Scope)
+[System.IO.File]::WriteAllText((Join-Path $RepoRoot 'verify-called.txt'), 'called')
+Write-Output 'STATUS: PASS'
+exit 0
+'@
+        $result = Invoke-RepoScript -UserProfile $fixture.UserProfile -ScriptPath (Join-Path $fixture.RepoRoot 'scripts\update-managed-assets.ps1') -Arguments @{
+            WorkspaceRoot               = $fixture.WorkspaceRoot
+            RepoRoot                    = $fixture.RepoRoot
+            Scope                       = 'All'
+            RebaselineLegacyInstallState = $true
+        }
+        $outputText = $result.Output -join [Environment]::NewLine
+        if ($result.ExitCode -eq 0 -or (Get-StatusLineValue -Output $result.Output -Prefix 'STATUS') -ne 'REBASELINE_PLAN_REQUIRED') {
+            throw 'plan-only rebaseline should preserve REBASELINE_PLAN_REQUIRED and return nonzero'
+        }
+        foreach ($expectedLine in @(
+                'RebaselinePlanDigest: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                'SourceManifestCount: 3',
+                'TargetCount: 7'
+            )) {
+            if (-not $outputText.Contains($expectedLine)) {
+                throw ("plan-only wrapper output should preserve {0}" -f $expectedLine)
+            }
+        }
+        if (Test-Path -LiteralPath (Join-Path $fixture.RepoRoot 'verify-called.txt')) {
+            throw 'plan-only rebaseline must not run verify-installation.ps1'
+        }
+    }
+
+    Invoke-WrapperContractCheck -Name 'legacy-rebaseline-apply-rejects-skipverify-before-install' -Action {
+        $fixture = New-WrapperContractFixture `
+            -Name 'skipverify' `
+            -InstallScript @'
+param([string]$WorkspaceRoot, [string]$RepoRoot, [switch]$RebaselineLegacyInstallState, [string]$ExpectedRebaselinePlanDigest = '')
+[System.IO.File]::WriteAllText((Join-Path $RepoRoot 'install-called.txt'), 'called')
+Write-Output 'Install summary:'
+exit 0
+'@ `
+            -VerifyScript @'
+param([string]$WorkspaceRoot, [string]$RepoRoot, [string]$Scope)
+[System.IO.File]::WriteAllText((Join-Path $RepoRoot 'verify-called.txt'), 'called')
+Write-Output 'STATUS: PASS'
+exit 0
+'@
+        $result = Invoke-RepoScript -UserProfile $fixture.UserProfile -ScriptPath (Join-Path $fixture.RepoRoot 'scripts\update-managed-assets.ps1') -Arguments @{
+            WorkspaceRoot                = $fixture.WorkspaceRoot
+            RepoRoot                     = $fixture.RepoRoot
+            Scope                        = 'All'
+            RebaselineLegacyInstallState = $true
+            ExpectedRebaselinePlanDigest = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+            SkipVerify                   = $true
+        }
+        $outputText = $result.Output -join [Environment]::NewLine
+        if ($result.ExitCode -eq 0 -or (Get-StatusLineValue -Output $result.Output -Prefix 'STATUS') -ne 'FAIL') {
+            throw 'digest-bound apply with SkipVerify should fail immediately'
+        }
+        if ($outputText -notmatch 'SkipVerify cannot be used') {
+            throw 'SkipVerify rejection should explain the forbidden combination'
+        }
+        if (Test-Path -LiteralPath (Join-Path $fixture.RepoRoot 'install-called.txt')) {
+            throw 'SkipVerify rejection must happen before install.ps1'
+        }
+    }
+
+    Invoke-WrapperContractCheck -Name 'legacy-rebaseline-verify-failure-is-committed-unverified' -Action {
+        $fixture = New-WrapperContractFixture `
+            -Name 'committed-unverified' `
+            -InstallScript @'
+[CmdletBinding()]
+param(
+    [string]$WorkspaceRoot,
+    [string]$RepoRoot,
+    [switch]$RebaselineLegacyInstallState,
+    [string]$ExpectedRebaselinePlanDigest = ''
+)
+if (-not $RebaselineLegacyInstallState.IsPresent -or $ExpectedRebaselinePlanDigest -cne 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc') {
+    Write-Output 'STATUS: FAIL'
+    exit 2
+}
+[System.IO.File]::WriteAllText((Join-Path $RepoRoot 'install-called.txt'), 'called')
+Write-Output 'STATUS: REBASELINE_COMMITTED'
+Write-Output 'Install summary:'
+exit 0
+'@ `
+            -VerifyScript @'
+param([string]$WorkspaceRoot, [string]$RepoRoot, [string]$Scope)
+[System.IO.File]::WriteAllText((Join-Path $RepoRoot 'verify-called.txt'), 'called')
+Write-Output 'STATUS: WARN'
+Write-Output 'Warnings:'
+Write-Output '- synthetic verifier failure'
+exit 1
+'@
+        $result = Invoke-RepoScript -UserProfile $fixture.UserProfile -ScriptPath (Join-Path $fixture.RepoRoot 'scripts\update-managed-assets.ps1') -Arguments @{
+            WorkspaceRoot                = $fixture.WorkspaceRoot
+            RepoRoot                     = $fixture.RepoRoot
+            Scope                        = 'All'
+            RebaselineLegacyInstallState = $true
+            ExpectedRebaselinePlanDigest = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
+        }
+        $outputText = $result.Output -join [Environment]::NewLine
+        if ($result.ExitCode -eq 0 -or (Get-StatusLineValue -Output $result.Output -Prefix 'STATUS') -ne 'UPDATE_COMMITTED_UNVERIFIED') {
+            throw 'verify failure after digest-bound apply should return UPDATE_COMMITTED_UNVERIFIED and nonzero'
+        }
+        foreach ($marker in @('install-called.txt', 'verify-called.txt')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $fixture.RepoRoot $marker) -PathType Leaf)) {
+                throw ("committed-unverified case should run through {0}" -f $marker)
+            }
+        }
+        if ($outputText -notmatch 'Rollback: not performed' -or
+            $outputText -notmatch 'verify-installation\.ps1, update-managed-assets\.ps1, or uninstall\.ps1') {
+            throw 'committed-unverified output should state no rollback and the supported retry paths'
+        }
+    }
+
+    Invoke-WrapperContractCheck -Name 'legacy-rebaseline-postcommit-install-failure-preserves-commit-state' -Action {
+        $fixture = New-WrapperContractFixture `
+            -Name 'postcommit-install-failure' `
+            -InstallScript @'
+[CmdletBinding()]
+param(
+    [string]$WorkspaceRoot,
+    [string]$RepoRoot,
+    [switch]$RebaselineLegacyInstallState,
+    [string]$ExpectedRebaselinePlanDigest = ''
+)
+if (-not $RebaselineLegacyInstallState.IsPresent -or $ExpectedRebaselinePlanDigest -cne 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd') {
+    throw 'unexpected rebaseline arguments'
+}
+Write-Output 'STATUS: REBASELINE_COMMITTED'
+Write-Output 'RebaselinePlanDigest: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
+throw 'synthetic postcommit install failure'
+'@ `
+            -VerifyScript @'
+param([string]$WorkspaceRoot, [string]$RepoRoot, [string]$Scope)
+[System.IO.File]::WriteAllText((Join-Path $RepoRoot 'verify-called.txt'), 'called')
+Write-Output 'STATUS: PASS'
+exit 0
+'@
+        $result = Invoke-RepoScript -UserProfile $fixture.UserProfile -ScriptPath (Join-Path $fixture.RepoRoot 'scripts\update-managed-assets.ps1') -Arguments @{
+            WorkspaceRoot                = $fixture.WorkspaceRoot
+            RepoRoot                     = $fixture.RepoRoot
+            Scope                        = 'All'
+            RebaselineLegacyInstallState = $true
+            ExpectedRebaselinePlanDigest = 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
+        }
+        $outputText = $result.Output -join [Environment]::NewLine
+        if ($result.ExitCode -eq 0 -or (Get-StatusLineValue -Output $result.Output -Prefix 'STATUS') -ne 'UPDATE_COMMITTED_UNVERIFIED') {
+            throw 'postcommit install failure should return UPDATE_COMMITTED_UNVERIFIED and nonzero'
+        }
+        if ($outputText -notmatch 'synthetic postcommit install failure' -or
+            $outputText -notmatch 'Rollback: not performed') {
+            throw 'postcommit install failure should preserve its error and no-rollback disclosure'
+        }
+        if (Test-Path -LiteralPath (Join-Path $fixture.RepoRoot 'verify-called.txt')) {
+            throw 'postcommit install failure should not run verification after the install step failed'
+        }
+    }
+
+    Invoke-WrapperContractCheck -Name 'retired-managed-vault-template-keeps-exact-uninstall-lineage' -Action {
+        $caseRoot = Join-Path $scratchRoot 'retired-managed-vault-template'
+        $fixtureRepoRoot = Join-Path $caseRoot 'repo'
+        $userProfile = Join-Path $caseRoot 'user'
+        $workspaceRoot = Join-Path $caseRoot 'workspace'
+        New-Item -ItemType Directory -Path $fixtureRepoRoot,$userProfile,$workspaceRoot -Force | Out-Null
+        foreach ($fixtureSource in @('install.ps1','uninstall.ps1','scripts','skills','vault-template','agent-configs','runtime-hooks')) {
+            Copy-Item `
+                -LiteralPath (Join-Path $RepoRoot $fixtureSource) `
+                -Destination (Join-Path $fixtureRepoRoot $fixtureSource) `
+                -Recurse `
+                -Force
+        }
+
+        $fixtureClaudeHome = Join-Path $userProfile '.claude'
+        $fixtureClaudeSettingsPath = Join-Path $fixtureClaudeHome 'settings.json'
+        $fixtureHookTemplatePath = Join-Path $fixtureRepoRoot 'agent-configs\claude\settings.local.shared.json.template'
+        $fixturePostToolSourcePath = Join-Path $fixtureRepoRoot 'runtime-hooks\claude\posttooluse.js'
+        $livePostToolPath = Join-Path $fixtureClaudeHome 'hooks-memory\posttooluse.js'
+        $legacyPostToolCommand = 'node "{0}"' -f $livePostToolPath
+        $thirdPartyPostToolCommand = 'third-party-posttool.cmd'
+        $currentHookTemplateRaw = Get-Content -LiteralPath $fixtureHookTemplatePath -Raw -Encoding utf8
+        $legacyHookTemplate = $currentHookTemplateRaw | ConvertFrom-Json
+        $legacyHookTemplate | Add-Member -NotePropertyName PostToolUse -NotePropertyValue @(
+            [ordered]@{
+                matcher = 'Write|Edit|MultiEdit'
+                hooks = @([ordered]@{ type = 'command'; command = 'node "{CLAUDE_HOME}\hooks-memory\posttooluse.js"'; timeout = 10 })
+            }
+        ) -Force
+        [System.IO.File]::WriteAllText(
+            $fixtureHookTemplatePath,
+            ($legacyHookTemplate | ConvertTo-Json -Depth 20),
+            (New-Object System.Text.UTF8Encoding($false))
+        )
+        [System.IO.File]::WriteAllText(
+            $fixturePostToolSourcePath,
+            'process.stdin.resume(); process.stdout.write("{}\n");',
+            (New-Object System.Text.UTF8Encoding($false))
+        )
+        New-Item -ItemType Directory -Path $fixtureClaudeHome -Force | Out-Null
+        $thirdPartyBaseline = [ordered]@{
+            hooks = [ordered]@{
+                PostToolUse = @(
+                    [ordered]@{
+                        matcher = 'Write'
+                        hooks = @([ordered]@{ type = 'command'; command = $thirdPartyPostToolCommand })
+                    }
+                )
+            }
+        }
+        [System.IO.File]::WriteAllText(
+            $fixtureClaudeSettingsPath,
+            ($thirdPartyBaseline | ConvertTo-Json -Depth 20),
+            (New-Object System.Text.UTF8Encoding($false))
+        )
+        $readFixtureHookCommands = {
+            $settings = Get-Content -LiteralPath $fixtureClaudeSettingsPath -Raw -Encoding utf8 | ConvertFrom-Json
+            return @($settings.hooks.PSObject.Properties | ForEach-Object {
+                    foreach ($section in @($_.Value)) {
+                        foreach ($hook in @($section.hooks)) {
+                            [string]$hook.command
+                        }
+                    }
+                })
+        }
+
+        $templateRelativePath = '模板\决策需求模板.md'
+        $fixtureTemplatePath = Join-Path (Join-Path $fixtureRepoRoot 'vault-template') $templateRelativePath
+        $retiredContent = "obsolete managed decision template`n"
+        [System.IO.File]::WriteAllText($fixtureTemplatePath, $retiredContent, (New-Object System.Text.UTF8Encoding($false)))
+
+        $initialInstall = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $fixtureRepoRoot 'install.ps1') -Arguments @{
+            WorkspaceRoot = $workspaceRoot
+            RepoRoot      = $fixtureRepoRoot
+            VaultProfile  = 'full'
+        }
+        $liveTemplatePath = Join-Path (Join-Path $workspaceRoot '.assistant') $templateRelativePath
+        if ($initialInstall.ExitCode -ne 0 -or
+            (Get-Content -LiteralPath $liveTemplatePath -Raw -Encoding utf8) -cne $retiredContent -or
+            -not (Test-Path -LiteralPath $livePostToolPath -PathType Leaf)) {
+            throw 'fixture setup should install the formerly managed decision template and PostToolUse hook'
+        }
+        $initialHookCommands = @(& $readFixtureHookCommands)
+        if (@($initialHookCommands | Where-Object { $_ -ceq $legacyPostToolCommand }).Count -ne 1 -or
+            @($initialHookCommands | Where-Object { $_ -ceq $thirdPartyPostToolCommand }).Count -ne 1) {
+            throw 'fixture setup should contain one legacy Harness and one third-party PostToolUse command'
+        }
+
+        Remove-Item -LiteralPath $fixtureTemplatePath -Force
+        Remove-Item -LiteralPath $fixturePostToolSourcePath -Force
+        [System.IO.File]::WriteAllText(
+            $fixtureHookTemplatePath,
+            $currentHookTemplateRaw,
+            (New-Object System.Text.UTF8Encoding($false))
+        )
+        $updateResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $fixtureRepoRoot 'scripts\update-managed-assets.ps1') -Arguments @{
+            WorkspaceRoot = $workspaceRoot
+            RepoRoot      = $fixtureRepoRoot
+            Scope         = 'All'
+            SkipVerify    = $true
+        }
+        if ($updateResult.ExitCode -ne 0 -or
+            (Get-StatusLineValue -Output $updateResult.Output -Prefix 'STATUS') -ne 'PASS' -or
+            (Test-Path -LiteralPath $liveTemplatePath)) {
+            throw 'managed update should tombstone the retired owned template'
+        }
+        $updatedHookCommands = @(& $readFixtureHookCommands)
+        if ((Test-Path -LiteralPath $livePostToolPath) -or
+            @($updatedHookCommands | Where-Object { $_ -ceq $legacyPostToolCommand }).Count -ne 0 -or
+            @($updatedHookCommands | Where-Object { $_ -ceq $thirdPartyPostToolCommand }).Count -ne 1) {
+            throw 'managed update should retire only the Harness PostToolUse command/file and preserve third-party PostToolUse'
+        }
+
+        $registryPath = Join-Path $userProfile '.dev-harness\install-registry.json'
+        $registry = Get-Content -LiteralPath $registryPath -Raw -Encoding utf8 | ConvertFrom-Json
+        $workspaceEntry = @($registry.workspaces.PSObject.Properties | Select-Object -First 1)[0].Value
+        $latestManifestPath = [string]@($workspaceEntry.manifests)[-1]
+        $latestManifest = Get-Content -LiteralPath $latestManifestPath -Raw -Encoding utf8 | ConvertFrom-Json
+        $tombstoneRecords = @($latestManifest.backups | Where-Object {
+                (Get-NormalizedPath -Path $_.path) -eq (Get-NormalizedPath -Path $liveTemplatePath)
+            })
+        if ($tombstoneRecords.Count -ne 1 -or
+            -not [bool]$tombstoneRecords[0].existed -or
+            [string]$tombstoneRecords[0].item_type -ne 'file' -or
+            [string]$tombstoneRecords[0].ownership -ne 'managed' -or
+            [string]$tombstoneRecords[0].expected_postimage.item_type -ne 'missing' -or
+            (Get-Content -LiteralPath $tombstoneRecords[0].backup_path -Raw -Encoding utf8) -cne $retiredContent) {
+            throw 'retired template transition must be committed as exact file-to-missing ownership evidence'
+        }
+
+        $uninstallResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $fixtureRepoRoot 'uninstall.ps1') -Arguments @{
+            WorkspaceRoot = $workspaceRoot
+            RepoRoot      = $fixtureRepoRoot
+        }
+        $uninstalledHookCommands = @(& $readFixtureHookCommands)
+        if ($uninstallResult.ExitCode -ne 0 -or
+            (Test-Path -LiteralPath $liveTemplatePath) -or
+            (Test-Path -LiteralPath $livePostToolPath) -or
+            @($uninstalledHookCommands | Where-Object { $_ -ceq $legacyPostToolCommand }).Count -ne 0 -or
+            @($uninstalledHookCommands | Where-Object { $_ -ceq $thirdPartyPostToolCommand }).Count -ne 1) {
+            throw 'full uninstall should restore the original template and third-party hook preimage without retired Harness PostToolUse'
+        }
+
+        $unownedUserProfile = Join-Path $caseRoot 'unowned-user'
+        $unownedWorkspaceRoot = Join-Path $caseRoot 'unowned-workspace'
+        $unownedLivePath = Join-Path (Join-Path $unownedWorkspaceRoot '.assistant') $templateRelativePath
+        New-Item -ItemType Directory -Path $unownedUserProfile,(Split-Path -Parent $unownedLivePath) -Force | Out-Null
+        $unownedContent = "user-owned decision notes`n"
+        [System.IO.File]::WriteAllText($unownedLivePath, $unownedContent, (New-Object System.Text.UTF8Encoding($false)))
+        $unownedInstall = Invoke-RepoScript -UserProfile $unownedUserProfile -ScriptPath (Join-Path $fixtureRepoRoot 'install.ps1') -Arguments @{
+            WorkspaceRoot = $unownedWorkspaceRoot
+            RepoRoot      = $fixtureRepoRoot
+            VaultProfile  = 'full'
+        }
+        if ($unownedInstall.ExitCode -ne 0 -or
+            (Get-Content -LiteralPath $unownedLivePath -Raw -Encoding utf8) -cne $unownedContent) {
+            throw 'an unregistered same-path file must remain user-owned and untouched'
+        }
+    }
 
     Invoke-ManagedAssetsCase `
         -Name 'workflow-protocol-drift-is-repaired' `
@@ -643,41 +1005,6 @@ enabled = true
 
             $codexManagedConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'managed_config.toml'
             Assert-ManagedTextContains -Path $codexManagedConfigPath -Needle 'skills\\entry-router\\SKILL.md'
-        }
-
-    Invoke-ManagedAssetsCase `
-        -Name 'decision-needed-template-drift-is-repaired' `
-        -Scope 'All' `
-        -ExpectedStatus 'PASS' `
-        -InstallVaultProfile 'full' `
-        -Mutator {
-            param($CaseRoot, $UserProfile, $WorkspaceRoot)
-
-            $templateLeafName = -join (@(20915, 31574, 38656, 27714, 27169, 26495, 46, 109, 100) | ForEach-Object { [char]$_ })
-            $templatePath = @(Get-ChildItem -LiteralPath (Join-Path $WorkspaceRoot '.assistant') -Recurse -File | Where-Object {
-                    $_.Name -eq $templateLeafName
-                } | Select-Object -First 1)
-            if ($templatePath.Count -ne 1) {
-                throw 'unable to resolve decision-needed template in workspace vault'
-            }
-
-            Add-Content -LiteralPath $templatePath[0].FullName -Value "`nDRIFT-LINE" -Encoding utf8
-        } `
-        -PostAssert {
-            param($CaseRoot, $UserProfile, $WorkspaceRoot, $Result)
-
-            $templateLeafName = -join (@(20915, 31574, 38656, 27714, 27169, 26495, 46, 109, 100) | ForEach-Object { [char]$_ })
-            $templatePath = @(Get-ChildItem -LiteralPath (Join-Path $WorkspaceRoot '.assistant') -Recurse -File | Where-Object {
-                    $_.Name -eq $templateLeafName
-                } | Select-Object -First 1)
-            if ($templatePath.Count -ne 1) {
-                throw 'unable to resolve decision-needed template in workspace vault after update'
-            }
-
-            $content = Get-Content -LiteralPath $templatePath[0].FullName -Raw -Encoding utf8
-            if ($content.Contains('DRIFT-LINE')) {
-                throw 'decision-needed template drift should be repaired by Scope=All'
-            }
         }
 
     Invoke-ManagedAssetsCase `

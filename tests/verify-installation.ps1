@@ -10,15 +10,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Get-NormalizedPath {
-    param([string]$Path)
-
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        return $null
-    }
-
-    return [System.IO.Path]::GetFullPath($Path)
-}
+. (Join-Path $PSScriptRoot 'fixture-test-common.ps1')
 
 function Read-FileUtf8 {
     param([string]$Path)
@@ -224,6 +216,7 @@ function Assert-TemplateFileMatches {
         [string]$Path,
         [string]$TemplatePath,
         [string]$Label,
+        [string]$RolloutMarker = '',
         [switch]$EscapeForCode
     )
 
@@ -247,6 +240,8 @@ function Assert-TemplateFileMatches {
     $renderedTemplate = Render-TemplateContent -Content $templateContent -EscapeForCode:$EscapeForCode
     if (Test-LineContentMatches -ExpectedContent $renderedTemplate -ActualContent $actualContent) {
         Add-Check ("{0} 内容与模板一致" -f $Label)
+    } elseif (-not [string]::IsNullOrWhiteSpace($RolloutMarker)) {
+        Add-Warning ("LIVE_UPDATE_REQUIRED: {0}" -f $RolloutMarker)
     } else {
         Add-Error ("{0} 与模板不一致（可能缺少、变更或多出额外行）" -f $Label)
     }
@@ -491,7 +486,8 @@ $ClaudeSkillsPath = Join-Path $ClaudeHome 'skills'
 $CodexSkillsPath = Join-Path $CodexHome 'skills'
 $AgentsSkillsPath = Join-Path $AgentsHome 'skills'
 $ClaudeHooksPath = Join-Path $ClaudeHome 'hooks-memory'
-$ClaudeSettingsPath = Join-Path (Join-Path $ClaudeHome '.claude') 'settings.local.json'
+$ClaudeGlobalPath = Join-Path $ClaudeHome 'CLAUDE.md'
+$ClaudeSettingsPath = Join-Path $ClaudeHome 'settings.json'
 $CodexSettingsPath = Join-Path (Join-Path $CodexHome '.claude') 'settings.local.json'
 $CodexConfigPath = Join-Path $CodexHome 'config.toml'
 $CodexManagedConfigPath = Join-Path $CodexHome 'managed_config.toml'
@@ -502,6 +498,7 @@ $WorkspaceEntryAgentsPath = Join-Path $VaultPath 'entry\AGENTS.md'
 $WorkspaceAdvanceStageShimPath = Join-Path $VaultPath 'entry\advance-stage.ps1'
 $WorkspaceValidateArtifactsShimPath = Join-Path $VaultPath 'entry\validate-lite-artifacts.ps1'
 $WorkspaceRuntimeTasksPath = Join-Path $VaultPath '运行时\tasks'
+$InstallRegistryPath = Join-Path $effectiveUserProfile '.dev-harness\install-registry.json'
 $VaultIsFull = Test-FullVaultProfile -VaultPath $VaultPath
 $ForbiddenTokens = @('{REPO_ROOT}', '{WORKSPACE_ROOT}', '{VAULT_PATH}', '{CLAUDE_HOME}', '{CODEX_HOME}')
 $script:RenderTokens = [ordered]@{
@@ -520,19 +517,92 @@ Assert-ManagedSkillLinks -HostLabel 'Claude' -HostSkillsPath $ClaudeSkillsPath -
 Assert-ManagedSkillLinks -HostLabel 'Codex' -HostSkillsPath $CodexSkillsPath -RepoSkillsPath $RepoSkillsPath
 Assert-ManagedSkillLinks -HostLabel 'Agents' -HostSkillsPath $AgentsSkillsPath -RepoSkillsPath $RepoSkillsPath
 
-foreach ($hookName in @('userpromptsubmit.js', 'posttooluse.js', 'stop.js')) {
+foreach ($hookName in @('userpromptsubmit.js', 'stop.js', 'workspace-resolver.js')) {
     Assert-RenderedFile -Path (Join-Path $ClaudeHooksPath $hookName) -ForbiddenTokens $ForbiddenTokens
+    Assert-TemplateFileMatches -Path (Join-Path $ClaudeHooksPath $hookName) -TemplatePath (Join-Path $RepoRoot "runtime-hooks\claude\$hookName") -Label "Claude hook $hookName" -EscapeForCode
+}
+$retiredPostToolHookPath = Join-Path $ClaudeHooksPath 'posttooluse.js'
+if (Test-Path -LiteralPath $retiredPostToolHookPath) {
+    Add-Error ("Claude retired PostToolUse hook file is still installed: {0}" -f $retiredPostToolHookPath)
+} else {
+    Add-Check 'Claude retired PostToolUse hook file is absent'
 }
 
+Assert-RenderedFile -Path $ClaudeGlobalPath -ForbiddenTokens $ForbiddenTokens
+Assert-TemplateFileMatches -Path $ClaudeGlobalPath -TemplatePath (Join-Path $RepoRoot 'agent-configs\claude\CLAUDE.md.template') -Label 'Claude CLAUDE.md'
 Assert-RenderedFile -Path $CodexAgentsPath -ForbiddenTokens $ForbiddenTokens
-Assert-TemplateFileMatches -Path $CodexAgentsPath -TemplatePath (Join-Path $RepoRoot 'agent-configs\codex\AGENTS.md.template') -Label 'Codex AGENTS.md'
+Assert-TemplateFileMatches -Path $CodexAgentsPath -TemplatePath (Join-Path $RepoRoot 'agent-configs\codex\AGENTS.md.template') -Label 'Codex AGENTS.md' -RolloutMarker 'codex-agents-template-drift'
 Assert-RenderedFile -Path $WorkspaceAgentsPath -ForbiddenTokens $ForbiddenTokens
+Assert-TemplateFileMatches -Path $WorkspaceAgentsPath -TemplatePath (Join-Path $RepoRoot 'agent-configs\workspace\AGENTS.md.template') -Label 'workspace AGENTS.md' -RolloutMarker 'workspace-agents-template-drift'
 Assert-GitIgnoreManagedEntries -Path $WorkspaceGitIgnorePath
 Assert-RenderedFile -Path $WorkspaceEntryAgentsPath -ForbiddenTokens $ForbiddenTokens
+Assert-TemplateFileMatches -Path $WorkspaceEntryAgentsPath -TemplatePath (Join-Path $RepoRoot 'vault-template\entry\AGENTS.md.template') -Label 'workspace entry AGENTS.md' -RolloutMarker 'shim-template-drift'
 Assert-RenderedFile -Path $WorkspaceAdvanceStageShimPath -ForbiddenTokens $ForbiddenTokens
-Assert-TemplateFileMatches -Path $WorkspaceAdvanceStageShimPath -TemplatePath (Join-Path $RepoRoot 'vault-template\entry\advance-stage.ps1.template') -Label 'workspace advance-stage shim'
+Assert-TemplateFileMatches -Path $WorkspaceAdvanceStageShimPath -TemplatePath (Join-Path $RepoRoot 'vault-template\entry\advance-stage.ps1.template') -Label 'workspace advance-stage shim' -RolloutMarker 'shim-template-drift'
 Assert-RenderedFile -Path $WorkspaceValidateArtifactsShimPath -ForbiddenTokens $ForbiddenTokens
 Assert-TemplateFileMatches -Path $WorkspaceValidateArtifactsShimPath -TemplatePath (Join-Path $RepoRoot 'vault-template\entry\validate-lite-artifacts.ps1.template') -Label 'workspace validate-lite-artifacts shim'
+try {
+    $validatorShimCommand = Get-Command -Name $WorkspaceValidateArtifactsShimPath -CommandType ExternalScript -ErrorAction Stop
+    $declaredParameters = @($validatorShimCommand.ScriptBlock.Ast.ParamBlock.Parameters)
+    $declaredNames = @($declaredParameters | ForEach-Object { $_.Name.VariablePath.UserPath })
+    $taskIdParameter = $validatorShimCommand.Parameters['TaskId']
+    $qualityParameter = $validatorShimCommand.Parameters['Quality']
+    $taskIdBindings = @($taskIdParameter.Attributes | Where-Object { $_ -is [System.Management.Automation.ParameterAttribute] })
+    $qualityBindings = @($qualityParameter.Attributes | Where-Object { $_ -is [System.Management.Automation.ParameterAttribute] })
+    if ($declaredNames.Count -eq 2 -and
+        $declaredNames -ccontains 'TaskId' -and
+        $declaredNames -ccontains 'Quality' -and
+        $taskIdBindings.Count -eq 1 -and
+        $qualityBindings.Count -eq 1 -and
+        $taskIdParameter.ParameterType -eq [string] -and
+        $taskIdBindings[0].Mandatory -and
+        -not $taskIdBindings[0].ValueFromRemainingArguments -and
+        $qualityParameter.ParameterType -eq [System.Management.Automation.SwitchParameter] -and
+        -not $qualityBindings[0].Mandatory -and
+        -not $qualityBindings[0].ValueFromRemainingArguments) {
+        Add-Check 'workspace validate-lite-artifacts shim exposes only mandatory TaskId and optional Quality'
+    } else {
+        Add-Error 'workspace validate-lite-artifacts shim parameter contract should be exactly mandatory TaskId plus optional Quality'
+    }
+
+    $expectedValidatorPath = Get-NormalizedPath -Path (Join-Path $RepoRoot 'scripts\validate-lite-artifacts.ps1')
+    $delegations = @($validatorShimCommand.ScriptBlock.Ast.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.CommandAst] -and
+        -not [string]::IsNullOrWhiteSpace($node.GetCommandName()) -and
+        (Get-NormalizedPath -Path $node.GetCommandName()) -eq $expectedValidatorPath
+    }, $true))
+    $qualityForwarders = @()
+    if ($delegations.Count -eq 1) {
+        $qualityForwarders = @($delegations[0].CommandElements | Where-Object {
+            $_ -is [System.Management.Automation.Language.CommandParameterAst] -and
+            $_.ParameterName -ceq 'Quality' -and
+            $_.Argument -is [System.Management.Automation.Language.VariableExpressionAst] -and
+            $_.Argument.VariablePath.UserPath -ceq 'Quality'
+        })
+    }
+    $splats = @($validatorShimCommand.ScriptBlock.Ast.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.VariableExpressionAst] -and $node.Splatted
+    }, $true))
+    $scriptInvocations = @($validatorShimCommand.ScriptBlock.Ast.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.CommandAst] -and
+        ($node.InvocationOperator -in @([System.Management.Automation.Language.TokenKind]::Ampersand,[System.Management.Automation.Language.TokenKind]::Dot) -or
+            $node.GetCommandName() -match '(?i)\.ps1$')
+    }, $true))
+    if ($delegations.Count -eq 1 -and
+        $scriptInvocations.Count -eq 1 -and
+        $scriptInvocations[0].Extent.StartOffset -eq $delegations[0].Extent.StartOffset -and
+        $qualityForwarders.Count -eq 1 -and
+        $splats.Count -eq 0) {
+        Add-Check 'workspace validate-lite-artifacts shim explicitly forwards Quality without splatting'
+    } else {
+        Add-Error 'workspace validate-lite-artifacts shim should explicitly forward -Quality:$Quality to one canonical validator without splatting'
+    }
+} catch {
+    Add-Error ("workspace validate-lite-artifacts shim contract could not be inspected: {0}" -f $_.Exception.Message)
+}
 if (Test-Path -LiteralPath $WorkspaceRuntimeTasksPath -PathType Container) {
     Add-Check 'workspace runtime tasks directory exists'
 } else {
@@ -540,6 +610,33 @@ if (Test-Path -LiteralPath $WorkspaceRuntimeTasksPath -PathType Container) {
 }
 if ($VaultIsFull) {
     Add-Check 'workspace vault profile detected: full'
+    foreach ($protocol in @(
+            [pscustomobject]@{
+                RelativePath = '工作流\共享记忆协议.md'
+                Label = 'workspace shared-memory protocol'
+            },
+            [pscustomobject]@{
+                RelativePath = '工作流\写回协议.md'
+                Label = 'workspace writeback protocol'
+            }
+            [pscustomobject]@{
+                RelativePath = '工作流\任务识别协议.md'
+                Label = 'workspace task-routing protocol'
+            }
+            [pscustomobject]@{
+                RelativePath = '工作流\恢复协议.md'
+                Label = 'workspace recovery protocol'
+            }
+            [pscustomobject]@{
+                RelativePath = '工作流\记忆管理协议.md'
+                Label = 'workspace memory-management protocol'
+            }
+        )) {
+        $protocolPath = Join-Path $VaultPath $protocol.RelativePath
+        $protocolTemplatePath = Join-Path (Join-Path $RepoRoot 'vault-template') $protocol.RelativePath
+        Assert-RenderedFile -Path $protocolPath -ForbiddenTokens $ForbiddenTokens
+        Assert-TemplateFileMatches -Path $protocolPath -TemplatePath $protocolTemplatePath -Label $protocol.Label
+    }
 } else {
     Add-Check 'workspace vault profile detected: minimal'
 }
@@ -547,19 +644,70 @@ if ($VaultIsFull) {
 if (Test-Path -LiteralPath $ClaudeSettingsPath -PathType Leaf) {
     try {
         $claudeSettings = Get-Content -LiteralPath $ClaudeSettingsPath -Raw -Encoding utf8 | ConvertFrom-Json
-        foreach ($key in @('UserPromptSubmit', 'Stop', 'PostToolUse')) {
-            $value = $claudeSettings.$key
+        foreach ($key in @('UserPromptSubmit', 'Stop')) {
+            $value = $claudeSettings.hooks.$key
             if ($value -is [System.Array] -and $value.Count -gt 0) {
-                Add-Check ("Claude settings.local.json 包含数组化的 {0}" -f $key)
+                Add-Check ("Claude settings.json 包含数组化的 hooks.{0}" -f $key)
             } else {
-                Add-Error ("Claude settings.local.json 缺少数组化的 {0}" -f $key)
+                Add-Error ("Claude settings.json 缺少数组化的 hooks.{0}" -f $key)
             }
         }
+        $registeredCommands = @($claudeSettings.hooks.PSObject.Properties | ForEach-Object {
+                foreach ($section in @($_.Value)) {
+                    foreach ($hook in @($section.hooks)) {
+                        [string]$hook.command
+                    }
+                }
+            })
+        foreach ($hookName in @('userpromptsubmit.js', 'stop.js')) {
+            $expectedHookPath = Join-Path $ClaudeHooksPath $hookName
+            if (@($registeredCommands | Where-Object { $_ -like "*$expectedHookPath*" }).Count -eq 1) {
+                Add-Check ("Claude settings.json 唯一注册真实 hook: {0}" -f $hookName)
+            } else {
+                Add-Error ("Claude settings.json 未唯一注册真实 hook: {0}" -f $expectedHookPath)
+            }
+        }
+        if (@($registeredCommands | Where-Object { $_ -like "*$retiredPostToolHookPath*" }).Count -eq 0) {
+            Add-Check 'Claude settings.json 未注册已退役的 Harness PostToolUse hook'
+        } else {
+            Add-Error ("Claude settings.json 仍注册已退役的 Harness PostToolUse hook: {0}" -f $retiredPostToolHookPath)
+        }
     } catch {
-        Add-Error ("Claude settings.local.json 不是合法 JSON: {0}" -f $_.Exception.Message)
+        Add-Error ("Claude settings.json 不是合法 JSON: {0}" -f $_.Exception.Message)
     }
 } else {
-    Add-Error ("缺少 Claude settings.local.json: {0}" -f $ClaudeSettingsPath)
+    Add-Error ("缺少 Claude settings.json: {0}" -f $ClaudeSettingsPath)
+}
+
+if (Test-Path -LiteralPath $InstallRegistryPath -PathType Leaf) {
+    try {
+        $installRegistry = Read-FileUtf8 -Path $InstallRegistryPath | ConvertFrom-Json
+        $matchingEntries = @($installRegistry.workspaces.PSObject.Properties | Where-Object {
+                (Get-NormalizedPath -Path $_.Value.workspace_root) -eq $WorkspaceRoot
+            })
+        $modernTupleProperties = @('transaction_status_contract','history_ownership_contract','manifest_integrity_contract','retired_manifest_history','manifest_digests')
+        $modernTuplePresent = @($modernTupleProperties | Where-Object { $null -ne $installRegistry.PSObject.Properties[$_] }).Count -eq $modernTupleProperties.Count
+        $modernTupleValid = $modernTuplePresent -and
+            $installRegistry.transaction_status_contract -eq 'v1' -and
+            $installRegistry.history_ownership_contract -eq 'v1' -and
+            $installRegistry.manifest_integrity_contract -eq 'sha256-v1'
+        if ($installRegistry.schema_version -eq 'install-registry/v1.1' -and
+            $modernTupleValid -and
+            $matchingEntries.Count -eq 1 -and
+            @($matchingEntries[0].Value.manifests).Count -gt 0) {
+            Add-Check 'install registry 包含当前 workspace 的 manifest history'
+        } elseif ($installRegistry.schema_version -eq 'install-registry/v1.0' -and
+            $matchingEntries.Count -eq 1 -and
+            @($matchingEntries[0].Value.manifests).Count -gt 0) {
+            Add-Warning 'LIVE_UPDATE_REQUIRED: legacy-install-state'
+        } else {
+            Add-Error 'install registry 缺少当前 workspace 的唯一 manifest history'
+        }
+    } catch {
+        Add-Error ("install registry 不是合法 JSON: {0}" -f $_.Exception.Message)
+    }
+} else {
+    Add-Error ("缺少 install registry: {0}" -f $InstallRegistryPath)
 }
 
 if (Test-Path -LiteralPath $CodexSettingsPath -PathType Leaf) {
@@ -667,7 +815,8 @@ $status = 'PASS'
 if ($script:Errors.Count -gt 0) {
     $status = 'FAIL'
 } elseif ($script:Warnings.Count -gt 0) {
-    $status = 'WARN'
+    $nonRolloutWarnings = @($script:Warnings | Where-Object { $_ -notlike 'LIVE_UPDATE_REQUIRED:*' })
+    $status = if ($nonRolloutWarnings.Count -eq 0) { 'LIVE_UPDATE_REQUIRED' } else { 'WARN' }
 }
 
 Write-Output ("STATUS: {0}" -f $status)

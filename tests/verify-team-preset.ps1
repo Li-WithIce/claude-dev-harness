@@ -6,6 +6,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot 'fixture-test-common.ps1')
+
 function Add-Check {
     param([string]$Message)
     $script:Checks += $Message
@@ -14,62 +16,6 @@ function Add-Check {
 function Add-Failure {
     param([string]$Message)
     $script:Failures += $Message
-}
-
-function Write-Utf8Bom {
-    param(
-        [string]$Path,
-        [string]$Content
-    )
-
-    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($true)))
-}
-
-function Read-FileUtf8 {
-    param([string]$Path)
-
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        return ''
-    }
-
-    return (Get-Content -LiteralPath $Path -Raw -Encoding utf8)
-}
-
-function Remove-DirectoryWithRetry {
-    param([string]$Path)
-
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return
-    }
-
-    $lastError = $null
-    for ($attempt = 0; $attempt -lt 10; $attempt++) {
-        try {
-            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
-            return
-        } catch {
-            $lastError = $_
-            Start-Sleep -Milliseconds 200
-        }
-    }
-
-    if (Test-Path -LiteralPath $Path) {
-        Add-Failure ("cleanup failed for {0}: {1}" -f $Path, $lastError.Exception.Message)
-    }
-}
-
-function Copy-RepoPathToFixture {
-    param(
-        [string]$SourceRoot,
-        [string]$FixtureRoot,
-        [string]$RelativePath
-    )
-
-    $sourcePath = Join-Path $SourceRoot $RelativePath
-    $destinationPath = Join-Path $FixtureRoot $RelativePath
-    $destinationParent = Split-Path -Parent $destinationPath
-    New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
-    Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Recurse -Force
 }
 
 function New-IsolatedRepoFixture {
@@ -286,6 +232,12 @@ try {
         Add-Check 'P1 export-team-preset emits valid JSON/YAML with the expected top-level schema'
     } else {
         Add-Failure ("P1 preset export failed, json stdout=[{0}] stderr=[{1}] yaml stdout=[{2}] stderr=[{3}]" -f $jsonResult.StdOut, $jsonResult.StdErr, $yamlResult.StdOut, $yamlResult.StdErr)
+    }
+
+    if (-not (Test-FileHasUtf8Bom -Path $jsonOutputPath) -and -not (Test-FileHasUtf8Bom -Path $yamlOutputPath)) {
+        Add-Check 'P1 preset JSON and YAML are UTF-8 without BOM'
+    } else {
+        Add-Failure 'P1 preset JSON and YAML should be UTF-8 without BOM'
     }
 
     $workflowDescriptor = Read-WorkflowDescriptor -Path $workflowPath

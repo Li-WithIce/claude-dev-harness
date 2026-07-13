@@ -6,15 +6,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Get-NormalizedPath {
-    param([string]$Path)
-
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        return $null
-    }
-
-    return [System.IO.Path]::GetFullPath($Path)
-}
+. (Join-Path $PSScriptRoot 'fixture-test-common.ps1')
 
 function Invoke-RepoScript {
     param(
@@ -47,20 +39,6 @@ function Invoke-RepoScript {
     }
 }
 
-function Get-StatusLineValue {
-    param(
-        $Output,
-        [string]$Prefix
-    )
-
-    $line = @($Output | Where-Object { [string]$_ -match ("^{0}:\s+" -f [regex]::Escape($Prefix)) } | Select-Object -First 1)
-    if ($line.Count -eq 0) {
-        return $null
-    }
-
-    return ([string]$line[0] -replace ("^{0}:\s+" -f [regex]::Escape($Prefix)), '')
-}
-
 function Add-Check {
     param([string]$Message)
     $script:Checks += $Message
@@ -76,18 +54,14 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 }
 
 $RepoRoot = Get-NormalizedPath -Path $RepoRoot
-$scratchRoot = Join-Path $RepoRoot 'tmp\harness-entry-regression'
-
-if (Test-Path -LiteralPath $scratchRoot) {
-    Remove-Item -LiteralPath $scratchRoot -Recurse -Force
-}
-
-New-Item -ItemType Directory -Path $scratchRoot | Out-Null
-
 $script:Checks = @()
 $script:Failures = @()
+$scratchRoot = Join-Path $RepoRoot ('tmp\harness-entry-regression-' + [guid]::NewGuid().ToString('N'))
 
 $harnessPath = Join-Path $RepoRoot 'harness.ps1'
+
+try {
+New-Item -ItemType Directory -Path $scratchRoot | Out-Null
 
 # Case 1: bootstrap from a subdirectory inside a fresh git workspace.
 $caseRoot = Join-Path $scratchRoot 'bootstrap-from-git-ancestor'
@@ -130,16 +104,21 @@ if (-not (Test-Path -LiteralPath $entryShimPath -PathType Leaf)) {
     Add-Failure 'harness.ps1 should install the workspace entry shim'
 } else {
     $entryShimContent = Get-Content -LiteralPath $entryShimPath -Raw -Encoding utf8
-    if ($entryShimContent.Contains('quick` only when all true') -and
-        $entryShimContent.Contains('workflow` when any of these is true') -and
+    if ($entryShimContent.Contains('standalone project-scoped read-only') -and
+        $entryShimContent.Contains('route identity does not broaden requested action') -and
+        $entryShimContent.Contains('clear target, scope, and output') -and
+        $entryShimContent.Contains('mixed mutation') -and
+        $entryShimContent.Contains('ambiguous read/write') -and
+        $entryShimContent.Contains('read-only inspect/status does none of those writes or stage loads') -and
+        $entryShimContent.Contains('without inbox write') -and
         $entryShimContent.Contains('Deep Clarification Mode') -and
         $entryShimContent.Contains('iterative blocking clarification gate') -and
         $entryShimContent.Contains('Remain in ask until all blocking uncertainties are resolved') -and
         $entryShimContent.Contains('Ask exit criteria') -and
         $entryShimContent.Contains('Do not invoke other workflow skills before routing')) {
-        Add-Check 'workspace entry shim documents quick/workflow/ask routing gates'
+        Add-Check 'workspace entry shim documents read-only/mutation/ask routing precedence'
     } else {
-        Add-Failure 'workspace entry shim should document quick/workflow/ask routing gates'
+        Add-Failure 'workspace entry shim should document read-only/mutation/ask routing precedence'
     }
 }
 if (Test-Path -LiteralPath (Join-Path $workspaceRoot '.assistant\工作流') -PathType Container) {
@@ -316,6 +295,9 @@ if ((Get-StatusLineValue -Output $guardResult.Output -Prefix 'STATUS') -ne 'FAIL
     Add-Failure 'harness.ps1 should fail safely when run from the harness repo root without WorkspaceRoot'
 } else {
     Add-Check 'harness.ps1 fails safely when run from the harness repo root without WorkspaceRoot'
+}
+} finally {
+    Remove-DirectoryWithRetry -Path $scratchRoot
 }
 
 Write-Output 'Checks:'

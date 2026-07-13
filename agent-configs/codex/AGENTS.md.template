@@ -11,16 +11,16 @@
 ## Read Order
 
 - Orientation: the active workspace's `AGENTS.md` first, then read existing optional files only if present: `.assistant\首页.md` -> `.assistant\工作流\项目约定.md` -> `.assistant\配置\系统信息.md` -> `.assistant\配置\用户偏好.md` -> `.assistant\配置\工具与组件.md`
-- Resume: read existing runtime files only if present: `.assistant\运行时\恢复索引.md` -> `.assistant\运行时\当前任务.md` -> `.assistant\运行时\tasks\<task-id>.md` -> `.assistant\运行时\中断任务.md` -> `.assistant\运行时\上次会话.md`; missing runtime files mean no active recorded state
+- Resume: first inspect open `[writeback-fallback]` rows in `.assistant\运行时\收件箱.md`; then read existing runtime files only if present: `.assistant\运行时\恢复索引.md` -> `.assistant\运行时\当前任务.md` -> `.assistant\运行时\tasks\<task-id>.md` -> `.assistant\运行时\中断任务.md` -> `.assistant\运行时\上次会话.md`; missing runtime files mean no active recorded state
 
 ## Lazy Loading
 
 - After task recognition, follow the active workspace's `.assistant\entry\AGENTS.md` mode rules.
-- For development tasks, `entry-router` is the default auto-entry skill; it chooses `resume-current`, `switch-existing`, `new-task`, or `inbox-first`, then `quick`, `workflow`, or `ask` for new work.
+- For project-scoped development and read-only engineering requests, `entry-router` is the default auto-entry skill; it chooses `resume-current`, `switch-existing`, `new-task`, or authorized durable `inbox-first`, then `quick`, `workflow`, or `ask` for new work.
 - `orchestrator`, `plan`, `implement`, `review`, and `test` are available for harness dispatch, but stage skills should be reached through `entry-router` / `orchestrator` and must not bypass `plan.md` frontmatter stage truth.
 - `quick` loads only entry rules, user preferences / necessary config, and the directly relevant skill.
 - `workflow` loads `entry-router`, `orchestrator`, and the current-stage skill.
-- `resume-current` / `switch-existing` loads recovery runtime files first, then the current-stage skill.
+- `resume-current` / `switch-existing` reads recovery identity/runtime first. Only explicit continue/switch-and-execute loads the current-stage skill or writes runtime; read-only inspect/status does not.
 - `ask` is an iterative blocking clarification gate: do not load workflow stage skills, create `docs/tasks/{task_id}/`, edit code, or enter quick/workflow/PLAN/IMPLEMENT until all blocking uncertainties are resolved. Ask one highest-value question at a time by default, then reassess.
 - Clarification-family requests such as 需求澄清 / 需求确认 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认 follow the active workspace entry rules and land in existing `PLAN -> Clarification` when they need durable development decisions; they do not create a new stage.
 - Treat unresolved PLAN acceptance, non-goals, impact, rollback/compatibility, or implementation path that cannot guide IMPLEMENT as the same Clarification protocol.
@@ -32,7 +32,7 @@
 ## Writeback
 
 - Single-writer model: only the entry agent writes shared pointer files
-- Codex writes task artifacts under `docs/tasks/{task_id}/*` as local workflow artifacts by default, plus the active workspace's `.assistant\运行时\tasks\<task-id>.md` when required
+- Only `mode=workflow` writes task artifacts under `docs/tasks/{task_id}/*`; standalone quick/read-only requests do not create them. Active workflow tasks may also require the workspace's `.assistant\运行时\tasks\<task-id>.md`
 - Durable, code-managed conclusions must be promoted into maintained tracked surfaces such as workflow docs, skills, tests, templates, or user-approved tracked docs
-- Codex updates shared pointer files only when the active workspace entry rules identify Codex as the active entry host for the current task; otherwise, do not touch shared pointers
-- New items go to `运行时\收件箱.md` first
+- Codex updates shared pointer files only for `mode=workflow` when the active workspace entry rules identify Codex as entry host and the user explicitly continues/executes the stage; active or inactive read-only inspect/status never updates pointers
+- New durable workflow items go to `运行时\收件箱.md` first; standalone quick/read-only responses do not

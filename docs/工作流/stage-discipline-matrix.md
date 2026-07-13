@@ -34,12 +34,13 @@ Core question: "Do I truly understand the user's goal, acceptance criteria, scop
 ## Quick - Smallest Reversible Action
 
 Discipline:
-- Only use quick when scope and acceptance are clear, risk is low, and focused verification is possible.
+- Pure read-only work uses quick when target, scope, and output are clear; high-risk code or production areas increase evidence depth but do not grant workflow artifact or write authority.
+- For mutation, use quick only when scope and acceptance are clear, risk is low, and focused verification is possible.
 - Do the smallest safe change or check.
 - Do not create `docs/tasks/{task_id}/`.
 - Do not use workflow frontmatter stages.
 - Do not introduce new abstractions, dependencies, or opportunistic refactors.
-- If scope or risk expands, stop and route to `ask` or `workflow`.
+- If read-only target/scope/output becomes unclear, route to `ask`; if mutation scope or risk expands, stop and route to `ask` or `workflow`.
 - Report changed files and verification.
 
 Core question: "Can this be completed safely and reversibly in the current conversation?"

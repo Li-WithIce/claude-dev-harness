@@ -6,84 +6,31 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Get-NormalizedPath {
-    param([string]$Path)
-
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        return $null
-    }
-
-    return [System.IO.Path]::GetFullPath($Path)
-}
-
-function C([int[]]$Points) {
-    return (-join ($Points | ForEach-Object { [char]$_ }))
-}
-
-function Get-LastExitCodeOrZero {
-    $variable = Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
-    if ($null -ne $variable -and $variable.Value -is [int]) {
-        return $variable.Value
-    }
-
-    return 0
-}
-
-function Invoke-RepoScript {
-    param(
-        [string]$UserProfile,
-        [string]$ScriptPath,
-        [hashtable]$Arguments = @{},
-        [string]$WorkingDirectory = ''
-    )
-
-    $originalUserProfile = $env:USERPROFILE
-    $originalLocation = $null
-    try {
-        $env:USERPROFILE = $UserProfile
-        if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
-            $originalLocation = (Get-Location).Path
-            Set-Location -LiteralPath $WorkingDirectory
-        }
-
-        $output = @(& $ScriptPath @Arguments 2>&1)
-        return [pscustomobject]@{
-            Output   = @($output | ForEach-Object { [string]$_ })
-            ExitCode = (Get-LastExitCodeOrZero)
-        }
-    } finally {
-        if (-not [string]::IsNullOrWhiteSpace($originalLocation)) {
-            Set-Location -LiteralPath $originalLocation
-        }
-        $env:USERPROFILE = $originalUserProfile
-    }
-}
+. (Join-Path $PSScriptRoot 'fixture-test-common.ps1')
 
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 }
 
 $RepoRoot = Get-NormalizedPath -Path $RepoRoot
-$runtimeDirName = C @(36816, 34892, 26102)
-$archiveStem = C @(35760, 24518, 20505, 36873, 24402, 26723)
+$runtimeDirName = Convert-CodePointsToString @(36816, 34892, 26102)
+$archiveStem = Convert-CodePointsToString @(35760, 24518, 20505, 36873, 24402, 26723)
 $archiveFileName = "$archiveStem.md"
-$runtimeArchiveTag = C @(36816, 34892, 26102, 44, 32, 35760, 24518, 20505, 36873, 24402, 26723)
-$archiveDateHeader = C @(24402, 26723, 26085, 26399)
-$typeHeader = C @(31867, 22411)
-$contentSummaryHeader = C @(20869, 23481, 25688, 35201)
-$resultHeader = C @(32467, 26524)
-$targetReasonHeader = C @(30446, 26631, 20301, 32622, 32, 47, 32, 21407, 22240)
-$notesHeader = C @(22791, 27880)
-$legacyArchivePlaceholder = C @(26242, 26080, 24402, 26723, 35760, 24405)
-$scratchRoot = Join-Path $RepoRoot 'tmp\memory-maintain-regression'
-if (Test-Path -LiteralPath $scratchRoot) {
-    Remove-Item -LiteralPath $scratchRoot -Recurse -Force
-}
-
-New-Item -ItemType Directory -Path $scratchRoot | Out-Null
-
+$runtimeArchiveTag = Convert-CodePointsToString @(36816, 34892, 26102, 44, 32, 35760, 24518, 20505, 36873, 24402, 26723)
+$archiveDateHeader = Convert-CodePointsToString @(24402, 26723, 26085, 26399)
+$typeHeader = Convert-CodePointsToString @(31867, 22411)
+$contentSummaryHeader = Convert-CodePointsToString @(20869, 23481, 25688, 35201)
+$resultHeader = Convert-CodePointsToString @(32467, 26524)
+$targetReasonHeader = Convert-CodePointsToString @(30446, 26631, 20301, 32622, 32, 47, 32, 21407, 22240)
+$notesHeader = Convert-CodePointsToString @(22791, 27880)
+$legacyArchivePlaceholder = Convert-CodePointsToString @(26242, 26080, 24402, 26723, 35760, 24405)
+$scratchRoot = Join-Path $RepoRoot ('tmp\memory-maintain-regression-' +
+    [guid]::NewGuid().ToString('N'))
 $checks = New-Object System.Collections.Generic.List[string]
 $failures = New-Object System.Collections.Generic.List[string]
+
+try {
+New-Item -ItemType Directory -Path $scratchRoot | Out-Null
 
 $caseRoot = Join-Path $scratchRoot 'fresh-install-maintain-pass'
 $workspaceRoot = Join-Path $caseRoot 'workspace'
@@ -172,6 +119,13 @@ if ($upgradedArchiveContent -notmatch [regex]::Escape($expectedArchiveHeader)) {
     $failures.Add('memory-maintain.ps1 should upgrade the legacy archive placeholder format to the standard archive table') | Out-Null
 } else {
     $checks.Add('memory-maintain.ps1 upgrades the legacy archive placeholder format to the standard archive table') | Out-Null
+}
+} finally {
+    try {
+        Remove-Item -LiteralPath $scratchRoot -Recurse -Force -ErrorAction Stop
+    } catch {
+        $failures.Add(("cleanup failed for {0}: {1}" -f $scratchRoot, $_.Exception.Message)) | Out-Null
+    }
 }
 
 Write-Output 'Checks:'

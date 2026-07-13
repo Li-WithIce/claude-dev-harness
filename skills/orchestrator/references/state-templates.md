@@ -160,13 +160,12 @@ Do not call team_task_update to mutate task state.
 ```markdown
 ### Run 2 · 2026-04-09 11:00 · runner: Codex
 - verdict: pass
-- findings:
-  - none
+- findings: none
 - next: none
-- invocation: skill=review mode=adapter tool=codex ok=True
+- invocation: skill=codex mode=adapter tool=codex ok=True status=delegated
 ```
 
-`Plan Review` 和 `Code Review` 读取 `verdict`；`Implementation Notes` 记录 `changed/tests/risks/next`。Phase 3 的 invocation trace 只能 append 到既有 run 内；没有 `### Run N` 时要安全跳过。
+`Plan Review` 和 `Code Review` 的每个 run 恰好一个 verdict 和一个 findings 形态；latest `pass + P0/P1`、`revise + none` 会被拒绝，`pass + 仅 P2/P3` 合法。`Implementation Notes` 记录 `changed/tests/risks/next`。Phase 3 的 invocation trace 只能 append 到既有 run 内；没有 `### Run N` 时要安全跳过。
 
 ## spec.md skeleton
 
@@ -203,6 +202,13 @@ Do not call team_task_update to mutate task state.
 ## Findings
 - ...
 
+## Evidence
+- command: `pwsh -NoProfile -File ...`
+- exit_code: 0
+- executed_at: 2026-07-10T10:00:00+08:00
+- revision: 0123456789abcdef0123456789abcdef01234567
+- evidence_path: `docs/tasks/{task_id}/test.md`（workspace 内已存在的相对路径）
+
 ## Risks / Gaps
 - ...
 
@@ -220,25 +226,4 @@ pass
   - ...
 ```
 
-`current_state`、`key_decisions`、`next_actions` 是 opt-in 密度扩展字段，未填不影响 validator；`delivery` 与 `follow_up` 仍是最低必填。
-
-## task mirror skeleton
-
-```markdown
----
-task_id: <task-id>
-stage: <stage>
-tool: <tool>
-tool_profile: <optional profile name>
-model: <optional full model id>
-updated: YYYY-MM-DD
----
-# Task Mirror
-
-- pointer: docs/tasks/{task_id}/plan.md
-- assigned_tool: <tool>
-- assigned_tool_profile: <optional profile name>
-- assigned_model: <optional full model id>
-- latest_plan_review: <pass|revise|none>
-- latest_code_review: <pass|revise|none>
-```
+`current_state`、`key_decisions`、`next_actions` 是 opt-in 密度扩展字段；`delivery`、`follow_up` 和 Evidence 的五个字段是最低必填。Evidence 字段各出现一次；`pass` 要求 `exit_code: 0`、含时区 ISO-8601 `executed_at`、7-40 位十六进制 git revision 或 `dirty:<64hex>`，以及 workspace 内已存在文件的相对 `evidence_path`。

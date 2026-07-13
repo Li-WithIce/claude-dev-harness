@@ -17,7 +17,8 @@ IMPLEMENT 负责两件事：改代码，以及把本轮实现证据追加到 `do
 
 - 不写独立 `implementation-notes.md`
 - 只追加新的 `### Run N`，不改旧 run
-- 回修轮必须追加一条比最近一次 `Code Review` 更晚的 Implementation Notes run
+- CODE_REVIEW revise 回修轮必须追加一条分钟不早于最近 Code Review 的 Implementation Notes run
+- 若由 `TEST fail` 返回，保留失败 `test.md`，并追加分钟不早于其 `Evidence.executed_at` 的 Implementation Notes run
 - 不手改 frontmatter 的 `stage`
 
 ## Run 写法
@@ -54,12 +55,12 @@ Use the IMPLEMENT discipline from `docs/工作流/stage-discipline-matrix.md` wh
 
 ## 工作流程
 
-1. 读取 `plan.md` 和可选 `spec.md`
+1. 读取 `plan.md`、可选 `spec.md`，以及 `TEST fail` 回环保留的 `test.md`
 2. 只实现当前计划要求的内容
 3. 跑最小必要验证
 4. 在 `## Implementation Notes` 末尾追加新 run
 5. 推进到 `CODE_REVIEW` 前，默认使用 workflow descriptor 的 `harness-default-codex`；如需切换 backend，再让用户指定下一阶段 `tool`
-6. 调用 `.assistant\entry\advance-stage.ps1 -TaskId {task_id}` 进入 `CODE_REVIEW`；切换 backend 时追加 `-Tool <next-tool>`
+6. 调用 `.assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage IMPLEMENT` 进入 `CODE_REVIEW`；切换 backend 时追加 `-Tool <next-tool>`
 7. 如需单独排查文档问题，再手动运行 `.assistant\entry\validate-lite-artifacts.ps1 -TaskId {task_id}`
 
 ## Context Providers

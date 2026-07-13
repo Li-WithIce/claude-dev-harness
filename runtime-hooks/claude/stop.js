@@ -4,11 +4,11 @@
 
 const fs = require("fs");
 const path = require("path");
+const { resolveAssistantRoot } = require("./workspace-resolver");
 
-const assistantRoot = "{VAULT_PATH}";
-const currentTaskPath = path.join(assistantRoot, "运行时", "当前任务.md");
-const currentFlowPath = path.join(assistantRoot, "orchestration", "current-flow.md");
 const activeStages = new Set(["PLAN", "PLAN_REVIEW", "IMPLEMENT", "CODE_REVIEW", "TEST"]);
+let currentTaskPath = "";
+let currentFlowPath = "";
 
 /**
  * Writes a JSON payload to stdout.
@@ -105,13 +105,12 @@ function getPointerState() {
 
 /**
  * Resolves the current-flow snapshot.
- * @returns {{taskId: string, taskName: string, status: string, currentDoc: string}}
+ * @returns {{taskId: string, status: string, currentDoc: string}}
  */
 function getFlowState() {
   const content = safeRead(currentFlowPath);
   return {
     taskId: parseYamlValue(content, "task_id"),
-    taskName: parseYamlValue(content, "task_name"),
     status: parseYamlValue(content, "stage"),
     currentDoc: parseYamlValue(content, "current_doc"),
   };
@@ -140,6 +139,13 @@ function isActivePointer(pointerState) {
  * @returns {void}
  */
 function main() {
+  const assistantRoot = resolveAssistantRoot();
+  if (!assistantRoot) {
+    writeJson({});
+    return;
+  }
+  currentTaskPath = path.join(assistantRoot, "运行时", "当前任务.md");
+  currentFlowPath = path.join(assistantRoot, "orchestration", "current-flow.md");
   const pointerState = getPointerState();
   const flowState = getFlowState();
 
@@ -150,13 +156,13 @@ function main() {
 
   if (!isActivePointer(pointerState) && isActiveFlow(flowState)) {
     writeJson({
-      systemMessage: `Shared pointer is idle, but current-flow is still active (status=${flowState.status}, source=current-flow, current_doc=${flowState.currentDoc}).`,
+      systemMessage: `Shared pointer is idle, but current-flow is still active (status=${flowState.status}, source=current-flow, current_doc=${flowState.currentDoc}). This is diagnostic only and does not authorize runtime writes; read-only work may stop without refresh.`,
     });
     return;
   }
 
   writeJson({
-    systemMessage: `Shared pointer still looks active (status=${pointerState.status}, task_id=${pointerState.taskId}). Refresh current-task or last-session before stopping.`,
+    systemMessage: `Shared pointer still looks active (status=${pointerState.status}, task_id=${pointerState.taskId}). Active identity is diagnostic only and does not authorize runtime writes; read-only work may stop without refresh.`,
   });
 }
 

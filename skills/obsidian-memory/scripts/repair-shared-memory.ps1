@@ -13,294 +13,25 @@ $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'resolve-shared-memory-paths.ps1')
 . (Join-Path $PSScriptRoot 'runtime-inbox-common.ps1')
+. (Join-Path $PSScriptRoot 'runtime-state-common.ps1')
 
-function New-CandidateTemplate {
-    <#
-    .SYNOPSIS
-    生成记忆候选标准模板。
-
-    .PARAMETER Today
-    frontmatter 使用的日期字符串。
-
-    .OUTPUTS
-    System.String.
-    #>
-    param([string]$Today)
-
-    return @"
----
-tags: [运行时, 记忆, 候选]
-created: $Today
-updated: $Today
----
-
-# 记忆候选
-
-| ID | 日期 | 类型 | 内容摘要 | 建议写入 | 来源 | 状态 | 用户确认 |
-|----|------|------|----------|----------|------|------|----------|
-| 无 | - | - | 当前暂无候选项 | - | - | - | - |
-"@
-}
-
-function New-ArchiveTemplate {
-    <#
-    .SYNOPSIS
-    生成记忆候选归档标准模板。
-
-    .PARAMETER Today
-    frontmatter 使用的日期字符串。
-
-    .OUTPUTS
-    System.String.
-    #>
-    param([string]$Today)
-
-    return @"
----
-tags: [运行时, 记忆候选归档]
-created: $Today
-updated: $Today
----
-
-# 记忆候选归档
-
-| ID | 归档日期 | 类型 | 内容摘要 | 结果 | 目标位置 / 原因 | 备注 |
-|----|----------|------|----------|------|-----------------|------|
-| 无 | - | - | 当前暂无归档项 | - | - | - |
-"@
-}
-
-function New-CurrentTaskContent {
-    <#
-    .SYNOPSIS
-    生成当前任务共享指针文档。
-
-    .PARAMETER TaskId
-    任务 ID。
-
-    .PARAMETER TaskName
-    任务名称。
-
-    .PARAMETER Status
-    当前状态。
-
-    .PARAMETER CurrentDoc
-    当前文档路径。
-
-    .PARAMETER NextStep
-    下一步。
-
-    .OUTPUTS
-    System.String.
-    #>
+function New-IdleRepairTaskState {
     param(
-        [string]$TaskId,
-        [string]$TaskName,
-        [string]$Status,
-        [string]$CurrentDoc,
-        [string]$NextStep
+        [switch]$FromPlan,
+        [string]$Audit = ''
     )
 
-    return @(
-        '---'
-        ('updated: {0}' -f (Get-CurrentTimestamp))
-        ('task_id: {0}' -f $TaskId)
-        ('entry_host: {0}' -f $script:ResolvedEntryHost)
-        'writer: repair-shared-memory'
-        '---'
-        ''
-        '# 当前任务'
-        ''
-        '| 项目 | 值 |'
-        '|------|-----|'
-        ('| task_id | `{0}` |' -f $TaskId)
-        ('| 任务 | {0} |' -f $TaskName)
-        ('| 状态 | {0} |' -f $Status)
-        ('| 当前文档 | {0} |' -f $CurrentDoc)
-        ('| 下一步 | {0} |' -f $NextStep)
-    ) -join "`r`n"
-}
-
-function New-InterruptedTemplate {
-    <#
-    .SYNOPSIS
-    生成中断任务标准模板。
-
-    .OUTPUTS
-    System.String.
-    #>
-    param()
-
-    return @(
-        '---'
-        ('updated: {0}' -f (Get-CurrentTimestamp))
-        'derived_from: [运行时/tasks/]'
-        '---'
-        ''
-        '# 中断任务'
-        ''
-        '| Priority | Updated | Task | TaskId | Status | Next |'
-        '|----------|---------|------|--------|--------|------|'
-    ) -join "`r`n"
-}
-
-function New-LastSessionTemplate {
-    <#
-    .SYNOPSIS
-    生成上次会话标准模板。
-
-    .OUTPUTS
-    System.String.
-    #>
-    param()
-
-    return @(
-        '---'
-        ('updated: {0}' -f (Get-CurrentTimestamp))
-        '---'
-        ''
-        '# 上次会话'
-        ''
-        '| 项目 | 值 |'
-        '|------|-----|'
-        ('| 日期 | {0} |' -f (Get-TodayDate))
-        '| 任务 | 无 |'
-        '| 状态 | 空闲 |'
-        '| 摘要 | - |'
-    ) -join "`r`n"
-}
-
-function New-TaskRuntimeContent {
-    <#
-    .SYNOPSIS
-    生成最小 task runtime 文档。
-
-    .PARAMETER TaskId
-    任务 ID。
-
-    .PARAMETER TaskName
-    任务名称。
-
-    .PARAMETER PrimaryArtifact
-    主产物相对路径。
-
-    .PARAMETER Stage
-    当前阶段。
-
-    .OUTPUTS
-    System.String.
-    #>
-    param(
-        [string]$TaskId,
-        [string]$TaskName,
-        [string]$PrimaryArtifact,
-        [string]$Stage
-    )
-
-    return @(
-        '---'
-        'schema_version: task-runtime/v1.1'
-        ('task_id: {0}' -f $TaskId)
-        ('task_name: {0}' -f $TaskName)
-        ('primary_artifact: {0}' -f $PrimaryArtifact)
-        ('entry_host: {0}' -f $script:ResolvedEntryHost)
-        '---'
-        ''
-        '# Task Runtime'
-        ''
-        ('- stage: {0}' -f $Stage)
-    ) -join "`r`n"
-}
-
-function New-RecoveryIndexContent {
-    <#
-    .SYNOPSIS
-    生成恢复索引文档。
-
-    .PARAMETER TaskId
-    当前任务 ID。
-
-    .PARAMETER TaskName
-    当前任务名称。
-
-    .PARAMETER Status
-    当前状态。
-
-    .PARAMETER CurrentDoc
-    当前文档路径。
-
-    .PARAMETER NextStep
-    下一步。
-
-    .PARAMETER InterruptedLines
-    中断任务展示行。
-
-    .OUTPUTS
-    System.String.
-    #>
-    param(
-        [string]$TaskId,
-        [string]$TaskName,
-        [string]$Status,
-        [string]$CurrentDoc,
-        [string]$NextStep,
-        [string[]]$InterruptedLines
-    )
-
-    return @(
-        '---'
-        'tags: [运行时, 恢复索引]'
-        ('updated: {0}' -f (Get-CurrentTimestamp))
-        'schema_version: recovery-index/v1.1'
-        'derived_from: [运行时/tasks/, 运行时/中断任务.md]'
-        '---'
-        ''
-        '# 恢复索引'
-        ''
-        '## 当前主任务'
-        ('- task_id: `{0}`' -f $TaskId)
-        ('- 任务: {0}' -f $TaskName)
-        ('- 状态: {0}' -f $Status)
-        ('- 当前文档: {0}' -f $CurrentDoc)
-        ('- 下一步: {0}' -f $NextStep)
-        ''
-        '## 中断任务 Top 3'
-        $InterruptedLines
-    ) -join "`r`n"
-}
-
-function Get-InterruptedPreviewLines {
-    <#
-    .SYNOPSIS
-    从中断任务表生成恢复索引展示行。
-
-    .PARAMETER Path
-    中断任务文件路径。
-
-    .OUTPUTS
-    System.String[].
-    #>
-    param([string]$Path)
-
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        return @('- 无')
+    return [pscustomobject]@{
+        TaskId     = 'none'
+        TaskName   = '无'
+        Status     = '空闲'
+        CurrentDoc = 'none'
+        Tool       = 'none'
+        Next       = '等待新任务'
+        FromFlow   = $false
+        FromPlan   = $FromPlan.IsPresent
+        Audit      = $Audit
     }
-
-    $lines = @()
-    foreach ($line in (Get-Content -LiteralPath $Path -Encoding utf8)) {
-        if ($line -match '^\|\s*P\d+\s*\|') {
-            $parts = $line.Trim().Trim('|').Split('|') | ForEach-Object { $_.Trim() }
-            if ($parts.Count -ge 6) {
-                $lines += ('- [{0}] {1} | {2} | {3}' -f $parts[0], $parts[2], $parts[4], $parts[5])
-            }
-        }
-    }
-
-    if ($lines.Count -eq 0) {
-        return @('- 无')
-    }
-
-    return @($lines | Select-Object -First 3)
 }
 
 function Get-RepairTaskState {
@@ -316,39 +47,153 @@ function Get-RepairTaskState {
     #>
     param([string]$VaultRoot)
 
-    $flow = Get-FlowSnapshot -VaultRoot $VaultRoot
-    $currentTask = Get-CurrentTaskSnapshot -VaultRoot $VaultRoot
+    $currentPath = Join-Path $VaultRoot '运行时\当前任务.md'
+    $current = Get-CanonicalCurrentTaskState -Path $currentPath
 
-    if (-not (Test-IsIdleValue -Value $flow.TaskId) -and (Test-IsIdleValue -Value $currentTask.TaskId)) {
-        return [pscustomobject]@{
-            TaskId     = $flow.TaskId
-            TaskName   = $flow.TaskName
-            Status     = $flow.Stage
-            CurrentDoc = $flow.CurrentDoc
-            Next       = $flow.Next
-            FromFlow   = $true
+    # current-flow is a one-time legacy migration source only. Once a pointer
+    # exists, it remains the authoritative input for repair.
+    if (-not $current.Exists) {
+        $flow = Get-FlowSnapshot -VaultRoot $VaultRoot
+        if (-not (Test-IsIdleValue -Value $flow.TaskId)) {
+            if (-not (Test-CanonicalRuntimeTaskId -TaskId $flow.TaskId)) {
+                return New-IdleRepairTaskState -Audit 'normalized invalid current-flow task_id to canonical idle without task path access'
+            }
+            return [pscustomobject]@{
+                TaskId     = $flow.TaskId
+                TaskName   = $flow.TaskName
+                Status     = $flow.Stage
+                CurrentDoc = $flow.CurrentDoc
+                Tool       = 'none'
+                Next       = $flow.Next
+                FromFlow   = $true
+                FromPlan   = $false
+                Audit      = ''
+            }
         }
     }
 
-    if (-not (Test-IsIdleValue -Value $currentTask.TaskId)) {
+    if (-not (Test-IsIdleValue -Value $current.TaskId)) {
+        if (-not (Test-CanonicalRuntimeTaskId -TaskId $current.TaskId)) {
+            return New-IdleRepairTaskState -Audit 'normalized invalid current task_id to canonical idle without task path access'
+        }
+        $workspaceRoot = Split-Path -Parent $VaultRoot
+        $planPath = Join-Path $workspaceRoot ('docs/tasks/{0}/plan.md' -f $current.TaskId)
+        $planStage = if (Test-Path -LiteralPath $planPath -PathType Leaf) { Get-YamlValue -Path $planPath -Key 'stage' } else { '' }
+        $planTool = if (Test-Path -LiteralPath $planPath -PathType Leaf) { Get-YamlValue -Path $planPath -Key 'tool' } else { '' }
+        if ($planStage -eq 'DONE') {
+            return New-IdleRepairTaskState -FromPlan
+        }
+        $resolvedStage = if (Test-CanonicalRuntimeStage -Stage $planStage) { $planStage } else { $current.Stage }
+        $resolvedDoc = if ($resolvedStage -eq 'DONE') { 'docs/tasks/{0}/test.md' -f $current.TaskId } elseif (Test-CanonicalRuntimeStage -Stage $resolvedStage) { 'docs/tasks/{0}/plan.md' -f $current.TaskId } else { $current.CurrentDoc }
         return [pscustomobject]@{
-            TaskId     = $currentTask.TaskId
-            TaskName   = $currentTask.TaskName
-            Status     = $currentTask.Status
-            CurrentDoc = $(if ([string]::IsNullOrWhiteSpace($flow.CurrentDoc)) { 'docs/tasks/{0}/plan.md' -f $currentTask.TaskId } else { $flow.CurrentDoc })
-            Next       = $currentTask.Next
+            TaskId     = $current.TaskId
+            TaskName   = $(if ([string]::IsNullOrWhiteSpace($current.TaskName)) { $current.TaskId } else { $current.TaskName })
+            Status     = $resolvedStage
+            CurrentDoc = $resolvedDoc
+            Tool       = $(if ([string]::IsNullOrWhiteSpace($planTool)) { $current.Tool } else { $planTool })
+            Next       = $current.NextStep
             FromFlow   = $false
+            FromPlan   = Test-CanonicalRuntimeStage -Stage $planStage
+            Audit      = ''
         }
     }
+
+    return New-IdleRepairTaskState
+}
+
+function Get-LegacyTaskRuntimeMigration {
+    <#
+    .SYNOPSIS
+    将可明确识别的旧 Task Mirror 迁移为 canonical runtime record。
+
+    .DESCRIPTION
+    只接受无 schema_version、带精确 Task Mirror 标记、唯一 canonical stage 和
+    属于同一 task 的 pointer。任何无法证明的记录由调用方原样保留并告警。
+    #>
+    param(
+        [System.IO.FileInfo]$File,
+        [string]$CurrentTaskId
+    )
+
+    $text = Get-Content -LiteralPath $File.FullName -Raw -Encoding utf8
+    if (-not [string]::IsNullOrWhiteSpace((Get-CanonicalRuntimeYamlField -Text $text -Key 'schema_version')) -or
+        $text -notmatch '(?m)^# Task Mirror\s*$') {
+        return $null
+    }
+
+    $taskId = Get-CanonicalRuntimeYamlField -Text $text -Key 'task_id'
+    if (-not (Test-CanonicalRuntimeTaskId -TaskId $taskId) -or $taskId -eq $CurrentTaskId) {
+        return $null
+    }
+
+    $stage = Get-CanonicalRuntimeYamlField -Text $text -Key 'stage'
+    $tool = Get-CanonicalRuntimeYamlField -Text $text -Key 'tool'
+    $updated = Get-CanonicalRuntimeYamlField -Text $text -Key 'updated'
+    $pointerMatches = @([regex]::Matches($text, '(?m)^-\s+pointer:\s*`?([^`\r\n]+?)`?\s*$'))
+    if (-not (Test-CanonicalRuntimeStage -Stage $stage) -or
+        [string]::IsNullOrWhiteSpace($tool) -or
+        [string]::IsNullOrWhiteSpace($updated) -or
+        $pointerMatches.Count -ne 1) {
+        return $null
+    }
+
+    try {
+        $updated = [datetimeoffset]::Parse($updated).ToString('yyyy-MM-ddTHH:mm:sszzz')
+    } catch {
+        return $null
+    }
+
+    $primaryArtifact = $pointerMatches[0].Groups[1].Value.Trim() -replace '\\', '/'
+    if ($primaryArtifact -cnotmatch ('^docs/tasks/{0}/(?:plan|test)\.md$' -f [regex]::Escape($taskId))) {
+        return $null
+    }
+
+    $taskName = Get-CanonicalRuntimeYamlField -Text $text -Key 'task_name'
+    if ([string]::IsNullOrWhiteSpace($taskName)) {
+        $taskName = $taskId
+    }
+
+    $legacyBody = [regex]::Replace($text, '(?s)\A---\r?\n.*?\r?\n---\r?\n?', '').Trim()
 
     return [pscustomobject]@{
-        TaskId     = 'none'
-        TaskName   = '无'
-        Status     = '空闲'
-        CurrentDoc = 'none'
-        Next       = '等待新任务'
-        FromFlow   = $false
+        TaskId          = $taskId
+        TaskName        = $taskName
+        PrimaryArtifact = $primaryArtifact
+        Tool            = $tool
+        Updated         = $updated
+        Stage           = $stage
+        LegacyBody      = $legacyBody
     }
+}
+
+function New-LegacyMigratedRuntimeContent {
+    <#
+    .SYNOPSIS
+    生成保留旧正文的 canonical task runtime。
+    #>
+    param(
+        [pscustomobject]$LegacyState,
+        [string]$WorkspaceRoot,
+        [string]$EntryHost
+    )
+
+    $canonical = New-CanonicalTaskRuntimeContent `
+        -TaskId $LegacyState.TaskId `
+        -TaskName $LegacyState.TaskName `
+        -Stage $LegacyState.Stage `
+        -WorkspaceRoot $WorkspaceRoot `
+        -PrimaryArtifact $LegacyState.PrimaryArtifact `
+        -Tool $LegacyState.Tool `
+        -EntryHost $EntryHost `
+        -Updated $LegacyState.Updated `
+        -Writer 'repair-shared-memory'
+    $quotedBody = if ([string]::IsNullOrWhiteSpace($LegacyState.LegacyBody)) {
+        '> none'
+    } else {
+        (($LegacyState.LegacyBody -split "`r?`n") | ForEach-Object { '> ' + $_ }) -join "`r`n"
+    }
+
+    return $canonical + "`r`n`r`n## Preserved Legacy Details`r`n`r`n- migrated_from_stage: $($LegacyState.Stage)`r`n`r`n$quotedBody"
 }
 
 function Clear-LockBlockedRows {
@@ -403,7 +248,10 @@ $VaultRoot = Resolve-SharedMemoryVaultRoot -VaultRoot $VaultRoot
 $paths = Get-RuntimeMarkdownPaths -VaultRoot $VaultRoot
 $today = Get-TodayDate
 $repairs = @()
+$warnings = @()
 $script:ResolvedEntryHost = Get-EntryHostValue -EntryHost $EntryHost
+$runtimeMutex = Enter-CanonicalRuntimeMutex -VaultRoot $VaultRoot
+try {
 
 if (-not (Test-Path -LiteralPath $paths.RuntimeDir -PathType Container)) {
     New-Item -ItemType Directory -Path $paths.RuntimeDir -Force | Out-Null
@@ -412,16 +260,8 @@ if (-not (Test-Path -LiteralPath $paths.RuntimeDir -PathType Container)) {
 if (Test-Path -LiteralPath $paths.LockPath -PathType Leaf) {
     try {
         $lock = Get-Content -LiteralPath $paths.LockPath -Raw -Encoding utf8 | ConvertFrom-Json
-        $lockedAt = [datetimeoffset]::Parse($lock.locked_at)
-        $ageMinutes = ([datetimeoffset]::UtcNow - $lockedAt.ToUniversalTime()).TotalMinutes
-        if ($ageMinutes -le 30) {
-            Write-Output 'STATUS: WARN'
-            Write-Output ('Blocked: active runtime.lock.json is held by {0} for task {1}; skipped shared runtime repair.' -f $lock.writer, $lock.task_id)
-            exit 1
-        }
-
         Remove-Item -LiteralPath $paths.LockPath -Force
-        $repairs += ('removed expired runtime.lock.json (age={0:N0}min, writer={1})' -f $ageMinutes, $lock.writer)
+        $repairs += ('removed stale runtime.lock.json diagnostic (writer={0}, task={1})' -f $lock.writer, $lock.task_id)
     } catch {
         Remove-Item -LiteralPath $paths.LockPath -Force
         $repairs += 'removed malformed runtime.lock.json'
@@ -429,13 +269,17 @@ if (Test-Path -LiteralPath $paths.LockPath -PathType Leaf) {
 }
 
 $repairState = Get-RepairTaskState -VaultRoot $VaultRoot
+if (-not [string]::IsNullOrWhiteSpace($repairState.Audit)) {
+    $repairs += $repairState.Audit
+}
+$runtimeUpdated = Get-CanonicalRuntimeTimestamp
 $lockContent = [ordered]@{
     writer    = 'repair-shared-memory'
     task_id   = $repairState.TaskId
     locked_at = [datetimeoffset]::UtcNow.ToString('o')
     entry_host = $script:ResolvedEntryHost
 } | ConvertTo-Json -Depth 3
-Write-Utf8Bom -Path $paths.LockPath -Content $lockContent
+Write-CanonicalRuntimeUtf8BomAtomic -Path $paths.LockPath -Content $lockContent
 
 try {
     if (-not (Test-Path -LiteralPath $paths.TasksDir -PathType Container)) {
@@ -445,13 +289,41 @@ try {
 
     $candidatePath = Join-Path $paths.RuntimeDir '记忆候选.md'
     if (-not (Test-Path -LiteralPath $candidatePath -PathType Leaf)) {
-        Write-Utf8Bom -Path $candidatePath -Content (New-CandidateTemplate -Today $today)
+        Write-CanonicalRuntimeUtf8BomAtomic `
+            -Path $candidatePath `
+            -Content @"
+---
+tags: [运行时, 记忆, 候选]
+created: $today
+updated: $today
+---
+
+# 记忆候选
+
+| ID | 日期 | 类型 | 内容摘要 | 建议写入 | 来源 | 状态 | 用户确认 |
+|----|------|------|----------|----------|------|------|----------|
+| 无 | - | - | 当前暂无候选项 | - | - | - | - |
+"@
         $repairs += ('created {0}' -f $candidatePath)
     }
 
     $archivePath = Join-Path $paths.RuntimeDir '记忆候选归档.md'
     if (-not (Test-Path -LiteralPath $archivePath -PathType Leaf)) {
-        Write-Utf8Bom -Path $archivePath -Content (New-ArchiveTemplate -Today $today)
+        Write-CanonicalRuntimeUtf8BomAtomic `
+            -Path $archivePath `
+            -Content @"
+---
+tags: [运行时, 记忆候选归档]
+created: $today
+updated: $today
+---
+
+# 记忆候选归档
+
+| ID | 归档日期 | 类型 | 内容摘要 | 结果 | 目标位置 / 原因 | 备注 |
+|----|----------|------|----------|------|-----------------|------|
+| 无 | - | - | 当前暂无归档项 | - | - | - |
+"@
         $repairs += ('created {0}' -f $archivePath)
     }
 
@@ -460,47 +332,111 @@ try {
         $repairs += ('created {0}' -f $paths.InboxPath)
     }
 
-    if (-not (Test-Path -LiteralPath $paths.CurrentTaskPath -PathType Leaf)) {
-        Write-Utf8Bom -Path $paths.CurrentTaskPath -Content (New-CurrentTaskContent `
-            -TaskId 'none' `
-            -TaskName '无' `
-            -Status '空闲' `
-            -CurrentDoc 'none' `
-            -NextStep '等待新任务')
-        $repairs += ('created {0}' -f $paths.CurrentTaskPath)
-    }
-
     if (-not (Test-Path -LiteralPath $paths.InterruptedPath -PathType Leaf)) {
-        Write-Utf8Bom -Path $paths.InterruptedPath -Content (New-InterruptedTemplate)
+        Write-CanonicalRuntimeUtf8BomAtomic `
+            -Path $paths.InterruptedPath `
+            -Content (@(
+                '---'
+                ('updated: {0}' -f (Get-CurrentTimestamp))
+                'derived_from: [运行时/tasks/]'
+                '---'
+                ''
+                '# 中断任务'
+                ''
+                '| Priority | Updated | Task | TaskId | Status | Next |'
+                '|----------|---------|------|--------|--------|------|'
+            ) -join "`r`n")
         $repairs += ('created {0}' -f $paths.InterruptedPath)
     }
 
     if (-not (Test-Path -LiteralPath $paths.LastSessionPath -PathType Leaf)) {
-        Write-Utf8Bom -Path $paths.LastSessionPath -Content (New-LastSessionTemplate)
+        Write-CanonicalRuntimeUtf8BomAtomic `
+            -Path $paths.LastSessionPath `
+            -Content (@(
+                '---'
+                ('updated: {0}' -f (Get-CurrentTimestamp))
+                '---'
+                ''
+                '# 上次会话'
+                ''
+                '| 项目 | 值 |'
+                '|------|-----|'
+                ('| 日期 | {0} |' -f (Get-TodayDate))
+                '| 任务 | 无 |'
+                '| 状态 | 空闲 |'
+                '| 摘要 | - |'
+            ) -join "`r`n")
         $repairs += ('created {0}' -f $paths.LastSessionPath)
     }
 
-    Write-Utf8Bom -Path $paths.CurrentTaskPath -Content (New-CurrentTaskContent `
-        -TaskId $repairState.TaskId `
-        -TaskName $repairState.TaskName `
-        -Status $repairState.Status `
-        -CurrentDoc $repairState.CurrentDoc `
-        -NextStep $repairState.Next)
-    if ($repairState.FromFlow) {
-        $repairs += ('synchronized {0} from current-flow' -f $paths.CurrentTaskPath)
+    $currentBeforeRepair = Get-CanonicalCurrentTaskState -Path $paths.CurrentTaskPath
+    $currentNeedsRepair = -not $currentBeforeRepair.Exists -or
+        $currentBeforeRepair.SchemaVersion -ne 'current-task-pointer/v1.1' -or
+        [string]::IsNullOrWhiteSpace($currentBeforeRepair.EntryHost) -or
+        [string]::IsNullOrWhiteSpace($currentBeforeRepair.Writer) -or
+        [string]::IsNullOrWhiteSpace($currentBeforeRepair.Updated) -or
+        $currentBeforeRepair.TaskId -ne $repairState.TaskId -or
+        $currentBeforeRepair.Stage -ne $repairState.Status -or
+        $currentBeforeRepair.CurrentDoc -ne $repairState.CurrentDoc
+    if ($currentNeedsRepair) {
+        Write-CanonicalRuntimeUtf8BomAtomic -Path $paths.CurrentTaskPath -Content (New-CanonicalCurrentTaskContent `
+            -TaskId $repairState.TaskId `
+            -TaskName $repairState.TaskName `
+            -Stage $repairState.Status `
+            -CurrentDoc $repairState.CurrentDoc `
+            -Tool $repairState.Tool `
+            -EntryHost $script:ResolvedEntryHost `
+            -NextStep $repairState.Next `
+            -Updated $runtimeUpdated `
+            -Writer 'repair-shared-memory')
+        if ($repairState.FromFlow) {
+            $repairs += ('migrated missing pointer {0} from current-flow' -f $paths.CurrentTaskPath)
+        } else {
+            $repairs += ('repaired {0}' -f $paths.CurrentTaskPath)
+        }
+    }
+
+    $workspaceRoot = Split-Path -Parent $VaultRoot
+    $legacyRecords = Get-CanonicalTaskRuntimeRecords -TasksDirectory $paths.TasksDir
+    $currentTaskRuntimePath = if (Test-CanonicalRuntimeTaskId -TaskId $repairState.TaskId) {
+        [System.IO.Path]::GetFullPath((Join-Path $paths.TasksDir ('{0}.md' -f $repairState.TaskId)))
     } else {
-        $repairs += ('normalized {0}' -f $paths.CurrentTaskPath)
+        ''
+    }
+    foreach ($legacyRecord in @($legacyRecords | Where-Object { -not $_.IsValid })) {
+        if (-not [string]::IsNullOrWhiteSpace($currentTaskRuntimePath) -and [System.IO.Path]::GetFullPath($legacyRecord.Path) -ieq $currentTaskRuntimePath) {
+            continue
+        }
+        $legacyState = Get-LegacyTaskRuntimeMigration `
+            -File (Get-Item -LiteralPath $legacyRecord.Path) `
+            -CurrentTaskId $repairState.TaskId
+        if ($null -eq $legacyState) {
+            $warnings += ('preserved invalid task runtime for manual recovery: {0}' -f $legacyRecord.Path)
+            continue
+        }
+
+        Write-CanonicalRuntimeUtf8BomAtomic -Path $legacyRecord.Path -Content (New-LegacyMigratedRuntimeContent `
+            -LegacyState $legacyState `
+            -WorkspaceRoot $workspaceRoot `
+            -EntryHost $script:ResolvedEntryHost)
+        $repairs += ('migrated legacy task runtime {0} with stage {1}' -f $legacyRecord.Path, $legacyState.Stage)
     }
 
     if (-not (Test-IsIdleValue -Value $repairState.TaskId)) {
         $taskRuntimePath = Join-Path $paths.TasksDir ('{0}.md' -f $repairState.TaskId)
-        if (-not (Test-Path -LiteralPath $taskRuntimePath -PathType Leaf)) {
-            Write-Utf8Bom -Path $taskRuntimePath -Content (New-TaskRuntimeContent `
+        $existingRecord = Get-CanonicalTaskRuntimeRecords -TasksDirectory $paths.TasksDir | Where-Object { $_.Path -eq $taskRuntimePath } | Select-Object -First 1
+        if ($null -eq $existingRecord -or -not $existingRecord.IsValid -or $existingRecord.Stage -ne $repairState.Status -or $existingRecord.PrimaryArtifact -ne $repairState.CurrentDoc) {
+            Write-CanonicalRuntimeUtf8BomAtomic -Path $taskRuntimePath -Content (New-CanonicalTaskRuntimeContent `
                 -TaskId $repairState.TaskId `
                 -TaskName $repairState.TaskName `
+                -Stage $repairState.Status `
+                -WorkspaceRoot $workspaceRoot `
                 -PrimaryArtifact $repairState.CurrentDoc `
-                -Stage $repairState.Status)
-            $repairs += ('created {0}' -f $taskRuntimePath)
+                -Tool $repairState.Tool `
+                -EntryHost $script:ResolvedEntryHost `
+                -Updated $runtimeUpdated `
+                -Writer 'repair-shared-memory')
+            $repairs += ('repaired {0}' -f $taskRuntimePath)
         }
     }
 
@@ -511,14 +447,13 @@ try {
         $repairs += ('cleared {0} lock-blocked inbox item(s)' -f $clearedResult.Cleared)
     }
 
-    $indexContent = New-RecoveryIndexContent `
-        -TaskId $repairState.TaskId `
-        -TaskName $repairState.TaskName `
-        -Status $repairState.Status `
-        -CurrentDoc $repairState.CurrentDoc `
-        -NextStep $repairState.Next `
-        -InterruptedLines (Get-InterruptedPreviewLines -Path $paths.InterruptedPath)
-    Write-Utf8Bom -Path $paths.RecoveryIndexPath -Content $indexContent
+    $canonicalCurrent = Get-CanonicalCurrentTaskState -Path $paths.CurrentTaskPath
+    $canonicalRecords = Get-CanonicalTaskRuntimeRecords -TasksDirectory $paths.TasksDir
+    Write-CanonicalRuntimeUtf8BomAtomic -Path $paths.RecoveryIndexPath -Content (New-CanonicalRecoveryIndexContent `
+        -CurrentTask $canonicalCurrent `
+        -TaskRecords $canonicalRecords `
+        -Updated $runtimeUpdated `
+        -Writer 'repair-shared-memory')
     $repairs += ('refreshed {0}' -f $paths.RecoveryIndexPath)
 
     Remove-Item -LiteralPath $paths.LockPath -Force
@@ -529,9 +464,26 @@ try {
     throw
 }
 
-Write-Output 'STATUS: PASS'
+if ($warnings.Count -gt 0) {
+    Write-Output 'STATUS: WARN'
+} else {
+    Write-Output 'STATUS: PASS'
+}
 Write-Output ('Repaired: {0}' -f $repairs.Count)
 foreach ($item in $repairs) {
     Write-Output ('- {0}' -f $item)
 }
+if ($warnings.Count -gt 0) {
+    Write-Output 'Warnings:'
+    foreach ($warning in $warnings) {
+        Write-Output ('- {0}' -f $warning)
+    }
+    exit 1
+}
 exit 0
+} finally {
+    if (Test-Path -LiteralPath $paths.LockPath -PathType Leaf) {
+        Remove-Item -LiteralPath $paths.LockPath -Force -ErrorAction SilentlyContinue
+    }
+    Exit-CanonicalRuntimeMutex -Mutex $runtimeMutex
+}

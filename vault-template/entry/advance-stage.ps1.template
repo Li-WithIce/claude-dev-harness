@@ -5,11 +5,18 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$TaskId,
 
+    [Parameter(Mandatory = $true)]
+    [string]$ExpectedStage,
+
     [string]$Tool = "",
 
     [string]$Profile = "",
 
-    [string]$Model = ""
+    [string]$Model = "",
+
+    [switch]$SyncOnly,
+
+    [switch]$ActivateCurrent
 )
 
 Set-StrictMode -Version Latest
@@ -22,15 +29,20 @@ Advance the current lite task stage from the workspace.
 This shim keeps the user-facing command inside `.assistant\entry` while delegating to the managed harness repo script.
 .PARAMETER TaskId
 The task id under `docs/tasks/{task_id}/`.
+.PARAMETER ExpectedStage
+The caller-observed current frontmatter stage used for compare-and-swap validation.
 .PARAMETER Tool
 The next-stage tool for non-DONE transitions.
 .PARAMETER Profile
 Optional next-stage tool profile.
 .PARAMETER Model
 Optional full model id override.
+.PARAMETER SyncOnly
+Synchronize runtime state without changing the plan stage.
+.PARAMETER ActivateCurrent
+Explicitly make this non-DONE task the current task.
 .OUTPUTS
 None.
 #>
 
-& '{REPO_ROOT}\scripts\advance-stage.ps1' -TaskId $TaskId -Tool $Tool -Profile $Profile -Model $Model -VaultRoot '{VAULT_PATH}' -WorkspaceRoot '{WORKSPACE_ROOT}' -RepoRoot '{REPO_ROOT}'
-exit $LASTEXITCODE
+& '{REPO_ROOT}\scripts\advance-stage.ps1' -TaskId $TaskId -ExpectedStage $ExpectedStage -Tool $Tool -Profile $Profile -Model $Model -SyncOnly:$SyncOnly -ActivateCurrent:$ActivateCurrent -VaultRoot '{VAULT_PATH}' -WorkspaceRoot '{WORKSPACE_ROOT}' -RepoRoot '{REPO_ROOT}'

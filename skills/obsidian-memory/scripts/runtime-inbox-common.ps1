@@ -6,32 +6,7 @@ $script:RuntimeInboxPlaceholderSummary = '当前暂无收件箱事项'
 $script:RuntimeInboxHeader = '| created_at | source | task_id | type | status | summary | payload |'
 $script:RuntimeInboxDivider = '|------------|--------|---------|------|--------|---------|---------|'
 
-function Write-Utf8Bom {
-    <#
-    .SYNOPSIS
-    以 UTF-8 BOM 写入文本文件。
-
-    .PARAMETER Path
-    目标文件路径。
-
-    .PARAMETER Content
-    要写入的完整文本。
-
-    .OUTPUTS
-    None.
-
-    .NOTES
-    该函数会覆盖目标文件。
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Path,
-        [Parameter(Mandatory = $true)]
-        [string]$Content
-    )
-
-    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($true)))
-}
+. (Join-Path $PSScriptRoot 'runtime-state-common.ps1')
 
 function Get-CurrentTimestamp {
     <#
@@ -237,41 +212,10 @@ function Get-FlowSnapshot {
     }
 }
 
-function Get-CurrentTaskSnapshot {
-    <#
-    .SYNOPSIS
-    读取当前任务共享指针的核心字段。
-
-    .PARAMETER VaultRoot
-    共享记忆根目录。
-
-    .OUTPUTS
-    PSCustomObject.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$VaultRoot
-    )
-
-    $path = Join-Path $VaultRoot '运行时\当前任务.md'
-    $taskId = Get-TableValue -Path $path -Key 'task_id'
-    if ([string]::IsNullOrWhiteSpace($taskId)) {
-        $taskId = Get-YamlValue -Path $path -Key 'task_id'
-    }
-
-    return [pscustomobject]@{
-        Path     = $path
-        TaskId   = Remove-MarkdownTicks -Value $taskId
-        TaskName = Get-TableValue -Path $path -Key '任务'
-        Status   = Get-TableValue -Path $path -Key '状态'
-        Next     = Get-TableValue -Path $path -Key '下一步'
-    }
-}
-
 function Resolve-EntryTaskId {
     <#
     .SYNOPSIS
-    解析当前入口任务 ID，优先 current-flow，再退回当前任务指针。
+    解析当前入口任务 ID，以当前任务指针为权威来源。
 
     .PARAMETER VaultRoot
     共享记忆根目录。
@@ -284,14 +228,36 @@ function Resolve-EntryTaskId {
         [string]$VaultRoot
     )
 
-    $flow = Get-FlowSnapshot -VaultRoot $VaultRoot
-    if (-not (Test-IsIdleValue -Value $flow.TaskId)) {
-        return $flow.TaskId
+    $currentTaskPath = Join-Path $VaultRoot '运行时\当前任务.md'
+    if (Test-Path -LiteralPath $currentTaskPath -PathType Leaf) {
+        $currentTask = Get-CanonicalCurrentTaskState -Path $currentTaskPath
+        $updatedValue = [datetimeoffset]::MinValue
+        $hasValidUpdated = [datetimeoffset]::TryParseExact(
+            $currentTask.Updated,
+            'yyyy-MM-ddTHH:mm:sszzz',
+            [System.Globalization.CultureInfo]::InvariantCulture,
+            [System.Globalization.DateTimeStyles]::None,
+            [ref]$updatedValue
+        )
+        $isCanonicalActive = $currentTask.SchemaVersion -eq 'current-task-pointer/v1.1' -and
+            (Test-CanonicalRuntimeTaskId -TaskId $currentTask.TaskId) -and
+            (Test-CanonicalRuntimeStage -Stage $currentTask.Stage) -and
+            $currentTask.Stage -ne 'DONE' -and
+            -not [string]::IsNullOrWhiteSpace($currentTask.EntryHost) -and
+            -not [string]::IsNullOrWhiteSpace($currentTask.Writer) -and
+            -not [string]::IsNullOrWhiteSpace($currentTask.Updated) -and
+            $hasValidUpdated -and
+            -not [string]::IsNullOrWhiteSpace($currentTask.CurrentDoc)
+        if ($isCanonicalActive) {
+            return $currentTask.TaskId
+        }
+
+        return 'unknown'
     }
 
-    $currentTask = Get-CurrentTaskSnapshot -VaultRoot $VaultRoot
-    if (-not (Test-IsIdleValue -Value $currentTask.TaskId)) {
-        return $currentTask.TaskId
+    $flow = Get-FlowSnapshot -VaultRoot $VaultRoot
+    if (Test-CanonicalRuntimeTaskId -TaskId $flow.TaskId) {
+        return $flow.TaskId
     }
 
     return 'unknown'
@@ -316,8 +282,23 @@ function Resolve-WorkspaceRoot {
         [string]$VaultRoot = ''
     )
 
-    if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
-        return [System.IO.Path]::GetFullPath($WorkspaceRoot)
+    $explicitWorkspaceRoot = if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+        ''
+    } else {
+        [System.IO.Path]::GetFullPath($WorkspaceRoot).TrimEnd('\', '/')
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($VaultRoot)) {
+        $vaultWorkspaceRoot = (Split-Path -Parent ([System.IO.Path]::GetFullPath($VaultRoot))).TrimEnd('\', '/')
+        if (-not [string]::IsNullOrWhiteSpace($explicitWorkspaceRoot) -and
+            -not $explicitWorkspaceRoot.Equals($vaultWorkspaceRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "WorkspaceRoot does not own the explicit VaultRoot: workspace=$explicitWorkspaceRoot vault=$VaultRoot"
+        }
+        return $vaultWorkspaceRoot
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($explicitWorkspaceRoot)) {
+        return $explicitWorkspaceRoot
     }
 
     foreach ($candidate in @($env:DEV_HARNESS_WORKSPACE_ROOT, $env:CLAUDE_DEV_HARNESS_WORKSPACE_ROOT, $env:WORKSPACE_ROOT)) {
@@ -327,17 +308,6 @@ function Resolve-WorkspaceRoot {
     }
 
     $cwd = (Get-Location).Path
-    if (Test-Path -LiteralPath (Join-Path $cwd '.assistant') -PathType Container) {
-        return [System.IO.Path]::GetFullPath($cwd)
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($VaultRoot)) {
-        $normalizedVaultRoot = [System.IO.Path]::GetFullPath($VaultRoot)
-        if ((Split-Path -Leaf $normalizedVaultRoot) -ieq '.assistant') {
-            return (Split-Path -Parent $normalizedVaultRoot)
-        }
-    }
-
     return [System.IO.Path]::GetFullPath($cwd)
 }
 
@@ -357,20 +327,19 @@ function Get-RuntimeMarkdownPaths {
         [string]$VaultRoot
     )
 
-    if (Get-Command Assert-ProjectLocalVault -ErrorAction SilentlyContinue) {
-        $VaultRoot = Assert-ProjectLocalVault -VaultRoot $VaultRoot
-    }
+    $VaultRoot = Assert-CanonicalRuntimeVaultRoot -VaultRoot $VaultRoot
 
-    $runtimeDir = Join-Path $VaultRoot '运行时'
+    $runtimeDir = Resolve-CanonicalRuntimeContainedPath -Root $VaultRoot -RelativePath '运行时' -Label 'runtime directory'
+    $inboxPath = Resolve-CanonicalRuntimeContainedPath -Root $VaultRoot -RelativePath '运行时\收件箱.md' -Label 'runtime inbox'
     return [pscustomobject]@{
         RuntimeDir       = $runtimeDir
-        InboxPath        = Join-Path $runtimeDir '收件箱.md'
-        CurrentTaskPath  = Join-Path $runtimeDir '当前任务.md'
-        InterruptedPath  = Join-Path $runtimeDir '中断任务.md'
-        LastSessionPath  = Join-Path $runtimeDir '上次会话.md'
-        RecoveryIndexPath = Join-Path $runtimeDir '恢复索引.md'
-        TasksDir         = Join-Path $runtimeDir 'tasks'
-        LockPath         = Join-Path $runtimeDir 'runtime.lock.json'
+        InboxPath        = $inboxPath
+        CurrentTaskPath  = Resolve-CanonicalRuntimeContainedPath -Root $VaultRoot -RelativePath '运行时\当前任务.md' -Label 'runtime current task'
+        InterruptedPath  = Resolve-CanonicalRuntimeContainedPath -Root $VaultRoot -RelativePath '运行时\中断任务.md' -Label 'runtime interrupted task'
+        LastSessionPath  = Resolve-CanonicalRuntimeContainedPath -Root $VaultRoot -RelativePath '运行时\上次会话.md' -Label 'runtime last session'
+        RecoveryIndexPath = Resolve-CanonicalRuntimeContainedPath -Root $VaultRoot -RelativePath '运行时\恢复索引.md' -Label 'runtime recovery index'
+        TasksDir         = Resolve-CanonicalRuntimeContainedPath -Root $VaultRoot -RelativePath '运行时\tasks' -Label 'runtime task directory'
+        LockPath         = Resolve-CanonicalRuntimeContainedPath -Root $VaultRoot -RelativePath '运行时\runtime.lock.json' -Label 'runtime diagnostic lock'
     }
 }
 
@@ -424,6 +393,101 @@ function Format-InboxRow {
         (Escape-InboxCell -Value $Row.Payload)
 }
 
+function Test-RuntimeInboxPlaceholderRow {
+    <#
+    .SYNOPSIS
+    仅识别完整匹配七列约定的规范占位行。
+
+    .DESCRIPTION
+    不得以单个字段判定占位行，否则合法数据行恰好使用 `-`
+    或占位摘要时会在 append / fallback 写回中被静默丢弃。
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Row
+    )
+
+    return (
+        [string]$Row.CreatedAt -ceq '-' -and
+        [string]$Row.Source -ceq '-' -and
+        [string]$Row.TaskId -ceq '-' -and
+        [string]$Row.Type -ceq '-' -and
+        [string]$Row.Status -ceq 'cleared' -and
+        [string]$Row.Summary -ceq $script:RuntimeInboxPlaceholderSummary -and
+        [string]$Row.Payload -ceq '-'
+    )
+}
+
+function Get-InboxIdentityDigest {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Namespace,
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Row
+    )
+
+    $identity = "$Namespace`n$(Format-InboxRow -Row $Row)"
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($identity)
+        return [System.BitConverter]::ToString($sha256.ComputeHash($bytes)).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+    }
+}
+
+function Get-InboxRouteTaskId {
+    <#
+    .SYNOPSIS
+    为收件箱行返回稳定的 workflow task id。
+
+    .DESCRIPTION
+    合法且已绑定的 task_id 原样返回；空值或 canonical sentinel 使用完整七列行身份
+    派生稳定的 inbox task id，确保 create/triage 间崩溃后仍命中同一 plan。
+
+    .PARAMETER Row
+    包含标准收件箱列的对象。
+
+    .OUTPUTS
+    System.String.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Row
+    )
+
+    $taskId = [string]$Row.TaskId
+    if (Test-CanonicalRuntimeTaskId -TaskId $taskId) {
+        return $taskId
+    }
+
+    $sentinels = @('none', 'idle', 'unknown')
+    if (-not [string]::IsNullOrWhiteSpace($taskId) -and $sentinels -cnotcontains $taskId) {
+        throw "Inbox row task_id is neither canonical nor a supported sentinel: $taskId"
+    }
+
+    $digest = Get-InboxIdentityDigest -Namespace 'runtime-inbox-route/v1' -Row $Row
+    return 'inbox-' + $digest.Substring(0, 58)
+}
+
+function Get-InboxRowId {
+    <#
+    .SYNOPSIS
+    从完整七列行身份派生临时精确选择器。
+
+    .DESCRIPTION
+    row_id 不参与 workflow task 路由，也不写入持久 schema；相同完整行共享选择器，
+    任一列不同都会得到不同选择器。
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Row
+    )
+
+    $digest = Get-InboxIdentityDigest -Namespace 'runtime-inbox-row/v1' -Row $Row
+    return 'row-' + $digest.Substring(0, 60)
+}
+
 function Convert-InboxLineToRow {
     <#
     .SYNOPSIS
@@ -441,20 +505,33 @@ function Convert-InboxLineToRow {
         [string]$Line
     )
 
-    if ($Line -notmatch '^\|') {
+    $trimmedLine = $Line.Trim()
+    if (-not $trimmedLine.StartsWith('|')) {
+        return $null
+    }
+    if ($trimmedLine.Length -lt 2 -or -not $trimmedLine.EndsWith('|')) {
+        throw "Runtime inbox table row must start and end with one boundary pipe: $Line"
+    }
+
+    $cells = $trimmedLine.Substring(1, $trimmedLine.Length - 2).Split('|') | ForEach-Object { $_.Trim() }
+    if ($cells.Count -ne 7) {
+        throw "Runtime inbox table row must contain exactly seven columns: $Line"
+    }
+
+    $headerCells = @('created_at', 'source', 'task_id', 'type', 'status', 'summary', 'payload')
+    $isHeader = $true
+    for ($index = 0; $index -lt $headerCells.Count; $index++) {
+        if ($cells[$index] -cne $headerCells[$index]) {
+            $isHeader = $false
+            break
+        }
+    }
+    $isDivider = @($cells | Where-Object { $_ -notmatch '^-+$' }).Count -eq 0
+    if ($isHeader -or $isDivider) {
         return $null
     }
 
-    $cells = $Line.Trim().Trim('|').Split('|') | ForEach-Object { $_.Trim() }
-    if ($cells.Count -lt 7) {
-        return $null
-    }
-
-    if ($cells[0] -eq 'created_at' -or $cells[0] -match '^-+$') {
-        return $null
-    }
-
-    return [pscustomobject]@{
+    $row = [pscustomobject]@{
         CreatedAt = $cells[0]
         Source    = $cells[1]
         TaskId    = $cells[2]
@@ -463,6 +540,12 @@ function Convert-InboxLineToRow {
         Summary   = $cells[5]
         Payload   = $cells[6]
     }
+
+    if (Test-RuntimeInboxPlaceholderRow -Row $row) {
+        return $null
+    }
+
+    return $row
 }
 
 function Read-RuntimeInbox {
@@ -483,10 +566,6 @@ function Read-RuntimeInbox {
     )
 
     $paths = Get-RuntimeMarkdownPaths -VaultRoot $VaultRoot
-    if (-not (Test-Path -LiteralPath $paths.RuntimeDir -PathType Container)) {
-        New-Item -ItemType Directory -Path $paths.RuntimeDir -Force | Out-Null
-    }
-
     $created = Get-TodayDate
     $rows = @()
     $needsRewrite = $false
@@ -514,11 +593,14 @@ function Read-RuntimeInbox {
         ) {
             $needsRewrite = $true
         }
-    } else {
+    } elseif ($NormalizeExisting.IsPresent) {
         $needsRewrite = $true
     }
 
     if ($needsRewrite) {
+        if (-not (Test-Path -LiteralPath $paths.RuntimeDir -PathType Container)) {
+            New-Item -ItemType Directory -Path $paths.RuntimeDir -Force | Out-Null
+        }
         Write-RuntimeInbox -InboxPath $paths.InboxPath -CreatedDate $created -Rows $rows
     }
 
@@ -578,7 +660,7 @@ function Write-RuntimeInbox {
         $rowLines
     ) -join "`r`n"
 
-    Write-Utf8Bom -Path $InboxPath -Content $content
+    Write-CanonicalRuntimeUtf8BomAtomic -Path $InboxPath -Content $content
 }
 
 function Select-ActiveInboxRows {
@@ -609,29 +691,46 @@ function Select-ActiveInboxRows {
     #>
     param(
         [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
         [pscustomobject[]]$Rows,
+        [string]$RowId = '',
+        [string]$RouteTaskId = '',
         [string]$CreatedAt = '',
         [string]$TaskId = '',
         [string]$Type = '',
         [string]$Source = '',
+        [string]$Summary = '',
+        [string]$Payload = '',
         [string]$SummaryContains = ''
     )
 
-    $filtered = @($Rows | Where-Object { $_.Status -eq 'open' })
+    $filtered = @($Rows | Where-Object { $_.Status -ceq 'open' })
+    if (-not [string]::IsNullOrWhiteSpace($RowId)) {
+        $filtered = @($filtered | Where-Object { (Get-InboxRowId -Row $_) -ceq $RowId })
+    }
+    if (-not [string]::IsNullOrWhiteSpace($RouteTaskId)) {
+        $filtered = @($filtered | Where-Object { (Get-InboxRouteTaskId -Row $_) -ceq $RouteTaskId })
+    }
     if (-not [string]::IsNullOrWhiteSpace($CreatedAt)) {
-        $filtered = @($filtered | Where-Object { $_.CreatedAt -eq $CreatedAt })
+        $filtered = @($filtered | Where-Object { $_.CreatedAt -ceq $CreatedAt })
     }
     if (-not [string]::IsNullOrWhiteSpace($TaskId)) {
-        $filtered = @($filtered | Where-Object { $_.TaskId -eq $TaskId })
+        $filtered = @($filtered | Where-Object { $_.TaskId -ceq $TaskId })
     }
     if (-not [string]::IsNullOrWhiteSpace($Type)) {
-        $filtered = @($filtered | Where-Object { $_.Type -eq $Type })
+        $filtered = @($filtered | Where-Object { $_.Type -ceq $Type })
     }
     if (-not [string]::IsNullOrWhiteSpace($Source)) {
-        $filtered = @($filtered | Where-Object { $_.Source -eq $Source })
+        $filtered = @($filtered | Where-Object { $_.Source -ceq $Source })
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Summary)) {
+        $filtered = @($filtered | Where-Object { $_.Summary -ceq $Summary })
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Payload)) {
+        $filtered = @($filtered | Where-Object { $_.Payload -ceq $Payload })
     }
     if (-not [string]::IsNullOrWhiteSpace($SummaryContains)) {
-        $filtered = @($filtered | Where-Object { $_.Summary.Contains($SummaryContains) })
+        $filtered = @($filtered | Where-Object { $_.Summary.IndexOf($SummaryContains, [System.StringComparison]::Ordinal) -ge 0 })
     }
 
     return ,@($filtered)

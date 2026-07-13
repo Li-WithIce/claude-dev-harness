@@ -6,11 +6,6 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Add-Check {
-    param([string]$Message)
-    $script:Checks += $Message
-}
-
 function Add-Failure {
     param([string]$Message)
     $script:Failures += $Message
@@ -56,7 +51,7 @@ foreach ($relativePath in $scriptFiles) {
     }
 
     if ($hits.Count -eq 0) {
-        Add-Check ("no required Node/npm/npx command dependency in {0}" -f $relativePath)
+        $script:Checks += ("no required Node/npm/npx command dependency in {0}" -f $relativePath)
     } else {
         Add-Failure ("Node/npm/npx command dependency leaked into {0}: {1}" -f $relativePath, ($hits -join " | "))
     }
