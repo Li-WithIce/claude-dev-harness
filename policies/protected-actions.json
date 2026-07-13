@@ -1,0 +1,26 @@
+{
+  "schema_version": "protected-actions/v1",
+  "rules": [
+    {
+      "id": "production-database-destructive",
+      "match": {
+        "command_regex": "(?i)\\b(drop|truncate|delete\\s+from)\\b",
+        "environment": "production"
+      },
+      "requires_profile": "critical",
+      "requires_approval": "production",
+      "requires_dry_run": true,
+      "requires_independent_review": true
+    },
+    {
+      "id": "authorization-path-change",
+      "match": {
+        "path_globs": ["**/auth/**", "**/permissions/**", "**/rbac/**"]
+      },
+      "requires_profile": "governed",
+      "requires_approval": "none",
+      "requires_dry_run": false,
+      "requires_independent_review": true
+    }
+  ]
+}

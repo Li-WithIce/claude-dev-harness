@@ -1,0 +1,12 @@
+{
+  "schema_version": "requirement-contract/v1",
+  "task_id": "freeze-user",
+  "goal": "Allow an administrator to freeze one user.",
+  "acceptance": ["The target user's existing session is invalidated."],
+  "in_scope": ["User status API"],
+  "product_constraints": ["User data is retained."],
+  "product_decisions": [],
+  "unresolved_product_decisions": [],
+  "source_authority": ["repo-evidence", "engineering-convention"],
+  "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}
