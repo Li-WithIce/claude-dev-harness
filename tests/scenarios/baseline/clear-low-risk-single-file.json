@@ -1,0 +1,48 @@
+{
+  "schema_version": "harness-benchmark-scenario/v1",
+  "scenario_id": "clear-low-risk-single-file",
+  "task_summary": "Clear, low-risk change limited to one tracked file.",
+  "source": {
+    "kind": "redacted-repository-derived",
+    "contains_full_prompt": false
+  },
+  "baseline": {
+    "branch": "codex/harness-distribution",
+    "commit": "aee525f6b3b0638f11bf6ab278482aa5b8c79d11",
+    "tag": "thin-harness-v1-baseline-aee525f"
+  },
+  "protocols": {
+    "v1": {
+      "model_turns": {
+        "status": "unavailable",
+        "value": null,
+        "reason": "No host trace was captured; model turns must not be inferred."
+      },
+      "tool_calls": {
+        "status": "unavailable",
+        "value": null,
+        "reason": "No host trace was captured; tool calls must not be inferred."
+      },
+      "loaded_files": {
+        "status": "simulated",
+        "value": 6,
+        "reason": "Repository-derived v1 route fixture, not a captured host trace."
+      },
+      "loaded_skills": {
+        "status": "simulated",
+        "value": 5,
+        "reason": "Repository-derived v1 stage-chain fixture, not a captured host trace."
+      },
+      "artifact_writes": {
+        "status": "simulated",
+        "value": 3,
+        "reason": "Fixture expectation for plan, code, and test artifacts; not an observed run."
+      },
+      "runtime_writes": {
+        "status": "simulated",
+        "value": 4,
+        "reason": "Fixture expectation for v1 runtime transitions; not an observed run."
+      }
+    }
+  }
+}
