@@ -241,6 +241,8 @@ $coreScripts = @(
     'verify-context-provider-install-isolation.ps1',
     'verify-entry-routing-clarification.ps1',
     'verify-v2-entry-contract.ps1',
+    'verify-v2-requirement-gate.ps1',
+    'verify-v2-readonly-zero-write.ps1',
     'verify-harness-entry.ps1',
     'verify-lite-artifact-validator.ps1',
     'verify-lite-footprint.ps1',
