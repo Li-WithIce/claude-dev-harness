@@ -58,6 +58,7 @@ function Test-Throws {
 $modulePath = Join-Path $RepoRoot 'scripts\lib\Harness.Policy.psm1'
 $catalogPath = Join-Path $RepoRoot 'tests\scenarios\direct\route-cases.json'
 $canonicalPath = Join-Path $RepoRoot 'policies\entry-contract.md'
+$architecturePath = Join-Path $RepoRoot 'docs\architecture\policy-engine.md'
 $scratchRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('thin-v2-pr04-direct-' + [guid]::NewGuid().ToString('N'))
 $statusBefore = @(& git -C $RepoRoot status --porcelain --untracked-files=all)
 
@@ -82,6 +83,8 @@ try {
     Assert-True -Condition ($canonical -match '`auto_resolves_to`:\s*`existing-artifact-or-gated-v2-new`' -and $canonical -match '`v2_entry_activation`:\s*`explicit-new-or-existing-v2-or-eligible-auto-new`' -and $canonical -match 'only with a current all-pass rollout report') -Success 'entry contract gates new auto v2 tasks while preserving artifact detection' -Failure 'entry contract protocol rollout widened or became ambiguous'
     Assert-True -Condition ($canonical -match 'does not load `entry-router`, `orchestrator`, lifecycle skills, Memory, Team, or Provider' -and $canonical -match 'Direct writes no task/runtime/current state' -and $canonical -match 'table/rules below are v1-only') -Success 'Direct entry avoids v1 lifecycle skills and durable harness writes' -Failure 'Direct entry gained a v1 lifecycle or persistence dependency'
     Assert-True -Condition ($canonical -match 'actual commands/results, self-review, and gaps' -and $canonical -match '`not_run`/unavailable never means pass') -Success 'Direct response requires actual verification, self-review, and gaps' -Failure 'Direct evidence summary permits missing or false evidence'
+    $architecture = Get-Content -LiteralPath $architecturePath -Raw -Encoding utf8
+    Assert-True -Condition ($architecture -match 'Harness\.Policy\.psm1' -and $architecture -match 'Missing, malformed, unknown, or semantically weaker policy fails closed' -and $architecture -match 'no task/runtime/current state' -and $architecture -match 'HARNESS_PROTOCOL=v1') -Success 'policy engine architecture documents canonical authority, Direct zero-write, and rollback' -Failure 'policy engine architecture artifact is missing or contradicts the implementation contract'
 
     $catalog = Get-Content -LiteralPath $catalogPath -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable -ErrorAction Stop
     Assert-True -Condition ([string]$catalog.schema_version -ceq 'direct-route-scenarios/v1' -and @($catalog.cases).Count -eq 19) -Success 'Direct scenario catalog declares nineteen route cases' -Failure 'Direct scenario catalog version or case count drifted'

@@ -44,6 +44,8 @@ foreach($file in @('scripts/lib/Harness.Path.psm1','scripts/lib/Harness.AtomicWr
 Import-Module (Join-Path $RepoRoot 'scripts/lib/Harness.TaskState.psm1') -Force
 $exports=@(Get-Command -Module Harness.TaskState|Select-Object -ExpandProperty Name|Sort-Object)
 Check (@(Compare-Object @('Get-HarnessTaskStatus','New-HarnessTaskState','Repair-HarnessTaskTransaction','Resume-HarnessTaskExecution','Set-HarnessTaskApproval','Set-HarnessTaskEvidence','Set-HarnessTaskTransition') $exports).Count -eq 0) 'TaskState exports are exact' 'TaskState exports drifted'
+$architecturePath=Join-Path $RepoRoot 'docs/architecture/task-state-v2.md';$architecture=Get-Content -LiteralPath $architecturePath -Raw -Encoding utf8
+Check ($architecture-match'task-state/v2'-and$architecture-match'ExpectedVersion'-and$architecture-match'current\.json'-and$architecture-match'failed-writes'-and$architecture-match'\.migration-<task-id>'-and$architecture-match'done or cancelled'-and$architecture-match'HARNESS_PROTOCOL=v1') 'task state architecture documents state, transaction, recovery, terminal pointer, and rollback contracts' 'task state architecture artifact is missing or contradicts implementation'
 
 $owner=Write-Contract $workspace 'owner-task' 'contracts/owner.json'
 $snap=Snapshot $workspace;$r=Invoke-Cli $workspace @('create','-TaskId','owner-task','-Contract',$owner,'-AsJson') $null
