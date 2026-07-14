@@ -37,7 +37,10 @@ try {
         throw '-EvidenceSatisfied was removed; use verify -Evidence'
     }
 
-    if ($Command -ceq 'inspect') {
+    if ($Command -ceq 'protocol') {
+        Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1') -Force -ErrorAction Stop
+        $result = Get-HarnessProtocolResolution -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId
+    } elseif ($Command -ceq 'inspect') {
         if ([string]::IsNullOrWhiteSpace($RequestFile)) {
             throw 'inspect requires -RequestFile'
         }
@@ -50,6 +53,14 @@ try {
         Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Recovery.psm1') -Force -ErrorAction Stop
         $result = Get-HarnessResumeClarification -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId
     } else {
+        if ($Command -cne 'replay') {
+            Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1') -Force -ErrorAction Stop
+            $protocol = Get-HarnessProtocolResolution -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId
+            if ([string]$protocol.selected_protocol -cne 'v2') {
+                throw 'selected protocol is v1; new v2 task commands require HARNESS_PROTOCOL=v2 and existing v1 tasks require explicit migration'
+            }
+            $env:HARNESS_PROTOCOL = 'v2'
+        }
         Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.TaskState.psm1') -Force -ErrorAction Stop
         if ($Command -ceq 'create') {
             if ([string]::IsNullOrWhiteSpace($TaskId) -or [string]::IsNullOrWhiteSpace($Contract)) {
@@ -94,6 +105,13 @@ try {
         Write-Output ("requirement_state: {0}" -f $result.requirement_state)
         Write-Output ("blocking_decisions: {0}" -f @($result.blocking_decisions).Count)
         Write-Output ("contract_digest: {0}" -f $(if ($null -eq $result.contract) { 'none' } else { $result.contract.digest }))
+    } elseif ($Command -ceq 'protocol') {
+        Write-Output ("task_id: {0}" -f $(if ($null -eq $result.task_id) { 'none' } else { $result.task_id }))
+        Write-Output ("requested_protocol: {0}" -f $result.requested_protocol)
+        Write-Output ("detected_protocol: {0}" -f $result.detected_protocol)
+        Write-Output ("selected_protocol: {0}" -f $result.selected_protocol)
+        Write-Output ("reason: {0}" -f $result.reason)
+        Write-Output 'runtime_writes: 0'
     } elseif ($Command -ceq 'status') {
         if ([string]$result.operation -ceq 'recovery-index') {
             Write-Output ("current_task: {0}" -f $(if ($null -eq $result.current) { 'none' } else { $result.current.task_id }))

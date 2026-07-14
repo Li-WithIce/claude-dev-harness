@@ -8,22 +8,22 @@
 - The executable workspace entry shim remains `.assistant\entry\AGENTS.md`.
 
 <!-- BEGIN GENERATED ENTRY CONTRACT -->
-<!-- source-sha256: 1d740c8f3b5d3534f107c7609b9915f9a86d3bcaac5422e411f5b803cf450651 -->
+<!-- source-sha256: 7f7880bed789e0637f275d4a6e4faf18542a32cefcf066ce1392c22be7462568 -->
 # Entry Contract
 
 Canonical shared routing contract. Host templates may add only host-specific overlays outside the generated markers.
 
 - `protocol_default`: `auto`
-- `auto_resolves_to`: `v1`
-- `v2_entry_activation`: `explicit-v2-only`
+- `auto_resolves_to`: `existing-artifact-or-v1-new`
+- `v2_entry_activation`: `explicit-new-or-existing-v2`
 - `stage_chain`: `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`
 
-- Unset `HARNESS_PROTOCOL`, `auto`, and `v1` use the v1 table; existing/resumed tasks stay v1. Only explicit `HARNESS_PROTOCOL=v2` plus a new task may run Requirement and policy gates.
+- For a known task, run `scripts\task.ps1 protocol -TaskId {task_id}`: v2 `task.json` wins, then legal v1 `plan.md`; `auto` keeps new tasks on v1 through PR-13, conflicts fail closed, migration is explicit, and v2 never calls `advance-stage.ps1`.
 - Blocked, protected, expanded-scope, or non-Direct results reroute before writes.
 - Clear Direct hands off to the main Agent: `understand -> edit -> focused verification -> self-review -> report`; it does not load `entry-router`, `orchestrator`, lifecycle skills, Memory, Team, or Provider.
 - Direct writes no task/runtime/current state. `quick` aliases Direct without policy downgrade; file count alone does not escalate.
 - Response Evidence lists changes, actual commands/results, self-review, and gaps; `not_run`/unavailable never means pass.
-- The table/rules below are v1-only: v1 routing, stages, recovery, and rollback remain authoritative for `auto`, `v1`, and active v1 tasks, but do not apply after an explicit v2 Direct handoff.
+- The table/rules below are v1-only: v1 routing, stages, recovery, and rollback remain authoritative whenever the detector selects v1, but do not apply after v2 selection.
 
 | case_id | condition | route | writes | stage_skill |
 | --- | --- | --- | --- | --- |
@@ -38,8 +38,7 @@ Canonical shared routing contract. Host templates may add only host-specific ove
 | `inactive-status` | status or read-only review of an inactive task | `switch-existing/readonly` | `none` | `none` |
 | `durable-unowned` | authorized actionable durable item lacks task identity | `inbox-first` | `inbox-row-only` | `none` |
 
-- Resolve project/task identity before mode; identity never broadens authorization.
-- For project-scoped development and read-only engineering requests, `entry-router` is the default first hop. Do not invoke other workflow skills before routing; after routing, load only the context required by the selected mode.
+- Resolve project/task identity before mode; identity never broadens authorization. For project-scoped development and read-only engineering requests, `entry-router` is the default first hop. Do not invoke other workflow skills before routing; after routing, load only the context required by the selected mode.
 - `quick` loads only entry rules, necessary configuration, and the directly relevant skill; it creates no workflow artifact or shared pointer.
 - `workflow` loads `entry-router`, `orchestrator`, and only the current v1 stage skill; `plan.md` frontmatter is the sole stage truth.
 - `ask` is an iterative blocking clarification gate: do not load workflow stage skills, create task artifacts, edit code, write shared runtime/inbox, or initialize providers until all blocking uncertainties are resolved; ask one highest-value question at a time.

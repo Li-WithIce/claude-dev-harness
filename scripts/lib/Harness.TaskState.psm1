@@ -91,17 +91,22 @@ function Assert-V2WriteProtocol {
     if ($protocol -cne 'v2') { throw 'task-state writes require explicit HARNESS_PROTOCOL=v2' }
 }
 
+function Assert-RequirementContractDocument {
+    param([string]$RepoRoot,[string]$TaskId,[System.Collections.IDictionary]$Contract)
+    Test-TaskStateSchema -Value $Contract -SchemaPath (Join-Path $RepoRoot 'schemas\requirement-contract.schema.json') -Label 'Contract'
+    if ([string]$Contract.task_id -cne $TaskId) { throw 'Contract task_id does not match TaskId' }
+    if (@($Contract.unresolved_product_decisions).Count -gt 0) { throw 'cannot create or resolve a task from a blocked Requirement Contract' }
+    $withoutDigest = [ordered]@{}
+    foreach ($key in @('schema_version','task_id','goal','acceptance','in_scope','out_of_scope','product_constraints','product_decisions','unresolved_product_decisions','source_authority')) { if ($Contract.Contains($key)) { $withoutDigest[$key]=$Contract[$key] } }
+    $canonical = $withoutDigest | ConvertTo-Json -Depth 30 -Compress
+    if ([string]$Contract.digest -cne (Get-HarnessSha256Text -Content $canonical)) { throw 'Contract digest does not match canonical content' }
+}
+
 function Get-RequirementContract {
     param([string]$RepoRoot,[string]$WorkspaceRoot,[string]$TaskId,[string]$ContractPath)
     $path = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $ContractPath -Label 'Contract' -MustExist File
     $contract = Read-TaskStateJson -WorkspaceRoot $WorkspaceRoot -Path $path -Label 'Contract'
-    Test-TaskStateSchema -Value $contract -SchemaPath (Join-Path $RepoRoot 'schemas\requirement-contract.schema.json') -Label 'Contract'
-    if ([string]$contract.task_id -cne $TaskId) { throw 'Contract task_id does not match TaskId' }
-    if (@($contract.unresolved_product_decisions).Count -gt 0) { throw 'cannot create or resolve a task from a blocked Requirement Contract' }
-    $withoutDigest = [ordered]@{}
-    foreach ($key in @('schema_version','task_id','goal','acceptance','in_scope','out_of_scope','product_constraints','product_decisions','unresolved_product_decisions','source_authority')) { if ($contract.Contains($key)) { $withoutDigest[$key]=$contract[$key] } }
-    $canonical = $withoutDigest | ConvertTo-Json -Depth 30 -Compress
-    if ([string]$contract.digest -cne (Get-HarnessSha256Text -Content $canonical)) { throw 'Contract digest does not match canonical content' }
+    Assert-RequirementContractDocument -RepoRoot $RepoRoot -TaskId $TaskId -Contract $contract
     return [pscustomobject]@{ Document=$contract; Path=(Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path $path); Digest=[string]$contract.digest }
 }
 
@@ -341,6 +346,108 @@ function New-HarnessTaskState {
         $transaction=Invoke-TaskStateTransaction -WorkspaceRoot $WorkspaceRoot -Journal $journal
         return [ordered]@{operation='create';transaction_id=$transaction.TransactionId;pointer_action=$pointerAction;plan_action=$planAction;task=$task}
     } finally { Exit-TaskStateMutex -Mutex $currentMutex;Exit-TaskStateMutex -Mutex $taskMutex }
+}
+
+function Write-HarnessMigrationFile {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][AllowEmptyString()][string]$Content)
+    $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($Content)
+    $stream = [System.IO.FileStream]::new($Path,[System.IO.FileMode]::CreateNew,[System.IO.FileAccess]::Write,[System.IO.FileShare]::None,4096,[System.IO.FileOptions]::WriteThrough)
+    try { $stream.Write($bytes,0,$bytes.Length);$stream.Flush($true) } finally { $stream.Dispose() }
+}
+
+function Remove-HarnessEmptyMigrationParents {
+    param([string[]]$Paths)
+    foreach ($path in @($Paths)) {
+        if ((Test-Path -LiteralPath $path -PathType Container) -and @(Get-ChildItem -LiteralPath $path -Force).Count -eq 0) {
+            [System.IO.Directory]::Delete($path,$false)
+        }
+    }
+}
+
+function Import-HarnessV1TaskState {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$WorkspaceRoot,
+        [Parameter(Mandatory)][string]$TaskId,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Contract,
+        [Parameter(Mandatory)][string]$SourcePlanPath,
+        [Parameter(Mandatory)][string]$SourcePlanDigest,
+        [Parameter(Mandatory)][ValidateSet('PLAN','PLAN_REVIEW','IMPLEMENT','CODE_REVIEW','TEST')][string]$SourceStage,
+        [Parameter(Mandatory)][string]$DryRunDigest,
+        [string[]]$ImportedHistorySections=@(),
+        [string]$ActorHost='migration',
+        [string]$ActorModel='inherit'
+    )
+    Assert-V2WriteProtocol
+    $WorkspaceRoot=Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot;Assert-HarnessTaskId -TaskId $TaskId
+    if ($SourcePlanDigest -cnotmatch '^sha256:[0-9a-f]{64}$' -or $DryRunDigest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'migration digest is invalid' }
+    $sourceTarget=Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $SourcePlanPath -Label 'v1 source plan' -MustExist File
+    $sourceRelative=Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path $sourceTarget
+    if ((Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $sourceRelative) -cne $SourcePlanDigest) { throw 'v1 source plan digest changed before migration' }
+    Assert-RequirementContractDocument -RepoRoot $RepoRoot -TaskId $TaskId -Contract $Contract
+    $policies=Get-TaskPolicyFlags -RepoRoot $RepoRoot -Profile 'governed' -Capabilities @()
+    $paths=Get-TaskStatePaths -TaskId $TaskId
+    $taskMutex=$null
+    try {
+        $taskMutex=Enter-TaskStateMutex -Name (Get-TaskStateMutexName -WorkspaceRoot $WorkspaceRoot -Suffix "task.$TaskId")
+        $targetRoot=Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $paths.TaskRoot -Label 'v2 migration target' -AllowMissing
+        if (Test-Path -LiteralPath $targetRoot) { throw "v2 task already exists: $TaskId" }
+        if (@(Get-PendingTransactions -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId).Count -gt 0) { throw 'task has a pending transaction; replay it before migration' }
+
+        $timestamp=[datetimeoffset]::UtcNow.ToString('o')
+        $contractPath="$($paths.TaskRoot)/contract.json"
+        $task=[ordered]@{schema_version='task-state/v2';task_id=$TaskId;version=1;status='paused';identity='existing';intent='write';requirement_state='clear';execution_profile='governed';persistence='durable';contract_path=$contractPath;contract_digest=[string]$Contract.digest;block_reason=$null;policies=$policies;approvals=@();evidence_path=$null;created_at=$timestamp;updated_at=$timestamp}
+        Assert-TaskStateDocument -RepoRoot $RepoRoot -Task $task
+        $event=New-TaskEvent -RepoRoot $RepoRoot -EventId ('evt_'+[guid]::NewGuid().ToString('N')) -TaskId $TaskId -Version 1 -Type 'task.created' -Host $ActorHost -Model $ActorModel -Timestamp $timestamp -Payload ([ordered]@{
+            profile='governed'
+            contract_digest=[string]$Contract.digest
+            import_note=[ordered]@{
+                source_protocol='v1'
+                source_stage=$SourceStage
+                source_plan_path=$sourceRelative
+                source_plan_digest=$SourcePlanDigest
+                dry_run_digest=$DryRunDigest
+                history_sections=@($ImportedHistorySections)
+                imported_as='reference-only'
+                capability_state_inferred=$false
+            }
+        })
+        $contractText=ConvertTo-HarnessJsonText -Value $Contract
+        $taskText=ConvertTo-HarnessJsonText -Value $task
+        $eventText=ConvertTo-HarnessJsonLine -Value $event
+
+        $parentRelatives=@('.assistant','.assistant/runtime','.assistant/runtime/tasks')
+        $parentPaths=@($parentRelatives|ForEach-Object{Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $_ -Label 'migration parent' -AllowMissing})
+        $createdParents=[System.Collections.Generic.List[string]]::new()
+        for($index=0;$index-lt$parentPaths.Count;$index++){if(-not(Test-Path -LiteralPath $parentPaths[$index])){$createdParents.Insert(0,$parentPaths[$index])}}
+        $stageRoot=$null
+        try {
+            [void](New-HarnessContainedDirectory -WorkspaceRoot $WorkspaceRoot -Path '.assistant/runtime/tasks' -Label 'v2 task parent')
+            $stageRelative=".assistant/runtime/tasks/.migration-$TaskId-$([guid]::NewGuid().ToString('N'))"
+            $stageRoot=Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $stageRelative -Label 'migration staging directory' -AllowMissing
+            [void][System.IO.Directory]::CreateDirectory($stageRoot)
+            Write-HarnessMigrationFile -Path (Join-Path $stageRoot 'contract.json') -Content $contractText
+            Write-HarnessMigrationFile -Path (Join-Path $stageRoot 'task.json') -Content $taskText
+            Write-HarnessMigrationFile -Path (Join-Path $stageRoot 'events.jsonl') -Content $eventText
+            if ((Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path (Join-Path $stageRelative 'contract.json')) -cne (Get-HarnessSha256Text -Content $contractText) -or
+                (Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path (Join-Path $stageRelative 'task.json')) -cne (Get-HarnessSha256Text -Content $taskText) -or
+                (Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path (Join-Path $stageRelative 'events.jsonl')) -cne (Get-HarnessSha256Text -Content $eventText)) { throw 'migration staging verification failed' }
+            if ([System.Environment]::GetEnvironmentVariable('DEV_HARNESS_TEST_MIGRATION_FAIL_BEFORE_PUBLISH') -ceq '1') { throw 'injected migration failure before publish' }
+            if ((Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $sourceRelative) -cne $SourcePlanDigest) { throw 'v1 source plan changed while migration was staged' }
+            [System.IO.Directory]::Move($stageRoot,$targetRoot)
+            $stageRoot=$null
+        } catch {
+            if ($null-ne$stageRoot-and(Test-Path -LiteralPath $stageRoot -PathType Container)) {
+                $verifiedStage=Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $stageRoot -Label 'migration cleanup target' -MustExist Directory
+                if (-not [System.IO.Path]::GetFileName($verifiedStage).StartsWith(".migration-$TaskId-",[System.StringComparison]::Ordinal)) { throw 'migration cleanup target is invalid' }
+                [System.IO.Directory]::Delete($verifiedStage,$true)
+            }
+            Remove-HarnessEmptyMigrationParents -Paths @($createdParents)
+            throw
+        }
+        return [ordered]@{operation='import-v1';source_plan_path=$sourceRelative;source_plan_digest=$SourcePlanDigest;dry_run_digest=$DryRunDigest;pointer_action='unchanged';task=$task}
+    } finally { Exit-TaskStateMutex -Mutex $taskMutex }
 }
 
 function Get-HarnessTaskStatus {

@@ -245,6 +245,8 @@ $coreScripts = @(
     'verify-v2-requirement-gate.ps1',
     'verify-v2-task-state.ps1',
     'verify-v2-model-neutrality.ps1',
+    'verify-v1-v2-coexistence.ps1',
+    'verify-v1-to-v2-migration.ps1',
     'verify-v2-runtime-memory-decoupling.ps1',
     'verify-v2-install-presets.ps1',
     'verify-v2-evidence.ps1',

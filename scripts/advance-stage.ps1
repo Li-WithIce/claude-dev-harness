@@ -36,10 +36,6 @@ $ValidStages = @("PLAN", "PLAN_REVIEW", "IMPLEMENT", "CODE_REVIEW", "TEST", "DON
 $ValidTools = @("claudecode", "codex")
 $ModelAliasPattern = '^(opus|sonnet|haiku|default|latest|codex|claude|gpt)$'
 
-if (-not $VaultRoot) {
-    throw "Set OBSIDIAN_VAULT or pass -VaultRoot."
-}
-
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $repoRoot = Split-Path -Parent $PSScriptRoot
 } else {
@@ -66,6 +62,20 @@ if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
     $workspaceRoot = $repoRoot
 } else {
     $workspaceRoot = [System.IO.Path]::GetFullPath($WorkspaceRoot)
+}
+$requestedProtocol = [System.Environment]::GetEnvironmentVariable('HARNESS_PROTOCOL', [System.EnvironmentVariableTarget]::Process)
+if (-not [string]::IsNullOrWhiteSpace($requestedProtocol) -and $requestedProtocol -cnotin @('auto', 'v1', 'v2')) {
+    throw 'HARNESS_PROTOCOL must be auto, v1, or v2'
+}
+$v2TaskStatePath = Join-Path $workspaceRoot (".assistant\runtime\tasks\{0}\task.json" -f $TaskId)
+if (Test-Path -LiteralPath $v2TaskStatePath -PathType Leaf) {
+    throw "Task $TaskId is a v2 task; advance-stage.ps1 is v1-only."
+}
+if ($requestedProtocol -ceq 'v2') {
+    throw 'advance-stage.ps1 is v1-only and cannot run with HARNESS_PROTOCOL=v2'
+}
+if (-not $VaultRoot) {
+    throw "Set OBSIDIAN_VAULT or pass -VaultRoot."
 }
 $VaultRoot = Resolve-SharedMemoryVaultRoot -WorkspaceRoot $workspaceRoot -VaultRoot $VaultRoot
 $taskBase = Resolve-LiteContainedPath -Root $workspaceRoot -RelativePath 'docs\tasks' -Label 'task base'

@@ -2,8 +2,8 @@
   "schema_version": "thin-harness-entry-routing/v1",
   "protocol": {
     "default": "auto",
-    "auto_resolves_to": "v1",
-    "v2_entry_activation": "explicit-v2-only"
+    "auto_resolves_to": "existing-artifact-or-v1-new",
+    "v2_entry_activation": "explicit-new-or-existing-v2"
   },
   "baseline": {
     "commit": "aee525f6b3b0638f11bf6ab278482aa5b8c79d11",
