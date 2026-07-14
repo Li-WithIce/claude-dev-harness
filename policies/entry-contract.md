@@ -4,8 +4,15 @@ Canonical shared routing contract. Host templates may add only host-specific ove
 
 - `protocol_default`: `auto`
 - `auto_resolves_to`: `v1`
-- `v2_entry_activation`: `disabled`
+- `v2_entry_activation`: `explicit-v2-only`
 - `stage_chain`: `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`
+
+- Unset `HARNESS_PROTOCOL`, `auto`, and `v1` use the v1 table; existing/resumed tasks stay v1. Only explicit `HARNESS_PROTOCOL=v2` plus a new task may run Requirement and policy gates.
+- Blocked, protected, expanded-scope, or non-Direct results reroute before writes.
+- Clear Direct hands off to the main Agent: `understand -> edit -> focused verification -> self-review -> report`; it does not load `entry-router`, `orchestrator`, lifecycle skills, Memory, Team, or Provider.
+- Direct writes no task/runtime/current state. `quick` aliases Direct without policy downgrade; file count alone does not escalate.
+- Response Evidence lists changes, actual commands/results, self-review, and gaps; `not_run`/unavailable never means pass.
+- The table/rules below are v1-only: v1 routing, stages, recovery, and rollback remain authoritative for `auto`, `v1`, and active v1 tasks, but do not apply after an explicit v2 Direct handoff.
 
 | case_id | condition | route | writes | stage_skill |
 | --- | --- | --- | --- | --- |
@@ -30,4 +37,3 @@ Canonical shared routing contract. Host templates may add only host-specific ove
 - Status/read-only recovery never replays fallback, syncs pointers, writes task/runtime state, or loads a stage skill; only explicit continue/switch-and-execute may do so within authorized `workflow` scope.
 - `inbox-first` is limited to already-authorized actionable durable capture; interactive ambiguity remains `ask` with zero writes.
 - Optional memory and provider indexes never block routing; absent or unavailable providers fall back to repository inspection.
-- v2 Requirement/Direct contracts remain inert until a later activation; v1 `entry-router`, `orchestrator`, five-stage tasks, and rollback paths remain authoritative.
