@@ -235,7 +235,8 @@ if ($runner -match '(?m)^\s*\[int\]\$CheckTimeoutSeconds = 360\s*$' -and
     $workflow -match '(?m)^\s*timeout-minutes:\s*30\s*$' -and
     $workflow -match '(?m)^\s*timeout-minutes:\s*45\s*$' -and
     $workflow -match 'run-validation\.ps1 -Suite core -CheckTimeoutSeconds 360' -and
-    $rolloutGenerator -match 'run-validation\.ps1 -Suite all -CheckTimeoutSeconds 360' -and
+    $rolloutGenerator -match 'run-validation\.ps1 -Suite all -CheckTimeoutSeconds 360 -VerboseOutput' -and
+    $rolloutGenerator -match '\(\?m\)\^\\\[UNAVAILABLE\\\]\\s\+' -and
     $workflow -match 'run-changed-optional-validation\.ps1' -and
     $workflow -match 'run-isolated-install-smoke\.ps1 -RepoRoot \$PWD -Preset core' -and
     $workflow -match 'generate-v2-rollout-report\.ps1 -RepoRoot \$PWD' -and

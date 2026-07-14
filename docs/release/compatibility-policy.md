@@ -4,7 +4,7 @@
 
 `HARNESS_PROTOCOL=auto` is artifact-first. Existing `.assistant/runtime/tasks/{task_id}/task.json` selects v2; a legal `docs/tasks/{task_id}/plan.md` selects v1. Only a task with no existing artifact may use the v2 default, and only when a workspace-contained `rollout-eligibility/v1` report is supplied through `HARNESS_V2_ELIGIBILITY_REPORT` and validates against the current distribution revision and source digests.
 
-The report must contain passing behavior, full `Suite all` hard-safety and v1 compatibility, Direct performance, core install rollback, and full install rollback gates. Its source digest covers the shipped entry, policy, runtime hook, migration, installer, skill, and validation surfaces. Missing, malformed, tampered, stale, failed, blocked, simulated, or unavailable evidence selects v1 and returns a diagnostic reason. `HARNESS_PROTOCOL=v1` is the permanent immediate rollback switch; explicit v2 remains available for a new task and never overrides an existing v1 artifact.
+The report must contain passing behavior, full `Suite all` hard-safety and v1 compatibility, Direct performance, core install rollback, and full install rollback gates. The full suite runs with verifier output exposed; any structured `[UNAVAILABLE]` result makes the compatibility gate unavailable rather than pass. Its source digest covers the shipped entry, policy, runtime hook, migration, installer, skill, and validation surfaces. Missing, malformed, tampered, stale, failed, blocked, simulated, or unavailable evidence selects v1 and returns a diagnostic reason. `HARNESS_PROTOCOL=v1` is the permanent immediate rollback switch; explicit v2 remains available for a new task and never overrides an existing v1 artifact.
 
 Generate the report with:
 

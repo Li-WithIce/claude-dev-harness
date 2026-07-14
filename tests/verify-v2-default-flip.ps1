@@ -13,7 +13,7 @@ function New-Gates([string]$Performance='pass'){
     $digest='sha256:'+('2'*64)
     return [ordered]@{
         behavior=[ordered]@{status='pass';evidence_digest=$digest;command='tests/run-scenario-evals.ps1 -Suite core'}
-        v1_compatibility=[ordered]@{status='pass';evidence_digest=$digest;command='scripts/run-validation.ps1 -Suite all -CheckTimeoutSeconds 360'}
+        v1_compatibility=[ordered]@{status='pass';evidence_digest=$digest;command='scripts/run-validation.ps1 -Suite all -CheckTimeoutSeconds 360 -VerboseOutput'}
         direct_performance=[ordered]@{status=$Performance;evidence_digest=$digest;command='scripts/benchmark-harness.ps1 -Compare bare,v1,v2'}
         core_install_rollback=[ordered]@{status='pass';evidence_digest=$digest;command='scripts/run-isolated-install-smoke.ps1 -Preset core'}
         full_install_rollback=[ordered]@{status='pass';evidence_digest=$digest;command='scripts/run-isolated-install-smoke.ps1 -Preset full'}
@@ -35,6 +35,8 @@ try{
     Check ($exports.Count-eq1-and$exports[0]-ceq'Get-HarnessProtocolResolution') 'Protocol keeps one public function' 'Protocol exposed rollout internals'
     $sourcePaths=@(& $script:protocolModule {param($Root) Get-HarnessRolloutSourcePaths -RepoRoot $Root} $RepoRoot)
     Check ($sourcePaths-ccontains'runtime-hooks/core/pretooluse.ps1'-and$sourcePaths-ccontains'scripts/migrate-task-v1-to-v2.ps1'-and$sourcePaths-ccontains'scripts/run-validation.ps1'-and$sourcePaths-ccontains'tests/verify-v2-approval.ps1') 'rollout source digest covers runtime, migration, validation, and hard-safety tests' 'rollout source digest omits a safety execution surface'
+    $generator=Get-Content -LiteralPath $generatorPath -Raw -Encoding utf8
+    Check ($generator-match'run-validation\.ps1 -Suite all -CheckTimeoutSeconds 360 -VerboseOutput'-and$generator-match"\[UNAVAILABLE\\\]\\s\+") 'rollout generator exposes and classifies full-suite unavailable evidence' 'rollout generator can collapse unavailable full-suite evidence into pass'
 
     $missing=Resolve-Protocol $workspace ''
     Check ($missing.selected_protocol-ceq'v1'-and$missing.reason-ceq'rollout-report-missing'-and$missing.rollout_eligibility.status-ceq'missing'-and$missing.warning-match'deprecated') 'missing report keeps new auto task on v1 with a diagnostic warning' 'missing report did not fail safe to v1'
