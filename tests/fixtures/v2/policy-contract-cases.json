@@ -1,6 +1,23 @@
 {
   "cases": [
     {
+      "name": "current-pointer",
+      "schema": "current-pointer.schema.json",
+      "valid": {
+        "schema_version": "current-pointer/v1",
+        "task_id": "freeze-user",
+        "task_version": 4,
+        "activated_at": "2026-07-13T10:12:00Z"
+      },
+      "invalid": {
+        "schema_version": "current-pointer/v1",
+        "task_id": "none",
+        "task_version": 0,
+        "activated_at": "not-a-timestamp",
+        "write_permission": true
+      }
+    },
+    {
       "name": "requirement-contract",
       "schema": "requirement-contract.schema.json",
       "valid": {

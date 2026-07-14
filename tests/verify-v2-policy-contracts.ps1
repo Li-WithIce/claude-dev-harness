@@ -103,16 +103,17 @@ Assert-True -Condition (@($parseErrors).Count -eq 0) -Success 'policy verifier p
 
 $expectedSchemaFiles = @(
     'approval.schema.json',
+    'current-pointer.schema.json',
     'event.schema.json',
     'evidence.schema.json',
     'requirement-contract.schema.json',
     'task-state.schema.json'
 )
 $actualSchemaFiles = @(Get-ChildItem -LiteralPath $schemaRoot -Filter '*.json' -File | Select-Object -ExpandProperty Name | Sort-Object)
-Assert-True -Condition (@(Compare-Object $expectedSchemaFiles $actualSchemaFiles).Count -eq 0) -Success 'PR-01 owns exactly the five planned schemas' -Failure 'PR-01 schema set drifted or expanded beyond the plan'
+Assert-True -Condition (@(Compare-Object $expectedSchemaFiles $actualSchemaFiles).Count -eq 0) -Success 'schema set contains the five PR-01 contracts and PR-05 current pointer' -Failure 'schema set drifted or expanded beyond the plan'
 
 $catalog = Get-Content -LiteralPath $catalogPath -Raw -Encoding utf8 | ConvertFrom-Json -ErrorAction Stop
-$expectedCases = @('approval', 'event', 'evidence', 'requirement-contract', 'task-state')
+$expectedCases = @('approval', 'current-pointer', 'event', 'evidence', 'requirement-contract', 'task-state')
 $actualCases = @($catalog.cases | ForEach-Object { [string]$_.name } | Sort-Object)
 Assert-True -Condition (@(Compare-Object $expectedCases $actualCases).Count -eq 0) -Success 'fixture catalog has one pair for every schema' -Failure 'fixture catalog does not cover every schema'
 
