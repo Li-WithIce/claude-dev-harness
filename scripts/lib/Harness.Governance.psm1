@@ -57,7 +57,8 @@ function Resolve-HarnessAuditArtifact {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][string]$TaskId,
-        [Parameter(Mandatory)][int]$TaskVersion,[Parameter(Mandatory)][string]$ContractDigest,[Parameter(Mandatory)][object]$Evidence
+        [Parameter(Mandatory)][int]$TaskVersion,[Parameter(Mandatory)][string]$ContractDigest,[Parameter(Mandatory)][object]$Evidence,
+        [ValidateSet('isolated-context','different-actor')][string]$RequiredIndependence='isolated-context'
     )
     $path = "docs/tasks/$TaskId/audit.md"
     $text = Read-HarnessGovernanceText -WorkspaceRoot $WorkspaceRoot -Path $path -Label 'independent audit'
@@ -75,6 +76,7 @@ function Resolve-HarnessAuditArtifact {
     catch { throw "independent audit record schema validation failed: $($_.Exception.Message)" }
     if (-not $valid) { throw 'independent audit record failed schema validation' }
     if ([string]$record.evidence_digest -cne [string]$Evidence.Digest) { throw 'independent audit evidence_digest is stale' }
+    if ($RequiredIndependence -ceq 'different-actor' -and [string]$record.independence_level -cne 'different-actor') { throw 'Critical task requires a different-actor audit' }
 
     $actors = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     $contexts = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
@@ -108,7 +110,10 @@ function Assert-HarnessGovernanceReady {
     param([Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][System.Collections.IDictionary]$Task,[Parameter(Mandatory)][object]$Evidence)
     $plan = $null;$audit = $null
     if ([bool]$Task.policies.plan_required) { $plan = Assert-HarnessPlanArtifact -WorkspaceRoot $WorkspaceRoot -TaskId ([string]$Task.task_id) -ContractDigest ([string]$Task.contract_digest) }
-    if ([bool]$Task.policies.independent_review_required) { $audit = Resolve-HarnessAuditArtifact -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId ([string]$Task.task_id) -TaskVersion ([int]$Task.version) -ContractDigest ([string]$Task.contract_digest) -Evidence $Evidence }
+    if ([bool]$Task.policies.independent_review_required) {
+        $requiredIndependence=if([string]$Task.execution_profile-ceq'critical'){'different-actor'}else{'isolated-context'}
+        $audit = Resolve-HarnessAuditArtifact -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId ([string]$Task.task_id) -TaskVersion ([int]$Task.version) -ContractDigest ([string]$Task.contract_digest) -Evidence $Evidence -RequiredIndependence $requiredIndependence
+    }
     return [pscustomobject]@{Plan=$plan;Audit=$audit}
 }
 

@@ -12,6 +12,7 @@ param(
     [switch]$ActivateCurrent,
     [switch]$EvidenceSatisfied,
     [string]$Evidence = '',
+    [string]$Approval = '',
     [string]$TransactionId = '',
     [string]$ActorHost = 'codex',
     [string]$ActorModel = 'inherit',
@@ -64,6 +65,11 @@ try {
                 throw 'verify requires -TaskId, -ExpectedVersion, and -Evidence'
             }
             $result = Set-HarnessTaskEvidence -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -ExpectedVersion ([int]$ExpectedVersion) -EvidencePath $Evidence -ActorHost $ActorHost -ActorModel $ActorModel
+        } elseif ($Command -ceq 'approve') {
+            if ([string]::IsNullOrWhiteSpace($TaskId) -or $null -eq $ExpectedVersion -or [string]::IsNullOrWhiteSpace($Approval)) {
+                throw 'approve requires -TaskId, -ExpectedVersion, and -Approval'
+            }
+            $result = Set-HarnessTaskApproval -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -ExpectedVersion ([int]$ExpectedVersion) -ApprovalPath $Approval -ActorHost $ActorHost -ActorModel $ActorModel
         } elseif ($Command -ceq 'replay') {
             if ([string]::IsNullOrWhiteSpace($TransactionId)) {
                 throw 'replay requires -TransactionId'
@@ -96,6 +102,14 @@ try {
         Write-Output ("status: {0}" -f $result.task.status)
         Write-Output ("conclusion: {0}" -f $result.conclusion)
         Write-Output ("evidence_path: {0}" -f $result.evidence_path)
+        Write-Output ("pointer_action: {0}" -f $result.pointer_action)
+    } elseif ($Command -ceq 'approve') {
+        Write-Output ("operation: {0}" -f $result.operation)
+        Write-Output ("task_id: {0}" -f $result.task.task_id)
+        Write-Output ("version: {0}" -f $result.task.version)
+        Write-Output ("status: {0}" -f $result.task.status)
+        Write-Output ("approval_id: {0}" -f $result.approval_id)
+        Write-Output ("approval_path: {0}" -f $result.approval_path)
         Write-Output ("pointer_action: {0}" -f $result.pointer_action)
     } else {
         Write-Output ("operation: {0}" -f $result.operation)

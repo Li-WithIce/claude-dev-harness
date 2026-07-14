@@ -43,7 +43,7 @@ foreach($file in @('scripts/lib/Harness.Path.psm1','scripts/lib/Harness.AtomicWr
 }
 Import-Module (Join-Path $RepoRoot 'scripts/lib/Harness.TaskState.psm1') -Force
 $exports=@(Get-Command -Module Harness.TaskState|Select-Object -ExpandProperty Name|Sort-Object)
-Check (@(Compare-Object @('Get-HarnessTaskStatus','New-HarnessTaskState','Repair-HarnessTaskTransaction','Set-HarnessTaskEvidence','Set-HarnessTaskTransition') $exports).Count -eq 0) 'TaskState exports are exact' 'TaskState exports drifted'
+Check (@(Compare-Object @('Get-HarnessTaskStatus','New-HarnessTaskState','Repair-HarnessTaskTransaction','Set-HarnessTaskApproval','Set-HarnessTaskEvidence','Set-HarnessTaskTransition') $exports).Count -eq 0) 'TaskState exports are exact' 'TaskState exports drifted'
 
 $owner=Write-Contract $workspace 'owner-task' 'contracts/owner.json'
 $snap=Snapshot $workspace;$r=Invoke-Cli $workspace @('create','-TaskId','owner-task','-Contract',$owner,'-AsJson') $null
