@@ -232,14 +232,20 @@ if ($null -eq $quietProcessFunction) {
 
 if ($runner -match '(?m)^\s*\[int\]\$CheckTimeoutSeconds = 360\s*$' -and
     $workflow -match '(?m)^\s*timeout-minutes:\s*30\s*$' -and
+    $workflow -match '(?m)^\s*timeout-minutes:\s*45\s*$' -and
+    $workflow -match 'run-validation\.ps1 -Suite core -CheckTimeoutSeconds 360' -and
     $workflow -match 'run-validation\.ps1 -Suite all -CheckTimeoutSeconds 360' -and
-    $workflow -match 'run-isolated-install-smoke\.ps1 -RepoRoot \$PWD' -and
+    $workflow -match 'run-changed-optional-validation\.ps1' -and
+    $workflow -match 'run-isolated-install-smoke\.ps1 -RepoRoot \$PWD -Preset core' -and
+    $workflow -match 'run-isolated-install-smoke\.ps1 -RepoRoot \$PWD -Preset full' -and
+    $workflow -match 'run-scenario-evals\.ps1 -RepoRoot \$PWD -Suite core' -and
+    $workflow -match 'benchmark-harness\.ps1 -RepoRoot \$PWD -Compare bare,v1,v2' -and
     $workflow -notmatch 'verify-installation\.ps1' -and
     $workflow -notmatch '(?m)^\s*&\s+\.\\uninstall\.ps1' -and
-    $readme -match 'job 上限为 30 分钟，单个 verify 脚本上限为 360 秒') {
-    Add-Check 'CI and local runner share the release budget and delegate isolated install verification to the smoke runner'
+    $readme -match 'PR job 上限为 30 分钟，release job 上限为 45 分钟，单个 verify 脚本上限为 360 秒') {
+    Add-Check 'CI layers share bounded validation budgets and delegate install rollback to the smoke runner'
 } else {
-    Add-Failure 'CI, local runner, and README should share the release budget and delegate isolated installation to the smoke runner'
+    Add-Failure 'CI layers, local runner, and README should share bounded budgets and delegate install rollback to the smoke runner'
 }
 
 if (-not (Test-Path -LiteralPath $smokeRunnerPath -PathType Leaf)) {

@@ -94,12 +94,15 @@ try {
         Assert-True -Condition ($v1Comparisons.Count -eq 1 -and [string]$v1Comparisons[0].protocol -ceq 'v1') -Success 'v1 benchmark emits one v1 comparison' -Failure 'v1 benchmark comparison set is wrong'
         if ($v1Comparisons.Count -eq 1) {
             $metrics = $v1Comparisons[0].metrics
-            $metricNames = @('model_turns', 'tool_calls', 'loaded_files', 'loaded_skills', 'artifact_writes', 'runtime_writes', 'total_duration_ms')
+            $metricNames = @('model_turns', 'tool_calls', 'loaded_files', 'loaded_skills', 'artifact_writes', 'runtime_writes', 'direct_latency_ms', 'total_duration_ms')
             $present = @($metricNames | Where-Object { $null -ne $metrics.PSObject.Properties[$_] })
             Assert-True -Condition ($present.Count -eq $metricNames.Count) -Success 'benchmark report includes every required metric' -Failure 'benchmark report is missing required metrics'
             Assert-True -Condition ([string]$metrics.model_turns.status -ceq 'unavailable' -and $null -eq $metrics.model_turns.value -and [string]$metrics.tool_calls.status -ceq 'unavailable') -Success 'uncaptured host metrics remain unavailable' -Failure 'uncaptured host metrics must not be presented as measured'
             Assert-True -Condition ([string]$metrics.loaded_files.status -ceq 'simulated' -and [string]$metrics.total_duration_ms.status -ceq 'measured') -Success 'fixture counts and replay duration retain honest status labels' -Failure 'benchmark metric status labels are misleading'
+            Assert-True -Condition ([string]$metrics.direct_latency_ms.status -ceq 'unavailable') -Success 'uncaptured Direct host latency remains unavailable' -Failure 'Direct latency was inferred from a fixture'
         }
+
+        Assert-True -Condition (-not [bool]$firstReport.performance_regression.eligible -and [string]$firstReport.performance_regression.direct_latency.status -ceq 'unavailable') -Success 'missing bare/v2 Direct latency fails performance eligibility' -Failure 'missing Direct latency was treated as eligible'
 
         Assert-True -Condition ($firstText -notmatch [regex]::Escape($RepoRoot) -and $firstText -notmatch [regex]::Escape($env:USERPROFILE) -and $firstText -notmatch '(?i)"prompt"\s*:') -Success 'benchmark report omits repo paths, user paths, and full prompt fields' -Failure 'benchmark report leaks a private path or prompt field'
     }
@@ -115,6 +118,7 @@ try {
     if ($null -ne $matrixReport) {
         $v2 = @($matrixReport.comparisons | Where-Object { [string]$_.protocol -ceq 'v2' } | Select-Object -First 1)
         Assert-True -Condition ($v2.Count -eq 1 -and [string]$v2[0].metrics.model_turns.status -ceq 'unavailable') -Success 'missing protocol observations remain unavailable' -Failure 'missing protocol observations must not be presented as measured'
+        Assert-True -Condition ([string]$matrixReport.performance_regression.local_fixture_replay.status -ceq 'measured' -and -not [bool]$matrixReport.performance_regression.eligible -and [string]$matrixReport.performance_regression.direct_latency.status -ceq 'unavailable') -Success 'benchmark separates measured replay diagnostics from unavailable rollout latency' -Failure 'benchmark conflated fixture replay with Direct performance eligibility'
     }
 
     $outputPath = Join-Path $scratchRoot 'benchmark.json'

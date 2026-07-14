@@ -234,11 +234,6 @@ if ($IncludeCachedDiff) {
 
 $coreScripts = @(
     'verify-adversarial-review-gate.ps1',
-    'verify-ask-codex.ps1',
-    'verify-codex-entry-autoload.ps1',
-    'verify-code-intel-provider-boundary.ps1',
-    'verify-context-provider-boundary.ps1',
-    'verify-context-provider-install-isolation.ps1',
     'verify-entry-routing-clarification.ps1',
     'verify-v2-entry-contract.ps1',
     'verify-v2-direct-no-artifacts.ps1',
@@ -248,6 +243,8 @@ $coreScripts = @(
     'verify-v1-v2-coexistence.ps1',
     'verify-v1-to-v2-migration.ps1',
     'verify-v2-runtime-memory-decoupling.ps1',
+    'run-scenario-evals.ps1',
+    'verify-v2-ci-routing.ps1',
     'verify-v2-install-presets.ps1',
     'verify-v2-evidence.ps1',
     'verify-v2-governed-audit.ps1',
@@ -256,22 +253,17 @@ $coreScripts = @(
     'verify-harness-entry.ps1',
     'verify-lite-artifact-validator.ps1',
     'verify-lite-footprint.ps1',
-    'verify-memory-provider-boundary.ps1',
     'verify-minimal-safe-change-policy.ps1',
-    'verify-md-html-review-renderer.ps1',
     'verify-no-node-install-dependency.ps1',
     'verify-placeholder-rendering.ps1',
-    'verify-provider-usage-recording.ps1',
     'verify-workflow-contracts.ps1',
     'verify-workflow-descriptor.ps1',
     'verify-shared-memory-layers.ps1',
     'verify-stage-discipline-matrix.ps1',
-    'verify-render-review-html.ps1',
     'verify-release-validation.ps1',
     'verify-runtime-state-contract.ps1',
     'verify-skill-manifest.ps1',
     'verify-task-artifact-drift-audit.ps1',
-    'verify-aiteamcode-skill-contract.ps1',
     'verify-tool-profile.ps1'
 )
 

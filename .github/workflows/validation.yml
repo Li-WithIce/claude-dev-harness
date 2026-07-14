@@ -6,22 +6,75 @@ on:
     branches:
       - main
       - codex/harness-distribution
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  validation:
+  pr-core:
+    if: github.event_name == 'pull_request'
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Full validation
+      - name: PR core validation
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation.ps1 -Suite core -CheckTimeoutSeconds 360
+
+      - name: Core installation rollback
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-isolated-install-smoke.ps1 -RepoRoot $PWD -Preset core
+
+  changed-optional:
+    if: github.event_name == 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve changed paths
+        shell: pwsh
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: git diff --name-only "$env:BASE_SHA...$env:HEAD_SHA" | Set-Content -LiteralPath changed-paths.txt -Encoding utf8NoBOM
+
+      - name: Changed optional validation
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-changed-optional-validation.ps1 -RepoRoot $PWD -ChangedPathsFile changed-paths.txt
+
+  release-full:
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Full v1 and v2 validation
         shell: pwsh
         run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation.ps1 -Suite all -CheckTimeoutSeconds 360
 
-      - name: Isolated installation verification
+      - name: Core installation rollback
         shell: pwsh
-        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-isolated-install-smoke.ps1 -RepoRoot $PWD
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-isolated-install-smoke.ps1 -RepoRoot $PWD -Preset core
+
+      - name: Full installation rollback
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-isolated-install-smoke.ps1 -RepoRoot $PWD -Preset full
+
+      - name: Behavior evaluation
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File tests/run-scenario-evals.ps1 -RepoRoot $PWD -Suite core
+
+      - name: Performance regression report
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/benchmark-harness.ps1 -RepoRoot $PWD -Compare bare,v1,v2

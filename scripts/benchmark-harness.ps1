@@ -125,6 +125,20 @@ function ConvertTo-Metric {
     }
 }
 
+function ConvertTo-OptionalMetric {
+    param(
+        [object]$Observation,
+        [string]$MetricName,
+        [string]$ScenarioId,
+        [string]$Protocol
+    )
+
+    if ($null -eq $Observation -or $null -eq $Observation.PSObject.Properties[$MetricName]) {
+        return (New-UnavailableMetric -Reason "No measured $MetricName observation exists for $Protocol in scenario $ScenarioId.")
+    }
+    return ConvertTo-Metric -Observation $Observation -MetricName $MetricName -ScenarioId $ScenarioId -Protocol $Protocol
+}
+
 function Get-Median {
     param([double[]]$Values)
 
@@ -222,6 +236,7 @@ if ($LASTEXITCODE -ne 0) {
 $inventory = ($inventoryJson -join [Environment]::NewLine) | ConvertFrom-Json
 
 $metricNames = @('model_turns', 'tool_calls', 'loaded_files', 'loaded_skills', 'artifact_writes', 'runtime_writes')
+$optionalMetricNames = @('direct_latency_ms')
 $comparisons = [System.Collections.Generic.List[object]]::new()
 foreach ($record in $scenarioRecords) {
     foreach ($protocol in $protocols) {
@@ -230,6 +245,9 @@ foreach ($record in $scenarioRecords) {
         $metrics = [ordered]@{}
         foreach ($metricName in $metricNames) {
             $metrics[$metricName] = ConvertTo-Metric -Observation $observation -MetricName $metricName -ScenarioId ([string]$record.Scenario.scenario_id) -Protocol $protocol
+        }
+        foreach ($metricName in $optionalMetricNames) {
+            $metrics[$metricName] = ConvertTo-OptionalMetric -Observation $observation -MetricName $metricName -ScenarioId ([string]$record.Scenario.scenario_id) -Protocol $protocol
         }
 
         $samples = [System.Collections.Generic.List[double]]::new()
@@ -257,11 +275,33 @@ foreach ($record in $scenarioRecords) {
 
 $statusCounts = [ordered]@{ measured = 0; simulated = 0; unavailable = 0 }
 foreach ($comparison in $comparisons) {
-    foreach ($metricName in @($metricNames + 'total_duration_ms')) {
+    foreach ($metricName in @($metricNames + $optionalMetricNames + 'total_duration_ms')) {
         $status = [string]$comparison.metrics[$metricName].status
         $statusCounts[$status] = [int]$statusCounts[$status] + 1
     }
 }
+
+$bareComparison = @($comparisons | Where-Object { [string]$_.protocol -ceq 'bare' } | Select-Object -First 1)
+$v2Comparison = @($comparisons | Where-Object { [string]$_.protocol -ceq 'v2' } | Select-Object -First 1)
+$localReplay = [ordered]@{status='unavailable';ratio=$null;threshold=1.25;reason='bare and v2 comparisons are both required for a local replay ratio'}
+$directLatency = [ordered]@{status='unavailable';ratio=$null;threshold=1.25;reason='measured bare and v2 Direct host latency observations are required'}
+if ($bareComparison.Count -eq 1 -and $v2Comparison.Count -eq 1) {
+    $bareReplay = [double]$bareComparison[0].metrics.total_duration_ms.value
+    $v2Replay = [double]$v2Comparison[0].metrics.total_duration_ms.value
+    if ($bareReplay -gt 0) {
+        $localRatio = [math]::Round($v2Replay / $bareReplay, 4)
+        $localReplay = [ordered]@{status='measured';ratio=$localRatio;threshold=1.25;reason='Diagnostic local fixture replay ratio; never treated as Direct host latency or rollout evidence.'}
+    }
+    $bareLatency = $bareComparison[0].metrics.direct_latency_ms
+    $v2Latency = $v2Comparison[0].metrics.direct_latency_ms
+    if ([string]$bareLatency.status -ceq 'measured' -and [string]$v2Latency.status -ceq 'measured' -and [double]$bareLatency.value -gt 0) {
+        $directRatio = [math]::Round(([double]$v2Latency.value / [double]$bareLatency.value),4)
+        $directLatency = [ordered]@{status=$(if($directRatio -le 1.25){'pass'}else{'fail'});ratio=$directRatio;threshold=1.25;reason='Ratio of measured v2 and bare Direct host latency observations.'}
+    } elseif ([string]$bareLatency.status -ceq 'simulated' -or [string]$v2Latency.status -ceq 'simulated') {
+        $directLatency = [ordered]@{status='simulated';ratio=$null;threshold=1.25;reason='Simulated Direct latency cannot authorize rollout.'}
+    }
+}
+$performanceEligible = [string]$directLatency.status -ceq 'pass'
 
 $runner = if ([string]$env:GITHUB_ACTIONS -eq 'true') { 'github-actions' } else { 'local' }
 $report = [ordered]@{
@@ -282,6 +322,13 @@ $report = [ordered]@{
     }
     inventory = $inventory
     comparisons = [object[]]$comparisons.ToArray()
+    performance_regression = [ordered]@{
+        direct_latency = $directLatency
+        local_fixture_replay = $localReplay
+        eligible = $performanceEligible
+        status = $(if($performanceEligible){'pass'}else{'fail'})
+        reason = $(if($performanceEligible){'measured Direct latency meets the v2-to-bare threshold'}else{'Direct performance is failed, simulated, or unavailable; rollout must remain fail closed'})
+    }
     summary = [ordered]@{
         scenario_count = $scenarioRecords.Count
         comparison_count = $comparisons.Count
