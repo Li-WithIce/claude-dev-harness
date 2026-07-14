@@ -45,6 +45,7 @@ function Get-HarnessEvidenceRevision {
     $evidenceFiles = [System.Collections.Generic.List[object]]::new()
     $exactExclusions = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     [void]$exactExclusions.Add($inputRelative);[void]$exactExclusions.Add($outputRelative)
+    if ($Evidence.Contains('task_id')) { [void]$exactExclusions.Add("docs/tasks/$([string]$Evidence.task_id)/audit.md") }
     foreach ($record in @($Evidence.records)) {
         $recordPath = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path ([string]$record.evidence_path) -Label 'record evidence_path' -MustExist File
         $relative = Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path $recordPath

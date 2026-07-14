@@ -1,6 +1,26 @@
 {
   "cases": [
     {
+      "name": "audit-record",
+      "schema": "audit-record.schema.json",
+      "valid": {
+        "implementer_actor_id": "actor-implementer",
+        "reviewer_actor_id": "actor-reviewer",
+        "reviewer_context_id": "context-reviewer",
+        "reviewer_base_model": "gpt-5",
+        "independence_level": "different-actor",
+        "evidence_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "invalid": {
+        "implementer_actor_id": "actor-implementer",
+        "reviewer_actor_id": "actor-implementer",
+        "reviewer_context_id": "context-reviewer",
+        "reviewer_base_model": "gpt-5",
+        "independence_level": "self-review",
+        "evidence_digest": "not-a-digest"
+      }
+    },
+    {
       "name": "current-pointer",
       "schema": "current-pointer.schema.json",
       "valid": {

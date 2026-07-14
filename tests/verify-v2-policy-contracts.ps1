@@ -103,6 +103,7 @@ Assert-True -Condition (@($parseErrors).Count -eq 0) -Success 'policy verifier p
 
 $expectedSchemaFiles = @(
     'approval.schema.json',
+    'audit-record.schema.json',
     'current-pointer.schema.json',
     'event.schema.json',
     'evidence.schema.json',
@@ -110,10 +111,10 @@ $expectedSchemaFiles = @(
     'task-state.schema.json'
 )
 $actualSchemaFiles = @(Get-ChildItem -LiteralPath $schemaRoot -Filter '*.json' -File | Select-Object -ExpandProperty Name | Sort-Object)
-Assert-True -Condition (@(Compare-Object $expectedSchemaFiles $actualSchemaFiles).Count -eq 0) -Success 'schema set contains the five PR-01 contracts and PR-05 current pointer' -Failure 'schema set drifted or expanded beyond the plan'
+Assert-True -Condition (@(Compare-Object $expectedSchemaFiles $actualSchemaFiles).Count -eq 0) -Success 'schema set contains PR-01 contracts, PR-05 current pointer, and PR-07 audit record' -Failure 'schema set drifted or expanded beyond the plan'
 
 $catalog = Get-Content -LiteralPath $catalogPath -Raw -Encoding utf8 | ConvertFrom-Json -ErrorAction Stop
-$expectedCases = @('approval', 'current-pointer', 'event', 'evidence', 'requirement-contract', 'task-state')
+$expectedCases = @('approval', 'audit-record', 'current-pointer', 'event', 'evidence', 'requirement-contract', 'task-state')
 $actualCases = @($catalog.cases | ForEach-Object { [string]$_.name } | Sort-Object)
 Assert-True -Condition (@(Compare-Object $expectedCases $actualCases).Count -eq 0) -Success 'fixture catalog has one pair for every schema' -Failure 'fixture catalog does not cover every schema'
 
@@ -129,8 +130,8 @@ foreach ($fixtureCase in $catalog.cases) {
     Assert-True -Condition (-not (Test-AgainstSchema -Document $extra -SchemaPath $schemaPath)) -Success ("{0} rejects unknown top-level fields" -f $fixtureCase.name) -Failure ("{0} accepted an unknown top-level field" -f $fixtureCase.name)
 
     $wrongVersion = ($fixtureCase.valid | ConvertTo-Json -Depth 30 -Compress) | ConvertFrom-Json
-    $wrongVersion.schema_version = 'unsupported/v999'
-    Assert-True -Condition (-not (Test-AgainstSchema -Document $wrongVersion -SchemaPath $schemaPath)) -Success ("{0} rejects unknown schema versions" -f $fixtureCase.name) -Failure ("{0} accepted an unknown schema version" -f $fixtureCase.name)
+    $wrongVersion | Add-Member -NotePropertyName schema_version -NotePropertyValue 'unsupported/v999' -Force
+    Assert-True -Condition (-not (Test-AgainstSchema -Document $wrongVersion -SchemaPath $schemaPath)) -Success ("{0} rejects unauthorized schema versions" -f $fixtureCase.name) -Failure ("{0} accepted an unauthorized schema version" -f $fixtureCase.name)
 }
 
 $targetedInvalidFixtures = @(

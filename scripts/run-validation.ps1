@@ -245,6 +245,7 @@ $coreScripts = @(
     'verify-v2-requirement-gate.ps1',
     'verify-v2-task-state.ps1',
     'verify-v2-evidence.ps1',
+    'verify-v2-governed-audit.ps1',
     'verify-v2-readonly-zero-write.ps1',
     'verify-harness-entry.ps1',
     'verify-lite-artifact-validator.ps1',

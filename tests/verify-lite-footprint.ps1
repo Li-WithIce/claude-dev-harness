@@ -302,6 +302,7 @@ $script:Checks = @()
 $script:Failures = @()
 
 $expectedSkills = @(
+    'audit',
     'codex',
     'entry-router',
     'implement',
@@ -309,6 +310,7 @@ $expectedSkills = @(
     'obsidian-memory',
     'orchestrator',
     'plan',
+    'planning',
     'review',
     'spec',
     'test',
