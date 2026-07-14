@@ -11,6 +11,7 @@ param(
     [string]$Reason = '',
     [switch]$ActivateCurrent,
     [switch]$EvidenceSatisfied,
+    [string]$Evidence = '',
     [string]$TransactionId = '',
     [string]$ActorHost = 'codex',
     [string]$ActorModel = 'inherit',
@@ -31,6 +32,9 @@ try {
         $WorkspaceRoot = $RepoRoot
     }
     $WorkspaceRoot = (Resolve-Path -LiteralPath $WorkspaceRoot).Path
+    if ($EvidenceSatisfied) {
+        throw '-EvidenceSatisfied was removed; use verify -Evidence'
+    }
 
     if ($Command -ceq 'inspect') {
         if ([string]::IsNullOrWhiteSpace($RequestFile)) {
@@ -55,6 +59,11 @@ try {
                 throw 'transition requires -TaskId and -ExpectedVersion'
             }
             $result = Set-HarnessTaskTransition -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -ExpectedVersion ([int]$ExpectedVersion) -To $To -Reason $Reason -ContractPath $Contract -EvidenceSatisfied:$EvidenceSatisfied -ActorHost $ActorHost -ActorModel $ActorModel
+        } elseif ($Command -ceq 'verify') {
+            if ([string]::IsNullOrWhiteSpace($TaskId) -or $null -eq $ExpectedVersion -or [string]::IsNullOrWhiteSpace($Evidence)) {
+                throw 'verify requires -TaskId, -ExpectedVersion, and -Evidence'
+            }
+            $result = Set-HarnessTaskEvidence -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -ExpectedVersion ([int]$ExpectedVersion) -EvidencePath $Evidence -ActorHost $ActorHost -ActorModel $ActorModel
         } elseif ($Command -ceq 'replay') {
             if ([string]::IsNullOrWhiteSpace($TransactionId)) {
                 throw 'replay requires -TransactionId'
@@ -80,6 +89,14 @@ try {
     } elseif ($Command -ceq 'replay') {
         Write-Output ("transaction_id: {0}" -f $result.transaction_id)
         Write-Output ("result: {0}" -f $result.result)
+    } elseif ($Command -ceq 'verify') {
+        Write-Output ("operation: {0}" -f $result.operation)
+        Write-Output ("task_id: {0}" -f $result.task.task_id)
+        Write-Output ("version: {0}" -f $result.task.version)
+        Write-Output ("status: {0}" -f $result.task.status)
+        Write-Output ("conclusion: {0}" -f $result.conclusion)
+        Write-Output ("evidence_path: {0}" -f $result.evidence_path)
+        Write-Output ("pointer_action: {0}" -f $result.pointer_action)
     } else {
         Write-Output ("operation: {0}" -f $result.operation)
         Write-Output ("task_id: {0}" -f $result.task.task_id)

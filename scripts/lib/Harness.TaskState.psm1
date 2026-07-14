@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 
 Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot 'Harness.AtomicWrite.psm1') -Force -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot 'Harness.Evidence.psm1') -Force -ErrorAction Stop
 
 $script:RuntimeRelative = '.assistant/runtime'
 $script:Transitions = [ordered]@{
@@ -213,13 +214,14 @@ function New-TransactionStep {
 function Assert-TransactionJournal {
     param([string]$WorkspaceRoot,[System.Collections.IDictionary]$Journal)
     Assert-TaskStateExactKeys -Value $Journal -Expected @('transaction_id','operation','task_id','expected_version','status','completed_steps','failed_step','error','replay_command','created_at','steps') -Label 'transaction journal'
-    if ([string]$Journal.transaction_id -cnotmatch '^txn_[0-9a-f]{32}$' -or [string]$Journal.task_id -cnotmatch '^(?!(?:none|idle|unknown)$)[a-z0-9][a-z0-9-]{0,63}$' -or [string]$Journal.operation -cnotin @('create','transition') -or [string]$Journal.status -cnotin @('prepared','applying','failed','recovered')) { throw 'transaction journal identity, operation, or status is invalid' }
-    if (@($Journal.steps).Count -lt 2 -or @($Journal.steps).Count -gt 3) { throw 'transaction journal has an invalid step count' }
+    if ([string]$Journal.transaction_id -cnotmatch '^txn_[0-9a-f]{32}$' -or [string]$Journal.task_id -cnotmatch '^(?!(?:none|idle|unknown)$)[a-z0-9][a-z0-9-]{0,63}$' -or [string]$Journal.operation -cnotin @('create','transition','verify') -or [string]$Journal.status -cnotin @('prepared','applying','failed','recovered')) { throw 'transaction journal identity, operation, or status is invalid' }
+    if (@($Journal.steps).Count -lt 2 -or @($Journal.steps).Count -gt 4) { throw 'transaction journal has an invalid step count' }
     $stepIds = [System.Collections.Generic.List[string]]::new()
     $allowedPaths = @(
         "$($script:RuntimeRelative)/current.json",
         "$($script:RuntimeRelative)/tasks/$($Journal.task_id)/task.json",
-        "$($script:RuntimeRelative)/tasks/$($Journal.task_id)/events.jsonl"
+        "$($script:RuntimeRelative)/tasks/$($Journal.task_id)/events.jsonl",
+        "docs/tasks/$($Journal.task_id)/evidence.json"
     )
     foreach ($step in @($Journal.steps)) {
         Assert-TaskStateExactKeys -Value $step -Expected @('id','relative_path','action','before_digest','after_digest','content_base64') -Label 'transaction step'
@@ -360,7 +362,8 @@ function Set-HarnessTaskTransition {
         $from=[string]$task.status;if (@($script:Transitions[$from]) -cnotcontains $To) { throw "illegal task transition: $from -> $To" }
         if ($To -ceq 'blocked' -and [string]::IsNullOrWhiteSpace($Reason)) { throw 'blocked transition requires -Reason' }
         if ($from -ceq 'blocked' -and $To -ceq 'ready' -and [string]::IsNullOrWhiteSpace($ContractPath)) { throw 'blocked -> ready requires a revised -Contract' }
-        if ($To -ceq 'done' -and -not $EvidenceSatisfied) { throw 'verifying -> done requires -EvidenceSatisfied' }
+        if ($EvidenceSatisfied) { throw '-EvidenceSatisfied was removed; use verify -Evidence' }
+        if ($To -ceq 'done') { throw 'done requires verify -Evidence' }
         $current=Read-CurrentPointer -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Current;$isCurrent=$null -ne $current -and [string]$current.task_id -ceq $TaskId
         if ($isCurrent -and [int]$current.task_version -ne $ExpectedVersion) { throw 'current pointer version is stale; replay or repair before transition' }
         $next=(ConvertTo-HarnessJsonText -Value $task)|ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop;$next.version=$ExpectedVersion+1;$next.status=$To;$next.updated_at=[datetimeoffset]::UtcNow.ToString('o')
@@ -378,6 +381,37 @@ function Set-HarnessTaskTransition {
         $transaction=Invoke-TaskStateTransaction -WorkspaceRoot $WorkspaceRoot -Journal $journal
         return [ordered]@{operation='transition';transaction_id=$transaction.TransactionId;pointer_action=$pointerAction;task=$next}
     } finally {Exit-TaskStateMutex -Mutex $currentMutex;Exit-TaskStateMutex -Mutex $taskMutex}
+}
+
+function Set-HarnessTaskEvidence {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][string]$TaskId,[Parameter(Mandatory)][int]$ExpectedVersion,
+        [Parameter(Mandatory)][string]$EvidencePath,[string]$ActorHost='codex',[string]$ActorModel='inherit'
+    )
+    Assert-V2WriteProtocol;$WorkspaceRoot=Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot;Assert-HarnessTaskId -TaskId $TaskId;$paths=Get-TaskStatePaths -TaskId $TaskId
+    $taskMutex=$null;$currentMutex=$null
+    try{
+        $taskMutex=Enter-TaskStateMutex -Name (Get-TaskStateMutexName -WorkspaceRoot $WorkspaceRoot -Suffix "task.$TaskId");$currentMutex=Enter-TaskStateMutex -Name (Get-TaskStateMutexName -WorkspaceRoot $WorkspaceRoot -Suffix 'current')
+        if(@(Get-PendingTransactions -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId).Count-gt 0){throw 'task has a pending transaction; replay it before verify'}
+        $task=Read-TaskStateDocument -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Task
+        if([int]$task.version-ne$ExpectedVersion){throw "ExpectedVersion mismatch: expected=$ExpectedVersion actual=$($task.version)"}
+        if([string]$task.status-cne'verifying'){throw "verify requires task status verifying; actual=$($task.status)"}
+        $contract=Get-RequirementContract -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -ContractPath ([string]$task.contract_path)
+        if($contract.Digest-cne[string]$task.contract_digest){throw 'task Contract digest is stale'}
+        $evidence=Resolve-HarnessEvidence -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -TaskVersion $ExpectedVersion -ContractDigest ([string]$task.contract_digest) -RequiredAcceptanceCount @($contract.Document.acceptance).Count -EvidencePath $EvidencePath
+        $current=Read-CurrentPointer -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Current;$isCurrent=$null-ne$current-and[string]$current.task_id-ceq$TaskId
+        if($isCurrent-and[int]$current.task_version-ne$ExpectedVersion){throw 'current pointer version is stale; replay or repair before verify'}
+        $next=(ConvertTo-HarnessJsonText -Value $task)|ConvertFrom-Json -AsHashtable -DateKind String;$next.version=$ExpectedVersion+1;$next.status=$evidence.NextStatus;$next.evidence_path=$evidence.OutputPath;$next.updated_at=[datetimeoffset]::UtcNow.ToString('o');Assert-TaskStateDocument -RepoRoot $RepoRoot -Task $next
+        $transactionId='txn_'+[guid]::NewGuid().ToString('N');$timestamp=[string]$next.updated_at;$events=Read-EventLog -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Events
+        $recorded=New-TaskEvent -RepoRoot $RepoRoot -EventId ('evt_'+$transactionId.Substring(4)) -TaskId $TaskId -Version ([int]$next.version) -Type 'verification.recorded' -Host $ActorHost -Model $ActorModel -Timestamp $timestamp -Payload ([ordered]@{evidence_path=$evidence.OutputPath;digest=$evidence.Digest;conclusion=$evidence.Conclusion;from='verifying';to=$evidence.NextStatus})
+        $eventText=$events.Text+(ConvertTo-HarnessJsonLine -Value $recorded)
+        if($evidence.NextStatus-cne'verifying'){$transition=New-TaskEvent -RepoRoot $RepoRoot -EventId ('evt2_'+$transactionId.Substring(4)) -TaskId $TaskId -Version ([int]$next.version) -Type (Get-TransitionEventType -From 'verifying' -To $evidence.NextStatus) -Host $ActorHost -Model $ActorModel -Timestamp $timestamp -Payload ([ordered]@{source='evidence';conclusion=$evidence.Conclusion});$eventText+=(ConvertTo-HarnessJsonLine -Value $transition)}
+        $steps=[Collections.Generic.List[object]]::new();$steps.Add((New-TransactionStep -WorkspaceRoot $WorkspaceRoot -Id 'evidence' -RelativePath $evidence.OutputPath -Action write -Content $evidence.Content));$steps.Add((New-TransactionStep -WorkspaceRoot $WorkspaceRoot -Id 'task-state' -RelativePath $paths.Task -Action write -Content (ConvertTo-HarnessJsonText -Value $next)));$steps.Add((New-TransactionStep -WorkspaceRoot $WorkspaceRoot -Id 'event-log' -RelativePath $paths.Events -Action write -Content $eventText));$pointerAction='unchanged'
+        if($isCurrent){if($evidence.NextStatus-ceq'done'){$steps.Add((New-TransactionStep -WorkspaceRoot $WorkspaceRoot -Id 'current-pointer' -RelativePath $paths.Current -Action delete -Content $null));$pointerAction='cleared'}else{$pointer=[ordered]@{schema_version='current-pointer/v1';task_id=$TaskId;task_version=[int]$next.version;activated_at=[string]$current.activated_at};Assert-CurrentPointerDocument -RepoRoot $RepoRoot -Pointer $pointer;$steps.Add((New-TransactionStep -WorkspaceRoot $WorkspaceRoot -Id 'current-pointer' -RelativePath $paths.Current -Action write -Content (ConvertTo-HarnessJsonText -Value $pointer)));$pointerAction='updated'}}
+        $journal=New-TaskTransaction -WorkspaceRoot $WorkspaceRoot -TransactionId $transactionId -Operation 'verify' -TaskId $TaskId -ExpectedVersion $ExpectedVersion -Steps @($steps);$transaction=Invoke-TaskStateTransaction -WorkspaceRoot $WorkspaceRoot -Journal $journal
+        return [ordered]@{operation='verify';transaction_id=$transaction.TransactionId;conclusion=$evidence.Conclusion;evidence_path=$evidence.OutputPath;evidence_digest=$evidence.Digest;pointer_action=$pointerAction;task=$next}
+    }finally{Exit-TaskStateMutex -Mutex $currentMutex;Exit-TaskStateMutex -Mutex $taskMutex}
 }
 
 function Repair-HarnessTaskTransaction {
@@ -398,4 +432,4 @@ function Repair-HarnessTaskTransaction {
     }finally{Exit-TaskStateMutex -Mutex $currentMutex;Exit-TaskStateMutex -Mutex $taskMutex}
 }
 
-Export-ModuleMember -Function New-HarnessTaskState,Get-HarnessTaskStatus,Set-HarnessTaskTransition,Repair-HarnessTaskTransaction
+Export-ModuleMember -Function New-HarnessTaskState,Get-HarnessTaskStatus,Set-HarnessTaskTransition,Set-HarnessTaskEvidence,Repair-HarnessTaskTransaction

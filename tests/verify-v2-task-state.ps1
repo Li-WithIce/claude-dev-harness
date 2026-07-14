@@ -43,7 +43,7 @@ foreach($file in @('scripts/lib/Harness.Path.psm1','scripts/lib/Harness.AtomicWr
 }
 Import-Module (Join-Path $RepoRoot 'scripts/lib/Harness.TaskState.psm1') -Force
 $exports=@(Get-Command -Module Harness.TaskState|Select-Object -ExpandProperty Name|Sort-Object)
-Check (@(Compare-Object @('Get-HarnessTaskStatus','New-HarnessTaskState','Repair-HarnessTaskTransaction','Set-HarnessTaskTransition') $exports).Count -eq 0) 'exports are exact' 'exports drifted'
+Check (@(Compare-Object @('Get-HarnessTaskStatus','New-HarnessTaskState','Repair-HarnessTaskTransaction','Set-HarnessTaskEvidence','Set-HarnessTaskTransition') $exports).Count -eq 0) 'TaskState exports are exact' 'TaskState exports drifted'
 
 $owner=Write-Contract $workspace 'owner-task' 'contracts/owner.json'
 $snap=Snapshot $workspace;$r=Invoke-Cli $workspace @('create','-TaskId','owner-task','-Contract',$owner,'-AsJson') $null
@@ -58,7 +58,7 @@ $snap=Snapshot $workspace;$r=Invoke-Cli $workspace @('status','-TaskId','owner-t
 Check ($r.ExitCode -eq 0 -and $status.event_count -eq 1 -and $status.is_current -eq $true -and $status.side_effects.runtime_writes -eq 0) 'status is read-only' 'status output is invalid';Same $snap (Snapshot $workspace) 'status is zero-write' 'status wrote state'
 $snap=Snapshot $workspace;$r=Invoke-Cli $workspace @('transition','-TaskId','owner-task','-ExpectedVersion','9','-To','running','-AsJson')
 Check ($r.ExitCode -eq 2 -and -not $r.StdOut -and $r.StdErr -match 'ExpectedVersion mismatch') 'CAS mismatch fails closed' 'CAS mismatch accepted';Same $snap (Snapshot $workspace) 'CAS mismatch is zero-write' 'CAS mismatch wrote state'
-$snap=Snapshot $workspace;$r=Invoke-Cli $workspace @('transition','-TaskId','owner-task','-ExpectedVersion','1','-To','done','-EvidenceSatisfied','-AsJson')
+$snap=Snapshot $workspace;$r=Invoke-Cli $workspace @('transition','-TaskId','owner-task','-ExpectedVersion','1','-To','verifying','-AsJson')
 Check ($r.ExitCode -eq 2 -and $r.StdErr -match 'illegal task transition') 'illegal transition fails closed' 'illegal transition accepted';Same $snap (Snapshot $workspace) 'illegal transition is zero-write' 'illegal transition wrote state'
 
 $background=Write-Contract $workspace 'background-task' 'contracts/background.json';$currentBefore=[IO.File]::ReadAllText($currentPath)
@@ -74,8 +74,8 @@ $blocked=Invoke-Cli $workspace @('transition','-TaskId','background-task','-Expe
 $same=Invoke-Cli $workspace @('transition','-TaskId','background-task','-ExpectedVersion','3','-To','ready','-Contract',$background,'-AsJson')
 $revised=Write-Contract $workspace 'background-task' 'contracts/background-v2.json' 'two';$resolved=Invoke-Cli $workspace @('transition','-TaskId','background-task','-ExpectedVersion','3','-To','ready','-Contract',$revised,'-AsJson')
 Check ($blocked.ExitCode -eq 0 -and $same.ExitCode -eq 2 -and $same.StdErr -match 'revised Contract digest' -and $resolved.ExitCode -eq 0) 'blocked task requires revised Contract' 'blocked task accepted stale Contract'
-$running=Invoke-Cli $workspace @('transition','-TaskId','owner-task','-ExpectedVersion','1','-To','running','-AsJson');$verifying=Invoke-Cli $workspace @('transition','-TaskId','owner-task','-ExpectedVersion','2','-To','verifying','-AsJson');$done=Invoke-Cli $workspace @('transition','-TaskId','owner-task','-ExpectedVersion','3','-To','done','-EvidenceSatisfied','-AsJson')
-Check ($running.ExitCode -eq 0 -and $verifying.ExitCode -eq 0 -and $done.ExitCode -eq 0 -and (Read-Output $done).pointer_action -ceq 'cleared' -and -not(Test-Path $currentPath)) 'active done clears current' 'active done failed'
+$running=Invoke-Cli $workspace @('transition','-TaskId','owner-task','-ExpectedVersion','1','-To','running','-AsJson');$verifying=Invoke-Cli $workspace @('transition','-TaskId','owner-task','-ExpectedVersion','2','-To','verifying','-AsJson');$snap=Snapshot $workspace;$done=Invoke-Cli $workspace @('transition','-TaskId','owner-task','-ExpectedVersion','3','-To','done','-EvidenceSatisfied','-AsJson')
+Check ($running.ExitCode -eq 0 -and $verifying.ExitCode -eq 0 -and $done.ExitCode -eq 2 -and $done.StdErr -match 'use verify -Evidence' -and (Test-Path $currentPath)) 'done rejects the removed EvidenceSatisfied shortcut' 'done accepted the EvidenceSatisfied shortcut';Same $snap (Snapshot $workspace) 'rejected done is zero-write' 'rejected done wrote state'
 
 $crashContract=Write-Contract $crashWorkspace 'crash-task' 'contract.json';$r=Invoke-Cli $crashWorkspace @('create','-TaskId','crash-task','-Contract',$crashContract,'-ActivateCurrent','-AsJson') 'v2' '1'
 $match=[regex]::Match($r.StdErr,'TransactionId=(txn_[0-9a-f]{32})');$transactionId=if($match.Success){$match.Groups[1].Value}else{''};$journal=Join-Path $crashWorkspace ".assistant/runtime/failed-writes/$transactionId.json"
