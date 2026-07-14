@@ -420,7 +420,7 @@ function Test-FullModelId {
     .SYNOPSIS
     判断 model 是否看起来像完整模型 ID。
     .DESCRIPTION
-    Phase 1 不接入具体模型注册表，只阻止 `opus`、`pro` 这类短别名进入机器可读契约。
+    `inherit` 由宿主解析；显式值仍必须是完整模型 ID，阻止 `opus`、`pro` 这类短别名进入机器可读契约。
     .PARAMETER Model
     待检查的模型 ID。
     .OUTPUTS
@@ -433,6 +433,10 @@ function Test-FullModelId {
     }
 
     $normalized = $Model.Trim()
+    if ($normalized -ceq 'inherit') {
+        return $true
+    }
+
     if ($normalized -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*[A-Za-z0-9]$') {
         return $false
     }
@@ -502,7 +506,7 @@ function Get-ToolProfile {
     }
 
     if (-not (Test-FullModelId -Model $fields['model'])) {
-        throw ("Tool profile {0} model should be a full model id, got: {1}" -f $normalizedName, $fields['model'])
+        throw ("Tool profile {0} model should be inherit or a full model id, got: {1}" -f $normalizedName, $fields['model'])
     }
 
     return [pscustomobject]@{
@@ -946,7 +950,7 @@ function Resolve-LegacyProfileSelection {
     }
 
     if (-not [string]::IsNullOrWhiteSpace($selectedModel) -and -not (Test-FullModelId -Model $selectedModel)) {
-        throw ("Model should be a full model id, got: {0}" -f $selectedModel)
+        throw ("Model should be inherit or a full model id, got: {0}" -f $selectedModel)
     }
 
     return [pscustomobject]@{

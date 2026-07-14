@@ -610,7 +610,7 @@ try {
                 }
 
                 $skillRoot = Resolve-ActiveSkillDirs -WorkspaceRoot $resolvedWorkspace -Tool $Tool -ToolProfileId $ToolProfileId
-                $scriptPath = Join-Path $skillRoot.Path 'codex\scripts\ask_codex.ps1'
+                $scriptPath = Join-Path $skillRoot.Path 'codex\scripts\invoke_codex.ps1'
                 $backendOutputPath = Join-Path ([System.IO.Path]::GetTempPath()) ('invoke-harness-skill-output-' + [guid]::NewGuid().ToString('N') + '.tmp')
                 $payloadFiles = @(Get-PayloadProperty -Payload $payload -Name 'file')
                 $parameters = [ordered]@{

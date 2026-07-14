@@ -453,7 +453,7 @@ function Write-MockCodexSkill {
         [string]$Marker
     )
 
-    $scriptPath = Join-Path $SkillRoot 'codex\scripts\ask_codex.ps1'
+    $scriptPath = Join-Path $SkillRoot 'codex\scripts\invoke_codex.ps1'
     New-Item -ItemType Directory -Path (Split-Path -Parent $scriptPath) -Force | Out-Null
     Write-Utf8Bom -Path (Join-Path (Split-Path -Parent $scriptPath) 'lifecycle-descendant.ps1') -Content @'
 [CmdletBinding()]

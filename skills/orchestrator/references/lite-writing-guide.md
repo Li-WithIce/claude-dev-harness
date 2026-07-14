@@ -34,7 +34,7 @@ task_id: <task-id>
 stage: PLAN | PLAN_REVIEW | IMPLEMENT | CODE_REVIEW | TEST | DONE
 tool: claudecode | codex | none
 tool_profile: harness-default-codex
-model: gpt-5.5/xhigh
+model: inherit
 updated: YYYY-MM-DD
 ---
 ```
@@ -47,7 +47,7 @@ updated: YYYY-MM-DD
 - `tool_profile` 指向 `agent-configs/profiles/<name>.yaml`
 - 当前 stage 的 `tool_profile/model` 只是活跃元数据，不会作为下一 stage 的黏性 fallback
 - 存在 `tool_profile` 时，`tool` 必须等于 profile 描述符中的 `backend`
-- `model` 必须写完整模型 ID，不写 `opus`、`pro`、`latest` 这类短别名
+- `model` 可写 `inherit`；显式覆盖必须写完整模型 ID，不写 `opus`、`pro`、`latest` 这类短别名
 - 未启用 `tool_profile` / `model` 时，旧四字段 frontmatter 继续合法
 
 ### Workflow Descriptor（可选）

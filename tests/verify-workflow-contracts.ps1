@@ -1374,7 +1374,7 @@ try {
     if ($missingNextToolOutcome.Succeeded -and
         $missingNextToolOutcome.Output -eq 'PLAN_REVIEW | codex' -and
         $missingNextToolPlan -match '(?m)^tool_profile:\s*harness-default-codex\s*$' -and
-        $missingNextToolPlan -match '(?m)^model:\s*gpt-5\.5/xhigh\s*$') {
+        $missingNextToolPlan -match '(?m)^model:\s*inherit\s*$') {
         Add-Check 'non-DONE transitions use the workflow-default tool/profile when CLI selection is absent'
     } else {
         Add-Failure ("non-DONE transition should resolve the workflow-default profile: {0}" -f $(if ($missingNextToolOutcome.Succeeded) { $missingNextToolOutcome.Output } else { $missingNextToolOutcome.Error }))

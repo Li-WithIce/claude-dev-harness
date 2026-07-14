@@ -136,7 +136,7 @@ function Test-FullModelId {
     .SYNOPSIS
     判断 model 是否看起来像完整模型 ID。
     .DESCRIPTION
-    Phase 1 不接入具体模型注册表，只阻止 `opus`、`pro` 这类短别名进入机器可读契约。
+    `inherit` 由宿主解析；显式值仍必须是完整模型 ID，阻止 `opus`、`pro` 这类短别名进入机器可读契约。
     .PARAMETER Model
     待检查的模型 ID。
     .OUTPUTS
@@ -149,6 +149,10 @@ function Test-FullModelId {
     }
 
     $normalized = $Model.Trim()
+    if ($normalized -ceq 'inherit') {
+        return $true
+    }
+
     if ($normalized -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*[A-Za-z0-9]$') {
         return $false
     }
@@ -913,7 +917,7 @@ function Assert-WorkflowDescriptorAdvisory {
 function Assert-FullModelId {
     <#
     .SYNOPSIS
-    校验 model 字段使用完整 ID。
+    校验 model 字段使用 `inherit` 或完整 ID。
     .PARAMETER Model
     模型 ID。
     .PARAMETER Label
@@ -927,9 +931,9 @@ function Assert-FullModelId {
     )
 
     if (Test-FullModelId -Model $Model) {
-        Add-Check ("{0} uses a full model id" -f $Label)
+        Add-Check ("{0} uses inherit or a full model id" -f $Label)
     } else {
-        Add-Failure ("{0} should use a full model id, got [{1}]" -f $Label, $Model)
+        Add-Failure ("{0} should use inherit or a full model id, got [{1}]" -f $Label, $Model)
     }
 }
 

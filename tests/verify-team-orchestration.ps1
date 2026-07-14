@@ -201,11 +201,11 @@ try {
     }
 
     $expectedPayloads = [ordered]@{
-        'plan-author' = [ordered]@{ backend = 'codex'; model = 'gpt-5.5/xhigh'; skills = @('plan', 'entry-router') }
-        'plan-reviewer' = [ordered]@{ backend = 'codex'; model = 'gpt-5.5/xhigh'; skills = @('review') }
-        'implementer' = [ordered]@{ backend = 'codex'; model = 'gpt-5.5/xhigh'; skills = @('implement') }
-        'code-reviewer' = [ordered]@{ backend = 'codex'; model = 'gpt-5.5/xhigh'; skills = @('review') }
-        'tester' = [ordered]@{ backend = 'codex'; model = 'gpt-5.5/xhigh'; skills = @('test') }
+        'plan-author' = [ordered]@{ backend = 'codex'; model = 'inherit'; skills = @('plan', 'entry-router') }
+        'plan-reviewer' = [ordered]@{ backend = 'codex'; model = 'inherit'; skills = @('review') }
+        'implementer' = [ordered]@{ backend = 'codex'; model = 'inherit'; skills = @('implement') }
+        'code-reviewer' = [ordered]@{ backend = 'codex'; model = 'inherit'; skills = @('review') }
+        'tester' = [ordered]@{ backend = 'codex'; model = 'inherit'; skills = @('test') }
     }
     $payloadOk = $true
     foreach ($payload in $o2Payloads) {

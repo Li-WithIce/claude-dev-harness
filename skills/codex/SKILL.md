@@ -20,19 +20,19 @@ description: Delegate coding tasks to Codex CLI for execution. Invoke this skill
 The script path is:
 
 ```
-~/.claude/skills/codex/scripts/ask_codex.sh
+~/.claude/skills/codex/scripts/invoke_codex.sh
 ```
 
 Minimal invocation:
 
 ```bash
-~/.claude/skills/codex/scripts/ask_codex.sh "Your request in natural language"
+~/.claude/skills/codex/scripts/invoke_codex.sh "Your request in natural language"
 ```
 
 With file context:
 
 ```bash
-~/.claude/skills/codex/scripts/ask_codex.sh "Refactor these components to use the new API" \
+~/.claude/skills/codex/scripts/invoke_codex.sh "Refactor these components to use the new API" \
   --file src/components/UserList.tsx \
   --file src/components/UserDetail.tsx
 ```
@@ -40,7 +40,7 @@ With file context:
 Multi-turn conversation (continue a previous session):
 
 ```bash
-~/.claude/skills/codex/scripts/ask_codex.sh "Also add retry logic with exponential backoff" \
+~/.claude/skills/codex/scripts/invoke_codex.sh "Also add retry logic with exponential backoff" \
   --session <session_id from previous run>
 ```
 
@@ -51,26 +51,26 @@ Use PowerShell 7.3 or newer (`pwsh`). The Windows wrapper fails before doing any
 The script path is:
 
 ```
-~/.claude/skills/codex/scripts/ask_codex.ps1
+~/.claude/skills/codex/scripts/invoke_codex.ps1
 ```
 
 Minimal invocation:
 
 ```powershell
-& "$HOME/.claude/skills/codex/scripts/ask_codex.ps1" "Your request in natural language"
+& "$HOME/.claude/skills/codex/scripts/invoke_codex.ps1" "Your request in natural language"
 ```
 
 With file context:
 
 ```powershell
-& "$HOME/.claude/skills/codex/scripts/ask_codex.ps1" "Refactor these components to use the new API" `
+& "$HOME/.claude/skills/codex/scripts/invoke_codex.ps1" "Refactor these components to use the new API" `
   -File @('src/components/UserList.tsx', 'src/components/UserDetail.tsx')
 ```
 
 Multi-turn conversation (continue a previous session):
 
 ```powershell
-& "$HOME/.claude/skills/codex/scripts/ask_codex.ps1" "Also add retry logic with exponential backoff" `
+& "$HOME/.claude/skills/codex/scripts/invoke_codex.ps1" "Also add retry logic with exponential backoff" `
   -Session <session_id from previous run>
 ```
 
@@ -144,4 +144,4 @@ The current Windows wrapper uses the Codex 0.141 resume contract:
 - `-Workspace` sets the wrapper process working directory, but it does not rewrite the original session's stored context.
 - `-FullAuto` applies only to new sessions.
 
-These resume guarantees are specific to `ask_codex.ps1`. The Bash wrapper is a separate implementation and does not inherit the Windows hardening contract.
+These resume guarantees are specific to `invoke_codex.ps1`. The Bash wrapper is a separate implementation and does not inherit the Windows hardening contract. Existing `ask_codex.ps1` and `ask_codex.sh` commands remain thin compatibility shims.

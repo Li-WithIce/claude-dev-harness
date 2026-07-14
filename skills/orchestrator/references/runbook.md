@@ -5,8 +5,8 @@
 1. 解析任务是 `resume-current`、`switch-existing`、`new-task` 还是 `inbox-first`
 2. 判定为 `new-task` 后由 `entry-router` 按 read-only / mutation / durable / ambiguous precedence 选择 `mode: quick | workflow | ask`；`review` / `test` 等名词本身不决定 mode
 3. 只有 `mode=workflow` 才进入 orchestrator；quick 不创建 task artifact，ask 保持 iterative blocking clarification gate
-4. 进入 workflow 后为新任务选择 `task_id`；未显式指定时，当前 `PLAN` 默认使用 `tool: codex`、`tool_profile: harness-default-codex`、`model: gpt-5.5/xhigh`
-   可选：显式选择其他 `tool_profile` 和完整 `model`
+4. 进入 workflow 后为新任务选择 `task_id`；未显式指定时，当前 `PLAN` 默认使用 `tool: codex`、`tool_profile: harness-default-codex`、`model: inherit`
+   可选：显式选择其他 `tool_profile`，或用完整 `model` 覆盖宿主继承
    可选：在仓库里维护 `agent-configs/workflows/harness-lite.yaml`，为后续 stage 声明 `default_profile`
 5. 如无 `plan.md`，先创建 `docs/tasks/{task_id}/plan.md`
 6. 输入不足时再补 `docs/tasks/{task_id}/spec.md`

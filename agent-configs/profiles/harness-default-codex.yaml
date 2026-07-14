@@ -1,6 +1,6 @@
 name: harness-default-codex
 backend: codex
-model: gpt-5.5/xhigh
+model: inherit
 skills_dirs:
   - .codex/skills
 enabled_skills:

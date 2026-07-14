@@ -230,7 +230,8 @@ function Test-EnvironmentSnapshotEqual {
     return $true
 }
 
-$scriptPath = Join-Path $RepoRoot 'skills\codex\scripts\ask_codex.ps1'
+$scriptPath = Join-Path $RepoRoot 'skills\codex\scripts\invoke_codex.ps1'
+$legacyScriptPath = Join-Path $RepoRoot 'skills\codex\scripts\ask_codex.ps1'
 $scratchRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('dev-harness-ask-codex-' + [guid]::NewGuid().ToString('N'))
 $environmentNames = @('PATH', 'USERPROFILE', 'CODEX_HOME', 'TEMP', 'TMP', 'CODEX_CA_CERTIFICATE', 'ASK_CODEX_NATIVE_RECORDER', 'ASK_CODEX_OBSERVED_NATIVE_MODE', 'ASK_CODEX_TEST_CASE', 'ASK_CODEX_TEST_MODE', 'ASK_CODEX_TEST_CAPTURE_ROOT', 'ASK_CODEX_TEST_IDENTITY', 'ASK_CODEX_TEST_MARKER', 'ASK_CODEX_TEST_TOKEN', 'ASK_CODEX_CMD_MARKER')
 $originalEnvironment = Get-EnvironmentSnapshot -Names $environmentNames
@@ -243,6 +244,12 @@ try {
         Add-Check 'wrapper requires PowerShell 7.3+ before using standard native argument passing'
     } else {
         Add-Failure 'wrapper must require PowerShell 7.3+ with no parse errors'
+    }
+    $legacyText = Get-Content -LiteralPath $legacyScriptPath -Raw -Encoding utf8
+    if ($legacyText -match [regex]::Escape("Join-Path `$PSScriptRoot 'invoke_codex.ps1'") -and $legacyText -notmatch 'function Invoke-CodexProcess') {
+        Add-Check 'legacy ask_codex PowerShell entry is a thin invoke_codex compatibility shim'
+    } else {
+        Add-Failure 'legacy ask_codex PowerShell entry should delegate to invoke_codex without duplicating the implementation'
     }
     $skillText = Get-Content -LiteralPath (Join-Path $RepoRoot 'skills\codex\SKILL.md') -Raw -Encoding utf8
     $windowsOptionsMatch = [regex]::Match($skillText, '(?ms)^### Windows PowerShell options\s*(.*?)(?=^## |^### |\z)')
@@ -566,6 +573,17 @@ $parameters = @{
         Add-Check 'PowerShell shim observes Standard native argument passing at runtime'
     } else {
         Add-Failure "PowerShell shim native argument mode was not Standard: [$observedNativeMode]"
+    }
+
+    $legacyCase = 'legacy-shim'
+    $legacyOutput = Join-Path $scratchRoot 'outputs\legacy-shim.md'
+    $legacyResult = Invoke-AskCodex -ScriptPath $legacyScriptPath -Arguments @('-Task', 'legacy compatibility', '-Workspace', $workspace, '-Output', $legacyOutput, '-TimeoutSeconds', '5') -Environment (New-CaseEnvironment -CaseId $legacyCase) -WorkingDirectory $callerRoot -Label $legacyCase
+    $legacyRecord = Read-MockRecord -CaptureRoot $captureRoot -CaseId $legacyCase
+    $legacyContent = if (Test-Path -LiteralPath $legacyOutput -PathType Leaf) { Get-Content -LiteralPath $legacyOutput -Raw -Encoding utf8 } else { '' }
+    if ($legacyResult.ExitCode -eq 0 -and $null -ne $legacyRecord -and $legacyContent.Contains($legacyCase + '-response-1')) {
+        Add-Check 'legacy ask_codex PowerShell shim preserves the canonical success protocol'
+    } else {
+        Add-Failure "legacy ask_codex shim failed: exit=$($legacyResult.ExitCode) stdout=[$($legacyResult.StdOut)] stderr=[$($legacyResult.StdErr)]"
     }
 
     $fileCase = 'file-array-binding'
