@@ -59,9 +59,9 @@ $workflow = Get-Content -LiteralPath $workflowPath -Raw -Encoding utf8
 $rolloutGenerator = Get-Content -LiteralPath $rolloutGeneratorPath -Raw -Encoding utf8
 Check ($workflow -match '(?m)^\s*schedule:\s*$' -and $workflow -match '(?m)^\s*workflow_dispatch:\s*$') 'CI exposes nightly and manual release validation' 'CI lacks nightly or manual release validation'
 Check ($workflow -match '(?m)^\s*pr-core:\s*$' -and $workflow -match '(?m)^\s*changed-optional:\s*$' -and $workflow -match '(?m)^\s*release-full:\s*$') 'CI declares PR core, changed optional, and release full jobs' 'CI job layering is incomplete'
-Check ($workflow -match 'run-validation\.ps1 -Suite core' -and $workflow -match 'run-changed-optional-validation\.ps1' -and $workflow -match 'run-validation\.ps1 -Suite all') 'each CI layer delegates to the expected validation entry' 'CI layer commands are wrong'
+Check ($workflow -match 'run-validation\.ps1 -Suite core' -and $workflow -match 'run-changed-optional-validation\.ps1' -and $rolloutGenerator -match 'run-validation\.ps1 -Suite all') 'each CI layer delegates to the expected validation entry' 'CI layer commands are wrong'
 Check ($workflow -match 'run-isolated-install-smoke\.ps1[^\r\n]+-Preset core' -and $workflow -match 'generate-v2-rollout-report\.ps1' -and $rolloutGenerator -match 'run-isolated-install-smoke\.ps1 -Preset core' -and $rolloutGenerator -match 'run-isolated-install-smoke\.ps1 -Preset full') 'PR and release jobs cover core/full install rollback' 'CI install rollback coverage is incomplete'
-Check ($rolloutGenerator -match 'run-scenario-evals\.ps1 -Suite core' -and $rolloutGenerator -match 'benchmark-harness\.ps1 -Compare bare,v1,v2') 'release report runs behavior and performance gates' 'release report omits behavior or performance gates'
+Check ($rolloutGenerator -match 'run-validation\.ps1 -Suite all' -and $rolloutGenerator -match 'run-scenario-evals\.ps1 -Suite core' -and $rolloutGenerator -match 'benchmark-harness\.ps1 -Compare bare,v1,v2') 'release report binds full validation, behavior, and performance gates' 'release report omits full validation, behavior, or performance gates'
 
 $validation = Get-Content -LiteralPath $validationPath -Raw -Encoding utf8
 $coreBlock = [regex]::Match($validation,'(?s)\$coreScripts\s*=\s*@\((?<body>.*?)\r?\n\)').Groups['body'].Value

@@ -56,6 +56,9 @@ function Get-HarnessRecoveryIndex {
             throw 'runtime tasks path is not a directory'
         }
         foreach ($directory in Get-ChildItem -LiteralPath $tasksRoot -Directory -Force | Sort-Object Name) {
+            if ($directory.Name -cmatch '^\.migration-(?!(?:none|idle|unknown)-)[a-z0-9][a-z0-9-]{0,63}-[0-9a-f]{32}$') {
+                continue
+            }
             Assert-HarnessTaskId -TaskId $directory.Name
             $status = Get-HarnessTaskStatus -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $directory.Name
             if ([string]$status.task.status -cin @('done','cancelled')) {

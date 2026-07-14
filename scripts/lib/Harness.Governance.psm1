@@ -94,8 +94,9 @@ function Resolve-HarnessAuditArtifact {
     if ($findings -cne '- none') {
         foreach ($line in @($findings -split "\r?\n")) {
             if ([string]::IsNullOrWhiteSpace($line)) { continue }
-            $finding = [regex]::Match($line,'^- P[0-3]:\s*.+?\s*\|\s*evidence_path=(?<path>[^|]+?)\s*\|\s*evidence_digest=(?<digest>sha256:[0-9a-f]{64})\s*$')
+            $finding = [regex]::Match($line,'^- (?<severity>P[0-3]):\s*.+?\s*\|\s*evidence_path=(?<path>[^|]+?)\s*\|\s*evidence_digest=(?<digest>sha256:[0-9a-f]{64})\s*$')
             if (-not $finding.Success) { throw 'independent audit finding must contain structured file evidence' }
+            if ($finding.Groups['severity'].Value -cin @('P0','P1')) { throw 'independent audit pass cannot contain a blocking finding' }
             $evidencePath = $finding.Groups['path'].Value.Trim();$expectedDigest = $finding.Groups['digest'].Value
             [void](Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $evidencePath -Label 'audit finding evidence' -MustExist File)
             if ((Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $evidencePath) -cne $expectedDigest) { throw 'independent audit finding evidence digest mismatch' }

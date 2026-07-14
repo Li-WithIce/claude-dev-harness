@@ -59,10 +59,6 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Full v1 and v2 validation
-        shell: pwsh
-        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation.ps1 -Suite all -CheckTimeoutSeconds 360
-
-      - name: Generate rollout eligibility report
+      - name: Full validation and rollout eligibility report
         shell: pwsh
         run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/generate-v2-rollout-report.ps1 -RepoRoot $PWD -OutputPath "$env:RUNNER_TEMP\v2-rollout-eligibility.json"

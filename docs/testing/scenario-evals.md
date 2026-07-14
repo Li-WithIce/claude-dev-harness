@@ -16,6 +16,6 @@ CI has three layers:
 
 - PR core runs deterministic core contracts, behavior evaluation, routing verification, and a core install/update/uninstall smoke test.
 - changed optional selects Memory, Team, md-html, Codex adapter, or Provider boundary tests only when their paths change. A change to the routing or installation surfaces selects every optional group fail closed.
-- release full runs the monolithic v1/v2 validation entry, core and full installation rollback, behavior evaluation, and the bare/v1/v2 benchmark. It runs on protected-branch pushes, a nightly schedule, and manual dispatch.
+- release full uses the rollout-report generator to bind the monolithic v1/v2 validation entry, core and full installation rollback, behavior evaluation, and the bare/v1/v2 benchmark into one revision/source-bound report. It runs on protected-branch pushes, a nightly schedule, and manual dispatch.
 
 `scripts/benchmark-harness.ps1` reports local fixture replay separately from Direct host latency. Fixture replay is a measured diagnostic proxy and is never treated as host latency. Missing, simulated, or failed Direct latency evidence makes performance eligibility false; it must not be presented as a pass.

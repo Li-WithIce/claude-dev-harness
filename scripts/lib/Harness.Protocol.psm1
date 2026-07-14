@@ -63,20 +63,15 @@ function Assert-HarnessRolloutKeys {
 function Get-HarnessRolloutSourcePaths {
     param([string]$RepoRoot)
     $paths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
-    foreach ($pattern in @('policies\*.json','schemas\*.json','scripts\lib\Harness.*.psm1','tests\evals\*.json')) {
-        foreach ($file in Get-ChildItem -Path (Join-Path $RepoRoot $pattern) -File -ErrorAction Stop) {
+    foreach ($relativeRoot in @('agent-configs','policies','runtime-hooks','schemas','scripts','skills','templates','tests','vault-template')) {
+        $sourceRoot = Join-Path $RepoRoot $relativeRoot
+        if (-not (Test-Path -LiteralPath $sourceRoot -PathType Container)) { throw 'rollout-source-directory-missing' }
+        foreach ($file in Get-ChildItem -LiteralPath $sourceRoot -File -Recurse -Force -ErrorAction Stop) {
             [void]$paths.Add((Get-HarnessRelativePath -WorkspaceRoot $RepoRoot -Path $file.FullName))
         }
     }
     foreach ($relative in @(
-        'policies/entry-contract.md',
-        'scripts/task.ps1',
-        'scripts/benchmark-harness.ps1',
-        'scripts/generate-v2-rollout-report.ps1',
-        'scripts/run-isolated-install-smoke.ps1',
-        'tests/run-scenario-evals.ps1',
-        'tests/verify-v1-v2-coexistence.ps1',
-        'tests/verify-installation.ps1',
+        'harness.ps1',
         'install.ps1',
         'uninstall.ps1'
     )) {

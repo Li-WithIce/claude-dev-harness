@@ -44,7 +44,7 @@ $behaviorRun = Invoke-RolloutGate -Command 'tests/run-scenario-evals.ps1 -Suite 
 $behaviorJson = Read-JsonOutput -Text $behaviorRun.Output
 $behaviorStatus = if ($behaviorRun.ExitCode -eq 0 -and $null -ne $behaviorJson -and [bool]$behaviorJson.eligibility.eligible) { 'pass' } elseif ($null -ne $behaviorJson -and [int]$behaviorJson.summary.unavailable -gt 0) { 'unavailable' } else { 'fail' }
 
-$compatRun = Invoke-RolloutGate -Command 'tests/verify-v1-v2-coexistence.ps1' -ScriptPath (Join-Path $RepoRoot 'tests\verify-v1-v2-coexistence.ps1') -Arguments @('-RepoRoot',$RepoRoot)
+$compatRun = Invoke-RolloutGate -Command 'scripts/run-validation.ps1 -Suite all -CheckTimeoutSeconds 360' -ScriptPath (Join-Path $RepoRoot 'scripts\run-validation.ps1') -Arguments @('-RepoRoot',$RepoRoot,'-Suite','all','-CheckTimeoutSeconds','360')
 $compatStatus = if ($compatRun.ExitCode -eq 0) { 'pass' } else { 'fail' }
 
 $benchmarkRun = Invoke-RolloutGate -Command 'scripts/benchmark-harness.ps1 -Compare bare,v1,v2' -ScriptPath (Join-Path $RepoRoot 'scripts\benchmark-harness.ps1') -Arguments @('-RepoRoot',$RepoRoot,'-Compare','bare,v1,v2')

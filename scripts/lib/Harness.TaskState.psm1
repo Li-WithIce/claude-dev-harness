@@ -490,7 +490,7 @@ function Set-HarnessTaskTransition {
         $events=Read-EventLog -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Events;$eventText=$events.Text+(ConvertTo-HarnessJsonLine -Value $event)
         $steps=[System.Collections.Generic.List[object]]::new();$steps.Add((New-TransactionStep -WorkspaceRoot $WorkspaceRoot -Id 'task-state' -RelativePath $paths.Task -Action write -Content (ConvertTo-HarnessJsonText -Value $next)));$steps.Add((New-TransactionStep -WorkspaceRoot $WorkspaceRoot -Id 'event-log' -RelativePath $paths.Events -Action write -Content $eventText));$pointerAction='unchanged'
         if ($isCurrent) {
-            if ($To -ceq 'done') {$steps.Add((New-TransactionStep -WorkspaceRoot $WorkspaceRoot -Id 'current-pointer' -RelativePath $paths.Current -Action delete -Content $null));$pointerAction='cleared'}
+            if ($To -cin @('done','cancelled')) {$steps.Add((New-TransactionStep -WorkspaceRoot $WorkspaceRoot -Id 'current-pointer' -RelativePath $paths.Current -Action delete -Content $null));$pointerAction='cleared'}
             else {$pointer=[ordered]@{schema_version='current-pointer/v1';task_id=$TaskId;task_version=[int]$next.version;activated_at=[string]$current.activated_at};Assert-CurrentPointerDocument -RepoRoot $RepoRoot -Pointer $pointer;$steps.Add((New-TransactionStep -WorkspaceRoot $WorkspaceRoot -Id 'current-pointer' -RelativePath $paths.Current -Action write -Content (ConvertTo-HarnessJsonText -Value $pointer)));$pointerAction='updated'}
         }
         $journal=New-TaskTransaction -WorkspaceRoot $WorkspaceRoot -TransactionId $transactionId -Operation 'transition' -TaskId $TaskId -ExpectedVersion $ExpectedVersion -Steps @($steps)

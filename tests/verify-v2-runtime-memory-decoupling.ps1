@@ -91,6 +91,10 @@ try {
     $replay=Invoke-Task $taskScript $fixture $crash @('replay','-TransactionId',$transactionId,'-AsJson')
     Check ($replay.ExitCode-eq0-and(Read-Output $replay).result-ceq'recovered') 'failed-write replay remains independent and idempotent' 'failed-write replay failed'
 
+    $staging=Join-Path $crash '.assistant/runtime/tasks/.migration-orphan-task-ffffffffffffffffffffffffffffffff';[void][IO.Directory]::CreateDirectory($staging);[IO.File]::WriteAllText((Join-Path $staging 'partial.json'),'{}',[Text.UTF8Encoding]::new($false));$before=Snapshot $crash
+    $stagingStatus=Invoke-Task $taskScript $fixture $crash @('status','-AsJson') $null;$stagingIndex=Read-Output $stagingStatus
+    Check ($stagingStatus.ExitCode-eq0-and@($stagingIndex.tasks).Count-eq1-and(Test-Path -LiteralPath $staging)) 'recovery ignores but preserves a strict migration staging residue' 'migration staging residue broke recovery or was deleted';Same $before (Snapshot $crash) 'migration residue handling is zero-write' 'recovery changed migration residue'
+
     $coreHookText=@(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'runtime-hooks\core') -File -Recurse|ForEach-Object{Get-Content -LiteralPath $_.FullName -Raw -Encoding utf8})-join"`n"
     Check ($coreHookText-notmatch'(?i)resume|obsidian|long-term memory|恢复索引|继续|恢复') 'core hooks contain no resume or memory prompt injection' 'core hooks retain resume or memory prompt injection'
     $memoryHook=Join-Path $RepoRoot 'runtime-hooks\memory\userpromptsubmit.js';$legacyHook=Join-Path $RepoRoot 'runtime-hooks\claude\userpromptsubmit.js'
