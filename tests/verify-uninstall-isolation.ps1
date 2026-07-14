@@ -169,6 +169,12 @@ try {
             'vault-template'
             'scripts'
             'skills\entry-router'
+            'skills\orchestrator'
+            'skills\plan'
+            'skills\implement'
+            'skills\review'
+            'skills\test'
+            'skills\spec'
             'tests\verify-installation.ps1'
             'tests\fixture-test-common.ps1'
             'tests\forbidden-path-prefixes.txt'
@@ -1828,15 +1834,16 @@ try {
     $installedHookCommands = Get-HookCommands -Settings $installedClaudeSettings
     $installedPermissions = $installedClaudeSettings.PSObject.Properties['permissions']
     $installedAllow = @(if ($null -ne $installedPermissions -and $null -ne $installedPermissions.Value.PSObject.Properties['allow']) { $installedPermissions.Value.allow })
-    $harnessHooksUnique = @('userpromptsubmit.js', 'stop.js') | Where-Object {
+    $harnessHooksUnique = @('pretooluse.ps1', 'stop.js') | Where-Object {
         $hookName = $_
         @($installedHookCommands | Where-Object { $_ -like "*$hookName*" }).Count -ne 1
     }
+    $optionalMemoryHookCount = @($installedHookCommands | Where-Object { $_ -like '*userpromptsubmit.js*' }).Count
     $retiredPostToolHookCount = @($installedHookCommands | Where-Object { $_ -like '*hooks-memory\posttooluse.js*' }).Count
-    if (@($installedHookCommands | Where-Object { $_ -eq 'third-party-hook.cmd' }).Count -eq 1 -and @($harnessHooksUnique).Count -eq 0 -and $retiredPostToolHookCount -eq 0 -and $installedAllow.Count -eq 1 -and [string]$installedAllow[0] -ceq 'Read(//workspace/**)' -and $null -eq $installedClaudeSettings.hooks.PSObject.Properties['permissions']) {
-        Add-Check 'repeated install preserves third-party Claude hooks and root permissions, keeps active Harness hooks unique, and retires Harness PostToolUse'
+    if (@($installedHookCommands | Where-Object { $_ -eq 'third-party-hook.cmd' }).Count -eq 1 -and @($harnessHooksUnique).Count -eq 0 -and $optionalMemoryHookCount -eq 0 -and $retiredPostToolHookCount -eq 0 -and $installedAllow.Count -eq 1 -and [string]$installedAllow[0] -ceq 'Read(//workspace/**)' -and $null -eq $installedClaudeSettings.hooks.PSObject.Properties['permissions']) {
+        Add-Check 'repeated core install preserves third-party Claude hooks and root permissions, keeps core hooks unique, and omits optional or retired hooks'
     } else {
-        Add-Failure 'repeated install should preserve third-party Claude hooks and root permissions, keep active Harness hooks unique, retire Harness PostToolUse, and leave permissions outside hooks'
+        Add-Failure 'repeated core install should preserve third-party Claude hooks and root permissions, keep core hooks unique, omit optional or retired hooks, and leave permissions outside hooks'
     }
 
     $installedClaudeHash = (Get-FileHash -LiteralPath $claudeGlobalPath -Algorithm SHA256).Hash

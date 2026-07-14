@@ -727,6 +727,7 @@ $global:LASTEXITCODE = 73
 $foreignInstallResult = Invoke-RepoScript -UserProfile $legacyForeignUserProfile -ScriptPath (Join-Path $legacyRepoRoot 'install.ps1') -Arguments @{
     WorkspaceRoot = $legacyForeignWorkspace
     RepoRoot      = $legacyRepoRoot
+    VaultProfile  = 'full'
 }
 $foreignInstallRestoredExitCode = Get-LastExitCodeOrZero
 $global:LASTEXITCODE = 0
@@ -762,7 +763,7 @@ foreach ($legacyPointerRecord in @($legacyPointerManifest.backups)) {
         [void]$legacyPointerRecord.PSObject.Properties.Remove($pointerRecordField)
     }
 }
-foreach ($pointerManifestField in @('schema_version','postimage_identity_contract','transaction_status','backup_payload_integrity_contract','managed_backup_targets','registry_path','registry_preimage_sha256')) {
+foreach ($pointerManifestField in @('schema_version','postimage_identity_contract','transaction_status','backup_payload_integrity_contract','managed_backup_targets','registry_path','registry_preimage_sha256','requested_preset','effective_preset','preset_source','feature_ownership')) {
     [void]$legacyPointerManifest.PSObject.Properties.Remove($pointerManifestField)
 }
 [System.IO.File]::WriteAllText(
@@ -774,6 +775,7 @@ Remove-Item -LiteralPath $legacyForeignUserProfile,$legacyForeignWorkspace -Recu
 $legacyWarmupResult = Invoke-RepoScript -UserProfile $legacyUserProfile -ScriptPath (Join-Path $legacyRepoRoot 'install.ps1') -Arguments @{
     WorkspaceRoot = $legacyWorkspace
     RepoRoot      = $legacyRepoRoot
+    VaultProfile  = 'full'
 }
 $legacyEarliestExactPath = Join-Path $legacyWorkspace 'AGENTS.md'
 $legacyEarliestExactContent = 'legacy earliest exact sentinel'
@@ -787,6 +789,7 @@ $legacyLayerResults = @(1..3 | ForEach-Object {
         Invoke-RepoScript -UserProfile $legacyUserProfile -ScriptPath (Join-Path $legacyRepoRoot 'install.ps1') -Arguments @{
             WorkspaceRoot = $legacyWorkspace
             RepoRoot      = $legacyRepoRoot
+            VaultProfile  = 'full'
         }
     })
 $legacySeedResults = @($legacyWarmupResult) + @($legacyLayerResults)
@@ -807,7 +810,7 @@ for ($manifestIndex = 0; $manifestIndex -lt $legacyManifestPaths.Count; $manifes
     $legacyManifest = Get-Content -LiteralPath $legacyManifestPaths[$manifestIndex] -Raw -Encoding utf8 | ConvertFrom-Json
     $legacyManifest.schema_version = 'install-manifest/v1.1'
     $legacyManifest.installed_at = ([datetimeoffset]'2026-01-01T00:00:01+00:00').AddSeconds($manifestIndex).ToString('o')
-    foreach ($legacyManifestField in @('postimage_identity_contract','transaction_status','backup_payload_integrity_contract','managed_backup_targets','registry_preimage_sha256')) {
+    foreach ($legacyManifestField in @('postimage_identity_contract','transaction_status','backup_payload_integrity_contract','managed_backup_targets','registry_preimage_sha256','requested_preset','effective_preset','preset_source','feature_ownership')) {
         [void]$legacyManifest.PSObject.Properties.Remove($legacyManifestField)
     }
     foreach ($legacyBackupRecord in @($legacyManifest.backups)) {

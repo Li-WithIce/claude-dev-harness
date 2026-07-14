@@ -2,8 +2,8 @@
 
 - Call `/entry-router` at the start of each conversation.
 - Resolve the workspace via `DEV_HARNESS_WORKSPACE_ROOT` -> `WORKSPACE_ROOT` -> nearest parent containing `.assistant`; if environment values conflict or no unique workspace exists, stop shared-memory writes and request an explicit root.
-- The active workspace's `.assistant` is the only shared runtime source. Default language is Chinese and sensitive values must not be disclosed.
-- On resume, read existing recovery index, current task, task runtime, interruption, and last-session files in that order; missing files mean no recorded state.
+- The active workspace's Harness runtime is authoritative. Default language is Chinese and sensitive values must not be disclosed.
+- Use `scripts\task.ps1 status` for a read-only v2 recovery view. Existing v1 tasks keep their compatibility recovery files; optional Memory is loaded only when installed and needed.
 - Claude follows the workspace single-writer model. Multi-step `mode=workflow` start/switch/pause may sync runtime; standalone quick/read-only work does not.
 
 <!-- BEGIN GENERATED ENTRY CONTRACT -->

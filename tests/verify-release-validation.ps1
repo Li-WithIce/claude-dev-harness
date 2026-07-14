@@ -263,8 +263,8 @@ if (-not (Test-Path -LiteralPath $smokeRunnerPath -PathType Leaf)) {
         $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
         [System.IO.File]::WriteAllText((Join-Path $fixtureRepo 'install.ps1'), @'
 [CmdletBinding()]
-param([string]$WorkspaceRoot, [string]$RepoRoot, [string]$VaultProfile)
-$line = 'install|{0}|{1}|{2}|{3}' -f $WorkspaceRoot,$env:USERPROFILE,$RepoRoot,$VaultProfile
+param([string]$WorkspaceRoot, [string]$RepoRoot, [string]$Preset)
+$line = 'install|{0}|{1}|{2}|{3}' -f $WorkspaceRoot,$env:USERPROFILE,$RepoRoot,$Preset
 [System.IO.File]::AppendAllText($env:DEV_HARNESS_SMOKE_TRACE, $line + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
 exit [int]$env:DEV_HARNESS_SMOKE_INSTALL_EXIT
 '@, $utf8NoBom)
@@ -350,7 +350,7 @@ exit [int]$env:DEV_HARNESS_SMOKE_UNINSTALL_EXIT
                 $caseExit = $LASTEXITCODE
                 $traceLines = @(Get-Content -LiteralPath $tracePath -Encoding utf8 -ErrorAction SilentlyContinue)
                 $actualSequence = @($traceLines | ForEach-Object { ($_ -split '\|', 2)[0] })
-                $installFields = @($traceLines[0] -split '\|')
+                $installFields = if ($traceLines.Count -gt 0) { @($traceLines[0] -split '\|') } else { @() }
                 if ($installFields.Count -ge 2) {
                     $runnerScratchRoot = Split-Path -Parent $installFields[1]
                 }

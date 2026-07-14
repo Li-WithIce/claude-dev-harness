@@ -1,6 +1,7 @@
 ﻿[CmdletBinding()]
 param(
-    [string]$RepoRoot = ''
+    [string]$RepoRoot = '',
+    [ValidateSet('core','governed','full')][string]$Preset = 'full'
 )
 
 Set-StrictMode -Version Latest
@@ -41,7 +42,7 @@ try {
     $env:USERPROFILE = $userProfileRoot
 
     Write-Output 'Smoke stage: install'
-    & $powerShellPath -NoLogo -NoProfile -NonInteractive -File $installScript -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -VaultProfile full
+    & $powerShellPath -NoLogo -NoProfile -NonInteractive -File $installScript -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -Preset $Preset
     $installExit = $LASTEXITCODE
 
     if ($installExit -eq 0) {

@@ -1,9 +1,9 @@
 # Workspace Host Overlay
 
-- Shared memory vault: `{VAULT_PATH}`; keep runtime notes only under this workspace's `.assistant`.
+- Harness runtime lives under `{VAULT_PATH}`; optional Memory features are used only when installed and explicitly needed or authorized.
 - Default to Simplified Chinese for explanations and summaries; keep code identifiers in their native language and never expose secrets or private data.
-- Orientation reads existing `.assistant` project/config files only as needed. Resume first inspects open `[writeback-fallback]` rows, then existing recovery/current-task/task/interruption/session runtime files; missing optional files do not block work.
-- Use `rg`, file reading, and manual inspection by default. Provider indexes and `codegraph sync` are opt-in and must not block routing; do not initialize them without explicit authorization.
+- Use `scripts\task.ps1 status` for a read-only v2 recovery view; v1 recovery files remain compatibility inputs only for existing v1 tasks.
+- Use `rg`, file reading, and manual inspection by default. Optional providers are never required for core routing.
 - Current requirements and business correctness take precedence over stale tests or snapshots unless historical compatibility is explicitly required.
 - The executable workspace entry shim remains `.assistant\entry\AGENTS.md`.
 

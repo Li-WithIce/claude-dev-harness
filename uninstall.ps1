@@ -61,6 +61,10 @@ function Test-IsHarnessHookCommand {
     if ([string]::IsNullOrWhiteSpace($Command) -or [string]::IsNullOrWhiteSpace($ClaudeHome)) {
         return $false
     }
+    $preToolCommand = 'pwsh -NoProfile -NonInteractive -File "{0}"' -f (Join-Path $ClaudeHome 'hooks-memory\pretooluse.ps1')
+    if ($Command.Trim().Equals($preToolCommand, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $true
+    }
     foreach ($hookName in @('userpromptsubmit.js','stop.js','posttooluse.js')) {
         $expectedCommand = 'node "{0}"' -f (Join-Path $ClaudeHome "hooks-memory\$hookName")
         if ($Command.Trim().Equals($expectedCommand, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -82,7 +86,7 @@ function Remove-HarnessHooksFromSettings {
     }
 
     $hooks = ConvertTo-NormalizedObject -Value $result['hooks']
-    foreach ($eventName in @('UserPromptSubmit', 'Stop', 'PostToolUse')) {
+    foreach ($eventName in @('PreToolUse', 'UserPromptSubmit', 'Stop', 'PostToolUse')) {
         if (-not $hooks.Contains($eventName)) {
             continue
         }
@@ -140,7 +144,7 @@ function Add-BaselineHarnessHooks {
         $Settings['hooks'] = [ordered]@{}
     }
 
-    foreach ($eventName in @('UserPromptSubmit', 'Stop', 'PostToolUse')) {
+    foreach ($eventName in @('PreToolUse', 'UserPromptSubmit', 'Stop', 'PostToolUse')) {
         if (-not $Baseline['hooks'].Contains($eventName)) {
             continue
         }

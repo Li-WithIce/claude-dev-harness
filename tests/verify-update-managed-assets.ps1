@@ -581,6 +581,7 @@ exit 0
         $fixtureClaudeSettingsPath = Join-Path $fixtureClaudeHome 'settings.json'
         $fixtureHookTemplatePath = Join-Path $fixtureRepoRoot 'agent-configs\claude\settings.local.shared.json.template'
         $fixturePostToolSourcePath = Join-Path $fixtureRepoRoot 'runtime-hooks\claude\posttooluse.js'
+        $fixtureInstallPath = Join-Path $fixtureRepoRoot 'install.ps1'
         $livePostToolPath = Join-Path $fixtureClaudeHome 'hooks-memory\posttooluse.js'
         $legacyPostToolCommand = 'node "{0}"' -f $livePostToolPath
         $thirdPartyPostToolCommand = 'third-party-posttool.cmd'
@@ -602,6 +603,14 @@ exit 0
             'process.stdin.resume(); process.stdout.write("{}\n");',
             (New-Object System.Text.UTF8Encoding($false))
         )
+        $currentInstallRaw = Get-Content -LiteralPath $fixtureInstallPath -Raw -Encoding utf8
+        $currentFullHooks = "hooks = @('pretooluse.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js')"
+        $legacyFullHooks = "hooks = @('pretooluse.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js','posttooluse.js')"
+        $legacyInstallRaw = $currentInstallRaw.Replace($currentFullHooks,$legacyFullHooks)
+        if ($legacyInstallRaw -ceq $currentInstallRaw) {
+            throw 'fixture could not enable the formerly managed PostToolUse hook'
+        }
+        [System.IO.File]::WriteAllText($fixtureInstallPath,$legacyInstallRaw,(New-Object System.Text.UTF8Encoding($true)))
         New-Item -ItemType Directory -Path $fixtureClaudeHome -Force | Out-Null
         $thirdPartyBaseline = [ordered]@{
             hooks = [ordered]@{
@@ -653,6 +662,7 @@ exit 0
 
         Remove-Item -LiteralPath $fixtureTemplatePath -Force
         Remove-Item -LiteralPath $fixturePostToolSourcePath -Force
+        [System.IO.File]::WriteAllText($fixtureInstallPath,$currentInstallRaw,(New-Object System.Text.UTF8Encoding($true)))
         [System.IO.File]::WriteAllText(
             $fixtureHookTemplatePath,
             $currentHookTemplateRaw,

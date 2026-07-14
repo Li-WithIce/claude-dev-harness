@@ -11,17 +11,6 @@
       ]
     }
   ],
-  "UserPromptSubmit": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "node \"{CLAUDE_HOME}\\hooks-memory\\userpromptsubmit.js\"",
-          "timeout": 10
-        }
-      ]
-    }
-  ],
   "Stop": [
     {
       "hooks": [

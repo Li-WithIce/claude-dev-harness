@@ -266,6 +266,22 @@ function Test-FullVaultProfile {
     return ($weakMarkerCount -eq 2)
 }
 
+function Get-ExpectedPresetDefinition {
+    param(
+        [Parameter(Mandatory)][ValidateSet('core','governed','full')][string]$Name,
+        [Parameter(Mandatory)][string]$RepoSkillsPath
+    )
+
+    $coreSkills = @('.system','entry-router','orchestrator','plan','implement','review','test','spec')
+    if ($Name -eq 'core') {
+        return [ordered]@{features=@('core','v1-compatibility');skills=$coreSkills;hooks=@('pretooluse.ps1','stop.js','workspace-resolver.js');vault_profile='minimal'}
+    }
+    if ($Name -eq 'governed') {
+        return [ordered]@{features=@('core','v1-compatibility','governed');skills=@($coreSkills+@('planning','audit'));hooks=@('pretooluse.ps1','stop.js','workspace-resolver.js');vault_profile='minimal'}
+    }
+    return [ordered]@{features=@('core','v1-compatibility','governed','memory','team','md-html','adapters','provider-references');skills=@(Get-ChildItem -LiteralPath $RepoSkillsPath -Force|Sort-Object Name|Select-Object -ExpandProperty Name);hooks=@('pretooluse.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js');vault_profile='full'}
+}
+
 function Assert-GitIgnoreManagedEntries {
     param([string]$Path)
 
@@ -392,7 +408,8 @@ function Assert-ManagedSkillLinks {
     param(
         [string]$HostLabel,
         [string]$HostSkillsPath,
-        [string]$RepoSkillsPath
+        [string]$RepoSkillsPath,
+        [string[]]$ManagedEntryNames
     )
 
     $hotSwapPreservedNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -410,21 +427,22 @@ function Assert-ManagedSkillLinks {
     }
 
     $checkedCount = 0
-    $managedEntryNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($entry in Get-ChildItem -LiteralPath $RepoSkillsPath -Force) {
-        [void]$managedEntryNames.Add($entry.Name)
-        $hostEntryPath = Join-Path $HostSkillsPath $entry.Name
+    $expectedManagedEntryNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in $ManagedEntryNames) {
+        [void]$expectedManagedEntryNames.Add($name)
+        $repoEntryPath = Join-Path $RepoSkillsPath $name
+        $hostEntryPath = Join-Path $HostSkillsPath $name
         if (-not (Test-Path -LiteralPath $hostEntryPath)) {
             Add-Error ("{0} skills 缺少 managed 条目: {1}" -f $HostLabel, $hostEntryPath)
             continue
         }
 
-        $expectedTarget = Get-NormalizedPath -Path $entry.FullName
+        $expectedTarget = Get-NormalizedPath -Path $repoEntryPath
         $actualTarget = Get-JunctionTarget -Path $hostEntryPath
-        if ($hotSwapPreservedNames.Contains($entry.Name) -and ($null -eq $actualTarget)) {
+        if ($hotSwapPreservedNames.Contains($name) -and ($null -eq $actualTarget)) {
             $checkedCount += 1
-            $allowExtraEntries = $entry.Name -eq '.system'
-            Assert-PreservedDirectoryMatchesRepo -HostPath $hostEntryPath -RepoPath $entry.FullName -Label ("{0} skills/{1}" -f $HostLabel, $entry.Name) -AllowExtraEntries:$allowExtraEntries
+            $allowExtraEntries = $name -eq '.system'
+            Assert-PreservedDirectoryMatchesRepo -HostPath $hostEntryPath -RepoPath $repoEntryPath -Label ("{0} skills/{1}" -f $HostLabel, $name) -AllowExtraEntries:$allowExtraEntries
             continue
         }
 
@@ -438,7 +456,7 @@ function Assert-ManagedSkillLinks {
 
     $normalizedRepoSkillsPath = Get-NormalizedPath -Path $RepoSkillsPath
     foreach ($entry in Get-ChildItem -LiteralPath $HostSkillsPath -Force) {
-        if ($managedEntryNames.Contains($entry.Name)) {
+        if ($expectedManagedEntryNames.Contains($entry.Name)) {
             continue
         }
 
@@ -513,13 +531,56 @@ $script:Checks = @()
 $script:Warnings = @()
 $script:Errors = @()
 
-Assert-ManagedSkillLinks -HostLabel 'Claude' -HostSkillsPath $ClaudeSkillsPath -RepoSkillsPath $RepoSkillsPath
-Assert-ManagedSkillLinks -HostLabel 'Codex' -HostSkillsPath $CodexSkillsPath -RepoSkillsPath $RepoSkillsPath
-Assert-ManagedSkillLinks -HostLabel 'Agents' -HostSkillsPath $AgentsSkillsPath -RepoSkillsPath $RepoSkillsPath
+$installManifest = $null
+$effectivePreset = if ($VaultIsFull) { 'full' } else { 'core' }
+try {
+    if (Test-Path -LiteralPath $InstallRegistryPath -PathType Leaf) {
+        $registryForPreset = Read-FileUtf8 -Path $InstallRegistryPath | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop
+        $entryForPreset = @($registryForPreset.workspaces.Values | Where-Object { (Get-NormalizedPath -Path $_.workspace_root) -eq $WorkspaceRoot })
+        if ($entryForPreset.Count -eq 1 -and @($entryForPreset[0].manifests).Count -gt 0) {
+            $installManifest = Read-FileUtf8 -Path @($entryForPreset[0].manifests)[-1] | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop
+            if (-not [string]::IsNullOrWhiteSpace([string]$installManifest.effective_preset)) {
+                $effectivePreset = [string]$installManifest.effective_preset
+            }
+        }
+    }
+} catch {
+    Add-Error ("Cannot resolve installed preset: {0}" -f $_.Exception.Message)
+}
+if ($effectivePreset -notin @('core','governed','full')) {
+    Add-Error ("Installed effective_preset is invalid: {0}" -f $effectivePreset)
+    $effectivePreset = if ($VaultIsFull) { 'full' } else { 'core' }
+}
+$presetDefinition = Get-ExpectedPresetDefinition -Name $effectivePreset -RepoSkillsPath $RepoSkillsPath
+$hasFeatureOwnership = $null -ne $installManifest -and
+    $installManifest.Contains('feature_ownership') -and
+    $null -ne $installManifest.feature_ownership
+if (-not $hasFeatureOwnership -or
+    [string]$installManifest.feature_ownership.schema_version -cne 'feature-ownership/v1' -or
+    [string]$installManifest.feature_ownership.vault_profile -cne [string]$presetDefinition.vault_profile -or
+    @(Compare-Object @($presetDefinition.features) @($installManifest.feature_ownership.features)).Count -ne 0 -or
+    @(Compare-Object @($presetDefinition.skills) @($installManifest.feature_ownership.skills)).Count -ne 0 -or
+    @(Compare-Object @($presetDefinition.hooks) @($installManifest.feature_ownership.hooks)).Count -ne 0) {
+    Add-Error 'Install manifest feature ownership does not match the effective preset'
+} else {
+    Add-Check ("install manifest feature ownership matches preset: {0}" -f $effectivePreset)
+}
 
-foreach ($hookName in @('userpromptsubmit.js', 'stop.js', 'workspace-resolver.js')) {
-    Assert-RenderedFile -Path (Join-Path $ClaudeHooksPath $hookName) -ForbiddenTokens $ForbiddenTokens
-    Assert-TemplateFileMatches -Path (Join-Path $ClaudeHooksPath $hookName) -TemplatePath (Join-Path $RepoRoot "runtime-hooks\claude\$hookName") -Label "Claude hook $hookName" -EscapeForCode
+Assert-ManagedSkillLinks -HostLabel 'Claude' -HostSkillsPath $ClaudeSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
+Assert-ManagedSkillLinks -HostLabel 'Codex' -HostSkillsPath $CodexSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
+Assert-ManagedSkillLinks -HostLabel 'Agents' -HostSkillsPath $AgentsSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
+
+foreach ($hookName in @('pretooluse.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js')) {
+    $hookPath = Join-Path $ClaudeHooksPath $hookName
+    if (@($presetDefinition.hooks) -contains $hookName) {
+        $templatePath = if ($hookName -eq 'userpromptsubmit.js') { Join-Path $RepoRoot 'runtime-hooks\memory\userpromptsubmit.js' } else { Join-Path $RepoRoot "runtime-hooks\claude\$hookName" }
+        Assert-RenderedFile -Path $hookPath -ForbiddenTokens $ForbiddenTokens
+        Assert-TemplateFileMatches -Path $hookPath -TemplatePath $templatePath -Label "Claude hook $hookName" -EscapeForCode:($hookName.EndsWith('.js'))
+    } elseif (Test-Path -LiteralPath $hookPath) {
+        Add-Error ("Claude preset should not install hook: {0}" -f $hookPath)
+    } else {
+        Add-Check ("Claude preset omits optional hook: {0}" -f $hookName)
+    }
 }
 $retiredPostToolHookPath = Join-Path $ClaudeHooksPath 'posttooluse.js'
 if (Test-Path -LiteralPath $retiredPostToolHookPath) {
@@ -644,7 +705,12 @@ if ($VaultIsFull) {
 if (Test-Path -LiteralPath $ClaudeSettingsPath -PathType Leaf) {
     try {
         $claudeSettings = Get-Content -LiteralPath $ClaudeSettingsPath -Raw -Encoding utf8 | ConvertFrom-Json
-        foreach ($key in @('UserPromptSubmit', 'Stop')) {
+        $eventByHook = [ordered]@{ 'pretooluse.ps1'='PreToolUse';'userpromptsubmit.js'='UserPromptSubmit';'stop.js'='Stop' }
+        foreach ($hookName in $eventByHook.Keys) {
+            $key = $eventByHook[$hookName]
+            if (@($presetDefinition.hooks) -notcontains $hookName) {
+                continue
+            }
             $value = $claudeSettings.hooks.$key
             if ($value -is [System.Array] -and $value.Count -gt 0) {
                 Add-Check ("Claude settings.json 包含数组化的 hooks.{0}" -f $key)
@@ -659,12 +725,13 @@ if (Test-Path -LiteralPath $ClaudeSettingsPath -PathType Leaf) {
                     }
                 }
             })
-        foreach ($hookName in @('userpromptsubmit.js', 'stop.js')) {
+        foreach ($hookName in $eventByHook.Keys) {
             $expectedHookPath = Join-Path $ClaudeHooksPath $hookName
-            if (@($registeredCommands | Where-Object { $_ -like "*$expectedHookPath*" }).Count -eq 1) {
+            $expectedCount = if (@($presetDefinition.hooks) -contains $hookName) { 1 } else { 0 }
+            if (@($registeredCommands | Where-Object { $_ -like "*$expectedHookPath*" }).Count -eq $expectedCount) {
                 Add-Check ("Claude settings.json 唯一注册真实 hook: {0}" -f $hookName)
             } else {
-                Add-Error ("Claude settings.json 未唯一注册真实 hook: {0}" -f $expectedHookPath)
+                Add-Error ("Claude settings.json hook registration count mismatch: {0}" -f $expectedHookPath)
             }
         }
         if (@($registeredCommands | Where-Object { $_ -like "*$retiredPostToolHookPath*" }).Count -eq 0) {

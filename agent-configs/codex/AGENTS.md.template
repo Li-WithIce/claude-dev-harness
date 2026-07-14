@@ -1,11 +1,11 @@
 # Codex Host Overlay
 
 - Resolve the active workspace in this order: explicit `-WorkspaceRoot` -> `DEV_HARNESS_WORKSPACE_ROOT` -> `WORKSPACE_ROOT` -> current directory inside an installed workspace.
-- The resolved workspace's `AGENTS.md` and `.assistant` are authoritative; user-level rules are defaults. Use its `.assistant` as shared memory and do not keep parallel runtime notes under `{CODEX_HOME}`.
-- Default language is Chinese. For recovery or durable context, use `obsidian-memory` only after workspace resolution and only against existing local runtime/memory files.
-- Orientation reads the local `AGENTS.md` first, then existing optional project/config files. Resume inspects open `[writeback-fallback]` rows before existing recovery/current-task/task/interruption/session runtime files.
+- The resolved workspace's `AGENTS.md` and Harness runtime are authoritative; user-level rules are defaults.
+- Default language is Chinese. Use `scripts\task.ps1 status` for read-only v2 recovery; optional Memory requires an installed feature and explicit need or write authorization.
+- Orientation reads the local `AGENTS.md` first. Existing v1 tasks may use their compatibility runtime files; new v2 tasks use `.assistant/runtime`.
 - Codex is a shared-pointer writer only when local entry rules identify it as entry host and the user explicitly continues or executes `mode=workflow`; inspect/status and standalone quick work never update pointers.
-- New durable workflow items enter `.assistant\运行时\收件箱.md` first. Durable conclusions belong in maintained tracked artifacts, not a parallel note store.
+- Durable conclusions belong in maintained tracked artifacts; internal failed writes stay in `.assistant/runtime/failed-writes` and never enter a business inbox.
 
 <!-- BEGIN GENERATED ENTRY CONTRACT -->
 <!-- source-sha256: 1d740c8f3b5d3534f107c7609b9915f9a86d3bcaac5422e411f5b803cf450651 -->

@@ -3,6 +3,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$WorkspaceRoot,
     [string]$RepoRoot = "",
+    [ValidateSet('core', 'governed', 'full')]
+    [string]$Preset = '',
     [ValidateSet('auto', 'minimal', 'full')]
     [string]$VaultProfile = 'auto',
     [switch]$RebaselineLegacyInstallState,
@@ -11,6 +13,15 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+$presetSpecified = $PSBoundParameters.ContainsKey('Preset')
+$vaultProfileSpecified = $PSBoundParameters.ContainsKey('VaultProfile')
+if ($presetSpecified -and $vaultProfileSpecified -and $VaultProfile -ne 'auto') {
+    $mappedPreset = if ($VaultProfile -eq 'full') { 'full' } else { 'core' }
+    if ($Preset -ne $mappedPreset) {
+        throw "Preset '$Preset' conflicts with VaultProfile '$VaultProfile' (maps to '$mappedPreset')"
+    }
+}
 
 . (Join-Path $PSScriptRoot 'scripts\install-transaction-common.ps1')
 
@@ -1792,7 +1803,7 @@ function Normalize-SettingsShape {
         $Settings['permissions'] = $permissions
     }
 
-    foreach ($key in @('UserPromptSubmit', 'Stop', 'PostToolUse')) {
+    foreach ($key in @('PreToolUse', 'UserPromptSubmit', 'Stop', 'PostToolUse')) {
         if (-not $Settings.Contains($key)) {
             continue
         }
@@ -1986,7 +1997,7 @@ function Merge-ClaudeSettingsJsonText {
     $result = ConvertFrom-JsonDocument -Json $existingJson
     $managedHooks = ConvertFrom-JsonDocument -Json $RenderedHooksJson
     $managedCommands = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($eventName in @('UserPromptSubmit', 'Stop', 'PostToolUse')) {
+    foreach ($eventName in @('PreToolUse', 'UserPromptSubmit', 'Stop', 'PostToolUse')) {
         foreach ($section in @(if ($managedHooks.Contains($eventName)) { @($managedHooks[$eventName]) } else { @() })) {
             foreach ($hook in @($section['hooks'])) {
                 if ($hook -is [System.Collections.IDictionary] -and -not [string]::IsNullOrWhiteSpace([string]$hook['command'])) {
@@ -1995,6 +2006,9 @@ function Merge-ClaudeSettingsJsonText {
             }
         }
     }
+    [void]$managedCommands.Add(('pwsh -NoProfile -NonInteractive -File "{0}"' -f (Join-Path (Split-Path -Parent $ExistingPath) 'hooks-memory\pretooluse.ps1')))
+    [void]$managedCommands.Add(('node "{0}"' -f (Join-Path (Split-Path -Parent $ExistingPath) 'hooks-memory\userpromptsubmit.js')))
+    [void]$managedCommands.Add(('node "{0}"' -f (Join-Path (Split-Path -Parent $ExistingPath) 'hooks-memory\stop.js')))
     [void]$managedCommands.Add(('node "{0}"' -f (Join-Path (Split-Path -Parent $ExistingPath) 'hooks-memory\posttooluse.js')))
     $hooks = if ($result.Contains('hooks')) {
         if (-not ($result['hooks'] -is [System.Collections.IDictionary])) {
@@ -2005,7 +2019,7 @@ function Merge-ClaudeSettingsJsonText {
         [ordered]@{}
     }
 
-    foreach ($eventName in @('UserPromptSubmit', 'Stop', 'PostToolUse')) {
+    foreach ($eventName in @('PreToolUse', 'UserPromptSubmit', 'Stop', 'PostToolUse')) {
         $sections = New-Object System.Collections.ArrayList
         foreach ($section in @(if ($hooks.Contains($eventName)) { @($hooks[$eventName]) } else { @() })) {
             if (-not ($section -is [System.Collections.IDictionary]) -or -not $section.Contains('hooks')) {
@@ -2054,7 +2068,7 @@ function New-ClaudeSettingsPostimageIdentity {
     param($ManagedSettings)
 
     $managedHooks = New-Object System.Collections.ArrayList
-    foreach ($eventName in @('UserPromptSubmit', 'Stop', 'PostToolUse')) {
+    foreach ($eventName in @('PreToolUse', 'UserPromptSubmit', 'Stop', 'PostToolUse')) {
         foreach ($section in @(if ($ManagedSettings.Contains($eventName)) { @($ManagedSettings[$eventName]) } else { @() })) {
             if (-not ($section -is [System.Collections.IDictionary]) -or
                 -not ($section['hooks'] -is [System.Collections.IList])) {
@@ -2252,15 +2266,20 @@ function Get-PreservedSkillEntryNames {
 function Sync-SkillsDirectory {
     param(
         [string]$HostSkillsPath,
-        [string]$RepoSkillsPath
+        [string]$RepoSkillsPath,
+        [string[]]$ManagedEntryNames
     )
 
     $hotSwapPreservedNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     [void]$hotSwapPreservedNames.Add('.system')
 
     $managedEntries = [ordered]@{}
-    foreach ($entry in Get-ChildItem -LiteralPath $RepoSkillsPath -Force) {
-        $managedEntries[$entry.Name] = $entry.FullName
+    foreach ($name in $ManagedEntryNames) {
+        $entryPath = Join-Path $RepoSkillsPath $name
+        if (-not (Test-Path -LiteralPath $entryPath)) {
+            throw "Preset skill entry is missing: $entryPath"
+        }
+        $managedEntries[$name] = $entryPath
     }
 
     $rootTarget = Get-JunctionTarget -Path $HostSkillsPath
@@ -2430,21 +2449,109 @@ function Test-ExistingFullVault {
     return ($weakMarkerCount -eq 2)
 }
 
-function Resolve-VaultProfile {
+function Get-InstallPresetDefinition {
     param(
-        [string]$RequestedProfile,
-        [string]$TargetRoot
+        [Parameter(Mandatory)][ValidateSet('core','governed','full')][string]$Name,
+        [Parameter(Mandatory)][string]$RepoSkillsPath
     )
 
-    if ($RequestedProfile -ne 'auto') {
-        return $RequestedProfile
+    $coreSkills = @('.system','entry-router','orchestrator','plan','implement','review','test','spec')
+    if ($Name -eq 'core') {
+        return [ordered]@{
+            name = 'core'
+            features = @('core','v1-compatibility')
+            skills = $coreSkills
+            hooks = @('pretooluse.ps1','stop.js','workspace-resolver.js')
+            vault_profile = 'minimal'
+        }
     }
+    if ($Name -eq 'governed') {
+        return [ordered]@{
+            name = 'governed'
+            features = @('core','v1-compatibility','governed')
+            skills = @($coreSkills + @('planning','audit'))
+            hooks = @('pretooluse.ps1','stop.js','workspace-resolver.js')
+            vault_profile = 'minimal'
+        }
+    }
+    return [ordered]@{
+        name = 'full'
+        features = @('core','v1-compatibility','governed','memory','team','md-html','adapters','provider-references')
+        skills = @(Get-ChildItem -LiteralPath $RepoSkillsPath -Force | Sort-Object Name | Select-Object -ExpandProperty Name)
+        hooks = @('pretooluse.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js')
+        vault_profile = 'full'
+    }
+}
 
+function Get-PreservedInstallPreset {
+    param(
+        [Parameter(Mandatory)]$Registry,
+        [Parameter(Mandatory)][string]$WorkspaceKey,
+        [Parameter(Mandatory)][string]$TargetRoot
+    )
+
+    if ($Registry['workspaces'].Contains($WorkspaceKey)) {
+        $manifestPaths = @($Registry['workspaces'][$WorkspaceKey]['manifests'])
+        if ($manifestPaths.Count -gt 0) {
+            $manifest = Read-JsonObject -Path $manifestPaths[-1]
+            $recordedPreset = [string]$manifest['effective_preset']
+            if (-not [string]::IsNullOrWhiteSpace($recordedPreset)) {
+                if ($recordedPreset -notin @('core','governed','full')) {
+                    throw "Installed manifest has an invalid effective_preset: $recordedPreset"
+                }
+                return [ordered]@{ preset=$recordedPreset;source='manifest-preserve' }
+            }
+            $legacyPreset = if ([string]$manifest['effective_vault_profile'] -eq 'full') { 'full' } else { 'core' }
+            return [ordered]@{ preset=$legacyPreset;source='legacy-manifest-preserve' }
+        }
+    }
     if (Test-ExistingFullVault -TargetRoot $TargetRoot) {
-        return 'full'
+        return [ordered]@{ preset='full';source='detected-full-vault' }
     }
+    return [ordered]@{ preset='core';source='default-core' }
+}
 
-    return 'minimal'
+function Resolve-InstallPreset {
+    param(
+        [string]$RequestedPreset,
+        [bool]$PresetSpecified,
+        [string]$RequestedVaultProfile,
+        [bool]$VaultProfileSpecified,
+        [Parameter(Mandatory)]$Registry,
+        [Parameter(Mandatory)][string]$WorkspaceKey,
+        [Parameter(Mandatory)][string]$TargetRoot
+    )
+
+    $preserved = Get-PreservedInstallPreset -Registry $Registry -WorkspaceKey $WorkspaceKey -TargetRoot $TargetRoot
+    $vaultMappedPreset = if ($RequestedVaultProfile -eq 'minimal') {
+        'core'
+    } elseif ($RequestedVaultProfile -eq 'full') {
+        'full'
+    } else {
+        [string]$preserved.preset
+    }
+    if ($PresetSpecified -and $VaultProfileSpecified -and $RequestedPreset -ne $vaultMappedPreset) {
+        throw "Preset '$RequestedPreset' conflicts with VaultProfile '$RequestedVaultProfile' (maps to '$vaultMappedPreset')"
+    }
+    if ($PresetSpecified) {
+        return [ordered]@{ preset=$RequestedPreset;source=$(if($VaultProfileSpecified){"preset+vault-profile:$RequestedVaultProfile"}else{'preset'}) }
+    }
+    if ($VaultProfileSpecified) {
+        return [ordered]@{ preset=$vaultMappedPreset;source="vault-profile:$RequestedVaultProfile" }
+    }
+    return $preserved
+}
+
+function Get-PresetHookSourcePath {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$HookName
+    )
+
+    if ($HookName -eq 'userpromptsubmit.js') {
+        return Join-Path $RepoRoot 'runtime-hooks\memory\userpromptsubmit.js'
+    }
+    return Join-Path $RepoRoot ("runtime-hooks\claude\{0}" -f $HookName)
 }
 
 function Install-MinimalVaultTemplate {
@@ -2626,6 +2733,10 @@ $script:Manifest = [ordered]@{
     generated_repo_system_path = $null
     requested_vault_profile = $VaultProfile
     effective_vault_profile = $null
+    requested_preset = $(if ($presetSpecified) { $Preset } else { $null })
+    effective_preset = $null
+    preset_source = $null
+    feature_ownership = $null
     backups = @()
 }
 $script:ManifestPath = Join-Path $BackupRoot 'install-manifest.json'
@@ -2661,6 +2772,30 @@ try {
         -RegistryPath $InstallRegistryPath `
         -ExpectedUserProfile $env:USERPROFILE `
         -RequireManifestIntegrity $true)
+    $presetResolution = Resolve-InstallPreset `
+        -RequestedPreset $Preset `
+        -PresetSpecified $presetSpecified `
+        -RequestedVaultProfile $VaultProfile `
+        -VaultProfileSpecified $vaultProfileSpecified `
+        -Registry $installRegistry `
+        -WorkspaceKey $currentWorkspaceKey `
+        -TargetRoot $VaultPath
+    $effectivePreset = [string]$presetResolution.preset
+    $presetDefinition = Get-InstallPresetDefinition -Name $effectivePreset -RepoSkillsPath $RepoSkillsPath
+    $effectiveVaultProfile = [string]$presetDefinition.vault_profile
+    $script:Manifest.effective_preset = $effectivePreset
+    $script:Manifest.preset_source = [string]$presetResolution.source
+    $script:Manifest.effective_vault_profile = $effectiveVaultProfile
+    $script:Manifest.feature_ownership = [ordered]@{
+        schema_version = 'feature-ownership/v1'
+        features = @($presetDefinition.features)
+        skills = @($presetDefinition.skills)
+        hooks = @($presetDefinition.hooks)
+        vault_profile = $effectiveVaultProfile
+    }
+    if ($vaultProfileSpecified) {
+        Write-Warning ("VaultProfile is deprecated; '{0}' mapped to Preset '{1}'." -f $VaultProfile,$effectivePreset)
+    }
     if ($legacyPointerImported) {
         Assert-LegacyPointerMigrationMarkerWritable -UserProfile $env:USERPROFILE -PointerPath $LegacyActiveInstallPath
     }
@@ -2704,10 +2839,6 @@ try {
 
     Ensure-Directory -Path (Join-Path $RepoSkillsPath '.system')
     Ensure-WorkspaceGitIgnoreEntries -WorkspaceRoot $WorkspaceRoot
-
-    $effectiveVaultProfile = Resolve-VaultProfile -RequestedProfile $VaultProfile -TargetRoot $VaultPath
-    $script:Manifest.effective_vault_profile = $effectiveVaultProfile
-    Save-InstallManifestSnapshot
 
     if ($effectiveVaultProfile -eq 'full') {
         $retiredDecisionTemplatePath = Join-Path $VaultPath '模板\决策需求模板.md'
@@ -2764,8 +2895,9 @@ try {
     Remove-PathIfExists -Path $claudeHooksStagingPath
     Ensure-Directory -Path $claudeHooksStagingPath
     try {
-        foreach ($hook in Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'runtime-hooks\claude') -File) {
-            Install-RenderedFile -SourcePath $hook.FullName -TargetPath (Join-Path $claudeHooksStagingPath $hook.Name)
+        foreach ($hookName in @($presetDefinition.hooks)) {
+            $hookSource = Get-PresetHookSourcePath -RepoRoot $RepoRoot -HookName $hookName
+            Install-RenderedFile -SourcePath $hookSource -TargetPath (Join-Path $claudeHooksStagingPath $hookName)
         }
         $claudeHooksExpectedPostimage = New-InstallExactDirectoryIdentity -Path $claudeHooksStagingPath
         $claudeHooksSourceIdentity = Get-InstallManagedPathIdentity -Path $claudeHooksPath
@@ -2779,7 +2911,8 @@ try {
         Remove-PathIfExists -Path $claudeHooksStagingPath
     }
 
-    $claudeSharedSettingsJson = Render-JsonTemplateText -TemplatePath (Join-Path $RepoRoot 'agent-configs\claude\settings.local.shared.json.template') -TargetPath $claudeSettingsPath
+    $claudeSettingsTemplate = if ($effectivePreset -eq 'full') { 'settings.local.shared.json.template' } else { 'settings.local.core.json.template' }
+    $claudeSharedSettingsJson = Render-JsonTemplateText -TemplatePath (Join-Path $RepoRoot ("agent-configs\claude\{0}" -f $claudeSettingsTemplate)) -TargetPath $claudeSettingsPath
     $claudeSettingsMerge = Merge-ClaudeSettingsJsonText -RenderedHooksJson $claudeSharedSettingsJson -ExistingPath $claudeSettingsPath
     $claudeSettingsExpectedPostimage = New-ClaudeSettingsPostimageIdentity -ManagedSettings (ConvertFrom-JsonDocument -Json $claudeSharedSettingsJson)
     Backup-IfNeeded -Path $claudeSettingsPath -ExpectedPostimage $claudeSettingsExpectedPostimage
@@ -2794,9 +2927,9 @@ try {
 
     Update-CodexManagedConfig -TemplatePath (Join-Path $RepoRoot 'agent-configs\codex\config.shared.toml.template') -ManagedTargetPath $codexManagedConfigPath
 
-    Sync-SkillsDirectory -HostSkillsPath $claudeSkillsPath -RepoSkillsPath $RepoSkillsPath
-    Sync-SkillsDirectory -HostSkillsPath $codexSkillsPath -RepoSkillsPath $RepoSkillsPath
-    Sync-SkillsDirectory -HostSkillsPath $agentsSkillsPath -RepoSkillsPath $RepoSkillsPath
+    Sync-SkillsDirectory -HostSkillsPath $claudeSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
+    Sync-SkillsDirectory -HostSkillsPath $codexSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
+    Sync-SkillsDirectory -HostSkillsPath $agentsSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
 
     Save-InstallManifestSnapshot
     Add-ManifestToRegistry `
@@ -2825,6 +2958,9 @@ try {
     Write-Output ('- vault_path: {0}' -f $VaultPath)
     Write-Output ('- requested_vault_profile: {0}' -f $VaultProfile)
     Write-Output ('- effective_vault_profile: {0}' -f $effectiveVaultProfile)
+    Write-Output ('- requested_preset: {0}' -f $(if ($presetSpecified) { $Preset } else { 'none' }))
+    Write-Output ('- effective_preset: {0}' -f $effectivePreset)
+    Write-Output ('- preset_source: {0}' -f $presetResolution.source)
     Write-Output ('- claude_skills_root: {0}' -f $claudeSkillsPath)
     Write-Output ('- codex_skills_root: {0}' -f $codexSkillsPath)
     Write-Output ('- agents_skills_root: {0}' -f $agentsSkillsPath)
