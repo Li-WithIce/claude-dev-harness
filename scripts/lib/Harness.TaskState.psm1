@@ -216,7 +216,7 @@ function New-TransactionStep {
 function Assert-TransactionJournal {
     param([string]$WorkspaceRoot,[System.Collections.IDictionary]$Journal)
     Assert-TaskStateExactKeys -Value $Journal -Expected @('transaction_id','operation','task_id','expected_version','status','completed_steps','failed_step','error','replay_command','created_at','steps') -Label 'transaction journal'
-    if ([string]$Journal.transaction_id -cnotmatch '^txn_[0-9a-f]{32}$' -or [string]$Journal.task_id -cnotmatch '^(?!(?:none|idle|unknown)$)[a-z0-9][a-z0-9-]{0,63}$' -or [string]$Journal.operation -cnotin @('create','transition','verify','approve') -or [string]$Journal.status -cnotin @('prepared','applying','failed','recovered')) { throw 'transaction journal identity, operation, or status is invalid' }
+    if ([string]$Journal.transaction_id -cnotmatch '^txn_[0-9a-f]{32}$' -or [string]$Journal.task_id -cnotmatch '^(?!(?:none|idle|unknown)$)[a-z0-9][a-z0-9-]{0,63}$' -or [string]$Journal.operation -cnotin @('create','transition','verify','approve','resume') -or [string]$Journal.status -cnotin @('prepared','applying','failed','recovered')) { throw 'transaction journal identity, operation, or status is invalid' }
     if (@($Journal.steps).Count -lt 2 -or @($Journal.steps).Count -gt 4) { throw 'transaction journal has an invalid step count' }
     $stepIds = [System.Collections.Generic.List[string]]::new()
     $allowedPaths = @(
@@ -392,6 +392,78 @@ function Set-HarnessTaskTransition {
     } finally {Exit-TaskStateMutex -Mutex $currentMutex;Exit-TaskStateMutex -Mutex $taskMutex}
 }
 
+function Resume-HarnessTaskExecution {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$WorkspaceRoot,
+        [Parameter(Mandatory)][string]$TaskId,
+        [Parameter(Mandatory)][int]$ExpectedVersion,
+        [string]$ActorHost = 'codex',
+        [string]$ActorModel = 'inherit'
+    )
+
+    Assert-V2WriteProtocol
+    $WorkspaceRoot = Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
+    Assert-HarnessTaskId -TaskId $TaskId
+    $paths = Get-TaskStatePaths -TaskId $TaskId
+    $taskMutex = $null
+    $currentMutex = $null
+    try {
+        $taskMutex = Enter-TaskStateMutex -Name (Get-TaskStateMutexName -WorkspaceRoot $WorkspaceRoot -Suffix "task.$TaskId")
+        $currentMutex = Enter-TaskStateMutex -Name (Get-TaskStateMutexName -WorkspaceRoot $WorkspaceRoot -Suffix 'current')
+        if (@(Get-PendingTransactions -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId).Count -gt 0) {
+            throw 'task has a pending transaction; replay it before resume-and-execute'
+        }
+        $task = Read-TaskStateDocument -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Task
+        if ([int]$task.version -ne $ExpectedVersion) {
+            throw "ExpectedVersion mismatch: expected=$ExpectedVersion actual=$($task.version)"
+        }
+        if ([string]$task.requirement_state -cne 'clear') {
+            throw 'blocked Requirement cannot resume execution'
+        }
+        if ([string]$task.status -cnotin @('ready','running','paused','failed')) {
+            throw "task status cannot resume execution: $($task.status)"
+        }
+        $current = Read-CurrentPointer -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Current
+        if ($null -ne $current -and [string]$current.task_id -cne $TaskId) {
+            throw "another current task is active: $($current.task_id)"
+        }
+        if ($null -ne $current -and [int]$current.task_version -ne $ExpectedVersion) {
+            throw 'current pointer version is stale; replay or repair before resume-and-execute'
+        }
+
+        $next = (ConvertTo-HarnessJsonText -Value $task) | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop
+        $next.version = $ExpectedVersion + 1
+        $next.status = 'running'
+        $next.updated_at = [datetimeoffset]::UtcNow.ToString('o')
+        Assert-TaskStateDocument -RepoRoot $RepoRoot -Task $next
+
+        $transactionId = 'txn_' + [guid]::NewGuid().ToString('N')
+        $timestamp = [string]$next.updated_at
+        $events = Read-EventLog -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Events
+        $event = New-TaskEvent -RepoRoot $RepoRoot -EventId ('evt_' + $transactionId.Substring(4)) -TaskId $TaskId -Version ([int]$next.version) -Type 'execution.started' -Host $ActorHost -Model $ActorModel -Timestamp $timestamp -Payload ([ordered]@{ from=[string]$task.status;to='running';source='resume-and-execute' })
+        $pointer = [ordered]@{ schema_version='current-pointer/v1';task_id=$TaskId;task_version=[int]$next.version;activated_at=$timestamp }
+        Assert-CurrentPointerDocument -RepoRoot $RepoRoot -Pointer $pointer
+        $steps = [System.Collections.Generic.List[object]]::new()
+        $steps.Add((New-TransactionStep -WorkspaceRoot $WorkspaceRoot -Id 'task-state' -RelativePath $paths.Task -Action write -Content (ConvertTo-HarnessJsonText -Value $next)))
+        $steps.Add((New-TransactionStep -WorkspaceRoot $WorkspaceRoot -Id 'event-log' -RelativePath $paths.Events -Action write -Content ($events.Text + (ConvertTo-HarnessJsonLine -Value $event))))
+        $steps.Add((New-TransactionStep -WorkspaceRoot $WorkspaceRoot -Id 'current-pointer' -RelativePath $paths.Current -Action write -Content (ConvertTo-HarnessJsonText -Value $pointer)))
+        $journal = New-TaskTransaction -WorkspaceRoot $WorkspaceRoot -TransactionId $transactionId -Operation 'resume' -TaskId $TaskId -ExpectedVersion $ExpectedVersion -Steps @($steps)
+        $transaction = Invoke-TaskStateTransaction -WorkspaceRoot $WorkspaceRoot -Journal $journal
+        return [ordered]@{
+            operation = 'resume-and-execute'
+            transaction_id = $transaction.TransactionId
+            write_authorized = $true
+            pointer_action = $(if ($null -eq $current) { 'activated' } else { 'updated' })
+            task = $next
+        }
+    } finally {
+        Exit-TaskStateMutex -Mutex $currentMutex
+        Exit-TaskStateMutex -Mutex $taskMutex
+    }
+}
+
 function Set-HarnessTaskApproval {
     [CmdletBinding()]
     param(
@@ -475,4 +547,4 @@ function Repair-HarnessTaskTransaction {
     }finally{Exit-TaskStateMutex -Mutex $currentMutex;Exit-TaskStateMutex -Mutex $taskMutex}
 }
 
-Export-ModuleMember -Function New-HarnessTaskState,Get-HarnessTaskStatus,Set-HarnessTaskTransition,Set-HarnessTaskApproval,Set-HarnessTaskEvidence,Repair-HarnessTaskTransaction
+Export-ModuleMember -Function New-HarnessTaskState,Get-HarnessTaskStatus,Set-HarnessTaskTransition,Resume-HarnessTaskExecution,Set-HarnessTaskApproval,Set-HarnessTaskEvidence,Repair-HarnessTaskTransaction

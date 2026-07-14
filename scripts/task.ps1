@@ -43,6 +43,12 @@ try {
         }
         Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Requirement.psm1') -Force -ErrorAction Stop
         $result = Invoke-RequirementInspection -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -RequestFile $RequestFile
+    } elseif ($Command -ceq 'status' -and [string]::IsNullOrWhiteSpace($TaskId)) {
+        Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Recovery.psm1') -Force -ErrorAction Stop
+        $result = Get-HarnessRecoveryIndex -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot
+    } elseif ($Command -ceq 'resume') {
+        Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Recovery.psm1') -Force -ErrorAction Stop
+        $result = Get-HarnessResumeClarification -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId
     } else {
         Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.TaskState.psm1') -Force -ErrorAction Stop
         if ($Command -ceq 'create') {
@@ -51,9 +57,6 @@ try {
             }
             $result = New-HarnessTaskState -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -ContractPath $Contract -Profile $Profile -Capabilities $Capabilities -ActivateCurrent:$ActivateCurrent -ActorHost $ActorHost -ActorModel $ActorModel
         } elseif ($Command -ceq 'status') {
-            if ([string]::IsNullOrWhiteSpace($TaskId)) {
-                throw 'status requires -TaskId'
-            }
             $result = Get-HarnessTaskStatus -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId
         } elseif ($Command -ceq 'transition') {
             if ([string]::IsNullOrWhiteSpace($TaskId) -or $null -eq $ExpectedVersion) {
@@ -70,6 +73,11 @@ try {
                 throw 'approve requires -TaskId, -ExpectedVersion, and -Approval'
             }
             $result = Set-HarnessTaskApproval -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -ExpectedVersion ([int]$ExpectedVersion) -ApprovalPath $Approval -ActorHost $ActorHost -ActorModel $ActorModel
+        } elseif ($Command -ceq 'resume-and-execute') {
+            if ([string]::IsNullOrWhiteSpace($TaskId) -or $null -eq $ExpectedVersion) {
+                throw 'resume-and-execute requires -TaskId and -ExpectedVersion'
+            }
+            $result = Resume-HarnessTaskExecution -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -ExpectedVersion ([int]$ExpectedVersion) -ActorHost $ActorHost -ActorModel $ActorModel
         } elseif ($Command -ceq 'replay') {
             if ([string]::IsNullOrWhiteSpace($TransactionId)) {
                 throw 'replay requires -TransactionId'
@@ -87,11 +95,22 @@ try {
         Write-Output ("blocking_decisions: {0}" -f @($result.blocking_decisions).Count)
         Write-Output ("contract_digest: {0}" -f $(if ($null -eq $result.contract) { 'none' } else { $result.contract.digest }))
     } elseif ($Command -ceq 'status') {
-        Write-Output ("task_id: {0}" -f $result.task.task_id)
-        Write-Output ("version: {0}" -f $result.task.version)
-        Write-Output ("status: {0}" -f $result.task.status)
-        Write-Output ("is_current: {0}" -f ([string]$result.is_current).ToLowerInvariant())
-        Write-Output ("pending_transactions: {0}" -f @($result.pending_transactions).Count)
+        if ([string]$result.operation -ceq 'recovery-index') {
+            Write-Output ("current_task: {0}" -f $(if ($null -eq $result.current) { 'none' } else { $result.current.task_id }))
+            Write-Output ("recoverable_tasks: {0}" -f @($result.tasks).Count)
+            Write-Output ("terminal_tasks: {0}" -f $result.terminal_task_count)
+            Write-Output 'runtime_writes: 0'
+        } else {
+            Write-Output ("task_id: {0}" -f $result.task.task_id)
+            Write-Output ("version: {0}" -f $result.task.version)
+            Write-Output ("status: {0}" -f $result.task.status)
+            Write-Output ("is_current: {0}" -f ([string]$result.is_current).ToLowerInvariant())
+            Write-Output ("pending_transactions: {0}" -f @($result.pending_transactions).Count)
+        }
+    } elseif ($Command -ceq 'resume') {
+        Write-Output ("requirement_state: {0}" -f $result.requirement_state)
+        Write-Output ("write_authorized: {0}" -f ([string]$result.write_authorized).ToLowerInvariant())
+        Write-Output ("blocking_decision: {0}" -f $result.blocking_decision)
     } elseif ($Command -ceq 'replay') {
         Write-Output ("transaction_id: {0}" -f $result.transaction_id)
         Write-Output ("result: {0}" -f $result.result)
@@ -110,6 +129,13 @@ try {
         Write-Output ("status: {0}" -f $result.task.status)
         Write-Output ("approval_id: {0}" -f $result.approval_id)
         Write-Output ("approval_path: {0}" -f $result.approval_path)
+        Write-Output ("pointer_action: {0}" -f $result.pointer_action)
+    } elseif ($Command -ceq 'resume-and-execute') {
+        Write-Output ("operation: {0}" -f $result.operation)
+        Write-Output ("task_id: {0}" -f $result.task.task_id)
+        Write-Output ("version: {0}" -f $result.task.version)
+        Write-Output ("status: {0}" -f $result.task.status)
+        Write-Output ("write_authorized: {0}" -f ([string]$result.write_authorized).ToLowerInvariant())
         Write-Output ("pointer_action: {0}" -f $result.pointer_action)
     } else {
         Write-Output ("operation: {0}" -f $result.operation)
