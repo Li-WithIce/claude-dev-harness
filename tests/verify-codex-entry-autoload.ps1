@@ -72,8 +72,8 @@ foreach ($skill in @('workflow-team', 'codegraph', 'agentmemory', 'codedb-mcp', 
 
 $entryContractPath = 'policies/entry-contract.md'
 Need-Text $entryContractPath '`protocol_default`: `auto`'
-Need-Text $entryContractPath '`auto_resolves_to`: `existing-artifact-or-v1-new`'
-Need-Text $entryContractPath '`v2_entry_activation`: `explicit-new-or-existing-v2`'
+Need-Text $entryContractPath '`auto_resolves_to`: `existing-artifact-or-gated-v2-new`'
+Need-Text $entryContractPath '`v2_entry_activation`: `explicit-new-or-existing-v2-or-eligible-auto-new`'
 Need-Text $entryContractPath '`stage_chain`: `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`'
 Need-Text $entryContractPath '`plan.md` frontmatter is the sole stage truth'
 

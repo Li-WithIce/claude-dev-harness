@@ -1,6 +1,8 @@
 ﻿Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+Import-Module (Join-Path $PSScriptRoot 'Harness.Protocol.psm1') -Force -ErrorAction Stop
+
 $script:ProfileRank = [ordered]@{ inspect=0; direct=1; governed=2; critical=3 }
 
 function Assert-ExactKeys {
@@ -135,6 +137,7 @@ function Resolve-HarnessExecutionProfile {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$RepoRoot,
+        [string]$WorkspaceRoot = '',
         [ValidateSet('new','existing','resume')][string]$Identity = 'new',
         [ValidateSet('read','write')][string]$Intent = 'write',
         [ValidateSet('clear','blocked')][string]$RequirementState = 'clear',
@@ -175,7 +178,16 @@ function Resolve-HarnessExecutionProfile {
     $protocol = [System.Environment]::GetEnvironmentVariable('HARNESS_PROTOCOL', [System.EnvironmentVariableTarget]::Process)
     if ([string]::IsNullOrWhiteSpace($protocol)) { $protocol = 'auto' }
     if ($protocol -cnotin @('v1','v2','auto')) { throw "HARNESS_PROTOCOL is invalid: $protocol" }
-    $selectedProtocol = if ($protocol -ceq 'v2' -and $Identity -ceq 'new') { 'v2' } else { 'v1' }
+    $selectedProtocol = 'v1'
+    if ($Identity -ceq 'new') {
+        if ($protocol -ceq 'v2') {
+            $selectedProtocol = 'v2'
+        } elseif ($protocol -ceq 'auto') {
+            if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) { $WorkspaceRoot = $RepoRoot }
+            $protocolResolution = Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -RequestedProtocol auto
+            $selectedProtocol = [string]$protocolResolution.selected_protocol
+        }
+    }
 
     $triggers = [System.Collections.Generic.List[string]]::new()
     foreach ($trigger in $CriticalTriggers) { if (-not $triggers.Contains($trigger)) { $triggers.Add($trigger) } }

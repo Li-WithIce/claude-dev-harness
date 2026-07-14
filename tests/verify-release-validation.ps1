@@ -184,6 +184,7 @@ $ownerTry = if ($null -eq $quietProcessFunction) { $null } else {
 $ownerFinallySource = if ($null -eq $ownerTry) { '' } else { $ownerTry.Finally.Extent.Text }
 $workflow = Get-Content -LiteralPath $workflowPath -Raw -Encoding utf8
 $readme = Get-Content -LiteralPath $readmePath -Raw -Encoding utf8
+$rolloutGenerator = Get-Content -LiteralPath (Join-Path $RepoRoot 'scripts\generate-v2-rollout-report.ps1') -Raw -Encoding utf8
 
 if ($runnerParseErrors.Count -eq 0 -and
     $quietProcessSource -match 'WaitForExit\(\$TimeoutSeconds \* 1000\)' -and
@@ -237,9 +238,11 @@ if ($runner -match '(?m)^\s*\[int\]\$CheckTimeoutSeconds = 360\s*$' -and
     $workflow -match 'run-validation\.ps1 -Suite all -CheckTimeoutSeconds 360' -and
     $workflow -match 'run-changed-optional-validation\.ps1' -and
     $workflow -match 'run-isolated-install-smoke\.ps1 -RepoRoot \$PWD -Preset core' -and
-    $workflow -match 'run-isolated-install-smoke\.ps1 -RepoRoot \$PWD -Preset full' -and
-    $workflow -match 'run-scenario-evals\.ps1 -RepoRoot \$PWD -Suite core' -and
-    $workflow -match 'benchmark-harness\.ps1 -RepoRoot \$PWD -Compare bare,v1,v2' -and
+    $workflow -match 'generate-v2-rollout-report\.ps1 -RepoRoot \$PWD' -and
+    $rolloutGenerator -match 'run-isolated-install-smoke\.ps1 -Preset core' -and
+    $rolloutGenerator -match 'run-isolated-install-smoke\.ps1 -Preset full' -and
+    $rolloutGenerator -match 'run-scenario-evals\.ps1 -Suite core' -and
+    $rolloutGenerator -match 'benchmark-harness\.ps1 -Compare bare,v1,v2' -and
     $workflow -notmatch 'verify-installation\.ps1' -and
     $workflow -notmatch '(?m)^\s*&\s+\.\\uninstall\.ps1' -and
     $readme -match 'PR job 上限为 30 分钟，release job 上限为 45 分钟，单个 verify 脚本上限为 360 秒') {

@@ -2,11 +2,11 @@
 
 ## Status and rollout boundary
 
-This document defines the machine-readable contracts introduced by PR-01. They are inert definitions: no entry point, installer, v1 task, runtime pointer, Evidence flow, or Approval flow consumes them yet.
+This document defines the machine-readable contracts introduced by PR-01 and implemented incrementally through PR-14.
 
 - PR-00 through PR-03 keep v1 as the only default runtime.
-- PR-04 through PR-13 may expose v2 only through explicit opt-in.
-- A later gated PR-14 decision may change `auto` for eligible new tasks.
+- PR-04 through PR-13 expose v2 only through explicit opt-in.
+- PR-14 lets `auto` select v2 only for a new task with a current all-pass rollout report; a missing, stale, failed, simulated, or unavailable gate selects v1 with a diagnostic reason.
 - Existing v1 tasks continue to use the current five-stage files and scripts throughout this refactor.
 
 Schema or policy load failure never grants permission. Read-only inspection may continue when policy infrastructure is unavailable, but protected writes fail closed.
@@ -79,4 +79,4 @@ Approval binds task id, task version, Requirement Contract digest, approval type
 
 `tests/fixtures/v2/policy-contract-cases.json` contains one valid and one invalid document for every PR-01 schema. `tests/verify-v2-policy-contracts.ps1` validates schemas, fixtures, exact policy keys, category ownership, score bands, profile minimums, protected rules, and malformed-input fail-closed behavior.
 
-Changes to a schema or policy require a corresponding behavior fixture. Prompt text may explain a rule but cannot loosen these files. Reverting PR-01 removes only inert definitions, fixtures, and documentation; v1 requires no migration or cleanup.
+Changes to a schema or policy require a corresponding behavior fixture. Prompt text may explain a rule but cannot loosen these files. At the PR-01 boundary the definitions were inert; later PRs consume them only through the gated, compatibility-preserving paths documented here.

@@ -115,7 +115,7 @@ function Invoke-ScenarioEvaluator {
                 $plan = "---`ntask_id: resume-v1`nstage: TEST`ntool: codex`nupdated: 2026-07-14`n---`n"
                 [System.IO.File]::WriteAllText($planPath,$plan,[System.Text.UTF8Encoding]::new($false))
             } else { throw "unknown protocol fixture: $($evaluator.fixture)" }
-            $result = Get-HarnessProtocolResolution -WorkspaceRoot $workspace -TaskId $taskId -RequestedProtocol auto
+            $result = Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $workspace -TaskId $taskId -RequestedProtocol auto
             return New-ObservedResult -AskRequired $false -Profile $null -WriteCount (Get-WriteCount $result.side_effects) -CompletionAllowed $null -SelectedProtocol $result.selected_protocol -Source 'Harness.Protocol'
         }
         'evidence-case' {

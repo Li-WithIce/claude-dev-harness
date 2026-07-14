@@ -242,6 +242,7 @@ $coreScripts = @(
     'verify-v2-model-neutrality.ps1',
     'verify-v1-v2-coexistence.ps1',
     'verify-v1-to-v2-migration.ps1',
+    'verify-v2-default-flip.ps1',
     'verify-v2-runtime-memory-decoupling.ps1',
     'run-scenario-evals.ps1',
     'verify-v2-ci-routing.ps1',

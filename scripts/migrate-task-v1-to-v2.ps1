@@ -82,7 +82,7 @@ function New-MigrationContract {
 
 function Get-MigrationMaterial {
     param([string]$RepoRoot,[string]$WorkspaceRoot,[string]$TaskId,[string]$ExpectedStage)
-    $resolution=Get-HarnessProtocolResolution -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -RequestedProtocol auto
+    $resolution=Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -RequestedProtocol auto
     if ([string]$resolution.detected_protocol -cne 'v1') { throw "migration requires an existing v1 task; detected=$($resolution.detected_protocol)" }
     if ([string]$resolution.v1_stage -cne $ExpectedStage) { throw "ExpectedV1Stage mismatch: expected=$ExpectedStage actual=$($resolution.v1_stage)" }
     if ((Get-V1CurrentTaskId -WorkspaceRoot $WorkspaceRoot) -ceq $TaskId) { throw 'active v1 task cannot be migrated; pause or switch away first' }

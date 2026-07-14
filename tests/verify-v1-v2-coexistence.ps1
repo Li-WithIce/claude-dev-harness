@@ -26,7 +26,7 @@ try{
 
     $new=Read-Json (Invoke-Script $taskScript @('protocol','-TaskId','new-task','-RepoRoot',$RepoRoot,'-WorkspaceRoot',$workspace,'-AsJson'))
     $newV2=Read-Json (Invoke-Script $taskScript @('protocol','-TaskId','new-task','-RepoRoot',$RepoRoot,'-WorkspaceRoot',$workspace,'-AsJson') 'v2')
-    Check ($new.detected_protocol-ceq'new'-and$new.selected_protocol-ceq'v1'-and$new.side_effects.runtime_writes-eq0) 'auto keeps a new task on v1 without writes' 'new auto protocol resolution is wrong'
+    Check ($new.detected_protocol-ceq'new'-and$new.selected_protocol-ceq'v1'-and$new.reason-ceq'rollout-report-missing'-and$new.warning-match'deprecated'-and$new.side_effects.runtime_writes-eq0) 'auto without an eligible report keeps a new task on v1 with diagnostics and no writes' 'new auto protocol resolution is wrong'
     Check ($newV2.selected_protocol-ceq'v2'-and$newV2.reason-ceq'explicit-v2-new-task') 'explicit v2 selects v2 for a new task' 'explicit v2 new-task resolution is wrong'
 
     $taskId='coexist-v1'

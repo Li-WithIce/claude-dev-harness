@@ -22,6 +22,7 @@ $runner = Join-Path $RepoRoot 'tests\run-scenario-evals.ps1'
 $datasetPath = Join-Path $RepoRoot 'tests\evals\core-scenarios.json'
 $workflowPath = Join-Path $RepoRoot '.github\workflows\validation.yml'
 $validationPath = Join-Path $RepoRoot 'scripts\run-validation.ps1'
+$rolloutGeneratorPath = Join-Path $RepoRoot 'scripts\generate-v2-rollout-report.ps1'
 $readmePath = Join-Path $RepoRoot 'README.md'
 
 foreach ($path in @($script:router,$runner,$PSCommandPath)) {
@@ -55,11 +56,12 @@ $routing = Get-Route @('.github/workflows/validation.yml')
 Check ($routing.run_all_optional -and @($routing.modules).Count -eq 5 -and @($routing.tests).Count -eq 12) 'routing-surface changes fail safe to every optional suite' 'routing-surface changes did not select all optional suites'
 
 $workflow = Get-Content -LiteralPath $workflowPath -Raw -Encoding utf8
+$rolloutGenerator = Get-Content -LiteralPath $rolloutGeneratorPath -Raw -Encoding utf8
 Check ($workflow -match '(?m)^\s*schedule:\s*$' -and $workflow -match '(?m)^\s*workflow_dispatch:\s*$') 'CI exposes nightly and manual release validation' 'CI lacks nightly or manual release validation'
 Check ($workflow -match '(?m)^\s*pr-core:\s*$' -and $workflow -match '(?m)^\s*changed-optional:\s*$' -and $workflow -match '(?m)^\s*release-full:\s*$') 'CI declares PR core, changed optional, and release full jobs' 'CI job layering is incomplete'
 Check ($workflow -match 'run-validation\.ps1 -Suite core' -and $workflow -match 'run-changed-optional-validation\.ps1' -and $workflow -match 'run-validation\.ps1 -Suite all') 'each CI layer delegates to the expected validation entry' 'CI layer commands are wrong'
-Check (($workflow | Select-String -Pattern 'run-isolated-install-smoke\.ps1[^\r\n]+-Preset core' -AllMatches).Matches.Count -ge 2 -and $workflow -match 'run-isolated-install-smoke\.ps1[^\r\n]+-Preset full') 'PR and release jobs cover core/full install rollback' 'CI install rollback coverage is incomplete'
-Check ($workflow -match 'run-scenario-evals\.ps1[^\r\n]+-Suite core' -and $workflow -match 'benchmark-harness\.ps1[^\r\n]+-Compare bare,v1,v2') 'release job runs behavior and performance reports' 'release job omits behavior or performance reporting'
+Check ($workflow -match 'run-isolated-install-smoke\.ps1[^\r\n]+-Preset core' -and $workflow -match 'generate-v2-rollout-report\.ps1' -and $rolloutGenerator -match 'run-isolated-install-smoke\.ps1 -Preset core' -and $rolloutGenerator -match 'run-isolated-install-smoke\.ps1 -Preset full') 'PR and release jobs cover core/full install rollback' 'CI install rollback coverage is incomplete'
+Check ($rolloutGenerator -match 'run-scenario-evals\.ps1 -Suite core' -and $rolloutGenerator -match 'benchmark-harness\.ps1 -Compare bare,v1,v2') 'release report runs behavior and performance gates' 'release report omits behavior or performance gates'
 
 $validation = Get-Content -LiteralPath $validationPath -Raw -Encoding utf8
 $coreBlock = [regex]::Match($validation,'(?s)\$coreScripts\s*=\s*@\((?<body>.*?)\r?\n\)').Groups['body'].Value

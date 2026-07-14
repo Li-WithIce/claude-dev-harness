@@ -39,7 +39,7 @@ try {
 
     if ($Command -ceq 'protocol') {
         Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1') -Force -ErrorAction Stop
-        $result = Get-HarnessProtocolResolution -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId
+        $result = Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId
     } elseif ($Command -ceq 'inspect') {
         if ([string]::IsNullOrWhiteSpace($RequestFile)) {
             throw 'inspect requires -RequestFile'
@@ -55,7 +55,7 @@ try {
     } else {
         if ($Command -cne 'replay') {
             Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1') -Force -ErrorAction Stop
-            $protocol = Get-HarnessProtocolResolution -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId
+            $protocol = Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId
             if ([string]$protocol.selected_protocol -cne 'v2') {
                 throw 'selected protocol is v1; new v2 task commands require HARNESS_PROTOCOL=v2 and existing v1 tasks require explicit migration'
             }
@@ -111,6 +111,8 @@ try {
         Write-Output ("detected_protocol: {0}" -f $result.detected_protocol)
         Write-Output ("selected_protocol: {0}" -f $result.selected_protocol)
         Write-Output ("reason: {0}" -f $result.reason)
+        Write-Output ("rollout_status: {0}" -f $result.rollout_eligibility.status)
+        if (-not [string]::IsNullOrWhiteSpace([string]$result.warning)) { Write-Output ("warning: {0}" -f $result.warning) }
         Write-Output 'runtime_writes: 0'
     } elseif ($Command -ceq 'status') {
         if ([string]$result.operation -ceq 'recovery-index') {

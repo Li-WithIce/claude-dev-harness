@@ -53,15 +53,152 @@ function Assert-HarnessV1Frontmatter {
     if ([string]$Fields['updated'] -cnotmatch '^\d{4}-\d{2}-\d{2}$') { throw 'v1 plan updated date is invalid' }
 }
 
+function Assert-HarnessRolloutKeys {
+    param([System.Collections.IDictionary]$Value,[string[]]$Expected,[string]$Label)
+    if ($Value -isnot [System.Collections.IDictionary]) { throw "rollout-report-invalid-$Label" }
+    $actual = @($Value.Keys | ForEach-Object { [string]$_ })
+    if (@(Compare-Object @($Expected | Sort-Object) @($actual | Sort-Object)).Count -ne 0) { throw "rollout-report-invalid-$Label" }
+}
+
+function Get-HarnessRolloutSourcePaths {
+    param([string]$RepoRoot)
+    $paths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($pattern in @('policies\*.json','schemas\*.json','scripts\lib\Harness.*.psm1','tests\evals\*.json')) {
+        foreach ($file in Get-ChildItem -Path (Join-Path $RepoRoot $pattern) -File -ErrorAction Stop) {
+            [void]$paths.Add((Get-HarnessRelativePath -WorkspaceRoot $RepoRoot -Path $file.FullName))
+        }
+    }
+    foreach ($relative in @(
+        'policies/entry-contract.md',
+        'scripts/task.ps1',
+        'scripts/benchmark-harness.ps1',
+        'scripts/generate-v2-rollout-report.ps1',
+        'scripts/run-isolated-install-smoke.ps1',
+        'tests/run-scenario-evals.ps1',
+        'tests/verify-v1-v2-coexistence.ps1',
+        'tests/verify-installation.ps1',
+        'install.ps1',
+        'uninstall.ps1'
+    )) {
+        $fullPath = Join-Path $RepoRoot $relative
+        if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) { throw 'rollout-source-file-missing' }
+        [void]$paths.Add($relative)
+    }
+    return @($paths | Sort-Object)
+}
+
+function Get-HarnessRolloutSourceDigest {
+    param([string]$RepoRoot)
+    $records = [System.Collections.Generic.List[object]]::new()
+    foreach ($relative in Get-HarnessRolloutSourcePaths -RepoRoot $RepoRoot) {
+        $records.Add([ordered]@{path=$relative;digest=(Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path $relative)})
+    }
+    return Get-HarnessSha256Text -Content ($records | ConvertTo-Json -Depth 10 -Compress)
+}
+
+function Get-HarnessRolloutRevision {
+    param([string]$RepoRoot)
+    $value = @(& git -C $RepoRoot rev-parse HEAD 2>$null)
+    if ($LASTEXITCODE -ne 0 -or ($value -join '').Trim() -cnotmatch '^[0-9a-f]{40}$') { throw 'rollout-source-revision-unavailable' }
+    return ($value -join '').Trim()
+}
+
+function Get-HarnessRolloutReportDigest {
+    param([System.Collections.IDictionary]$Document)
+    $body = [ordered]@{
+        schema_version = $Document.schema_version
+        source_revision = $Document.source_revision
+        source_digest = $Document.source_digest
+        generator_digest = $Document.generator_digest
+        generated_at_utc = $Document.generated_at_utc
+        gates = $Document.gates
+        eligible = $Document.eligible
+    }
+    return Get-HarnessSha256Text -Content ($body | ConvertTo-Json -Depth 30 -Compress)
+}
+
+function Assert-HarnessRolloutReport {
+    param([string]$RepoRoot,[System.Collections.IDictionary]$Document)
+    $gateNames = @('behavior','v1_compatibility','direct_performance','core_install_rollback','full_install_rollback')
+    Assert-HarnessRolloutKeys -Value $Document -Expected @('schema_version','source_revision','source_digest','generator_digest','generated_at_utc','gates','eligible','report_digest') -Label 'document'
+    if ([string]$Document.schema_version -cne 'rollout-eligibility/v1') { throw 'rollout-report-invalid-schema' }
+    if ([string]$Document.source_revision -cnotmatch '^[0-9a-f]{40}$' -or [string]$Document.source_digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or [string]$Document.generator_digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or [string]$Document.report_digest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'rollout-report-invalid-digest' }
+    try { [void][datetimeoffset]::Parse([string]$Document.generated_at_utc,[Globalization.CultureInfo]::InvariantCulture) } catch { throw 'rollout-report-invalid-time' }
+    if ($Document.eligible -isnot [bool]) { throw 'rollout-report-invalid-eligibility' }
+    Assert-HarnessRolloutKeys -Value $Document.gates -Expected $gateNames -Label 'gates'
+    $allPass = $true
+    foreach ($name in $gateNames) {
+        $gate = $Document.gates[$name]
+        Assert-HarnessRolloutKeys -Value $gate -Expected @('status','evidence_digest','command') -Label "gate-$name"
+        if ([string]$gate.status -cnotin @('pass','fail','blocked','unavailable','simulated')) { throw 'rollout-report-invalid-status' }
+        if ([string]$gate.evidence_digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or [string]::IsNullOrWhiteSpace([string]$gate.command)) { throw 'rollout-report-invalid-gate' }
+        if ([string]$gate.status -cne 'pass') { $allPass = $false }
+    }
+    if ([bool]$Document.eligible -ne $allPass) { throw 'rollout-report-invalid-eligibility' }
+    if ([string]$Document.report_digest -cne (Get-HarnessRolloutReportDigest -Document $Document)) { throw 'rollout-report-digest-mismatch' }
+    if ([string]$Document.source_revision -cne (Get-HarnessRolloutRevision -RepoRoot $RepoRoot)) { throw 'rollout-report-stale-revision' }
+    if ([string]$Document.source_digest -cne (Get-HarnessRolloutSourceDigest -RepoRoot $RepoRoot)) { throw 'rollout-report-stale-source' }
+    $generatorDigest = Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path 'scripts/generate-v2-rollout-report.ps1'
+    if ([string]$Document.generator_digest -cne $generatorDigest) { throw 'rollout-report-stale-generator' }
+}
+
+function New-HarnessRolloutReportDocument {
+    param([string]$RepoRoot,[System.Collections.IDictionary]$Gates)
+    $gateNames = @('behavior','v1_compatibility','direct_performance','core_install_rollback','full_install_rollback')
+    Assert-HarnessRolloutKeys -Value $Gates -Expected $gateNames -Label 'gates'
+    $eligible = @($gateNames | Where-Object { [string]$Gates[$_].status -cne 'pass' }).Count -eq 0
+    $document = [ordered]@{
+        schema_version = 'rollout-eligibility/v1'
+        source_revision = Get-HarnessRolloutRevision -RepoRoot $RepoRoot
+        source_digest = Get-HarnessRolloutSourceDigest -RepoRoot $RepoRoot
+        generator_digest = Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path 'scripts/generate-v2-rollout-report.ps1'
+        generated_at_utc = [datetime]::UtcNow.ToString('o')
+        gates = $Gates
+        eligible = $eligible
+        report_digest = ''
+    }
+    $document.report_digest = Get-HarnessRolloutReportDigest -Document $document
+    Assert-HarnessRolloutReport -RepoRoot $RepoRoot -Document $document
+    return $document
+}
+
+function Get-HarnessRolloutEligibility {
+    param([string]$RepoRoot,[string]$WorkspaceRoot,[string]$ReportPath)
+    if ([string]::IsNullOrWhiteSpace($ReportPath)) { $ReportPath = [Environment]::GetEnvironmentVariable('HARNESS_V2_ELIGIBILITY_REPORT',[EnvironmentVariableTarget]::Process) }
+    if ([string]::IsNullOrWhiteSpace($ReportPath)) { return [ordered]@{status='missing';eligible=$false;reason='rollout-report-missing';report_digest=$null} }
+    try {
+        $target = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $ReportPath -Label 'rollout eligibility report' -AllowMissing
+        if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { return [ordered]@{status='missing';eligible=$false;reason='rollout-report-missing';report_digest=$null} }
+        try { $document = [System.IO.File]::ReadAllText($target,[System.Text.UTF8Encoding]::new($false,$true)) | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop } catch { throw 'rollout-report-invalid-json' }
+        Assert-HarnessRolloutReport -RepoRoot $RepoRoot -Document $document
+        if (-not [bool]$document.eligible) {
+            foreach ($name in @('behavior','v1_compatibility','direct_performance','core_install_rollback','full_install_rollback')) {
+                $status = [string]$document.gates[$name].status
+                if ($status -cne 'pass') { return [ordered]@{status='ineligible';eligible=$false;reason="rollout-gate-$name-$status";report_digest=[string]$document.report_digest} }
+            }
+        }
+        return [ordered]@{status='pass';eligible=$true;reason='eligible-rollout-report';report_digest=[string]$document.report_digest}
+    } catch {
+        $reason = [string]$_.Exception.Message
+        if (-not $reason.StartsWith('rollout-',[StringComparison]::Ordinal)) { $reason = 'rollout-report-invalid' }
+        $status = if ($reason.StartsWith('rollout-report-stale',[StringComparison]::Ordinal)) { 'stale' } else { 'invalid' }
+        return [ordered]@{status=$status;eligible=$false;reason=$reason;report_digest=$null}
+    }
+}
+
 function Get-HarnessProtocolResolution {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$WorkspaceRoot,
         [string]$TaskId = '',
-        [string]$RequestedProtocol = ''
+        [string]$RequestedProtocol = '',
+        [string]$RepoRoot = '',
+        [string]$EligibilityReportPath = ''
     )
 
     $WorkspaceRoot = Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
+    if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Join-Path $PSScriptRoot '..\..' }
+    $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
     if (-not [string]::IsNullOrWhiteSpace($TaskId)) { Assert-HarnessTaskId -TaskId $TaskId }
     $requested = $RequestedProtocol
     if ([string]::IsNullOrWhiteSpace($requested)) {
@@ -107,9 +244,17 @@ function Get-HarnessProtocolResolution {
         throw 'existing v2 task cannot use the v1 compatibility path'
     }
 
+    $rollout = [ordered]@{status='not-required';eligible=$false;reason='artifact-or-explicit-selection';report_digest=$null}
+    if ($detected -ceq 'new' -and $requested -ceq 'auto') {
+        $rollout = Get-HarnessRolloutEligibility -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -ReportPath $EligibilityReportPath
+    }
     $selected = if ($detected -cin @('v1','v2')) {
         $detected
     } elseif ($requested -ceq 'v2') {
+        'v2'
+    } elseif ($requested -ceq 'v1') {
+        'v1'
+    } elseif ($rollout.eligible) {
         'v2'
     } else {
         'v1'
@@ -120,9 +265,14 @@ function Get-HarnessProtocolResolution {
         'existing-v1-plan'
     } elseif ($requested -ceq 'v2') {
         'explicit-v2-new-task'
+    } elseif ($requested -ceq 'v1') {
+        'explicit-v1-new-task'
+    } elseif ($rollout.eligible) {
+        'eligible-rollout-report'
     } else {
-        'pr12-new-task-default-v1'
+        [string]$rollout.reason
     }
+    $warning = if ($selected -ceq 'v1') { 'v1 protocol is deprecated but remains supported; HARNESS_PROTOCOL=v1 is the rollback switch.' } else { $null }
 
     return [ordered]@{
         operation='protocol'
@@ -131,6 +281,8 @@ function Get-HarnessProtocolResolution {
         detected_protocol=$detected
         selected_protocol=$selected
         reason=$reason
+        warning=$warning
+        rollout_eligibility=$rollout
         v1_stage=$stage
         v1_plan_path=$(if ($detected -ceq 'v1') { $planPath } else { $null })
         v1_plan_digest=$planDigest

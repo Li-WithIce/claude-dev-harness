@@ -4,9 +4,9 @@ The v1 and v2 task protocols coexist. Existing task artifacts select the protoco
 
 1. `.assistant/runtime/tasks/{task_id}/task.json` selects v2.
 2. Otherwise, a legal `docs/tasks/{task_id}/plan.md` selects v1.
-3. With neither artifact, PR-12/PR-13 `auto` selects v1 for a new task; explicit `HARNESS_PROTOCOL=v2` selects v2.
+3. With neither artifact, `auto` selects v2 only when a workspace-contained, revision-bound rollout report has every required gate at `pass`; otherwise it selects v1 with a diagnostic reason. Explicit `HARNESS_PROTOCOL=v2` selects v2 for a new task.
 
-Use `pwsh -File scripts/task.ps1 protocol -TaskId {task_id} -WorkspaceRoot {workspace}` for a read-only resolution. An explicit protocol that conflicts with an existing artifact fails closed. `HARNESS_PROTOCOL=v1` remains the rollback switch and never converts or deletes a task.
+Use `pwsh -File scripts/task.ps1 protocol -TaskId {task_id} -WorkspaceRoot {workspace}` for a read-only resolution. An explicit protocol that conflicts with an existing artifact fails closed. `HARNESS_PROTOCOL=v1` remains the rollback switch and never converts or deletes a task. See `docs/release/compatibility-policy.md` for report generation, default gating, deprecation, and retirement conditions.
 
 ## Frozen v1 path
 

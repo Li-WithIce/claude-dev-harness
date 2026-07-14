@@ -63,18 +63,6 @@ jobs:
         shell: pwsh
         run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation.ps1 -Suite all -CheckTimeoutSeconds 360
 
-      - name: Core installation rollback
+      - name: Generate rollout eligibility report
         shell: pwsh
-        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-isolated-install-smoke.ps1 -RepoRoot $PWD -Preset core
-
-      - name: Full installation rollback
-        shell: pwsh
-        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-isolated-install-smoke.ps1 -RepoRoot $PWD -Preset full
-
-      - name: Behavior evaluation
-        shell: pwsh
-        run: pwsh -NoLogo -NoProfile -NonInteractive -File tests/run-scenario-evals.ps1 -RepoRoot $PWD -Suite core
-
-      - name: Performance regression report
-        shell: pwsh
-        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/benchmark-harness.ps1 -RepoRoot $PWD -Compare bare,v1,v2
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/generate-v2-rollout-report.ps1 -RepoRoot $PWD -OutputPath "$env:RUNNER_TEMP\v2-rollout-eligibility.json"
