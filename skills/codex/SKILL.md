@@ -128,13 +128,14 @@ The Bash wrapper's resume branch forwards the session id, reasoning effort, prom
 - `-Model <name>` — Override model; otherwise use Codex config.
 - `-Reasoning <level>` — `low`, `medium`, `high`, or `max` (default: `medium`). Use `max` only when the selected model exposes that single-subject tier.
 - `-Sandbox <mode>` — `read-only`, `workspace-write`, or `danger-full-access`; no sandbox override is supplied by default.
+- `-ApprovalPolicy <policy>` — `untrusted`, `on-request`, or `never`; emitted as a global Codex option before `exec` and omitted by default.
 - `-ReadOnly` — Read-only mode for new and resumed sessions.
 - `-FullAuto` — Opt in to full-auto for a new session; it is not the Windows default and does not apply to resume.
 - `-Ephemeral` — Do not persist Codex session files.
 - `-TimeoutSeconds <seconds>` — Main-process timeout (default: 1800 seconds); timeout returns nonzero and closes the supported process tree.
 - `-Output <path>` / `-o <path>` — Response path; relative paths use the caller's current directory and successful output is published atomically.
-- `-OutputSchema <path>` — JSON Schema for the final model response.
-- `-TelemetryOutput <path>` — Atomic JSON with model/reasoning, timing, aggregate turn/tool/skill counts, and available token usage; it excludes prompts, command text, thread ids, and private paths.
+- `-OutputSchema <path>` — JSON Schema for the final model response; when Codex emits intermediate agent messages, only the last agent message is atomically published as the structured response.
+- `-TelemetryOutput <path>` — Atomic JSON with model/reasoning, sandbox/approval identity, timing, aggregate turn/message/tool/skill counts, and available token usage; it excludes prompts, command text, thread ids, and private paths.
 - `-AgentOutputOnly` — Exclude command summaries from the response file.
 - `-Quiet` — Suppress live command and message previews.
 - `-Isolated` — Disable plugins, apps, browser/computer use, memory, image generation, and multi-agent/fanout features for a fresh single-subject evaluation context.

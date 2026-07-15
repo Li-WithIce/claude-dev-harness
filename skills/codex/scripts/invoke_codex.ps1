@@ -24,6 +24,9 @@ param(
     [ValidateSet('read-only', 'workspace-write', 'danger-full-access')]
     [string]$Sandbox,
 
+    [ValidateSet('untrusted', 'on-request', 'never')]
+    [string]$ApprovalPolicy,
+
     [switch]$ReadOnly,
 
     [switch]$FullAuto,
@@ -73,6 +76,7 @@ Options:
   -Model <name>                Model override
   -Reasoning <level>           Reasoning effort: low, medium, high, max (default: medium)
   -Sandbox <mode>              read-only, workspace-write, or danger-full-access
+  -ApprovalPolicy <policy>     untrusted, on-request, or never
   -ReadOnly                    Read-only sandbox, including resume mode
   -FullAuto                    Full-auto mode for a new session
   -Ephemeral                   Do not persist Codex session files
@@ -462,6 +466,7 @@ $prompt = $Task
 if ($fileBlock) { $prompt += "`nPriority files (read these first before making changes):$fileBlock" }
 
 $codexArgs = [System.Collections.Generic.List[string]]::new()
+if ($ApprovalPolicy) { $codexArgs.Add('-a'); $codexArgs.Add($ApprovalPolicy) }
 $codexArgs.Add('exec')
 $codexArgs.Add('--ignore-user-config')
 if ($Isolated) {
@@ -618,7 +623,11 @@ try {
             $rawText = Get-PropertyValue -Object $item -Name 'text'
             if ($null -ne $rawText -and $rawText -isnot [string]) { throw 'Codex agent message text must be a string.' }
             $text = [string]$rawText
-            if (-not [string]::IsNullOrWhiteSpace($text)) { $outputContent.Add($text); $hasAgentResponse = $true }
+            if (-not [string]::IsNullOrWhiteSpace($text)) {
+                if ($OutputSchema) { $outputContent.Clear() }
+                $outputContent.Add($text)
+                $hasAgentResponse = $true
+            }
         } elseif ($itemType -eq 'command_execution' -and -not $AgentOutputOnly) {
             $command = [string](Get-PropertyValue -Object $item -Name 'command')
             $aggregated = [string](Get-PropertyValue -Object $item -Name 'aggregated_output')
@@ -653,6 +662,7 @@ if ($TelemetryOutput) {
         model = $(if ($Model) { $Model } else { 'inherit' })
         reasoning = $Reasoning
         sandbox = $effectiveSandbox
+        approval_policy = $(if ($ApprovalPolicy) { $ApprovalPolicy } else { 'default' })
         ephemeral = [bool]$Ephemeral
         duration_ms = [double]$invocation.DurationMs
         first_useful_action_ms = $telemetryState.FirstUsefulActionMs

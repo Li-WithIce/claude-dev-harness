@@ -246,6 +246,7 @@ $coreScripts = @(
     'verify-v2-runtime-memory-decoupling.ps1',
     'run-scenario-evals.ps1',
     'verify-model-eval-runner.ps1',
+    'verify-host-benchmark-runner.ps1',
     'verify-v2-ci-routing.ps1',
     'verify-v2-install-presets.ps1',
     'verify-v2-evidence.ps1',
