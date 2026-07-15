@@ -24,7 +24,7 @@ $normalizedPaths = @($ChangedPaths | ForEach-Object {
 
 $definitions = @(
     [ordered]@{name='memory';patterns=@('skills/obsidian-memory/*','scripts/*memory*','tests/verify-memory-*','tests/verify-shared-memory-*','.assistant/*memory*','vault-template/*memory*');tests=@('verify-memory-provider-boundary.ps1','verify-shared-memory-layers.ps1','verify-v2-runtime-memory-decoupling.ps1')},
-    [ordered]@{name='team';patterns=@('skills/workflow-team/*','scripts/*team*','tests/verify-aiteamcode-*','tests/verify-team-*');tests=@('verify-aiteamcode-skill-contract.ps1')},
+    [ordered]@{name='team';patterns=@('skills/workflow-team/*','scripts/*team*','scripts/invoke-harness-skill*.ps1','tests/verify-aiteamcode-*','tests/verify-team-*');tests=@('verify-aiteamcode-skill-contract.ps1')},
     [ordered]@{name='md-html';patterns=@('skills/md-html/*','scripts/*render*html*','tests/verify-md-html-*','tests/verify-render-review-html.ps1');tests=@('verify-md-html-review-renderer.ps1','verify-render-review-html.ps1')},
     [ordered]@{name='codex-adapter';patterns=@('skills/codex/*','scripts/invoke_codex.ps1','scripts/ask_codex.ps1','agent-configs/codex/*','tests/verify-ask-codex.ps1','tests/verify-codex-entry-autoload.ps1');tests=@('verify-ask-codex.ps1','verify-codex-entry-autoload.ps1')},
     [ordered]@{name='providers';patterns=@('policies/*provider*','scripts/*provider*','scripts/lib/*Provider*','tests/verify-*provider*','agent-configs/*provider*');tests=@('verify-code-intel-provider-boundary.ps1','verify-context-provider-boundary.ps1','verify-context-provider-install-isolation.ps1','verify-provider-usage-recording.ps1')}

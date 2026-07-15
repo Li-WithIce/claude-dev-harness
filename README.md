@@ -350,7 +350,7 @@ pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite quick
 pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite core
 ```
 
-`scripts/run-validation.ps1` 是推荐的 quiet validation 入口：外层只启动一次 PowerShell；内部验证脚本用无窗口子进程串行执行，保留每个脚本独立 exit code，同时减少验收阶段反复弹出 PowerShell 窗口。
+`scripts/run-validation.ps1` 是推荐的 quiet validation 入口：从 Windows PowerShell 5.1 调用时，入口只把已声明的固定参数透明转交给 `pwsh`；PowerShell 7.3+ runner 才进入后续验证。每项检查先启动固定、可审计的 tracked supervisor，supervisor 发布 `READY` 后才由父进程加入 Windows kill-on-close Job Object，收到匹配的 `GO` 后再执行目标。父进程仍在运行时，正常结束或超时都会主动终止 Job 并确认 active-process 为零；PowerShell 7 runner 被强停时则由操作系统关闭不可继承的 Job handle，触发 kill-on-close。不支持 Job assignment 时 fail closed。参数只经严格 JSON data request 传递，请求绑定系统临时目录中的随机 token 路径，并在确认归属后、目标进入前删除 request 及其专属空目录；不使用编码命令、动态脚本载荷、隐藏窗口或策略绕过参数。Windows 互操作源码固定在 `scripts/lib/Harness.ValidationJob.cs`。
 
 三档口径：
 

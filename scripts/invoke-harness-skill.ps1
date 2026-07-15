@@ -60,33 +60,6 @@ function Write-Diagnostic {
     }
 }
 
-function ConvertTo-PowerShellLiteral {
-    param([object]$Value)
-
-    if ($null -eq $Value) {
-        return '$null'
-    }
-
-    if ($Value -is [bool]) {
-        if ($Value) {
-            return '$true'
-        }
-
-        return '$false'
-    }
-
-    if ($Value -is [string]) {
-        return "'{0}'" -f ($Value -replace "'", "''")
-    }
-
-    if ($Value -is [System.Array]) {
-        $items = @($Value | ForEach-Object { ConvertTo-PowerShellLiteral -Value $_ })
-        return '@(' + ($items -join ', ') + ')'
-    }
-
-    return "'{0}'" -f ($Value.ToString() -replace "'", "''")
-}
-
 function Get-PayloadProperty {
     param(
         [object]$Payload,
@@ -310,19 +283,23 @@ function Invoke-ExternalPowerShellScript {
         throw "Missing adapter target script: $ScriptPath"
     }
 
+    $resolvedScriptPath = (Resolve-Path -LiteralPath $ScriptPath).Path
     $supervisorPath = Join-Path $PSScriptRoot 'invoke-harness-skill-supervisor.ps1'
     if (-not (Test-Path -LiteralPath $supervisorPath -PathType Leaf)) {
         throw "Missing adapter supervisor script: $supervisorPath"
     }
+    $dispatcherPath = Join-Path $PSScriptRoot 'invoke-harness-skill-dispatcher.ps1'
+    if (-not (Test-Path -LiteralPath $dispatcherPath -PathType Leaf)) {
+        throw "Missing adapter dispatcher script: $dispatcherPath"
+    }
 
-    $wrapperPath = Join-Path ([System.IO.Path]::GetTempPath()) ('invoke-harness-skill-wrapper-' + [guid]::NewGuid().ToString('N') + '.ps1')
-    $commandParts = @("& { & " + (ConvertTo-PowerShellLiteral -Value $ScriptPath))
+    $parameterRecords = [System.Collections.Generic.List[object]]::new()
     foreach ($entry in $Parameters.GetEnumerator()) {
-        $name = $entry.Key
+        $name = [string]$entry.Key
         $value = $entry.Value
         if ($value -is [bool]) {
             if ($value) {
-                $commandParts += " -$name"
+                $parameterRecords.Add([ordered]@{ name = $name; kind = 'switch'; value = $true })
             }
             continue
         }
@@ -339,26 +316,53 @@ function Invoke-ExternalPowerShellScript {
             continue
         }
 
-        $commandParts += (" -{0} {1}" -f $name, (ConvertTo-PowerShellLiteral -Value $value))
+        if ($value -is [string]) {
+            $parameterRecords.Add([ordered]@{ name = $name; kind = 'string'; value = $value })
+        } elseif ($value -is [System.Array]) {
+            if (@($value | Where-Object { $_ -isnot [string] }).Count -gt 0) {
+                throw "Adapter target parameter '$name' must contain only strings."
+            }
+            $parameterRecords.Add([ordered]@{ name = $name; kind = 'string-array'; value = [string[]]@($value) })
+        } elseif ($value -is [int] -or $value -is [long]) {
+            if ([long]$value -lt [int]::MinValue -or [long]$value -gt [int]::MaxValue) {
+                throw "Adapter target parameter '$name' is outside the Int32 range."
+            }
+            $parameterRecords.Add([ordered]@{ name = $name; kind = 'int32'; value = [int]$value })
+        } else {
+            throw "Adapter target parameter '$name' has an unsupported type."
+        }
     }
-    $commandParts += ' } *>&1'
 
-    $wrapperContent = "Remove-Item -LiteralPath `$PSCommandPath -Force -ErrorAction Stop`r`n"
-    $wrapperContent += "`$InformationPreference = 'Continue'`r`n"
-    $wrapperContent += "`$ErrorActionPreference = 'Stop'`r`n"
-    $wrapperContent += ($commandParts -join '') + "`r`n"
-    $wrapperContent += "exit `$LASTEXITCODE`r`n"
-
+    $requestPath = Join-Path ([System.IO.Path]::GetTempPath()) ('invoke-harness-skill-request-' + [guid]::NewGuid().ToString('N') + '.json')
+    $requestDocument = [ordered]@{
+        schema_version = 'invoke-harness-skill-dispatch/v1'
+        parameters = @($parameterRecords)
+    }
+    $requestJson = $requestDocument | ConvertTo-Json -Depth 6 -Compress
     try {
-        [System.IO.File]::WriteAllText($wrapperPath, $wrapperContent, (New-Object System.Text.UTF8Encoding($false)))
+        $requestBytes = [System.Text.UTF8Encoding]::new($false).GetBytes($requestJson)
+        $requestStream = [System.IO.FileStream]::new($requestPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        try {
+            $requestStream.Write($requestBytes, 0, $requestBytes.Length)
+            $requestStream.Flush($true)
+        } finally {
+            $requestStream.Dispose()
+        }
         $powerShellPath = (Get-Command pwsh -CommandType Application -ErrorAction Stop).Source
-        $output = @(& $powerShellPath -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $supervisorPath -TargetScriptPath $wrapperPath -OutputPath $Parameters.Output -TimeoutSeconds 1815 2>&1 | ForEach-Object { [string]$_ })
+        $output = @(& $powerShellPath -NoProfile -NonInteractive -File $supervisorPath -TargetScriptPath $resolvedScriptPath -RequestPath $requestPath -OutputPath $Parameters.Output -TimeoutSeconds 1815 2>&1 | ForEach-Object { [string]$_ })
         return [pscustomobject]@{
             ExitCode = $LASTEXITCODE
             Output = $output
         }
     } finally {
-        Remove-Item -LiteralPath $wrapperPath -Force -ErrorAction SilentlyContinue
+        try {
+            [System.IO.File]::Delete($requestPath)
+            if (Test-Path -LiteralPath $requestPath) {
+                throw 'dispatch request still exists after delete'
+            }
+        } catch {
+            throw "Adapter dispatch request cleanup failed: $($_.Exception.Message)"
+        }
     }
 }
 

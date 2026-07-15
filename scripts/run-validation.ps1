@@ -15,8 +15,36 @@ param(
     [int]$CheckTimeoutSeconds = 360
 )
 
+if ($PSVersionTable.PSVersion.Major -eq 5) {
+    $pwshCommand = Get-Command pwsh -CommandType Application -ErrorAction Stop
+    $bridgeArguments = [Collections.Generic.List[string]]::new()
+    foreach ($argument in @('-NoLogo','-NoProfile','-NonInteractive','-File',[IO.Path]::GetFullPath($PSCommandPath),'-Suite',$Suite,'-CheckTimeoutSeconds',[string]$CheckTimeoutSeconds)) {
+        [void]$bridgeArguments.Add([string]$argument)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($RepoRoot)) {
+        [void]$bridgeArguments.Add('-RepoRoot')
+        [void]$bridgeArguments.Add($RepoRoot)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+        [void]$bridgeArguments.Add('-WorkspaceRoot')
+        [void]$bridgeArguments.Add($WorkspaceRoot)
+    }
+    if ($IncludeCachedDiff.IsPresent) { [void]$bridgeArguments.Add('-IncludeCachedDiff') }
+    if ($VerboseOutput.IsPresent) { [void]$bridgeArguments.Add('-VerboseOutput') }
+    & $pwshCommand.Source @bridgeArguments
+    exit $LASTEXITCODE
+}
+if ($PSVersionTable.PSVersion -lt [Version]'7.3') {
+    throw 'Validation requires PowerShell 7.3 or newer.'
+}
+if (-not $IsWindows) {
+    throw 'Validation Job Object containment is supported on Windows only.'
+}
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+. (Join-Path $PSScriptRoot 'lib\Harness.ValidationProcess.ps1')
 
 function Resolve-RepoRoot {
     param([string]$RequestedRoot)
@@ -44,164 +72,19 @@ function Resolve-Executable {
     throw ("Unable to locate executable for {0}: {1}" -f $Purpose, ($Candidates -join ', '))
 }
 
-function Quote-PowerShellLiteral {
-    param([string]$Value)
-
-    return "'" + ($Value -replace "'", "''") + "'"
-}
-
-function New-PowerShellEncodedArguments {
-    param(
-        [string]$ScriptPath,
-        [string[]]$ScriptArguments = @()
-    )
-
-    $tokens = New-Object System.Collections.Generic.List[string]
-    $tokens.Add('&')
-    $tokens.Add((Quote-PowerShellLiteral -Value $ScriptPath))
-
-    foreach ($argument in $ScriptArguments) {
-        if ($argument.StartsWith('-')) {
-            $tokens.Add($argument)
-        } else {
-            $tokens.Add((Quote-PowerShellLiteral -Value $argument))
-        }
-    }
-
-    $command = @"
-`$ErrorActionPreference = 'Stop'
-[Console]::InputEncoding = [System.Text.UTF8Encoding]::new(`$false)
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(`$false)
-`$OutputEncoding = [Console]::OutputEncoding
-$($tokens -join ' ')
-`$lastExitCodeVariable = Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
-if (`$null -ne `$lastExitCodeVariable -and `$lastExitCodeVariable.Value -is [int]) { exit `$lastExitCodeVariable.Value }
-exit 0
-"@
-
-    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
-    return '-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ' + $encoded
-}
-
-function Invoke-QuietProcess {
-    param(
-        [string]$Name,
-        [string]$FilePath,
-        [string]$Arguments,
-        [string]$WorkingDirectory,
-        [int]$TimeoutSeconds
-    )
-
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $FilePath
-    $psi.Arguments = $Arguments
-    $psi.WorkingDirectory = $WorkingDirectory
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
-    $psi.StandardErrorEncoding = [System.Text.UTF8Encoding]::new($false)
-    $psi.CreateNoWindow = $true
-
-    $process = New-Object System.Diagnostics.Process
-    $process.StartInfo = $psi
-
-    $timer = [System.Diagnostics.Stopwatch]::StartNew()
-    $started = $false
-    $timedOut = $false
-    $exitCode = $null
-    $stdoutTask = $null
-    $stderrTask = $null
-    $stdout = ''
-    $stderr = ''
-    $primaryError = $null
-    $cleanupErrors = [System.Collections.Generic.List[string]]::new()
-
-    try {
-        [void]$process.Start()
-        $started = $true
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        $stderrTask = $process.StandardError.ReadToEndAsync()
-        $timedOut = -not $process.WaitForExit($TimeoutSeconds * 1000)
-        if (-not $timedOut) {
-            $exitCode = $process.ExitCode
-        }
-    } catch {
-        $primaryError = $_
-    } finally {
-        if ($started) {
-            $cleanupDeadlineMilliseconds = $timer.ElapsedMilliseconds + 5000
-            try {
-                $process.Kill($true)
-            } catch {
-                $cleanupErrors.Add(('kill tree: ' + $_.Exception.Message))
-            }
-            try {
-                $remainingCleanupMilliseconds = [math]::Max(0, [int]($cleanupDeadlineMilliseconds - $timer.ElapsedMilliseconds))
-                if (-not $process.WaitForExit($remainingCleanupMilliseconds)) {
-                    throw 'root process did not exit within cleanup grace'
-                }
-            } catch {
-                $cleanupErrors.Add(('wait root: ' + $_.Exception.Message))
-            }
-            try {
-                $streamTasks = @($stdoutTask,$stderrTask | Where-Object { $null -ne $_ })
-                if ($streamTasks.Count -gt 0) {
-                    $drainTask = [System.Threading.Tasks.Task]::WhenAll([System.Threading.Tasks.Task[]]$streamTasks)
-                    $remainingCleanupMilliseconds = [math]::Max(0, [int]($cleanupDeadlineMilliseconds - $timer.ElapsedMilliseconds))
-                    if (-not $drainTask.Wait($remainingCleanupMilliseconds)) {
-                        throw 'stdout/stderr did not close within cleanup grace'
-                    }
-                    if ($null -ne $stdoutTask) { $stdout = $stdoutTask.GetAwaiter().GetResult() }
-                    if ($null -ne $stderrTask) { $stderr = $stderrTask.GetAwaiter().GetResult() }
-                }
-            } catch {
-                $cleanupErrors.Add(('drain output: ' + $_.Exception.Message))
-            }
-        }
-        try {
-            $process.Dispose()
-        } catch {
-            $cleanupErrors.Add(('dispose process: ' + $_.Exception.Message))
-        }
-        $timer.Stop()
-    }
-
-    if ($cleanupErrors.Count -gt 0) {
-        $primaryMessage = if ($null -ne $primaryError) {
-            $primaryError.Exception.Message
-        } elseif ($timedOut) {
-            "Validation check '$Name' timed out after $TimeoutSeconds seconds."
-        } else {
-            "Validation check '$Name' exited with code $exitCode but cleanup failed."
-        }
-        throw [System.InvalidOperationException]::new(($primaryMessage + ' Cleanup failures: ' + ($cleanupErrors -join '; ')), $(if ($null -ne $primaryError) { $primaryError.Exception } else { $null }))
-    }
-    if ($null -ne $primaryError) {
-        throw $primaryError
-    }
-
-    return [pscustomobject]@{
-        Name = $Name
-        ExitCode = $(if ($timedOut) { 124 } else { $exitCode })
-        StdOut = $stdout
-        StdErr = $stderr
-        DurationSeconds = [math]::Round($timer.Elapsed.TotalSeconds, 2)
-        TimedOut = $timedOut
-    }
-}
-
 function Add-GitCheck {
     param(
         [System.Collections.Generic.List[object]]$Checks,
         [string]$Name,
-        [string]$Arguments
+        [string[]]$ArgumentList
     )
 
     $Checks.Add([pscustomobject]@{
         Name = $Name
+        InvocationKind = 'Native'
         FilePath = $script:GitPath
-        Arguments = $Arguments
+        ArgumentList = @($ArgumentList)
+        PowerShellParameters = [ordered]@{}
     }) | Out-Null
 }
 
@@ -210,26 +93,27 @@ function Add-PowerShellScriptCheck {
         [System.Collections.Generic.List[object]]$Checks,
         [string]$Name,
         [string]$ScriptPath,
-        [string[]]$Arguments = @()
+        [Collections.IDictionary]$Parameters = [ordered]@{}
     )
 
     $Checks.Add([pscustomobject]@{
         Name = $Name
-        FilePath = $script:PowerShellPath
-        Arguments = (New-PowerShellEncodedArguments -ScriptPath $ScriptPath -ScriptArguments $Arguments)
+        InvocationKind = 'PowerShellScript'
+        FilePath = $ScriptPath
+        ArgumentList = @()
+        PowerShellParameters = $Parameters
     }) | Out-Null
 }
 
 $repoRootResolved = Resolve-RepoRoot -RequestedRoot $RepoRoot
 $testsRoot = Join-Path $repoRootResolved 'tests'
 $script:GitPath = Resolve-Executable -Candidates @('git.exe', 'git') -Purpose 'git checks'
-$script:PowerShellPath = Resolve-Executable -Candidates @('pwsh.exe', 'pwsh', 'powershell.exe', 'powershell') -Purpose 'PowerShell validation'
 $checks = New-Object System.Collections.Generic.List[object]
 $skips = New-Object System.Collections.Generic.List[string]
 
-Add-GitCheck -Checks $checks -Name 'git diff --check' -Arguments 'diff --check'
+Add-GitCheck -Checks $checks -Name 'git diff --check' -ArgumentList @('diff', '--check')
 if ($IncludeCachedDiff) {
-    Add-GitCheck -Checks $checks -Name 'git diff --cached --check' -Arguments 'diff --cached --check'
+    Add-GitCheck -Checks $checks -Name 'git diff --cached --check' -ArgumentList @('diff', '--cached', '--check')
 }
 
 $coreScripts = @(
@@ -290,17 +174,17 @@ foreach ($scriptName in $scriptNames) {
 
 if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
     $installScript = Join-Path $testsRoot 'verify-installation.ps1'
-    Add-PowerShellScriptCheck -Checks $checks -Name 'verify-installation.ps1' -ScriptPath $installScript -Arguments @(
-        '-WorkspaceRoot', $WorkspaceRoot,
-        '-RepoRoot', $repoRootResolved
-    )
+    Add-PowerShellScriptCheck -Checks $checks -Name 'verify-installation.ps1' -ScriptPath $installScript -Parameters ([ordered]@{
+        WorkspaceRoot = $WorkspaceRoot
+        RepoRoot = $repoRootResolved
+    })
 } elseif ($Suite -eq 'all') {
     $skips.Add('verify-installation.ps1 requires -WorkspaceRoot and is not part of the default no-argument loop') | Out-Null
 }
 
 Write-Output ("Validation suite: {0}" -f $Suite)
 Write-Output ("RepoRoot: {0}" -f $repoRootResolved)
-Write-Output ("PowerShell host: {0}" -f $script:PowerShellPath)
+Write-Output ("PowerShell host: {0}" -f (Get-Process -Id $PID -ErrorAction Stop).Path)
 Write-Output ''
 
 foreach ($skip in $skips) {
@@ -311,7 +195,7 @@ $failures = New-Object System.Collections.Generic.List[object]
 foreach ($check in $checks) {
     Write-Output ("[RUN ] {0}" -f $check.Name)
     $effectiveTimeoutSeconds = if ($check.Name -ceq 'verify-host-benchmark-qualification.ps1') { [math]::Max($CheckTimeoutSeconds,900) } else { $CheckTimeoutSeconds }
-    $result = Invoke-QuietProcess -Name $check.Name -FilePath $check.FilePath -Arguments $check.Arguments -WorkingDirectory $repoRootResolved -TimeoutSeconds $effectiveTimeoutSeconds
+    $result = Invoke-QuietProcess -Name $check.Name -FilePath $check.FilePath -ArgumentList $check.ArgumentList -WorkingDirectory $repoRootResolved -TimeoutSeconds $effectiveTimeoutSeconds -InvocationKind $check.InvocationKind -PowerShellParameters $check.PowerShellParameters
     if ($result.ExitCode -eq 0) {
         Write-Output ("[PASS] {0} ({1}s)" -f $result.Name, $result.DurationSeconds)
         if ($VerboseOutput) {

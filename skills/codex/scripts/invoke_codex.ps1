@@ -350,7 +350,7 @@ function Resolve-CodexLaunch {
         $argumentJson = [ordered]@{arguments=@($CodexArguments)} | ConvertTo-Json -Compress
         return [pscustomobject]@{
             FilePath = $hostPath
-            PrefixArguments = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, '-InternalShimPath', $path, '-InternalShimArgumentsJson', $argumentJson)
+            PrefixArguments = @('-NoProfile', '-NonInteractive', '-File', $PSCommandPath, '-InternalShimPath', $path, '-InternalShimArgumentsJson', $argumentJson)
             Arguments = @()
             EnvironmentOverrides = @{ CODEX_EXECUTABLE = $path }
             OtelClientMode = 'descendant-codex-exe'
@@ -413,7 +413,6 @@ function Invoke-CodexProcess {
     $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
-    $psi.CreateNoWindow = $true
     $utf8 = [System.Text.UTF8Encoding]::new($false)
     $psi.StandardInputEncoding = $utf8
     $psi.StandardOutputEncoding = $utf8

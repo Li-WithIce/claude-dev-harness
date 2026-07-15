@@ -17,6 +17,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $false
 
 function Test-ParentProcessAlive {
     try {
@@ -51,106 +52,95 @@ function Publish-ControlJson {
     }
 }
 
+$script:NetstatPath = $null
+
 function Initialize-TcpOwnerLookup {
     if (-not $IsWindows) { throw 'OTLP client provenance is supported on Windows only.' }
-    if ($null -ne ('HarnessTcpOwnerTable' -as [type])) { return }
-    [void](Add-Type -TypeDefinition @'
-using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Net;
-using System.Runtime.InteropServices;
+    $candidate = Join-Path ([Environment]::SystemDirectory) 'netstat.exe'
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { throw 'Windows netstat.exe is unavailable for OTLP client provenance.' }
+    $item = Get-Item -LiteralPath $candidate -Force -ErrorAction Stop
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Windows netstat.exe provenance lookup path is unsafe.' }
+    $script:NetstatPath = [IO.Path]::GetFullPath($item.FullName)
+}
 
-public static class HarnessTcpOwnerTable
-{
-    private const int AfInet = 2;
-    private const uint ErrorInsufficientBuffer = 122;
-    private const uint TcpStateEstablished = 5;
+function Invoke-NetstatTcpSnapshot {
+    param([ValidateRange(100,5000)][int]$TimeoutMilliseconds = 1000)
 
-    private enum TcpTableClass
-    {
-        TcpTableOwnerPidAll = 5
-    }
+    if ([string]::IsNullOrWhiteSpace($script:NetstatPath)) { throw 'OTLP TCP owner lookup is not initialized.' }
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $script:NetstatPath
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in @('-ano','-p','tcp')) { [void]$startInfo.ArgumentList.Add($argument) }
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MibTcpRowOwnerPid
-    {
-        public uint State;
-        public uint LocalAddress;
-        public uint LocalPort;
-        public uint RemoteAddress;
-        public uint RemotePort;
-        public uint OwningPid;
-    }
-
-    [DllImport("iphlpapi.dll", SetLastError = true)]
-    private static extern uint GetExtendedTcpTable(
-        IntPtr table,
-        ref int size,
-        bool order,
-        int addressFamily,
-        TcpTableClass tableClass,
-        uint reserved);
-
-    private static int DecodePort(uint value)
-    {
-        return (ushort)IPAddress.NetworkToHostOrder(unchecked((short)(value & 0xffff)));
-    }
-
-    private static IPAddress DecodeAddress(uint value)
-    {
-        return new IPAddress(BitConverter.GetBytes(value));
-    }
-
-    public static int[] FindOwners(string localAddress, int localPort, string remoteAddress, int remotePort)
-    {
-        IPAddress expectedLocal = IPAddress.Parse(localAddress);
-        IPAddress expectedRemote = IPAddress.Parse(remoteAddress);
-        int size = 0;
-        uint result = GetExtendedTcpTable(IntPtr.Zero, ref size, true, AfInet, TcpTableClass.TcpTableOwnerPidAll, 0);
-        if (result != ErrorInsufficientBuffer || size <= 0)
-        {
-            throw new Win32Exception((int)result, "Unable to size the IPv4 TCP owner table.");
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    $started = $false
+    $stdoutTask = $null
+    $stderrTask = $null
+    $streamsDrained = $false
+    $cleanupErrors = [Collections.Generic.List[string]]::new()
+    try {
+        if (-not $process.Start()) { throw 'Windows netstat.exe TCP owner lookup did not start.' }
+        $started = $true
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutMilliseconds)) { throw [TimeoutException]::new("Windows netstat.exe TCP owner lookup exceeded ${TimeoutMilliseconds}ms.") }
+        $exitCode = $process.ExitCode
+        $drainTask = [Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]@($stdoutTask,$stderrTask))
+        if (-not $drainTask.Wait($TimeoutMilliseconds)) { throw [TimeoutException]::new("Windows netstat.exe output did not close within ${TimeoutMilliseconds}ms.") }
+        $streamsDrained = $true
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        if ($exitCode -ne 0) {
+            $diagnostic = $stderr.Trim()
+            if ($diagnostic.Length -gt 256) { $diagnostic = $diagnostic.Substring(0,256) }
+            throw "Windows netstat.exe TCP owner lookup failed with exit code $exitCode. $diagnostic"
         }
-
-        IntPtr buffer = Marshal.AllocHGlobal(size);
-        try
-        {
-            result = GetExtendedTcpTable(buffer, ref size, true, AfInet, TcpTableClass.TcpTableOwnerPidAll, 0);
-            if (result != 0)
-            {
-                throw new Win32Exception((int)result, "Unable to read the IPv4 TCP owner table.");
-            }
-
-            int count = Marshal.ReadInt32(buffer);
-            int rowSize = Marshal.SizeOf<MibTcpRowOwnerPid>();
-            var owners = new HashSet<int>();
-            IntPtr cursor = IntPtr.Add(buffer, sizeof(uint));
-            for (int index = 0; index < count; index++)
-            {
-                MibTcpRowOwnerPid row = Marshal.PtrToStructure<MibTcpRowOwnerPid>(cursor);
-                if (row.State == TcpStateEstablished &&
-                    DecodePort(row.LocalPort) == localPort &&
-                    DecodePort(row.RemotePort) == remotePort &&
-                    DecodeAddress(row.LocalAddress).Equals(expectedLocal) &&
-                    DecodeAddress(row.RemoteAddress).Equals(expectedRemote))
-                {
-                    owners.Add(checked((int)row.OwningPid));
+        return @($stdout -split '\r?\n')
+    } finally {
+        if ($started) {
+            try {
+                if (-not $process.HasExited) {
+                    $process.Kill($true)
+                    if (-not $process.WaitForExit(1000)) { throw 'netstat root did not exit within cleanup grace' }
                 }
-                cursor = IntPtr.Add(cursor,rowSize);
+            } catch { $cleanupErrors.Add(('kill/wait netstat: ' + $_.Exception.Message)) }
+            if (-not $streamsDrained -and $null -ne $stdoutTask -and $null -ne $stderrTask) {
+                try {
+                    $drainTask = [Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]@($stdoutTask,$stderrTask))
+                    if (-not $drainTask.Wait(1000)) { throw 'netstat output did not close within cleanup grace' }
+                } catch { $cleanupErrors.Add(('drain netstat: ' + $_.Exception.Message)) }
             }
-            int[] resultOwners = new int[owners.Count];
-            owners.CopyTo(resultOwners);
-            Array.Sort(resultOwners);
-            return resultOwners;
         }
-        finally
-        {
-            Marshal.FreeHGlobal(buffer);
-        }
+        try { $process.Dispose() } catch { $cleanupErrors.Add(('dispose netstat: ' + $_.Exception.Message)) }
+        if ($cleanupErrors.Count -gt 0) { throw ('Windows netstat.exe cleanup failed: ' + ($cleanupErrors -join '; ')) }
     }
 }
-'@)
+
+function Get-NetstatTcpOwnerProcessIds {
+    param(
+        [Parameter(Mandatory)][Net.IPAddress]$LocalAddress,
+        [Parameter(Mandatory)][ValidateRange(1,65535)][int]$LocalPort,
+        [Parameter(Mandatory)][Net.IPAddress]$RemoteAddress,
+        [Parameter(Mandatory)][ValidateRange(1,65535)][int]$RemotePort
+    )
+    $expectedLocalEndpoint = '{0}:{1}' -f $LocalAddress.ToString(),$LocalPort.ToString([Globalization.CultureInfo]::InvariantCulture)
+    $expectedRemoteEndpoint = '{0}:{1}' -f $RemoteAddress.ToString(),$RemotePort.ToString([Globalization.CultureInfo]::InvariantCulture)
+    $lines = @(Invoke-NetstatTcpSnapshot)
+    $owners = [Collections.Generic.HashSet[int]]::new()
+    foreach ($entry in $lines) {
+        $line = ([string]$entry).Trim()
+        if (-not $line.StartsWith('TCP ',[StringComparison]::OrdinalIgnoreCase)) { continue }
+        $fields = @($line -split '\s+')
+        if ($fields.Count -ne 5 -or -not $fields[0].Equals('TCP',[StringComparison]::OrdinalIgnoreCase)) { throw 'Windows netstat.exe returned a malformed TCP owner row.' }
+        if ([string]$fields[1] -cne $expectedLocalEndpoint -or [string]$fields[2] -cne $expectedRemoteEndpoint -or [string]$fields[3] -cne 'ESTABLISHED') { continue }
+        $ownerProcessId = 0
+        if (-not [int]::TryParse([string]$fields[4],[Globalization.NumberStyles]::None,[Globalization.CultureInfo]::InvariantCulture,[ref]$ownerProcessId) -or $ownerProcessId -le 0) { throw 'Windows netstat.exe returned an invalid TCP owner process id.' }
+        [void]$owners.Add($ownerProcessId)
+    }
+    return @($owners | Sort-Object)
 }
 
 function Test-ExactMapKeys {
@@ -228,9 +218,9 @@ function Get-ConnectionOwnerProcessId {
     $clientEndpoint = [Net.IPEndPoint]$Client.Client.RemoteEndPoint
     $collectorEndpoint = [Net.IPEndPoint]$Client.Client.LocalEndPoint
     if ($clientEndpoint.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or $collectorEndpoint.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or -not [Net.IPAddress]::IsLoopback($clientEndpoint.Address) -or -not [Net.IPAddress]::IsLoopback($collectorEndpoint.Address)) { throw 'OTLP connection is not exact IPv4 loopback.' }
-    $deadline = [DateTimeOffset]::UtcNow.AddMilliseconds(250)
+    $deadline = [DateTimeOffset]::UtcNow.AddMilliseconds(1000)
     do {
-        $owners = @([HarnessTcpOwnerTable]::FindOwners($clientEndpoint.Address.ToString(),$clientEndpoint.Port,$collectorEndpoint.Address.ToString(),$collectorEndpoint.Port))
+        $owners = @(Get-NetstatTcpOwnerProcessIds -LocalAddress $clientEndpoint.Address -LocalPort $clientEndpoint.Port -RemoteAddress $collectorEndpoint.Address -RemotePort $collectorEndpoint.Port)
         if ($owners.Count -gt 1) { throw 'OTLP connection owner lookup was ambiguous.' }
         if ($owners.Count -eq 1) { return [int]$owners[0] }
         Start-Sleep -Milliseconds 10

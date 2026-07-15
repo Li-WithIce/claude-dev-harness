@@ -17,7 +17,6 @@
         $startInfo = [Diagnostics.ProcessStartInfo]::new()
         $startInfo.FileName = (Get-Command pwsh -ErrorAction Stop).Source
         $startInfo.UseShellExecute = $false
-        $startInfo.CreateNoWindow = $true
         $startInfo.RedirectStandardOutput = $true
         $startInfo.RedirectStandardError = $true
         $startInfo.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)

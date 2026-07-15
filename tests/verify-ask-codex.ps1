@@ -63,11 +63,10 @@ function Start-AskCodex {
     $psi.UseShellExecute = $false
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
-    $psi.CreateNoWindow = $true
     $utf8 = [System.Text.UTF8Encoding]::new($false)
     $psi.StandardOutputEncoding = $utf8
     $psi.StandardErrorEncoding = $utf8
-    foreach ($argument in @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath) + $Arguments) {
+    foreach ($argument in @('-NoProfile', '-NonInteractive', '-File', $ScriptPath) + $Arguments) {
         $psi.ArgumentList.Add($argument)
     }
     foreach ($entry in $Environment.GetEnumerator()) {
@@ -428,8 +427,7 @@ if ($mode -in @('timeout', 'natural-child')) {
     $childPsi = [System.Diagnostics.ProcessStartInfo]::new()
     $childPsi.FileName = (Get-Process -Id $PID).Path
     $childPsi.UseShellExecute = $false
-    $childPsi.CreateNoWindow = $true
-    foreach ($argument in @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, '__mock-child', $env:ASK_CODEX_TEST_MARKER, $env:ASK_CODEX_TEST_TOKEN)) {
+    foreach ($argument in @('-NoProfile', '-NonInteractive', '-File', $PSCommandPath, '__mock-child', $env:ASK_CODEX_TEST_MARKER, $env:ASK_CODEX_TEST_TOKEN)) {
         $childPsi.ArgumentList.Add($argument)
     }
     $child = [System.Diagnostics.Process]::Start($childPsi)

@@ -46,6 +46,8 @@ $memory = Get-Route @('skills/obsidian-memory/SKILL.md')
 Check ((@($memory.modules) -join ',') -ceq 'memory' -and @($memory.tests) -ccontains 'verify-memory-provider-boundary.ps1') 'Memory changes select only Memory validation' 'Memory changed-path routing is wrong'
 $team = Get-Route @('skills/workflow-team/SKILL.md')
 Check ((@($team.modules) -join ',') -ceq 'team' -and @($team.tests) -ccontains 'verify-aiteamcode-skill-contract.ps1') 'Team changes select Team validation' 'Team changed-path routing is wrong'
+$adapterDispatch = Get-Route @('scripts/invoke-harness-skill-dispatcher.ps1')
+Check ((@($adapterDispatch.modules) -join ',') -ceq 'team' -and @($adapterDispatch.tests) -ccontains 'verify-aiteamcode-skill-contract.ps1') 'Harness adapter dispatcher changes select lifecycle validation' 'Harness adapter dispatcher change skipped lifecycle validation'
 $html = Get-Route @('skills/md-html/SKILL.md')
 Check ((@($html.modules) -join ',') -ceq 'md-html' -and @($html.tests).Count -eq 2) 'md-html changes select renderer validation' 'md-html changed-path routing is wrong'
 $codex = Get-Route @('skills/codex/SKILL.md')
