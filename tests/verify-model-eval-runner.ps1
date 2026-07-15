@@ -22,9 +22,9 @@ Check ([string]$dataset.schema_version -ceq 'harness-scenario-evals/v1') 'scenar
 Check (@($dataset.cases).Count -eq 20) 'model eval must keep 20 semantic cases'
 Check (@($dataset.cases.paraphrases).Count -eq 40) 'model eval must keep 40 paraphrases'
 Check (@($dataset.cases | Where-Object {[string]::IsNullOrWhiteSpace($_.model_context)}).Count -eq 0) 'every model case needs non-answer context'
-$valid='{"schema_version":"harness-model-observation/v1","action":"inspect","ask_required":false,"profile":"inspect","write_authorized":false,"completion_allowed":false,"verification_status":"pending","selected_protocol":"none","required_capabilities":[],"lifecycle_skills_loaded":0,"scope_expanded":false,"reason_code":"read-only-inspection"}'
+$valid='{"schema_version":"harness-model-observation/v1","action":"inspect","ask_required":false,"profile":"inspect","write_authorized":false,"completion_allowed":false,"verification_status":"pending","selected_protocol":"none","required_capabilities":[],"lifecycle_skills_loaded":0,"unauthorized_scope_change":false,"reason_code":"read-only-inspection"}'
 Check (Test-Json -Json $valid -SchemaFile $schema -ErrorAction Stop -WarningAction SilentlyContinue) 'valid model observation rejected'
-$invalid=$valid -replace '"scope_expanded":false,',''
+$invalid=$valid -replace '"unauthorized_scope_change":false,',''
 Check (-not (Test-Json -Json $invalid -SchemaFile $schema -ErrorAction SilentlyContinue -WarningAction SilentlyContinue)) 'missing model observation field accepted'
 $runnerText=Get-Content $runner -Raw -Encoding utf8; $moduleText=Get-Content $module -Raw -Encoding utf8; $wrapperText=Get-Content $wrapper -Raw -Encoding utf8
 Check ($runnerText -match "gpt-5\.6-sol" -and $runnerText -match "ValidateSet\('max'\)" -and $moduleText -match '-Ephemeral' -and $moduleText -match '-ReadOnly' -and $moduleText -match '-Isolated') 'release identity/isolation contract missing'

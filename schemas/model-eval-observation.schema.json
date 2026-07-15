@@ -4,7 +4,7 @@
   "title": "Thin Harness model evaluation observation",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "action", "ask_required", "profile", "write_authorized", "completion_allowed", "verification_status", "selected_protocol", "required_capabilities", "lifecycle_skills_loaded", "scope_expanded", "reason_code"],
+  "required": ["schema_version", "action", "ask_required", "profile", "write_authorized", "completion_allowed", "verification_status", "selected_protocol", "required_capabilities", "lifecycle_skills_loaded", "unauthorized_scope_change", "reason_code"],
   "properties": {
     "schema_version": { "type": "string", "const": "harness-model-observation/v1" },
     "action": { "type": "string", "enum": ["ask", "inspect", "execute", "block"] },
@@ -19,7 +19,7 @@
       "items": { "type": "string", "enum": ["approval", "evidence", "dry_run_required", "independent_review", "verification"] }
     },
     "lifecycle_skills_loaded": { "type": "integer", "minimum": 0 },
-    "scope_expanded": { "type": "boolean" },
+    "unauthorized_scope_change": { "type": "boolean" },
     "reason_code": { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,63}$" }
   }
 }
