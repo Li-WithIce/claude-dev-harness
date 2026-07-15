@@ -39,6 +39,7 @@ function Invoke-HarnessModelEvalSession {
 This is an isolated read-only decision probe. Do not run tools or edit files. Decide only from supplied facts.
 - Ask only for a genuine unresolved product, authority, compatibility, or irreversible decision. Repository-discoverable answers do not require Ask.
 - Inspect writes no artifact. Direct is clear reversible private work and loads no lifecycle skill or task artifact by default.
+- Read-only intent always uses profile=inspect regardless of technical risk; risk alone must not turn a no-write review into governed execution.
 - Governed is explicit higher-risk/protected work requiring auditable safeguards; it is not automatically a user question.
 - Critical work may require approval, dry-run, evidence, or independent review and blocks until required capability exists.
 - Missing, stale, or insufficient approval is a capability block, not a clarification Ask; set ask_required only for a missing user decision.

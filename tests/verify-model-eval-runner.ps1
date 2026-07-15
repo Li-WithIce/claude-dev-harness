@@ -28,6 +28,7 @@ $invalid=$valid -replace '"unauthorized_scope_change":false,',''
 Check (-not (Test-Json -Json $invalid -SchemaFile $schema -ErrorAction SilentlyContinue -WarningAction SilentlyContinue)) 'missing model observation field accepted'
 $runnerText=Get-Content $runner -Raw -Encoding utf8; $moduleText=Get-Content $module -Raw -Encoding utf8; $wrapperText=Get-Content $wrapper -Raw -Encoding utf8
 Check ($runnerText -match "gpt-5\.6-sol" -and $runnerText -match "ValidateSet\('max'\)" -and $moduleText -match '-Ephemeral' -and $moduleText -match '-ReadOnly' -and $moduleText -match '-Isolated') 'release identity/isolation contract missing'
+Check ($moduleText -match 'Read-only intent always uses profile=inspect') 'model rules must preserve the read-only Inspect override'
 Check ($runnerText -match 'prompt_persisted=\$false' -and $runnerText -match 'raw_command_persisted=\$false' -and $runnerText -match 'thread_id_persisted=\$false') 'sanitized report declarations missing'
 Check ($wrapperText -match 'codex-invocation-telemetry/v1' -and $wrapperText -match 'model_reasoning_effort' -and $wrapperText -match 'OutputSchema') 'wrapper telemetry/structured output contract missing'
 $output=@(& pwsh -NoLogo -NoProfile -File $runner -RepoRoot $RepoRoot -ValidateOnly 2>&1 | ForEach-Object {[string]$_}); $exit=$LASTEXITCODE
