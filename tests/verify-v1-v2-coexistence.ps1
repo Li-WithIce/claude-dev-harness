@@ -15,6 +15,7 @@ function Invoke-Script($Path,[string[]]$Arguments,[AllowNull()]$Protocol='auto')
     finally{if($null-eq$old){Remove-Item Env:HARNESS_PROTOCOL -ErrorAction Ignore}else{$env:HARNESS_PROTOCOL=$old}}
 }
 function Read-Json($Result){if([string]::IsNullOrWhiteSpace($Result.StdOut)){return $null};return $Result.StdOut|ConvertFrom-Json -Depth 40 -DateKind String}
+function New-V2TaskDocument($TaskId){$now=[DateTimeOffset]::UtcNow.ToString('o');return [ordered]@{schema_version='task-state/v2';task_id=$TaskId;version=1;status='ready';identity='existing';intent='write';requirement_state='clear';execution_profile='direct';persistence='ephemeral';policies=[ordered]@{plan_required=$false;approval_required=$false;rollback_required=$false;independent_review_required=$false;verification_required=$true};created_at=$now;updated_at=$now}}
 function Set-PlanSection($Path,$Name,$NextName,$Body){$text=[IO.File]::ReadAllText($Path,[Text.UTF8Encoding]::new($false,$true));$pattern="(?ms)^## $([regex]::Escape($Name))\s*.*?(?=^## $([regex]::Escape($NextName))\s*)";$updated=[regex]::Replace($text,$pattern,("## {0}`r`n`r`n{1}`r`n`r`n" -f $Name,$Body),1);if($updated-ceq$text){throw "section replacement failed: $Name"};Write-Utf8Bom -Path $Path -Content $updated}
 
 $repoBefore=@(&git -C $RepoRoot status --porcelain --untracked-files=all)
@@ -140,7 +141,7 @@ pass
     $finalPlan=[IO.File]::ReadAllText($planPath,[Text.UTF8Encoding]::new($false,$true))
     Check (@($stageResults|Where-Object ExitCode -ne 0).Count-eq0-and$finalPlan-match'(?m)^stage:\s*DONE\s*$') 'v1 task advances through PLAN, PLAN_REVIEW, IMPLEMENT, CODE_REVIEW, TEST, and DONE' ("v1 stage chain failed: "+(($stageResults|ForEach-Object{$_.StdErr})-join' | '))
 
-    $v2Id='coexist-v2';$v2Root=Join-Path $workspace ".assistant\runtime\tasks\$v2Id";[void][IO.Directory]::CreateDirectory($v2Root);[IO.File]::WriteAllText((Join-Path $v2Root 'task.json'),'{}',[Text.UTF8Encoding]::new($false))
+    $v2Id='coexist-v2';$v2Root=Join-Path $workspace ".assistant\runtime\tasks\$v2Id";[void][IO.Directory]::CreateDirectory($v2Root);[IO.File]::WriteAllText((Join-Path $v2Root 'task.json'),((New-V2TaskDocument $v2Id)|ConvertTo-Json -Depth 20 -Compress),[Text.UTF8Encoding]::new($false))
     $v2=Read-Json (Invoke-Script $taskScript @('protocol','-TaskId',$v2Id,'-RepoRoot',$RepoRoot,'-WorkspaceRoot',$workspace,'-AsJson') 'auto')
     $v2Conflict=Invoke-Script $taskScript @('protocol','-TaskId',$v2Id,'-RepoRoot',$RepoRoot,'-WorkspaceRoot',$workspace,'-AsJson') 'v1'
     $advanceV2=Invoke-Script $advance @('-TaskId',$v2Id,'-ExpectedStage','PLAN','-RepoRoot',$RepoRoot,'-WorkspaceRoot',$workspace) 'auto'
@@ -150,7 +151,17 @@ pass
 
     $corruptId='corrupt-v2';$corruptPath=Join-Path $workspace ".assistant\runtime\tasks\$corruptId\task.json";[void][IO.Directory]::CreateDirectory($corruptPath)
     $corrupt=Invoke-Script $taskScript @('protocol','-TaskId',$corruptId,'-RepoRoot',$RepoRoot,'-WorkspaceRoot',$workspace,'-AsJson') 'auto'
-    Check ($corrupt.ExitCode-eq2-and$corrupt.StdErr-match'v2 task state path is not a file') 'corrupt v2 artifact fails closed instead of falling back to v1' 'corrupt v2 artifact was misdetected'
+    Check ($corrupt.ExitCode-eq2-and$corrupt.StdErr-match'invalid-v2-artifact') 'directory v2 artifact is explicitly invalid and blocks fallback' 'directory v2 artifact was misdetected'
+    foreach($invalid in @(
+        [pscustomobject]@{Id='invalid-schema';Bytes=[Text.UTF8Encoding]::new($false).GetBytes('{}');Reason='schema'},
+        [pscustomobject]@{Id='invalid-identity';Bytes=[Text.UTF8Encoding]::new($false).GetBytes(((New-V2TaskDocument 'another-task')|ConvertTo-Json -Depth 20 -Compress));Reason='identity'},
+        [pscustomobject]@{Id='invalid-utf8';Bytes=[byte[]](0xC3,0x28);Reason='UTF-8'}
+    )){
+        $invalidPath=Join-Path $workspace ".assistant\runtime\tasks\$($invalid.Id)\task.json";[void][IO.Directory]::CreateDirectory((Split-Path -Parent $invalidPath));[IO.File]::WriteAllBytes($invalidPath,$invalid.Bytes)
+        $fallbackPlan=Join-Path $workspace "docs\tasks\$($invalid.Id)\plan.md";[void][IO.Directory]::CreateDirectory((Split-Path -Parent $fallbackPlan));[IO.File]::WriteAllText($fallbackPlan,"---`ntask_id: $($invalid.Id)`nstage: TEST`ntool: codex`nupdated: 2026-07-14`n---`n",[Text.UTF8Encoding]::new($false))
+        $result=Invoke-Script $taskScript @('protocol','-TaskId',$invalid.Id,'-RepoRoot',$RepoRoot,'-WorkspaceRoot',$workspace,'-AsJson') 'auto'
+        Check ($result.ExitCode-eq2-and[string]::IsNullOrWhiteSpace($result.StdOut)-and$result.StdErr-match'invalid-v2-artifact') "$($invalid.Reason) invalid v2 artifact blocks instead of falling back to v1" "$($invalid.Reason) invalid v2 artifact was accepted or fell back"
+    }
 }finally{
     if(Test-Path $temp){Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue}
 }

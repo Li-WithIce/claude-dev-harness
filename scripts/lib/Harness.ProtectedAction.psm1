@@ -17,8 +17,24 @@ function Convert-HarnessProtectedGlob {
     return '^'+$escaped+'$'
 }
 
+function Assert-HarnessProtectedRule {
+    param([System.Collections.IDictionary]$Rule,[string]$Label)
+    Assert-HarnessProtectedExactKeys -Value $Rule -Expected @('id','match','requires_profile','requires_approval','requires_dry_run','requires_independent_review') -Label $Label
+    if ([string]$Rule.id -cnotmatch '^[a-z0-9][a-z0-9-]{0,63}$') { throw "$Label id is invalid" }
+    if ($Rule.match -isnot [System.Collections.IDictionary]) { throw "$Label match is invalid" }
+    $matchKeys = @($Rule.match.Keys | ForEach-Object { [string]$_ })
+    if ($matchKeys.Count -eq 0 -or @($matchKeys | Where-Object { $_ -cnotin @('command_regex','environment','path_globs') }).Count -gt 0) { throw "$Label match keys are invalid" }
+    if ($Rule.match.Contains('command_regex')) { try { [void][regex]::new([string]$Rule.match.command_regex) } catch { throw "$Label command_regex is invalid" } }
+    if ($Rule.match.Contains('environment') -and [string]::IsNullOrWhiteSpace([string]$Rule.match.environment)) { throw "$Label environment is invalid" }
+    if ($Rule.match.Contains('path_globs')) {
+        $globs = @($Rule.match.path_globs)
+        if ($globs.Count -eq 0 -or @($globs | Where-Object { [string]::IsNullOrWhiteSpace([string]$_) }).Count -gt 0 -or @($globs | Sort-Object -Unique).Count -ne $globs.Count) { throw "$Label path_globs are invalid" }
+    }
+    if ([string]$Rule.requires_profile -cnotin @('governed','critical') -or [string]$Rule.requires_approval -cnotin @('none','product','architecture','production') -or $Rule.requires_dry_run -isnot [bool] -or $Rule.requires_independent_review -isnot [bool]) { throw "$Label requirements are invalid" }
+}
+
 function Read-HarnessProtectedPolicy {
-    param([string]$RepoRoot)
+    param([string]$RepoRoot,[string]$WorkspaceRoot)
     $path=Join-Path $RepoRoot 'policies\protected-actions.json'
     if(-not(Test-Path -LiteralPath $path -PathType Leaf)){throw 'protected action policy is unavailable'}
     try{$policy=Get-Content -LiteralPath $path -Raw -Encoding utf8|ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop}catch{throw "protected action policy is invalid: $($_.Exception.Message)"}
@@ -26,8 +42,23 @@ function Read-HarnessProtectedPolicy {
     if([string]$policy.schema_version-cne'protected-actions/v1'){throw 'protected action policy version is invalid'}
     $ids=@($policy.rules|ForEach-Object{[string]$_.id});if(@(Compare-Object @('production-database-destructive','authorization-path-change') $ids).Count){throw 'protected action policy rules are invalid'}
     foreach($rule in @($policy.rules)){
-        Assert-HarnessProtectedExactKeys -Value $rule -Expected @('id','match','requires_profile','requires_approval','requires_dry_run','requires_independent_review') -Label 'protected action rule'
-        if([string]$rule.requires_profile-cnotin@('governed','critical')-or[string]$rule.requires_approval-cnotin@('none','product','architecture','production')-or$rule.requires_dry_run-isnot[bool]-or$rule.requires_independent_review-isnot[bool]){throw 'protected action rule requirements are invalid'}
+        Assert-HarnessProtectedRule -Rule $rule -Label 'protected action rule'
+    }
+    $overlayRelative = '.assistant/policies/protected-actions.local.json'
+    $overlayPath = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $overlayRelative -Label 'protected action overlay' -AllowMissing
+    if (Test-Path -LiteralPath $overlayPath) {
+        if (-not (Test-Path -LiteralPath $overlayPath -PathType Leaf)) { throw 'protected action overlay is invalid: path is not a file' }
+        try { $overlayJson = [IO.File]::ReadAllText($overlayPath,[Text.UTF8Encoding]::new($false,$true)); $overlay = $overlayJson | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop } catch { throw "protected action overlay is invalid: $($_.Exception.Message)" }
+        $overlaySchema = Join-Path $RepoRoot 'schemas\protected-actions-overlay.schema.json'
+        try { $overlayValid = Test-Json -Json ($overlay | ConvertTo-Json -Depth 30 -Compress) -SchemaFile $overlaySchema -ErrorAction Stop -WarningAction SilentlyContinue } catch { throw "protected action overlay schema is unavailable: $($_.Exception.Message)" }
+        if (-not $overlayValid) { throw 'protected action overlay failed schema validation' }
+        $knownIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($id in $ids) { [void]$knownIds.Add($id) }
+        foreach ($rule in @($overlay.rules)) {
+            Assert-HarnessProtectedRule -Rule $rule -Label 'protected action overlay rule'
+            if (-not $knownIds.Add([string]$rule.id)) { throw 'protected action overlay rule id collides with another rule' }
+            $policy.rules += @($rule)
+        }
     }
     return $policy
 }
@@ -58,7 +89,7 @@ function Assert-HarnessProtectedAction {
     $WorkspaceRoot=Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
     if($SessionMode-ceq'read-only'-and$ActionMode-ceq'write'){throw 'read-only session cannot invoke a write tool'}
     if($ActionMode-ceq'read'){return [ordered]@{allowed=$true;protected=$false;matched_rules=@();required_scopes=@();approval_id=$null}}
-    $policy=Read-HarnessProtectedPolicy -RepoRoot $RepoRoot
+    $policy=Read-HarnessProtectedPolicy -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot
     $normalizedPaths=[Collections.Generic.List[string]]::new();foreach($path in $ChangedPaths){$resolved=Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $path -Label 'protected action path' -AllowMissing;$normalizedPaths.Add((Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path $resolved))}
     $matched=[Collections.Generic.List[object]]::new();$scopes=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     foreach($rule in @($policy.rules)){

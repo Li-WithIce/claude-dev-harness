@@ -53,6 +53,28 @@ function Assert-HarnessV1Frontmatter {
     if ([string]$Fields['updated'] -cnotmatch '^\d{4}-\d{2}-\d{2}$') { throw 'v1 plan updated date is invalid' }
 }
 
+function Assert-HarnessV2TaskArtifact {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$TaskId
+    )
+
+    try {
+        if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw 'task.json is not a file' }
+        $json = [System.IO.File]::ReadAllText($Path,[System.Text.UTF8Encoding]::new($false,$true))
+        $document = $json | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop
+        $schemaPath = Join-Path $RepoRoot 'schemas\task-state.schema.json'
+        if (-not (Test-Path -LiteralPath $schemaPath -PathType Leaf)) { throw 'task-state schema is unavailable' }
+        if (-not (Test-Json -Json ($document | ConvertTo-Json -Depth 30 -Compress) -SchemaFile $schemaPath -ErrorAction Stop -WarningAction SilentlyContinue)) { throw 'task.json failed task-state/v2 schema validation' }
+        if ([string]$document.task_id -cne $TaskId) { throw 'task.json task_id does not match TaskId' }
+    } catch {
+        $detail = [string]$_.Exception.Message
+        if ($detail.StartsWith('invalid-v2-artifact:',[StringComparison]::Ordinal)) { throw }
+        throw "invalid-v2-artifact: $detail"
+    }
+}
+
 function Assert-HarnessRolloutKeys {
     param([System.Collections.IDictionary]$Value,[string[]]$Expected,[string]$Label)
     if ($Value -isnot [System.Collections.IDictionary]) { throw "rollout-report-invalid-$Label" }
@@ -211,7 +233,7 @@ function Get-HarnessProtocolResolution {
         $taskStatePath = ".assistant/runtime/tasks/$TaskId/task.json"
         $taskStateTarget = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $taskStatePath -Label 'v2 task state' -AllowMissing
         if (Test-Path -LiteralPath $taskStateTarget) {
-            if (-not (Test-Path -LiteralPath $taskStateTarget -PathType Leaf)) { throw 'v2 task state path is not a file' }
+            Assert-HarnessV2TaskArtifact -RepoRoot $RepoRoot -Path $taskStateTarget -TaskId $TaskId
             $detected = 'v2'
         } else {
             $planPath = "docs/tasks/$TaskId/plan.md"

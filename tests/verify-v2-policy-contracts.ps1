@@ -107,11 +107,12 @@ $expectedSchemaFiles = @(
     'current-pointer.schema.json',
     'event.schema.json',
     'evidence.schema.json',
+    'protected-actions-overlay.schema.json',
     'requirement-contract.schema.json',
     'task-state.schema.json'
 )
 $actualSchemaFiles = @(Get-ChildItem -LiteralPath $schemaRoot -Filter '*.json' -File | Select-Object -ExpandProperty Name | Sort-Object)
-Assert-True -Condition (@(Compare-Object $expectedSchemaFiles $actualSchemaFiles).Count -eq 0) -Success 'schema set contains PR-01 contracts, PR-05 current pointer, and PR-07 audit record' -Failure 'schema set drifted or expanded beyond the plan'
+Assert-True -Condition (@(Compare-Object $expectedSchemaFiles $actualSchemaFiles).Count -eq 0) -Success 'schema set contains canonical contracts plus the project protected-action extension contract' -Failure 'schema set drifted beyond the approved contracts'
 
 $catalog = Get-Content -LiteralPath $catalogPath -Raw -Encoding utf8 | ConvertFrom-Json -ErrorAction Stop
 $expectedCases = @('approval', 'audit-record', 'current-pointer', 'event', 'evidence', 'requirement-contract', 'task-state')
@@ -230,6 +231,12 @@ foreach ($rule in $protected['rules']) {
 }
 $productionRule = @($protected['rules'] | Where-Object { [string]$_['id'] -ceq 'production-database-destructive' })[0]
 Assert-True -Condition ([string]$productionRule['requires_profile'] -ceq 'critical' -and [string]$productionRule['requires_approval'] -ceq 'production' -and $productionRule['requires_dry_run'] -eq $true) -Success 'production destructive database actions require Critical, approval, and dry-run' -Failure 'production destructive database protection is incomplete'
+$overlaySchemaPath = Join-Path $schemaRoot 'protected-actions-overlay.schema.json'
+$validOverlay = [ordered]@{schema_version='protected-actions-overlay/v1';rules=@([ordered]@{id='project-payment-path';match=[ordered]@{path_globs=@('**/payments/**');environment='staging'};requires_profile='governed';requires_approval='architecture';requires_dry_run=$false;requires_independent_review=$true})}
+$invalidOverlay = ($validOverlay | ConvertTo-Json -Depth 20) | ConvertFrom-Json -AsHashtable -Depth 20
+$invalidOverlay.rules[0].requires_profile = 'direct'
+Assert-True -Condition ((Test-Path $overlaySchemaPath -PathType Leaf) -and (Test-Json -Json ($validOverlay|ConvertTo-Json -Depth 20 -Compress) -SchemaFile $overlaySchemaPath -ErrorAction Stop -WarningAction SilentlyContinue)) -Success 'project protected-action overlay has a strict valid schema contract' -Failure 'valid protected-action overlay contract is unavailable'
+Assert-True -Condition (-not (Test-Json -Json ($invalidOverlay|ConvertTo-Json -Depth 20 -Compress) -SchemaFile $overlaySchemaPath -ErrorAction SilentlyContinue -WarningAction SilentlyContinue)) -Success 'protected-action overlay cannot weaken a rule to Direct' -Failure 'protected-action overlay accepted a weakened Direct rule'
 
 $malformedRejected = $false
 try {

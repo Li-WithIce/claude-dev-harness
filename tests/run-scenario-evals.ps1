@@ -107,7 +107,9 @@ function Invoke-ScenarioEvaluator {
                 $taskId = 'resume-v2'
                 $taskPath = Join-Path $workspace ".assistant\runtime\tasks\$taskId\task.json"
                 [void][System.IO.Directory]::CreateDirectory((Split-Path -Parent $taskPath))
-                [System.IO.File]::WriteAllText($taskPath,"{}`n",[System.Text.UTF8Encoding]::new($false))
+                $now = [DateTimeOffset]::UtcNow.ToString('o')
+                $task = [ordered]@{schema_version='task-state/v2';task_id=$taskId;version=1;status='ready';identity='existing';intent='write';requirement_state='clear';execution_profile='direct';persistence='ephemeral';policies=[ordered]@{plan_required=$false;approval_required=$false;rollback_required=$false;independent_review_required=$false;verification_required=$true};created_at=$now;updated_at=$now}
+                [System.IO.File]::WriteAllText($taskPath,($task | ConvertTo-Json -Depth 20 -Compress),[System.Text.UTF8Encoding]::new($false))
             } elseif ([string]$evaluator.fixture -ceq 'v1') {
                 $taskId = 'resume-v1'
                 $planPath = Join-Path $workspace "docs\tasks\$taskId\plan.md"
