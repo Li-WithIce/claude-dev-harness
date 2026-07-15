@@ -1776,11 +1776,11 @@ exit `$LASTEXITCODE
         $planSkillsIndexDoc -match '# Skills available at PLAN \(backend hint: codex\)' -and
         $planSkillsIndexDoc -match '\*\*plan\*\*' -and
         $planSkillsIndexDoc -match '\*\*entry-router\*\*' -and
-        $planSkillsIndexDoc -match 'Canonical entry router' -and
+        $planSkillsIndexDoc -match 'V1 compatibility entry router' -and
         $planSkillsIndexDoc -notmatch '\*\*using-superpowers\*\*') {
-        Add-Check 'E2 PLAN skills-index uses entry-router as the default entry command'
+        Add-Check 'E2 PLAN skills-index exposes the v1 compatibility entry-router without using-superpowers'
     } else {
-        Add-Failure ("E2 PLAN skills-index should expose entry-router and not using-superpowers, got output=[{0}] doc=[{1}]" -f $e2Result.Text, $planSkillsIndexDoc)
+        Add-Failure ("E2 PLAN skills-index should expose the v1 compatibility entry-router and not using-superpowers, got output=[{0}] doc=[{1}]" -f $e2Result.Text, $planSkillsIndexDoc)
     }
     $lifecycleAssertionsPassed = $script:Failures.Count -eq 0
 } finally {

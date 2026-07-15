@@ -88,7 +88,7 @@ Need-Text 'agent-configs/workspace/AGENTS.md.template' 'v1 recovery files remain
 Need-Text 'agent-configs/workspace/AGENTS.md.template' 'Use `rg`, file reading, and manual inspection by default.'
 Need-Text 'agent-configs/workspace/AGENTS.md.template' 'Optional providers are never required for core routing'
 Need-Text 'agent-configs/workspace/AGENTS.md.template' 'The executable workspace entry shim remains `.assistant\entry\AGENTS.md`'
-Need-Text 'agent-configs/claude/CLAUDE.md.template' 'Call `/entry-router` at the start of each conversation.'
+Need-Text 'agent-configs/claude/CLAUDE.md.template' '`/entry-router`: selected v1 only; never v2 Direct.'
 Need-Text 'agent-configs/claude/CLAUDE.md.template' 'Resolve the workspace via `DEV_HARNESS_WORKSPACE_ROOT`'
 Need-Text 'agent-configs/claude/CLAUDE.md.template' 'Multi-step `mode=workflow` start/switch/pause may sync runtime'
 Need-Text 'vault-template/entry/AGENTS.md.template' 'Stage advance: `pwsh -File .assistant\entry\advance-stage.ps1'

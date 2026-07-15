@@ -247,6 +247,8 @@ $coreScripts = @(
     'run-scenario-evals.ps1',
     'verify-model-eval-runner.ps1',
     'verify-host-benchmark-runner.ps1',
+    'verify-host-benchmark-otel.ps1',
+    'verify-host-benchmark-qualification.ps1',
     'verify-v2-ci-routing.ps1',
     'verify-v2-install-presets.ps1',
     'verify-v2-evidence.ps1',
@@ -308,7 +310,8 @@ foreach ($skip in $skips) {
 $failures = New-Object System.Collections.Generic.List[object]
 foreach ($check in $checks) {
     Write-Output ("[RUN ] {0}" -f $check.Name)
-    $result = Invoke-QuietProcess -Name $check.Name -FilePath $check.FilePath -Arguments $check.Arguments -WorkingDirectory $repoRootResolved -TimeoutSeconds $CheckTimeoutSeconds
+    $effectiveTimeoutSeconds = if ($check.Name -ceq 'verify-host-benchmark-qualification.ps1') { [math]::Max($CheckTimeoutSeconds,900) } else { $CheckTimeoutSeconds }
+    $result = Invoke-QuietProcess -Name $check.Name -FilePath $check.FilePath -Arguments $check.Arguments -WorkingDirectory $repoRootResolved -TimeoutSeconds $effectiveTimeoutSeconds
     if ($result.ExitCode -eq 0) {
         Write-Output ("[PASS] {0} ({1}s)" -f $result.Name, $result.DurationSeconds)
         if ($VerboseOutput) {
@@ -317,7 +320,7 @@ foreach ($check in $checks) {
         }
     } else {
         $failures.Add($result) | Out-Null
-        $failureSuffix = if ($result.TimedOut) { ", timeout {0}s" -f $CheckTimeoutSeconds } else { '' }
+        $failureSuffix = if ($result.TimedOut) { ", timeout {0}s" -f $effectiveTimeoutSeconds } else { '' }
         Write-Output ("[FAIL] {0} ({1}s, exit {2}{3})" -f $result.Name, $result.DurationSeconds, $result.ExitCode, $failureSuffix)
         if (-not [string]::IsNullOrWhiteSpace($result.StdOut)) {
             Write-Output '--- stdout ---'

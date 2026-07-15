@@ -232,6 +232,7 @@ if ($null -eq $quietProcessFunction) {
 }
 
 if ($runner -match '(?m)^\s*\[int\]\$CheckTimeoutSeconds = 360\s*$' -and
+    $runner -match "verify-host-benchmark-qualification\.ps1'\) \{ \[math\]::Max\(\`$CheckTimeoutSeconds,900\)" -and
     $workflow -match '(?m)^\s*timeout-minutes:\s*30\s*$' -and
     $workflow -match '(?m)^\s*timeout-minutes:\s*45\s*$' -and
     $workflow -match 'run-validation\.ps1 -Suite core -CheckTimeoutSeconds 360' -and
@@ -246,7 +247,7 @@ if ($runner -match '(?m)^\s*\[int\]\$CheckTimeoutSeconds = 360\s*$' -and
     $rolloutGenerator -match 'benchmark-harness\.ps1 -Compare bare,v1,v2' -and
     $workflow -notmatch 'verify-installation\.ps1' -and
     $workflow -notmatch '(?m)^\s*&\s+\.\\uninstall\.ps1' -and
-    $readme -match 'PR job 上限为 30 分钟，release job 上限为 45 分钟，单个 verify 脚本上限为 360 秒') {
+    $readme -match 'PR job 上限为 30 分钟，release job 上限为 45 分钟；常规 verify 脚本上限为 360 秒，磁盘密集的 host benchmark qualification 单项上限为 900 秒') {
     Add-Check 'CI layers share bounded validation budgets and delegate install rollback to the smoke runner'
 } else {
     Add-Failure 'CI layers, local runner, and README should share bounded budgets and delegate install rollback to the smoke runner'

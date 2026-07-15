@@ -46,6 +46,29 @@ function Reject-Regex {
     }
 }
 
+function Reject-TextFenceWorkflowChain {
+    param(
+        [string]$Text,
+        [string]$Message
+    )
+
+    $insideTextFence = $false
+    foreach ($line in ($Text -split "\r?\n")) {
+        if (-not $insideTextFence -and $line -ceq '```text') {
+            $insideTextFence = $true
+            continue
+        }
+        if ($insideTextFence -and $line -ceq '```') {
+            $insideTextFence = $false
+            continue
+        }
+        if ($insideTextFence -and $line -match '(?<![A-Z_])(ASK|QUICK|REVIEW|SUMMARY|HANDOFF)(?![A-Z_])\s*->') {
+            $failures.Add($Message) | Out-Null
+            return
+        }
+    }
+}
+
 $matrixPath = 'docs/工作流/stage-discipline-matrix.md'
 $matrix = Read-RepoFile -Path $matrixPath
 
@@ -82,7 +105,7 @@ Need-Text $matrix 'does not add frontmatter fields' "$matrixPath should not add 
 Need-Text $matrix 'does not create new hard validator gates' "$matrixPath should not add hard validation gates"
 
 Reject-Regex $matrix '(?mi)^stage:\s*(ASK|QUICK|REVIEW|SUMMARY|HANDOFF)\b' "$matrixPath should not introduce non-canonical frontmatter stages"
-Reject-Regex $matrix '(?m)^```text\r?\n(?:.*\r?\n)*?(ASK|QUICK|REVIEW|SUMMARY|HANDOFF)\s*->' "$matrixPath should not list non-canonical names in the workflow chain"
+Reject-TextFenceWorkflowChain $matrix "$matrixPath should not list non-canonical names in the workflow chain"
 Reject-Regex $matrix 'Only use quick when scope and acceptance are clear, risk is low' "$matrixPath should not require low risk for pure read-only quick work"
 
 if ($failures.Count -gt 0) {

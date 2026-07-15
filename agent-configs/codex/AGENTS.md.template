@@ -8,7 +8,7 @@
 - Durable conclusions belong in maintained tracked artifacts; internal failed writes stay in `.assistant/runtime/failed-writes` and never enter a business inbox.
 
 <!-- BEGIN GENERATED ENTRY CONTRACT -->
-<!-- source-sha256: 74655e2dcec95a42259e4689ceca013ad87b38d63e59ef4ea7091e0d38f38f21 -->
+<!-- source-sha256: 8d3066c46c108583497b3cd8982f4db96164626697b923d0771ce1b43f3c2065 -->
 # Entry Contract
 
 Canonical shared routing contract. Host templates may add only host-specific overlays outside the generated markers.
@@ -18,6 +18,7 @@ Canonical shared routing contract. Host templates may add only host-specific ove
 - `v2_entry_activation`: `explicit-new-or-existing-v2-or-eligible-auto-new`
 - `stage_chain`: `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`
 
+- `HARNESS_PROTOCOL=v2`: classify inline before v1 routing; Direct loads no `entry-router`/lifecycle skill.
 - For a known task, run `scripts\task.ps1 protocol -TaskId {task_id}`: v2 `task.json` wins, then legal v1 `plan.md`; for a new task, `auto` selects v2 only with a current all-pass rollout report and otherwise returns a diagnostic v1 fallback. Conflicts fail closed, migration is explicit, and v2 never calls `advance-stage.ps1`.
 - Blocked, protected, expanded-scope, or non-Direct results reroute before writes.
 - Clear Direct hands off to the main Agent: `understand -> edit -> focused verification -> self-review -> report`; it does not load `entry-router`, `orchestrator`, lifecycle skills, Memory, Team, or Provider.

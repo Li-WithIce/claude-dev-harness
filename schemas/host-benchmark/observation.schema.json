@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dev-harness.local/schemas/host-benchmark/observation.schema.json",
+  "title": "Host benchmark observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "outcome",
+    "task_completed",
+    "verification_executed",
+    "verification_passed",
+    "reason_code"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "host-benchmark-observation/v1"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["completed", "in_progress", "blocked", "failed"]
+    },
+    "task_completed": {
+      "type": "boolean"
+    },
+    "verification_executed": {
+      "type": "boolean"
+    },
+    "verification_passed": {
+      "type": "boolean"
+    },
+    "reason_code": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "stage_boundary",
+        "missing_decision",
+        "capability_block",
+        "execution_failed",
+        "verification_failed"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "verification_passed": { "const": true } },
+        "required": ["verification_passed"]
+      },
+      "then": {
+        "properties": { "verification_executed": { "const": true } }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "outcome": { "const": "completed" },
+            "task_completed": { "const": true },
+            "verification_executed": { "const": true },
+            "verification_passed": { "const": true },
+            "reason_code": { "const": "completed" }
+          }
+        },
+        {
+          "properties": {
+            "outcome": { "const": "in_progress" },
+            "task_completed": { "const": false },
+            "verification_passed": { "const": false },
+            "reason_code": { "const": "stage_boundary" }
+          }
+        },
+        {
+          "properties": {
+            "outcome": { "const": "blocked" },
+            "task_completed": { "const": false },
+            "verification_passed": { "const": false },
+            "reason_code": { "enum": ["missing_decision", "capability_block"] }
+          }
+        },
+        {
+          "properties": {
+            "outcome": { "const": "failed" },
+            "task_completed": { "const": false },
+            "verification_executed": { "const": false },
+            "verification_passed": { "const": false },
+            "reason_code": { "const": "execution_failed" }
+          }
+        },
+        {
+          "properties": {
+            "outcome": { "const": "failed" },
+            "task_completed": { "const": false },
+            "verification_executed": { "const": true },
+            "verification_passed": { "const": false },
+            "reason_code": { "const": "verification_failed" }
+          }
+        }
+      ]
+    }
+  ]
+}

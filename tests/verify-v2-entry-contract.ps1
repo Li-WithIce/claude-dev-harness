@@ -129,6 +129,7 @@ try {
     $canonicalHasBom = $canonicalBytes.Length -ge 3 -and $canonicalBytes[0] -eq 0xEF -and $canonicalBytes[1] -eq 0xBB -and $canonicalBytes[2] -eq 0xBF
     Assert-True -Condition (-not $canonicalHasBom -and -not $canonicalText.Contains("`r")) -Success 'canonical entry contract is deterministic LF UTF-8 without BOM' -Failure 'canonical entry contract encoding is not deterministic'
     Assert-True -Condition ($canonicalText -match '`protocol_default`:\s*`auto`' -and $canonicalText -match '`auto_resolves_to`:\s*`existing-artifact-or-gated-v2-new`' -and $canonicalText -match '`v2_entry_activation`:\s*`explicit-new-or-existing-v2-or-eligible-auto-new`') -Success 'auto is artifact-first and requires an eligible report for a new v2 task' -Failure 'entry contract protocol detector rollout is invalid'
+    Assert-True -Condition ($canonicalText -match '`HARNESS_PROTOCOL=v2`: classify inline before v1 routing' -and $canonicalText -match 'Direct loads no `entry-router`/lifecycle skill') -Success 'explicit v2 Direct resolves before v1 router or lifecycle skill loading' -Failure 'entry contract leaves explicit v2 Direct vulnerable to v1 routing overhead'
     Assert-True -Condition ($canonicalText -notmatch '\{(?:REPO_ROOT|VAULT_PATH|CODEX_HOME)\}' -and $canonicalText -notmatch '`auto_resolves_to`:\s*`v2`') -Success 'canonical body is host-neutral and never enables unconditional auto=v2' -Failure 'canonical body contains a host token or unconditional v2 default'
 
     $fixture = Get-Content -LiteralPath $fixturePath -Raw -Encoding utf8 | ConvertFrom-Json -ErrorAction Stop
@@ -183,6 +184,9 @@ try {
         }
     }
     Assert-True -Condition ($managedBlocks.Count -eq 4 -and @($managedBlocks | Select-Object -Unique).Count -eq 1) -Success 'all four allowlisted targets carry one byte-identical managed block' -Failure 'allowlisted generated blocks are not identical'
+    $claudeOverlay = (Get-ManagedBlock -Path (Join-Path $RepoRoot 'agent-configs\claude\CLAUDE.md.template')).Overlay
+    Assert-True -Condition ($claudeOverlay -notmatch '(?m)^- Call `/entry-router` at the start of each conversation\.$') -Success 'Claude overlay has no unconditional entry-router first-hop rule' -Failure 'Claude overlay still forces entry-router before v2 Direct classification'
+    Assert-True -Condition ($claudeOverlay -match '(?m)^- `/entry-router`: selected v1 only; never v2 Direct\.$') -Success 'Claude overlay limits entry-router to selected v1 requests' -Failure 'Claude overlay does not preserve the v1-only entry-router boundary'
     Assert-True -Condition ($baselineBytes -eq 22194 -and $baselineLines -eq 206) -Success 'fixed PR-00 entry baseline is reproducible at 22194 bytes and 206 lines' -Failure ("fixed entry baseline drifted: {0} bytes, {1} lines" -f $baselineBytes,$baselineLines)
     Assert-True -Condition ($currentBytes -lt $baselineBytes -and $currentLines -lt $baselineLines) -Success ("generated entries shrink to {0} bytes and {1} lines" -f $currentBytes,$currentLines) -Failure ("generated entries did not shrink: {0} bytes and {1} lines" -f $currentBytes,$currentLines)
 

@@ -4,6 +4,7 @@
 param(
     [string]$RepoRoot = '',
     [string]$OutputPath = '',
+    [string]$CodexHome = '',
     [ValidateRange(1,10)][int]$Trials = 3,
     [ValidateRange(1,12)][int]$MaxRoundTrips = 8,
     [string]$Model = 'gpt-5.6-sol',
@@ -12,229 +13,268 @@ param(
     [switch]$ValidateOnly,
     [switch]$KeepScratch
 )
-
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 
-function Get-TaggedFileHash {
-    param([Parameter(Mandatory)][string]$Path)
-    return 'sha256:' + (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+$atomicWritePath = Join-Path $PSScriptRoot 'lib\Harness.AtomicWrite.psm1'
+$pathModulePath = Join-Path $PSScriptRoot 'lib\Harness.Path.psm1'
+$otelContractPath = Join-Path $PSScriptRoot 'host-benchmark\HostBenchmark.Otel.ps1'
+$trialPath = Join-Path $PSScriptRoot 'host-benchmark\HostBenchmark.Trial.ps1'
+foreach ($path in @($atomicWritePath,$pathModulePath,$otelContractPath,$trialPath)) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required host benchmark input is missing: $path" }
+}
+Import-Module $atomicWritePath -Force -ErrorAction Stop
+Import-Module $pathModulePath -Force -ErrorAction Stop
+
+function Invoke-HostGit {
+    param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)][string[]]$Arguments)
+    $output = @(& git -C $Root @Arguments 2>&1 | ForEach-Object { [string]$_ })
+    if ($LASTEXITCODE -ne 0) { throw "host benchmark Git command failed: git $($Arguments -join ' ')" }
+    return $output
 }
 
-function Get-TextHash {
-    param([Parameter(Mandatory)][string]$Text)
-    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($Text)
-    return 'sha256:' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+function Get-HostGitState {
+    param([Parameter(Mandatory)][string]$Root,[switch]$IncludeIgnored)
+    $revision = (@(Invoke-HostGit -Root $Root -Arguments @('rev-parse','--verify','HEAD')) -join '').Trim()
+    $tree = (@(Invoke-HostGit -Root $Root -Arguments @('rev-parse',"$revision`^{tree}")) -join '').Trim()
+    $objectFormat = (@(Invoke-HostGit -Root $Root -Arguments @('rev-parse','--show-object-format')) -join '').Trim()
+    $status = [Collections.Generic.List[string]]::new()
+    foreach ($line in @(Invoke-HostGit -Root $Root -Arguments @('-c','core.quotepath=false','status','--porcelain=v1','--untracked-files=all'))) { $status.Add([string]$line) }
+    foreach ($line in @(Invoke-HostGit -Root $Root -Arguments @('-c','core.quotepath=false','ls-files','-v','--'))) {
+        if ([string]$line -cnotmatch '^H ') { $status.Add('IF ' + [string]$line) }
+    }
+    if ($IncludeIgnored) {
+        foreach ($path in @(Invoke-HostGit -Root $Root -Arguments @('-c','core.quotepath=false','ls-files','--others','--ignored','--exclude-standard','--'))) { $status.Add('!! ' + [string]$path) }
+    }
+    $statusText = @($status) -join "`n"
+    return [ordered]@{
+        revision=$revision
+        commit_tree_oid=$tree
+        object_format=$objectFormat
+        dirty=$status.Count -gt 0
+        status_entry_count=$status.Count
+        status_digest=Get-HarnessSha256Text -Content $statusText
+        state_digest=Get-HarnessSha256Text -Content ("{0}`n{1}`n{2}" -f $revision,$tree,$statusText)
+        state_basis=$(if($IncludeIgnored){'git-revision-tree-status-ignored/v1'}else{'git-revision-tree-status/v1'})
+    }
 }
 
-function Write-AtomicJson {
-    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)]$Value)
-    $parent = [IO.Path]::GetDirectoryName($Path)
-    [void][IO.Directory]::CreateDirectory($parent)
-    $temporary = Join-Path $parent ('.host-benchmark-' + [guid]::NewGuid().ToString('N') + '.tmp')
+function Test-HostGitFileMatchesRevision {
+    param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$Revision)
     try {
-        [IO.File]::WriteAllText($temporary,($Value | ConvertTo-Json -Depth 30),[Text.UTF8Encoding]::new($false))
-        [IO.File]::Move($temporary,$Path,$true)
-    } finally {
-        if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+        $relative = Get-HarnessRelativePath -WorkspaceRoot $Root -Path $Path
+        $expected = (@(Invoke-HostGit -Root $Root -Arguments @('rev-parse',("{0}:{1}" -f $Revision,$relative))) -join '').Trim()
+        $actual = (@(Invoke-HostGit -Root $Root -Arguments @('hash-object','--',$relative)) -join '').Trim()
+        return $expected -match '^[0-9a-f]{40,64}$' -and $actual -ceq $expected
+    } catch { return $false }
+}
+
+function Test-HostReportPath {
+    param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)][string]$Path)
+    $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd('\')
+    $pathFull = [IO.Path]::GetFullPath($Path)
+    $prefix = $rootFull + '\'
+    if (-not $pathFull.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) { return $true }
+    $relative = [IO.Path]::GetRelativePath($rootFull,$pathFull).Replace('\','/')
+    & git -C $rootFull check-ignore --no-index --quiet -- $relative 2>$null
+    return $LASTEXITCODE -eq 0
+}
+
+function Get-HostMedian {
+    param([Parameter(Mandatory)][double[]]$Values)
+    if ($Values.Count -eq 0) { throw 'host benchmark median requires at least one value' }
+    $ordered = @($Values | Sort-Object)
+    $middle = [int][math]::Floor($ordered.Count / 2)
+    if (($ordered.Count % 2) -eq 1) { return [double]$ordered[$middle] }
+    return ([double]$ordered[$middle - 1] + [double]$ordered[$middle]) / 2
+}
+
+function Test-HostRunnerPathAtOrBelow {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$Root)
+    $pathFull = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd('\')
+    return $pathFull.Equals($rootFull,[StringComparison]::OrdinalIgnoreCase) -or $pathFull.StartsWith($rootFull + '\',[StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-HostRunnerExactUtf8File {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][AllowEmptyString()][string]$ExpectedText)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    try {
+        $actual = [IO.File]::ReadAllBytes($Path)
+        $expected = [Text.UTF8Encoding]::new($false).GetBytes($ExpectedText)
+        if ($actual.Length -ne $expected.Length) { return $false }
+        for ($index=0; $index -lt $actual.Length; $index++) {
+            if ($actual[$index] -ne $expected[$index]) { return $false }
+        }
+        return $true
+    } catch { return $false }
+}
+
+function Get-HostRunnerWorkspaceChanges {
+    param([Parameter(Mandatory)][string]$Workspace,[Parameter(Mandatory)][string]$BaselineRevision)
+    $paths = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($arguments in @(
+        @('-c','core.quotepath=false','diff',$BaselineRevision,'--name-only','--'),
+        @('-c','core.quotepath=false','diff','--cached',$BaselineRevision,'--name-only','--'),
+        @('-c','core.quotepath=false','ls-files','--others','--exclude-standard','--'),
+        @('-c','core.quotepath=false','ls-files','--others','--ignored','--exclude-standard','--')
+    )) {
+        foreach ($path in @(Invoke-HostGit -Root $Workspace -Arguments $arguments)) {
+            $normalized = ([string]$path).Replace('\','/')
+            if ($normalized.Length -gt 0) { [void]$paths.Add($normalized) }
+        }
     }
-}
-
-function Get-TreeSnapshot {
-    param([Parameter(Mandatory)][string]$Root)
-    $snapshot = [ordered]@{}
-    foreach ($file in @(Get-ChildItem -LiteralPath $Root -Recurse -Force -File | Sort-Object FullName)) {
-        $relative = [IO.Path]::GetRelativePath($Root,$file.FullName).Replace('\','/')
-        if ($relative -ceq '.git' -or $relative.StartsWith('.git/',[StringComparison]::Ordinal)) { continue }
-        $snapshot[$relative] = Get-TaggedFileHash $file.FullName
+    foreach ($line in @(Invoke-HostGit -Root $Workspace -Arguments @('-c','core.quotepath=false','ls-files','-v','--'))) {
+        $entry = [string]$line
+        if ($entry -cnotmatch '^H ') {
+            $path = if ($entry.Length -gt 2) { $entry.Substring(2).Replace('\','/') } else { 'unknown' }
+            [void]$paths.Add('__git_index_flag__/' + $path)
+        }
     }
-    return $snapshot
+    return @($paths | Sort-Object)
 }
 
-function Get-ChangedPaths {
-    param([Collections.IDictionary]$Before,[Collections.IDictionary]$After)
-    $names = @($Before.Keys) + @($After.Keys) | Sort-Object -Unique
-    return @($names | Where-Object {
-        -not $Before.Contains($_) -or -not $After.Contains($_) -or [string]$Before[$_] -cne [string]$After[$_]
-    })
-}
-
-function Get-Median {
-    param([double[]]$Values)
-    $sorted = @($Values | Sort-Object)
-    if ($sorted.Count -eq 0) { return $null }
-    $middle = [math]::Floor($sorted.Count / 2)
-    if (($sorted.Count % 2) -eq 1) { return [double]$sorted[$middle] }
-    return ([double]$sorted[$middle-1] + [double]$sorted[$middle]) / 2
-}
-
-function Get-ReportDigest {
-    param([Collections.IDictionary]$Report)
-    $payload = [ordered]@{}
-    foreach ($key in $Report.Keys) {
-        if ([string]$key -cne 'report_digest') { $payload[$key] = $Report[$key] }
-    }
-    return Get-TextHash (($payload | ConvertTo-Json -Depth 30 -Compress))
-}
-
-function Invoke-HostTrial {
+function Test-HostRunnerTrialEvidence {
     param(
         [Parameter(Mandatory)][ValidateSet('bare','v1','v2')][string]$Protocol,
-        [Parameter(Mandatory)][int]$Trial,
-        [Parameter(Mandatory)][string]$ScratchRoot,
-        [Parameter(Mandatory)][string]$RepoRoot,
-        [Parameter(Mandatory)][string]$WrapperPath,
-        [Parameter(Mandatory)][string]$SchemaPath,
-        [Parameter(Mandatory)][string]$Model,
-        [Parameter(Mandatory)][string]$Reasoning,
-        [Parameter(Mandatory)][int]$MaxRoundTrips,
-        [Parameter(Mandatory)][int]$TimeoutSeconds
+        [Parameter(Mandatory)][string]$TrialRoot,
+        [Parameter(Mandatory)][object]$Record,
+        [Parameter(Mandatory)][string]$SourceRevision,
+        [Parameter(Mandatory)][string]$SourceCommitTree,
+        [switch]$RequireSourceBinding
     )
-
-    $trialRoot = Join-Path $ScratchRoot ("$Protocol-$Trial")
-    $workspace = Join-Path $trialRoot 'workspace'
-    $userRoot = Join-Path $trialRoot 'user'
-    $resultRoot = Join-Path $trialRoot 'results'
-    [void][IO.Directory]::CreateDirectory((Join-Path $workspace 'src'))
-    [void][IO.Directory]::CreateDirectory($userRoot)
-    [void][IO.Directory]::CreateDirectory($resultRoot)
-    [IO.File]::WriteAllText((Join-Path $workspace 'src\value.txt'),'alpha',[Text.UTF8Encoding]::new($false))
-    @(& git -C $workspace init --quiet 2>&1) | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "host benchmark git init failed for $Protocol" }
-    if ($Protocol -eq 'bare') {
-        [IO.File]::WriteAllText((Join-Path $workspace 'AGENTS.md'),"# Bare Host Benchmark`nExecute the authorized workspace task directly. This workspace intentionally has no harness lifecycle. Do not search outside this workspace for rules or skills.`n",[Text.UTF8Encoding]::new($false))
-    }
-
-    $savedEnvironment = [ordered]@{}
-    foreach ($name in @('USERPROFILE','HARNESS_PROTOCOL','DEV_HARNESS_WORKSPACE_ROOT','WORKSPACE_ROOT')) {
-        $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name,[EnvironmentVariableTarget]::Process)
-    }
     try {
-        $env:USERPROFILE = $userRoot
-        Remove-Item Env:DEV_HARNESS_WORKSPACE_ROOT,Env:WORKSPACE_ROOT -ErrorAction SilentlyContinue
-        if ($Protocol -ne 'bare') {
-            $installOutput = @(& pwsh -NoLogo -NoProfile -NonInteractive -File (Join-Path $RepoRoot 'install.ps1') -WorkspaceRoot $workspace -RepoRoot $RepoRoot -Preset core 2>&1 | ForEach-Object { [string]$_ })
-            if ($LASTEXITCODE -ne 0) { throw "host benchmark install failed for $Protocol" }
+        $workspace = Join-Path $TrialRoot 'workspace'
+        if (-not (Test-Path -LiteralPath $workspace -PathType Container)) { return $false }
+        $baseline = [string]$Record.workspace_baseline_revision
+        if ($baseline -cnotmatch '^[0-9a-f]{40,64}$') { return $false }
+        $head = (@(Invoke-HostGit -Root $workspace -Arguments @('rev-parse','--verify','HEAD')) -join '').Trim()
+        if ($head -cne $baseline -or -not (Test-HostRunnerExactUtf8File -Path (Join-Path $workspace 'src\value.txt') -ExpectedText 'beta')) { return $false }
+        $changed = @(Get-HostRunnerWorkspaceChanges -Workspace $workspace -BaselineRevision $baseline)
+        foreach ($relative in $changed) {
+            if ($relative.StartsWith('__git_index_flag__/',[StringComparison]::Ordinal)) { return $false }
+            $resolved = Resolve-HarnessContainedPath -WorkspaceRoot $workspace -Path $relative -Label 'runner benchmark changed path' -MustExist File
+            $item = Get-Item -LiteralPath $resolved -Force -ErrorAction Stop
+            if ($item.PSIsContainer -or -not [string]::IsNullOrWhiteSpace([string]$item.LinkType)) { return $false }
         }
-        $before = Get-TreeSnapshot $workspace
-        $duration = 0.0
-        $firstUsefulAction = $null
-        $turns = 0
-        $commandCalls = 0
-        $mcpCalls = 0
-        $webCalls = 0
-        $fileCalls = 0
-        $skillLoads = 0
-        $inputTokens = [long]0
-        $cachedInputTokens = [long]0
-        $outputTokens = [long]0
-        $tokenStatus = 'measured'
-        $freshSessions = 0
-        $modelRoundTrips = 0
-        $invocationUnavailable = $false
-        $diagnostic = $null
-        $lastReason = 'execution_failed'
-        $observationComplete = $false
+        if ($changed -cnotcontains 'src/value.txt') { return $false }
+        $artifactAllowlist = @('docs/tasks/host-benchmark-fixed-workflow/plan.md','docs/tasks/host-benchmark-fixed-workflow/test.md','docs/tasks/host-benchmark-fixed-workflow/skill-manifest.json')
+        $requiredArtifacts = @('docs/tasks/host-benchmark-fixed-workflow/plan.md','docs/tasks/host-benchmark-fixed-workflow/test.md')
+        $runtimeAllowlist = @('.assistant/运行时/当前任务.md','.assistant/运行时/恢复索引.md','.assistant/运行时/tasks/host-benchmark-fixed-workflow.md')
+        $artifactChanges = @($changed | Where-Object { $_.StartsWith('docs/tasks/',[StringComparison]::Ordinal) })
+        $runtimeChanges = @($changed | Where-Object { $_.StartsWith('.assistant/runtime/',[StringComparison]::Ordinal) -or $_.StartsWith('.assistant/运行时/',[StringComparison]::Ordinal) })
+        if ($Protocol -ceq 'v1') {
+            $allowed = @('src/value.txt') + $artifactAllowlist + $runtimeAllowlist
+            if (@($changed | Where-Object { $_ -cnotin $allowed }).Count -ne 0 -or @($requiredArtifacts | Where-Object { $_ -cnotin $artifactChanges }).Count -ne 0 -or $artifactChanges.Count -notin @(2,3) -or $runtimeChanges.Count -ne 3) { return $false }
+        } elseif ($changed.Count -ne 1 -or $artifactChanges.Count -ne 0 -or $runtimeChanges.Count -ne 0) { return $false }
+        if ([int]$Record.artifact_writes -ne $artifactChanges.Count -or [int]$Record.runtime_writes -ne $runtimeChanges.Count) { return $false }
+        if ($RequireSourceBinding) {
+            $sourceRoot = Join-Path $TrialRoot 'source'
+            if (-not (Test-Path -LiteralPath $sourceRoot -PathType Container)) { return $false }
+            $sourceState = Get-HostGitState -Root $sourceRoot -IncludeIgnored
+            if ([string]$sourceState.revision -cne $SourceRevision -or [string]$sourceState.commit_tree_oid -cne $SourceCommitTree -or [bool]$sourceState.dirty) { return $false }
+        }
+        return $true
+    } catch { return $false }
+}
 
-        for ($round = 1; $round -le $MaxRoundTrips; $round++) {
-            $freshSessions++
-            $responsePath = Join-Path $resultRoot ("response-$round.json")
-            $telemetryPath = Join-Path $resultRoot ("telemetry-$round.json")
-            $task = @'
-Work only inside this workspace. The user explicitly authorizes this complete, reversible, private one-file task and all normal harness stage transitions needed to finish it. Change only src/value.txt from exactly alpha to exactly beta. If a harness task for this request already exists, continue it instead of creating another task. Do not ask about scope, acceptance, rollback, or authorization: they are fully confirmed here. Run a real verification command that succeeds only when the file content is exactly beta. Do not change another user file; harness-required task/runtime records are allowed. Return only schema-valid JSON. Set task_completed and verification_passed true only after the exact file check has actually passed.
-'@
-            if ($Protocol -eq 'bare') { Remove-Item Env:HARNESS_PROTOCOL -ErrorAction SilentlyContinue } else { $env:HARNESS_PROTOCOL = $Protocol }
-            if ($null -eq $savedEnvironment['USERPROFILE']) { Remove-Item Env:USERPROFILE -ErrorAction SilentlyContinue } else { $env:USERPROFILE = [string]$savedEnvironment['USERPROFILE'] }
-            $wrapperOutput = @(& pwsh -NoLogo -NoProfile -NonInteractive -File $WrapperPath -Task $task -Workspace $workspace -Model $Model -Reasoning $Reasoning -Sandbox danger-full-access -ApprovalPolicy never -Ephemeral -AgentOutputOnly -Quiet -Isolated -OutputSchema $SchemaPath -Output $responsePath -TelemetryOutput $telemetryPath -TimeoutSeconds $TimeoutSeconds 2>&1 | ForEach-Object { [string]$_ })
-            $wrapperExit = $LASTEXITCODE
-            if ($wrapperExit -ne 0 -or -not (Test-Path -LiteralPath $responsePath -PathType Leaf) -or -not (Test-Path -LiteralPath $telemetryPath -PathType Leaf)) {
-                $invocationUnavailable = $true
-                $diagnostic = 'wrapper-exit-' + $wrapperExit
-                $lastReason = 'execution_failed'
-                break
-            }
-            try {
-                $rawObservation = [IO.File]::ReadAllText($responsePath,[Text.UTF8Encoding]::new($false,$true))
-                if (-not (Test-Json -Json $rawObservation -SchemaFile $SchemaPath -ErrorAction Stop -WarningAction SilentlyContinue)) { throw 'invalid observation schema' }
-                $observation = $rawObservation | ConvertFrom-Json -AsHashtable -Depth 20
-                $telemetry = [IO.File]::ReadAllText($telemetryPath,[Text.UTF8Encoding]::new($false,$true)) | ConvertFrom-Json -AsHashtable -Depth 20
-                if ([string]$telemetry.schema_version -cne 'codex-invocation-telemetry/v1' -or [string]$telemetry.model -cne $Model -or [string]$telemetry.reasoning -cne $Reasoning -or -not [bool]$telemetry.ephemeral -or [string]$telemetry.sandbox -cne 'danger-full-access' -or [string]$telemetry.approval_policy -cne 'never') { throw 'invalid telemetry identity' }
-            } catch {
-                $invocationUnavailable = $true
-                $diagnostic = 'invalid-wrapper-output'
-                $lastReason = 'execution_failed'
-                break
-            }
-            $duration += [double]$telemetry.duration_ms
-            if ($round -eq 1) { $firstUsefulAction = $telemetry.first_useful_action_ms }
-            $turns += [int]$telemetry.model_turns
-            $modelRoundTrips += [int]$telemetry.agent_messages
-            $commandCalls += [int]$telemetry.tool_calls.command
-            $mcpCalls += [int]$telemetry.tool_calls.mcp
-            $webCalls += [int]$telemetry.tool_calls.web_search
-            $fileCalls += [int]$telemetry.tool_calls.file_change
-            $skillLoads += [int]$telemetry.lifecycle_skill_loads
-            if ([string]$telemetry.tokens.status -ceq 'measured') {
-                $inputTokens += [long]$telemetry.tokens.input
-                if ($null -ne $telemetry.tokens.cached_input) { $cachedInputTokens += [long]$telemetry.tokens.cached_input }
-                $outputTokens += [long]$telemetry.tokens.output
-            } else { $tokenStatus = 'unavailable' }
-            $lastReason = [string]$observation.reason_code
-            $targetExact = (Test-Path -LiteralPath (Join-Path $workspace 'src\value.txt') -PathType Leaf) -and [IO.File]::ReadAllText((Join-Path $workspace 'src\value.txt')) -ceq 'beta'
-            if ($targetExact -and [bool]$observation.task_completed -and [bool]$observation.verification_executed -and [bool]$observation.verification_passed) {
-                $observationComplete = $true
-                break
-            }
+function Test-HostTrialContract {
+    param(
+        [Parameter(Mandatory)][ValidateSet('bare','v1','v2')][string]$Protocol,
+        [Parameter(Mandatory)][object]$Record,
+        [Parameter(Mandatory)][int]$ExpectedTrial,
+        [Parameter(Mandatory)][string]$SourceRevision,
+        [Parameter(Mandatory)][string]$SourceCommitTree,
+        [switch]$AllowUnavailableRequestMeasurement,
+        [switch]$AllowUnavailableRecord,
+        [switch]$RequireSourceBinding
+    )
+    try {
+        $recordStatus = [string]$Record.status
+        if ([int]$Record.trial -ne $ExpectedTrial -or -not [bool]$Record.runner_evidence_passed) { return $false }
+        if ($recordStatus -ceq 'measured') {
+            if (-not [bool]$Record.completion_passed) { return $false }
+        } elseif (-not $AllowUnavailableRecord -or $recordStatus -cne 'unavailable') { return $false }
+        if ([string]$Record.outcome -cne 'completed' -or [string]$Record.reason_code -cne 'completed' -or -not [bool]$Record.workflow_completed) { return $false }
+        $duration = [double]$Record.total_duration_ms
+        if (-not [double]::IsFinite($duration) -or $duration -le 0 -or [int]$Record.unexpected_writes -ne 0 -or -not [bool]$Record.raw_trace_deleted) { return $false }
+        if ([string]$Record.successful_request_sends.basis -cne 'codex-0.144.4-successful-websocket-send/v2') { return $false }
+        if (-not $AllowUnavailableRequestMeasurement -and ([string]$Record.successful_request_sends.status -cne 'measured' -or [double]$Record.successful_request_sends.value -le 0)) { return $false }
+        if ($AllowUnavailableRequestMeasurement -and [string]$Record.successful_request_sends.status -cnotin @('measured','unavailable')) { return $false }
+        if ([string]$Record.host_turns.status -cne 'measured' -or [string]$Record.host_turns.basis -cne 'codex-jsonl-turn.started') { return $false }
+        if ($Protocol -ceq 'v1') {
+            if ([string]$Record.workflow_contract -cne 'confirmed-plan-to-done' -or [int]$Record.fresh_sessions -ne 5 -or [int]$Record.host_turns.value -ne 5) { return $false }
+            if ((@($Record.v1_stage_journal) -join '>') -cne 'PLAN_REVIEW>IMPLEMENT>CODE_REVIEW>TEST>DONE' -or -not [bool]$Record.v1_validator_passed) { return $false }
+            if ((@($Record.v1_target_journal) -join '>') -cne 'alpha>alpha>beta>beta>beta') { return $false }
+            if ([int]$Record.artifact_writes -notin @(2,3) -or [int]$Record.runtime_writes -ne 3) { return $false }
+        } else {
+            if ([string]$Record.workflow_contract -cne 'new-task' -or [int]$Record.fresh_sessions -ne 1 -or [int]$Record.host_turns.value -ne 1) { return $false }
+            if ([int]$Record.artifact_writes -ne 0 -or [int]$Record.runtime_writes -ne 0) { return $false }
         }
+        if ($RequireSourceBinding) {
+            if ([string]$Record.source_binding.status -cne 'bound' -or [string]$Record.source_binding.revision -cne $SourceRevision -or [string]$Record.source_binding.commit_tree_oid -cne $SourceCommitTree -or [string]$Record.source_binding.verification -cne 'git-head-tree-clean/v1') { return $false }
+        }
+        return $true
+    } catch { return $false }
+}
 
-        $after = Get-TreeSnapshot $workspace
-        $changed = @(Get-ChangedPaths -Before $before -After $after)
-        $artifactWrites = @($changed | Where-Object { $_.StartsWith('docs/tasks/',[StringComparison]::Ordinal) }).Count
-        $runtimeWrites = @($changed | Where-Object { $_.StartsWith('.assistant/runtime/',[StringComparison]::Ordinal) -or $_.StartsWith('.assistant/运行时/',[StringComparison]::Ordinal) }).Count
-        $unexpectedWrites = @($changed | Where-Object {
-            $_ -cne 'src/value.txt' -and
-            -not $_.StartsWith('docs/tasks/',[StringComparison]::Ordinal) -and
-            -not $_.StartsWith('.assistant/runtime/',[StringComparison]::Ordinal) -and
-            -not $_.StartsWith('.assistant/运行时/',[StringComparison]::Ordinal)
-        }).Count
-        $targetPassed = (Test-Path -LiteralPath (Join-Path $workspace 'src\value.txt') -PathType Leaf) -and [IO.File]::ReadAllText((Join-Path $workspace 'src\value.txt')) -ceq 'beta'
-        $complete = $observationComplete -and $targetPassed -and $unexpectedWrites -eq 0
-        $status = if ($invocationUnavailable) { 'unavailable' } elseif ($complete) { 'measured' } else { 'fail' }
-        return [ordered]@{
-            trial = $Trial
-            status = $status
-            diagnostic = $diagnostic
-            completion_passed = $complete
-            reason_code = $lastReason
-            fresh_sessions = $freshSessions
-            model_roundtrips = $modelRoundTrips
-            model_roundtrip_basis = 'completed-agent-message-events'
-            total_duration_ms = [math]::Round($duration,2)
-            first_useful_action_ms = $firstUsefulAction
-            model_turns = $turns
-            tool_calls = [ordered]@{command=$commandCalls;mcp=$mcpCalls;web_search=$webCalls;file_change=$fileCalls;total=$commandCalls+$mcpCalls+$webCalls+$fileCalls}
-            loaded_skills = [ordered]@{status='measured';value=$skillLoads;reason='Aggregate lifecycle SKILL.md command loads from sanitized host telemetry.'}
-            loaded_files = [ordered]@{status='unavailable';value=$null;reason='Sanitized telemetry intentionally does not persist command paths or file names.'}
-            artifact_writes = $artifactWrites
-            runtime_writes = $runtimeWrites
-            unexpected_writes = $unexpectedWrites
-            tokens = [ordered]@{status=$tokenStatus;input=$(if($tokenStatus-ceq'measured'){$inputTokens}else{$null});cached_input=$(if($tokenStatus-ceq'measured'){$cachedInputTokens}else{$null});output=$(if($tokenStatus-ceq'measured'){$outputTokens}else{$null})}
+function Test-ReleaseHostTrialSet {
+    param(
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Records,
+        [Parameter(Mandatory)][int]$RequiredTrials,
+        [Parameter(Mandatory)][string]$SourceRevision,
+        [Parameter(Mandatory)][string]$SourceCommitTree
+    )
+    if ($RequiredTrials -ne 3) { return $false }
+    foreach ($protocol in @('bare','v1','v2')) {
+        if (-not $Records.Contains($protocol)) { return $false }
+        $trials = @($Records[$protocol].trials)
+        if ($trials.Count -ne $RequiredTrials) { return $false }
+        if ((@($trials | ForEach-Object { [int]$_.trial } | Sort-Object) -join ',') -cne '1,2,3') { return $false }
+        foreach ($record in $trials) {
+            if (-not (Test-HostTrialContract -Protocol $protocol -Record $record -ExpectedTrial ([int]$record.runner_expected_trial) -SourceRevision $SourceRevision -SourceCommitTree $SourceCommitTree -RequireSourceBinding)) { return $false }
         }
-    } finally {
-        foreach ($entry in $savedEnvironment.GetEnumerator()) {
-            [Environment]::SetEnvironmentVariable([string]$entry.Key,$entry.Value,[EnvironmentVariableTarget]::Process)
-        }
+    }
+    return $true
+}
+
+function Get-SanitizedHostTrialDiagnostic {
+    param([Parameter(Mandatory)][Management.Automation.ErrorRecord]$ErrorRecord)
+    $message = [string]$ErrorRecord.Exception.Message
+    if ($message -match '^host-benchmark-auth-home-') { return 'isolated-auth-home-unavailable' }
+    if ($message -match '^host-benchmark-source-') { return 'source-binding-unavailable' }
+    return 'trial-exception'
+}
+
+function New-HostUnavailableTrial {
+    param([int]$Trial,[string]$Diagnostic,[string]$SourceRevision,[string]$SourceCommitTree,[bool]$RawTraceDeleted = $false)
+    return [ordered]@{
+        trial=$Trial;runner_expected_trial=$Trial;runner_evidence_passed=$false;workspace_baseline_revision=$null;status='unavailable';diagnostic=$Diagnostic;completion_passed=$false;outcome='failed';reason_code='execution_failed'
+        source_binding=[ordered]@{status='unavailable';revision=$SourceRevision;commit_tree_oid=$SourceCommitTree;verification='unavailable';reason=$Diagnostic}
+        workflow_contract='unavailable';workflow_completed=$false;v1_stage_journal=@();v1_target_journal=@();v1_validator_passed=$false;fresh_sessions=0
+        host_turns=[ordered]@{status='unavailable';value=$null;basis='codex-jsonl-turn.started';reason=$Diagnostic}
+        successful_request_sends=[ordered]@{status='unavailable';value=$null;basis='codex-0.144.4-successful-websocket-send/v2';reason=$Diagnostic}
+        completed_agent_messages=0;total_duration_ms=0;sum_codex_process_duration_ms=0;first_useful_action_ms=$null
+        tool_calls=[ordered]@{command=0;mcp=0;web_search=0;file_change=0;total=0}
+        loaded_skills=[ordered]@{status='unavailable';value=$null;reason=$Diagnostic};skill_file_command_matches=[ordered]@{status='unavailable';value=$null;reason=$Diagnostic};loaded_files=[ordered]@{status='unavailable';value=$null;reason=$Diagnostic}
+        artifact_writes=0;runtime_writes=0;unexpected_writes=0;raw_trace_deleted=$RawTraceDeleted;post_trial_diagnostics=@()
+        tokens=[ordered]@{status='unavailable';input=$null;cached_input=$null;output=$null}
     }
 }
+
+. $otelContractPath
+. $trialPath
 
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Split-Path -Parent $PSScriptRoot }
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 if ($Model -cne 'gpt-5.6-sol') { throw 'Release host benchmark requires gpt-5.6-sol.' }
+$expectedCodexVersion = '0.144.4'
 $wrapperPath = Join-Path $RepoRoot 'skills\codex\scripts\invoke_codex.ps1'
-$schemaPath = Join-Path $RepoRoot 'schemas\host-benchmark-observation.schema.json'
+$schemaPath = Join-Path $RepoRoot 'schemas\host-benchmark\observation.schema.json'
 $installPath = Join-Path $RepoRoot 'install.ps1'
-foreach ($path in @($wrapperPath,$schemaPath,$installPath)) {
+$collectorPath = Join-Path $RepoRoot 'scripts\receive-otlp-http.ps1'
+foreach ($path in @($wrapperPath,$schemaPath,$installPath,$collectorPath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required host benchmark input is missing: $path" }
 }
 $schemaText = [IO.File]::ReadAllText($schemaPath,[Text.UTF8Encoding]::new($false,$true))
@@ -244,73 +284,153 @@ if ($ValidateOnly) { Write-Output 'STATUS: PASS (host benchmark definition only;
 if ([string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath = Join-Path ([IO.Path]::GetTempPath()) ('thin-v2-host-benchmark-' + [guid]::NewGuid().ToString('N') + '.json') }
 elseif (-not [IO.Path]::IsPathRooted($OutputPath)) { $OutputPath = Join-Path (Get-Location).Path $OutputPath }
 $OutputPath = [IO.Path]::GetFullPath($OutputPath)
-$scratchBase = Join-Path $RepoRoot '.assistant\运行时\release-qualification'
-[void][IO.Directory]::CreateDirectory($scratchBase)
-$scratchRoot = Join-Path $scratchBase ('thin-v2-host-benchmark-' + [guid]::NewGuid().ToString('N'))
-[void][IO.Directory]::CreateDirectory($scratchRoot)
+if (-not (Test-HostReportPath -Root $RepoRoot -Path $OutputPath)) { throw 'Host benchmark output must be outside the source tree or ignored by Git.' }
+if ([string]::IsNullOrWhiteSpace($CodexHome)) { $CodexHome = [Environment]::GetEnvironmentVariable('HOST_BENCHMARK_CODEX_HOME',[EnvironmentVariableTarget]::Process) }
+if (-not [string]::IsNullOrWhiteSpace($CodexHome)) {
+    if ((Test-HostRunnerPathAtOrBelow -Path $OutputPath -Root $CodexHome) -or (Test-HostRunnerPathAtOrBelow -Path $CodexHome -Root $OutputPath)) { throw 'Host benchmark output must not overlap the dedicated Codex home.' }
+    if (Test-Path -LiteralPath $CodexHome -PathType Container) {
+        $physicalOutput = Get-HostPhysicalPathInfo -Path $OutputPath -AllowMissing -RejectLinks
+        $physicalCodexHome = Get-HostPhysicalPathInfo -Path $CodexHome -RejectLinks
+        if ((Test-HostRunnerPathAtOrBelow -Path ([string]$physicalOutput.physical_path) -Root ([string]$physicalCodexHome.physical_path)) -or (Test-HostRunnerPathAtOrBelow -Path ([string]$physicalCodexHome.physical_path) -Root ([string]$physicalOutput.physical_path))) { throw 'Host benchmark output must not overlap the dedicated Codex home.' }
+    }
+}
+
+$sourceStart = Get-HostGitState -Root $RepoRoot
+$sourceInputPaths = @($PSCommandPath,$wrapperPath,$schemaPath,$collectorPath,$atomicWritePath,$pathModulePath,$otelContractPath,$trialPath)
+$sourceInputHeadBoundStart = @($sourceInputPaths | Where-Object { -not (Test-HostGitFileMatchesRevision -Root $RepoRoot -Path $_ -Revision ([string]$sourceStart.revision)) }).Count -eq 0
+$sourceInputs = [ordered]@{
+    runner_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path $PSCommandPath
+    wrapper_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path $wrapperPath
+    observation_schema_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path $schemaPath
+    otlp_collector_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path $collectorPath
+    atomic_write_module_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path $atomicWritePath
+    path_module_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path $pathModulePath
+    otel_contract_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path $otelContractPath
+    trial_helper_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path $trialPath
+}
+$sourceMode = if ([bool]$sourceStart.dirty -or -not $sourceInputHeadBoundStart) { 'live-dirty-diagnostic' } else { 'clean-commit-clone' }
+$scratchBase = New-HarnessContainedDirectory -WorkspaceRoot $RepoRoot -Path '.assistant\运行时\release-qualification' -Label 'host benchmark scratch base'
+$scratchRoot = New-HarnessContainedDirectory -WorkspaceRoot $scratchBase -Path ('thin-v2-host-benchmark-' + [guid]::NewGuid().ToString('N')) -Label 'host benchmark scratch root'
 $records = [ordered]@{}
+$trialRecordsByProtocol = [ordered]@{bare=[Collections.Generic.List[object]]::new();v1=[Collections.Generic.List[object]]::new();v2=[Collections.Generic.List[object]]::new()}
+$executionOrder = [Collections.Generic.List[object]]::new()
+$protocolNames = @('bare','v1','v2')
 $timer = [Diagnostics.Stopwatch]::StartNew()
 try {
-    foreach ($protocol in @('bare','v1','v2')) {
-        $trialRecords = [Collections.Generic.List[object]]::new()
-        for ($trial=1; $trial -le $Trials; $trial++) {
+    $sequence = 0
+    for ($trial=1; $trial -le $Trials; $trial++) {
+        $rotation = ($trial - 1) % $protocolNames.Count
+        for ($offset=0; $offset -lt $protocolNames.Count; $offset++) {
+            $protocol = $protocolNames[($rotation + $offset) % $protocolNames.Count]
+            $sequence++
+            $executionOrder.Add([ordered]@{sequence=$sequence;protocol=$protocol;trial=$trial})
             Write-Output ("[HOST] protocol={0} trial={1}/{2}" -f $protocol,$trial,$Trials)
-            $trialRecords.Add((Invoke-HostTrial -Protocol $protocol -Trial $trial -ScratchRoot $scratchRoot -RepoRoot $RepoRoot -WrapperPath $wrapperPath -SchemaPath $schemaPath -Model $Model -Reasoning $Reasoning -MaxRoundTrips $MaxRoundTrips -TimeoutSeconds $TimeoutSeconds))
+            try {
+                $record = Invoke-HostTrial -Protocol $protocol -Trial $trial -ScratchRoot $scratchRoot -RepoRoot $RepoRoot -WrapperPath $wrapperPath -SchemaPath $schemaPath -CollectorPath $collectorPath -CodexHome $CodexHome -Model $Model -Reasoning $Reasoning -MaxRoundTrips $MaxRoundTrips -TimeoutSeconds $TimeoutSeconds -ExpectedCodexVersion $expectedCodexVersion -SourceBindingRequired (-not [bool]$sourceStart.dirty -and $sourceInputHeadBoundStart) -SourceRevision ([string]$sourceStart.revision) -SourceCommitTree ([string]$sourceStart.commit_tree_oid)
+            } catch {
+                $diagnostic = Get-SanitizedHostTrialDiagnostic -ErrorRecord $_
+                $preTraceFailure = $diagnostic -cin @('isolated-auth-home-unavailable','source-binding-unavailable')
+                $record = New-HostUnavailableTrial -Trial $trial -Diagnostic $diagnostic -SourceRevision ([string]$sourceStart.revision) -SourceCommitTree ([string]$sourceStart.commit_tree_oid) -RawTraceDeleted $preTraceFailure
+            }
+            $trialRoot = Join-Path $scratchRoot ("$protocol-$trial")
+            $runnerEvidencePassed = Test-HostRunnerTrialEvidence -Protocol $protocol -TrialRoot $trialRoot -Record $record -SourceRevision ([string]$sourceStart.revision) -SourceCommitTree ([string]$sourceStart.commit_tree_oid) -RequireSourceBinding:(-not [bool]$sourceStart.dirty)
+            if ($record -is [Collections.IDictionary]) {
+                $record['runner_expected_trial'] = $trial
+                $record['runner_evidence_passed'] = $runnerEvidencePassed
+            } else {
+                $record | Add-Member -NotePropertyName runner_expected_trial -NotePropertyValue $trial -Force
+                $record | Add-Member -NotePropertyName runner_evidence_passed -NotePropertyValue $runnerEvidencePassed -Force
+            }
+            $trialRecordsByProtocol[$protocol].Add($record)
         }
-        $all = @($trialRecords)
-        $protocolStatus = if (@($all | Where-Object { [string]$_.status -ceq 'unavailable' }).Count -gt 0) { 'unavailable' } elseif (@($all | Where-Object { [string]$_.status -cne 'measured' }).Count -gt 0) { 'fail' } else { 'measured' }
+    }
+    $pendingCleanupFailures = @($script:HostPendingOtlpCollectors | Where-Object { -not (Complete-HostPendingOtlpCleanup -Pending $_) }).Count
+    if ($pendingCleanupFailures -gt 0) { throw 'OTLP collector or raw trace cleanup remained pending before protocol aggregation.' }
+    foreach ($protocol in $protocolNames) {
+        $all = @($trialRecordsByProtocol[$protocol])
+        $unavailableCount = @($all | Where-Object { [string]$_.status -ceq 'unavailable' -or [string]$_.successful_request_sends.status -ceq 'unavailable' }).Count
+        $invalidCount = @($all | Where-Object {
+            if ([string]$_.status -ceq 'fail') { return $true }
+            if ([string]$_.status -ceq 'unavailable') {
+                if ([string]$_.outcome -cne 'completed' -or [string]$_.reason_code -cne 'completed') { return $false }
+                return -not (Test-HostTrialContract -Protocol $protocol -Record $_ -ExpectedTrial ([int]$_.runner_expected_trial) -SourceRevision ([string]$sourceStart.revision) -SourceCommitTree ([string]$sourceStart.commit_tree_oid) -AllowUnavailableRequestMeasurement -AllowUnavailableRecord -RequireSourceBinding:(-not [bool]$sourceStart.dirty -and $sourceInputHeadBoundStart))
+            }
+            if (-not (Test-HostTrialContract -Protocol $protocol -Record $_ -ExpectedTrial ([int]$_.runner_expected_trial) -SourceRevision ([string]$sourceStart.revision) -SourceCommitTree ([string]$sourceStart.commit_tree_oid) -AllowUnavailableRequestMeasurement -RequireSourceBinding:(-not [bool]$sourceStart.dirty -and $sourceInputHeadBoundStart))) { return $true }
+            if ([string]$_.successful_request_sends.status -ceq 'unavailable') { return $false }
+            return -not (Test-HostTrialContract -Protocol $protocol -Record $_ -ExpectedTrial ([int]$_.runner_expected_trial) -SourceRevision ([string]$sourceStart.revision) -SourceCommitTree ([string]$sourceStart.commit_tree_oid) -RequireSourceBinding:(-not [bool]$sourceStart.dirty -and $sourceInputHeadBoundStart))
+        }).Count
+        $protocolStatus = if ($invalidCount -gt 0 -or $all.Count -ne $Trials) { 'fail' } elseif ($unavailableCount -gt 0) { 'unavailable' } else { 'measured' }
+        $sendStatus = if (@($all | Where-Object { [string]$_.successful_request_sends.status -cne 'measured' }).Count -eq 0 -and $all.Count -eq $Trials) { 'measured' } else { 'unavailable' }
+        $sendMedian = if ($sendStatus -ceq 'measured') { [math]::Round((Get-HostMedian -Values @($all | ForEach-Object { [double]$_.successful_request_sends.value })),2) } else { $null }
         $records[$protocol] = [ordered]@{
-            status = $protocolStatus
-            trials = $all
-            medians = [ordered]@{
-                total_duration_ms = $(if($protocolStatus-ceq'measured'){[math]::Round((Get-Median @($all.total_duration_ms)),2)}else{$null})
-                first_useful_action_ms = $(if($protocolStatus-ceq'measured' -and @($all.first_useful_action_ms | Where-Object {$null-ne$_}).Count-eq$Trials){[math]::Round((Get-Median @($all.first_useful_action_ms)),2)}else{$null})
-                model_roundtrips = $(if($protocolStatus-ceq'measured'){[math]::Round((Get-Median @($all.model_roundtrips)),2)}else{$null})
-                fresh_sessions = $(if($protocolStatus-ceq'measured'){[math]::Round((Get-Median @($all.fresh_sessions)),2)}else{$null})
-                model_turns = $(if($protocolStatus-ceq'measured'){[math]::Round((Get-Median @($all.model_turns)),2)}else{$null})
-                tool_calls = $(if($protocolStatus-ceq'measured'){[math]::Round((Get-Median @($all.tool_calls.total)),2)}else{$null})
+            status=$protocolStatus
+            runner_contract_failures=$invalidCount
+            trials=$all
+            successful_request_sends=[ordered]@{status=$sendStatus;median=$sendMedian;basis='codex-0.144.4-successful-websocket-send/v2';reason=$(if($sendStatus-ceq'measured'){'Median count of version-bound successful non-warmup Responses WebSocket sends.'}else{'One or more trials lacked a valid runner-rechecked successful-send contract.'})}
+            medians=[ordered]@{
+                total_duration_ms=$(if($protocolStatus-ceq'measured'){[math]::Round((Get-HostMedian -Values @($all | ForEach-Object {[double]$_.total_duration_ms})),2)}else{$null})
+                sum_codex_process_duration_ms=$(if($protocolStatus-ceq'measured'){[math]::Round((Get-HostMedian -Values @($all | ForEach-Object {[double]$_.sum_codex_process_duration_ms})),2)}else{$null})
+                first_useful_action_ms=$(if($protocolStatus-ceq'measured' -and @($all.first_useful_action_ms | Where-Object {$null-ne$_}).Count-eq$Trials){[math]::Round((Get-HostMedian -Values @($all | ForEach-Object {[double]$_.first_useful_action_ms})),2)}else{$null})
+                fresh_sessions=$(if($protocolStatus-ceq'measured'){[math]::Round((Get-HostMedian -Values @($all | ForEach-Object {[double]$_.fresh_sessions})),2)}else{$null})
+                host_turns=$(if($protocolStatus-ceq'measured'){[math]::Round((Get-HostMedian -Values @($all | ForEach-Object { [double]$_.host_turns.value })),2)}else{$null})
+                successful_request_sends=$sendMedian
+                tool_calls=$(if($protocolStatus-ceq'measured'){[math]::Round((Get-HostMedian -Values @($all | ForEach-Object {[double]$_.tool_calls.total})),2)}else{$null})
+                skill_file_command_matches=$(if($protocolStatus-ceq'measured'){[math]::Round((Get-HostMedian -Values @($all | ForEach-Object { [double]$_.skill_file_command_matches.value })),2)}else{$null})
             }
         }
     }
 } finally {
     $timer.Stop()
+    $pendingCleanupFailures = @($script:HostPendingOtlpCollectors | Where-Object { -not (Complete-HostPendingOtlpCleanup -Pending $_) }).Count
+    if ($pendingCleanupFailures -gt 0) { throw 'OTLP collector or raw trace cleanup remained pending after the final bounded retry.' }
     if (-not $KeepScratch -and (Test-Path -LiteralPath $scratchRoot -PathType Container)) {
-        $resolvedScratch = [IO.Path]::GetFullPath($scratchRoot)
-        $safePrefix = [IO.Path]::GetFullPath($scratchBase).TrimEnd('\') + '\'
-        if (-not $resolvedScratch.StartsWith($safePrefix,[StringComparison]::OrdinalIgnoreCase) -or -not (Split-Path -Leaf $resolvedScratch).StartsWith('thin-v2-host-benchmark-',[StringComparison]::Ordinal)) { throw 'Refusing to remove unsafe host benchmark scratch path.' }
+        $resolvedScratch = Resolve-HarnessContainedPath -WorkspaceRoot $scratchBase -Path $scratchRoot -Label 'host benchmark scratch cleanup' -MustExist Directory
+        if (-not (Split-Path -Leaf $resolvedScratch).StartsWith('thin-v2-host-benchmark-',[StringComparison]::Ordinal)) { throw 'Refusing to remove unsafe host benchmark scratch path.' }
         Remove-Item -LiteralPath $resolvedScratch -Recurse -Force
     }
 }
 
+$rawTraceCleanupConfirmed = @($records.Values | ForEach-Object { @($_.trials) } | Where-Object { -not [bool]$_.raw_trace_deleted }).Count -eq 0
+$rawTracePersisted = if ($rawTraceCleanupConfirmed) { $false } else { $null }
 $direct = [ordered]@{status='unavailable';ratio=$null;threshold=1.25;reason='Measured complete bare and v2 host trials are required.'}
-$roundtrip = [ordered]@{status='unavailable';reduction=$null;threshold=0.60;reason='Measured complete v1 and v2 host trials are required.'}
+$requestSend = [ordered]@{status='unavailable';reduction=$null;threshold=0.60;reason='Measured successful request sends are required for complete v1 and v2 host trials.'}
 if ([string]$records.bare.status -ceq 'measured' -and [string]$records.v2.status -ceq 'measured' -and [double]$records.bare.medians.total_duration_ms -gt 0) {
     $ratio = [math]::Round(([double]$records.v2.medians.total_duration_ms / [double]$records.bare.medians.total_duration_ms),4)
     $direct = [ordered]@{status=$(if($ratio-le1.25){'pass'}else{'fail'});ratio=$ratio;threshold=1.25;reason='Ratio of measured median complete-task v2 and bare host duration.'}
 }
-if ([string]$records.v1.status -ceq 'measured' -and [string]$records.v2.status -ceq 'measured' -and [double]$records.v1.medians.model_roundtrips -gt 0) {
-    $reduction = [math]::Round((([double]$records.v1.medians.model_roundtrips-[double]$records.v2.medians.model_roundtrips)/[double]$records.v1.medians.model_roundtrips),4)
-    $roundtrip = [ordered]@{status=$(if($reduction-ge0.60){'pass'}else{'fail'});reduction=$reduction;threshold=0.60;reason='Reduction in measured median fresh-session roundtrips from v1 to v2.'}
+if ([string]$records.v1.status -ceq 'measured' -and [string]$records.v2.status -ceq 'measured' -and [string]$records.v1.successful_request_sends.status -ceq 'measured' -and [string]$records.v2.successful_request_sends.status -ceq 'measured' -and [double]$records.v1.successful_request_sends.median -gt 0) {
+    $reduction = [math]::Round((([double]$records.v1.successful_request_sends.median-[double]$records.v2.successful_request_sends.median)/[double]$records.v1.successful_request_sends.median),4)
+    $requestSend = [ordered]@{status=$(if($reduction-ge0.60){'pass'}else{'fail'});reduction=$reduction;threshold=0.60;reason='Reduction in median version-bound successful non-warmup Responses WebSocket sends from the stage-bounded v1 workflow to v2 Direct.'}
 }
-$revision = (& git -C $RepoRoot rev-parse HEAD).Trim()
-$dirty = -not [string]::IsNullOrWhiteSpace((@(& git -C $RepoRoot status --porcelain=v1 --untracked-files=no) -join "`n"))
-$unavailable = @($records.Values | Where-Object { [string]$_.status -ceq 'unavailable' }).Count -gt 0
-$eligible = -not $dirty -and [string]$direct.status -ceq 'pass' -and [string]$roundtrip.status -ceq 'pass'
+$sourceEnd = Get-HostGitState -Root $RepoRoot
+$sourceInputHeadBoundEnd = @($sourceInputPaths | Where-Object { -not (Test-HostGitFileMatchesRevision -Root $RepoRoot -Path $_ -Revision ([string]$sourceEnd.revision)) }).Count -eq 0
+$sourceDirty = [bool]$sourceStart.dirty -or [bool]$sourceEnd.dirty -or -not $sourceInputHeadBoundStart -or -not $sourceInputHeadBoundEnd
+$sourceStable = -not $sourceDirty -and [string]$sourceStart.revision -ceq [string]$sourceEnd.revision -and [string]$sourceStart.commit_tree_oid -ceq [string]$sourceEnd.commit_tree_oid -and [string]$sourceStart.state_digest -ceq [string]$sourceEnd.state_digest
+$protocolUnavailable = @($records.Values | Where-Object { [string]$_.status -ceq 'unavailable' }).Count -gt 0
+$protocolFailed = @($records.Values | Where-Object { [string]$_.status -ceq 'fail' }).Count -gt 0
+$gateUnavailable = [string]$direct.status -ceq 'unavailable' -or [string]$requestSend.status -ceq 'unavailable'
+$releaseTrialSetPassed = -not $sourceDirty -and (Test-ReleaseHostTrialSet -Records $records -RequiredTrials 3 -SourceRevision ([string]$sourceStart.revision) -SourceCommitTree ([string]$sourceStart.commit_tree_oid))
+$releaseTrialSet = [ordered]@{status=$(if($releaseTrialSetPassed){'pass'}else{'fail'});required_trials_per_protocol=3;reason=$(if($releaseTrialSetPassed){'Each protocol has exactly three runner-rechecked, source-bound trials numbered 1 through 3.'}else{'Release eligibility requires clean source and exactly three runner-rechecked, source-bound trials numbered 1 through 3 for every protocol.'})}
+$eligible = $sourceStable -and -not $sourceDirty -and $releaseTrialSetPassed -and -not $protocolFailed -and [string]$direct.status -ceq 'pass' -and [string]$requestSend.status -ceq 'pass'
+$releaseConfigurationFailure = $Trials -ne 3
+$performanceFailure = $sourceStable -and -not $sourceDirty -and $releaseTrialSetPassed -and ([string]$direct.status -ceq 'fail' -or [string]$requestSend.status -ceq 'fail')
+$knownContractFailure = $protocolFailed -or $releaseConfigurationFailure -or $performanceFailure
+$reportStatus = if ($knownContractFailure) { 'fail' } elseif ($protocolUnavailable -or -not $sourceStable -or $gateUnavailable) { 'unavailable' } elseif ($sourceDirty -or -not $releaseTrialSetPassed) { 'fail' } elseif ($eligible) { 'pass' } else { 'fail' }
 $report = [ordered]@{
-    schema_version = 'harness-host-benchmark-report/v1'
-    generated_at_utc = [DateTimeOffset]::UtcNow.ToString('o')
-    source_revision = $revision
-    source_dirty = $dirty
-    source = [ordered]@{runner_digest=Get-TaggedFileHash $PSCommandPath;wrapper_digest=Get-TaggedFileHash $wrapperPath;observation_schema_digest=Get-TaggedFileHash $schemaPath}
-    execution = [ordered]@{model=$Model;reasoning=$Reasoning;trials_per_protocol=$Trials;max_fresh_sessions=$MaxRoundTrips;fresh_workspace_per_trial=$true;fresh_ephemeral_session_per_invocation=$true;model_roundtrip_basis='completed-agent-message-events';model_roundtrip_limit='Codex JSONL exposes completed agent messages but not underlying API request count';sandbox='danger-full-access';approval_policy='never';workspace_boundary='dedicated-ignored-nested-git-root';prompt_persisted=$false;raw_command_persisted=$false;thread_id_persisted=$false;install_duration_included=$false;duration_ms=[math]::Round($timer.Elapsed.TotalMilliseconds,2)}
-    protocols = $records
-    performance = [ordered]@{direct_latency=$direct;model_roundtrip_reduction=$roundtrip;eligible=$eligible}
-    status = $(if($unavailable){'unavailable'}elseif($eligible){'pass'}else{'fail'})
-    report_digest = $null
+    schema_version='harness-host-benchmark-report/v1';generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o')
+    source_revision=$sourceStart.revision;source_dirty=$sourceDirty;source_state_stable=$sourceStable
+    source=[ordered]@{runner_digest=$sourceInputs.runner_digest;wrapper_digest=$sourceInputs.wrapper_digest;observation_schema_digest=$sourceInputs.observation_schema_digest;otlp_collector_digest=$sourceInputs.otlp_collector_digest;atomic_write_module_digest=$sourceInputs.atomic_write_module_digest;path_module_digest=$sourceInputs.path_module_digest;otel_contract_digest=$sourceInputs.otel_contract_digest;trial_helper_digest=$sourceInputs.trial_helper_digest;input_head_binding=[ordered]@{start=$sourceInputHeadBoundStart;end=$sourceInputHeadBoundEnd;basis='git-hash-object-equals-revision-blob/v1'};execution_mode=$sourceMode;commit_tree_oid=$sourceStart.commit_tree_oid;object_format=$sourceStart.object_format;start=$sourceStart;end=$sourceEnd}
+    execution=[ordered]@{model=$Model;reasoning=$Reasoning;trials_per_protocol=$Trials;release_trials_required=3;max_fresh_sessions=$MaxRoundTrips;fresh_workspace_per_trial=$true;fresh_ephemeral_session_per_invocation=$true;v1_comparator='confirmed-plan-to-done-one-stage-per-host-turn';bare_and_v2_start='new-task';semantic_task='change exact private file bytes and verify';host_turn_basis='codex-jsonl-turn.started';successful_request_send_measurement='codex-0.144.4-successful-websocket-send/v2';expected_codex_service_version=$expectedCodexVersion;trial_order_strategy='round-interleaved-rotating-start';actual_trial_order=@($executionOrder);cache_state='shared-dedicated-auth-home-and-host-cache-not-cleared-between-trials';codex_home='dedicated-config-isolated-auth-home-path-not-persisted';sandbox='danger-full-access';approval_policy='never';workspace_boundary='dedicated-ignored-nested-git-root';prompt_persisted=$false;raw_command_persisted=$false;thread_id_persisted=$false;raw_trace_persisted=$rawTracePersisted;raw_trace_cleanup_confirmed=$rawTraceCleanupConfirmed;scratch_persisted=[bool]$KeepScratch;install_duration_included=$false;duration_ms=[math]::Round($timer.Elapsed.TotalMilliseconds,2)}
+    protocols=$records;performance=[ordered]@{release_trial_set=$releaseTrialSet;direct_latency=$direct;successful_request_send_reduction=$requestSend;eligible=$eligible};status=$reportStatus;report_digest=$null
 }
-$report.report_digest = Get-ReportDigest $report
-Write-AtomicJson -Path $OutputPath -Value $report
-Write-Output "HOST_BENCHMARK_STATUS=$($report.status)`nHOST_BENCHMARK_DIRECT_RATIO=$($direct.ratio)`nHOST_BENCHMARK_ROUNDTRIP_REDUCTION=$($roundtrip.reduction)`nHOST_BENCHMARK_REPORT=$OutputPath"
-if ([string]$report.status -ceq 'unavailable') { Write-Output '[UNAVAILABLE] one or more real host trials were unavailable'; exit 2 }
+$report.report_digest = Get-HarnessSha256Text -Content ($report | ConvertTo-Json -Depth 100 -Compress)
+$outputParent = [IO.Path]::GetDirectoryName($OutputPath)
+[void][IO.Directory]::CreateDirectory($outputParent)
+[void](Write-HarnessAtomicText -WorkspaceRoot $outputParent -Path $OutputPath -Content (($report | ConvertTo-Json -Depth 100) + "`n"))
+Write-Output "HOST_BENCHMARK_STATUS=$($report.status)"
+Write-Output "HOST_BENCHMARK_DIRECT_RATIO=$($direct.ratio)"
+Write-Output "HOST_BENCHMARK_REQUEST_SEND_REDUCTION=$($requestSend.reduction)"
+Write-Output "HOST_BENCHMARK_REPORT=$OutputPath"
+if ([string]$report.status -ceq 'unavailable') { Write-Output '[UNAVAILABLE] one or more real host measurements were unavailable'; exit 2 }
 if (-not $eligible) { exit 1 }
 exit 0

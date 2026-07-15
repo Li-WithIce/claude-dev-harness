@@ -1,9 +1,10 @@
 ---
 name: entry-router
-description: Canonical entry router for choosing quick, workflow, ask, resume, switch, or inbox-first paths and loading only the necessary shared memory and local skills.
+description: V1 compatibility entry router for choosing quick, workflow, ask, resume, switch, or inbox-first after protocol selection. Never load for selected v2 Direct.
 ---
 
 <EXTREMELY-IMPORTANT>
+This skill applies only after protocol selection resolves to v1. Selected v2 Direct must not load it.
 Entry-router is the default first hop for project-scoped development and read-only engineering requests. Do not invoke other workflow skills before routing. After routing, load only the minimum skill/context set required by the selected mode.
 </EXTREMELY-IMPORTANT>
 

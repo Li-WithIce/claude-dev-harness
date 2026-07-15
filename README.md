@@ -358,7 +358,7 @@ pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite core
 - `core`：跑 `git diff --check`、v1/v2 核心协议、Requirement/route/TaskState/Evidence/Approval/兼容迁移、行为 eval、CI 路由、artifact/runtime/install 合同与基础 workflow/skill/tool checks；Memory、Team、md-html、Codex adapter 和 Provider 重型验证由 changed optional 或 `all` 执行。
 - `all`：跑 `git diff --check` 加除 `verify-installation.ps1` 外所有 `tests/verify-*.ps1`；需要安装验证时额外传 `-WorkspaceRoot`。
 
-GitHub Actions 使用三层 Windows 验证：pull request 的 **PR core** 运行 `Suite core` 与 core 安装回滚；**changed optional** 仅在 Memory、Team、md-html、Codex adapter 或 Provider 路径变化时运行对应重型验证，路由/安装面变化时 fail closed 全跑；`main`、`codex/harness-distribution` push、nightly 与手工触发的 **release full** 由 rollout generator 绑定单体 `Suite all`、core/full 安装回滚、行为 eval 和 bare/v1/v2 性能报告。PR job 上限为 30 分钟，release job 上限为 45 分钟，单个 verify 脚本上限为 360 秒。CI 不安装、注册或连接外部 provider，也不要求 Node.js。
+GitHub Actions 使用三层 Windows 验证：pull request 的 **PR core** 运行 `Suite core` 与 core 安装回滚；**changed optional** 仅在 Memory、Team、md-html、Codex adapter 或 Provider 路径变化时运行对应重型验证，路由/安装面变化时 fail closed 全跑；`main`、`codex/harness-distribution` push、nightly 与手工触发的 **release full** 由 rollout generator 绑定单体 `Suite all`、core/full 安装回滚、行为 eval 和 bare/v1/v2 性能报告。PR job 上限为 30 分钟，release job 上限为 45 分钟；常规 verify 脚本上限为 360 秒，磁盘密集的 host benchmark qualification 单项上限为 900 秒。CI 不安装、注册或连接外部 provider，也不要求 Node.js。
 
 `HARNESS_PROTOCOL=auto` 对既有 task 始终按 v2 `task.json` / 合法 v1 `plan.md` artifact 识别；仅当无既有 task 且 workspace 内的 revision-bound rollout report 五项 gate 全部为 `pass` 时才选择 v2。缺失、stale、篡改、failed、blocked、simulated 或 unavailable report 均诊断后回退 v1；`HARNESS_PROTOCOL=v1` 永久保留为止损开关。生成、deprecation 与 v1 退役条件见 `docs/release/compatibility-policy.md`。
 

@@ -43,17 +43,52 @@ param(
 
     [string]$TelemetryOutput,
 
+    [string]$OtelTraceEndpoint,
+
+    [string]$OtelClientIdentityPath,
+
+    [string]$OtelCollectorInstanceId,
+
     [switch]$AgentOutputOnly,
 
     [switch]$Quiet,
 
     [switch]$Isolated,
 
-    [switch]$Help
+    [switch]$Help,
+
+    [Parameter(DontShow)]
+    [string]$InternalShimPath,
+
+    [Parameter(DontShow)]
+    [string]$InternalShimArgumentsJson
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+$hasInternalShimPath = -not [string]::IsNullOrWhiteSpace($InternalShimPath)
+$hasInternalShimArguments = -not [string]::IsNullOrWhiteSpace($InternalShimArgumentsJson)
+if ($hasInternalShimPath -or $hasInternalShimArguments) {
+    if (-not ($hasInternalShimPath -and $hasInternalShimArguments)) { throw 'Internal shim path and arguments must be provided together.' }
+    $resolvedShimPath = [IO.Path]::GetFullPath($InternalShimPath)
+    if ([IO.Path]::GetExtension($resolvedShimPath) -cne '.ps1' -or -not (Test-Path -LiteralPath $resolvedShimPath -PathType Leaf)) { throw 'Internal shim path must be an existing PowerShell script.' }
+    $expectedShimPath = if (-not [string]::IsNullOrWhiteSpace($env:CODEX_EXECUTABLE)) { [IO.Path]::GetFullPath($env:CODEX_EXECUTABLE) } else { [string](Get-Command codex -ErrorAction Stop).Path }
+    $pathComparison = if ($IsWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+    if ([string]::IsNullOrWhiteSpace($expectedShimPath) -or -not $resolvedShimPath.Equals([IO.Path]::GetFullPath($expectedShimPath),$pathComparison)) { throw 'Internal shim path must match the resolved Codex command.' }
+    $shimArgumentsDocument = $InternalShimArgumentsJson | ConvertFrom-Json -AsHashtable -Depth 5
+    if (@($shimArgumentsDocument.Keys).Count -ne 1 -or -not $shimArgumentsDocument.ContainsKey('arguments') -or $shimArgumentsDocument.arguments -isnot [array]) { throw 'Internal shim arguments are invalid.' }
+    $shimArguments = [Collections.Generic.List[string]]::new()
+    foreach ($argument in @($shimArgumentsDocument.arguments)) {
+        if ($argument -isnot [string]) { throw 'Internal shim arguments must be strings.' }
+        $shimArguments.Add([string]$argument)
+    }
+    $PSNativeCommandArgumentPassing = 'Standard'
+    $shimArgumentArray = $shimArguments.ToArray()
+    & $resolvedShimPath @shimArgumentArray
+    if ($null -eq $LASTEXITCODE) { exit 0 }
+    exit $LASTEXITCODE
+}
 
 function Show-Usage {
     @'
@@ -84,6 +119,9 @@ Options:
   -Output, -o <path>           Output file; relative paths use the caller's current directory
   -OutputSchema <path>         JSON Schema for the final model response
   -TelemetryOutput <path>      Sanitized aggregate telemetry JSON (no prompt, command, or thread id)
+  -OtelTraceEndpoint <url>     Internal loopback OTLP trace endpoint for release qualification
+  -OtelClientIdentityPath <p>  Internal pre-prompt OTLP client identity handshake path
+  -OtelCollectorInstanceId <id> Internal OTLP collector instance binding
   -AgentOutputOnly             Omit command summaries from the response file
   -Quiet                       Suppress live command/message previews
   -Isolated                    Disable plugins, apps, memory, browser/computer, and multi-agent features
@@ -164,6 +202,98 @@ function Write-Utf8NoBomAtomic {
     }
 }
 
+function Write-Utf8NoBomCreateNewAtomic {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$Content)
+    $parent = [IO.Path]::GetDirectoryName($Path)
+    $tempPath = Join-Path $parent ('.{0}.{1}.tmp' -f [IO.Path]::GetFileName($Path),[guid]::NewGuid().ToString('N'))
+    $stream = $null
+    try {
+        $bytes = [Text.UTF8Encoding]::new($false).GetBytes($Content)
+        $stream = [IO.FileStream]::new($tempPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+        $stream.Write($bytes,0,$bytes.Length)
+        $stream.Flush($true)
+        $stream.Dispose()
+        $stream = $null
+        [IO.File]::Move($tempPath,$Path)
+    } finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+        if ([IO.File]::Exists($tempPath)) { [IO.File]::Delete($tempPath) }
+    }
+}
+
+function Get-CodexOtelClientIdentity {
+    param([Parameter(Mandatory)][Diagnostics.Process]$RootProcess,[Parameter(Mandatory)]$Launch)
+    if (-not $IsWindows) { throw 'OTLP client process provenance is supported on Windows only.' }
+    if ([string]$Launch.OtelClientMode -ceq 'direct') {
+        if ($RootProcess.HasExited) { throw 'Codex exited before OTLP client registration.' }
+        return [ordered]@{process_id=$RootProcess.Id;start_time_filetime_utc=$RootProcess.StartTime.ToUniversalTime().ToFileTimeUtc()}
+    }
+    if ([string]$Launch.OtelClientMode -cne 'descendant-codex-exe') { throw 'Codex launch cannot provide an OTLP client identity.' }
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds(15)
+    while ([DateTimeOffset]::UtcNow -lt $deadline) {
+        if ($RootProcess.HasExited) { throw 'Codex shim exited before OTLP client registration.' }
+        $processes = @(Get-Process -Name codex -ErrorAction SilentlyContinue)
+        try {
+            $matches = [Collections.Generic.List[Diagnostics.Process]]::new()
+            foreach ($candidate in $processes) {
+                try {
+                    $cursor = $candidate
+                    for ($depth = 0; $depth -lt 64 -and $null -ne $cursor; $depth++) {
+                        if ($cursor.Id -eq $RootProcess.Id) { [void]$matches.Add($candidate); break }
+                        $cursor = $cursor.Parent
+                    }
+                } catch {}
+            }
+            if ($matches.Count -gt 1) { throw 'Codex shim produced an ambiguous native process tree.' }
+            if ($matches.Count -eq 1) {
+                $client = $matches[0]
+                $client.Refresh()
+                if (-not $client.HasExited -and $client.StartTime.ToUniversalTime() -ge $RootProcess.StartTime.ToUniversalTime()) {
+                    return [ordered]@{process_id=$client.Id;start_time_filetime_utc=$client.StartTime.ToUniversalTime().ToFileTimeUtc()}
+                }
+            }
+        } finally {
+            foreach ($candidate in $processes) { try { $candidate.Dispose() } catch {} }
+        }
+        Start-Sleep -Milliseconds 25
+    }
+    throw 'Native Codex OTLP client process did not appear before the prompt deadline.'
+}
+
+function Register-CodexOtelClient {
+    param(
+        [Parameter(Mandatory)][Diagnostics.Process]$RootProcess,
+        [Parameter(Mandatory)]$Launch,
+        [Parameter(Mandatory)][string]$IdentityPath,
+        [Parameter(Mandatory)][string]$CollectorInstanceId,
+        [Parameter(Mandatory)][int]$Round
+    )
+    $acceptedPath = $IdentityPath + '.accepted'
+    $identity = Get-CodexOtelClientIdentity -RootProcess $RootProcess -Launch $Launch
+    $identityText = ([ordered]@{
+        schema_version='host-benchmark-otel-client/v1';collector_instance_id=$CollectorInstanceId;round=$Round
+        process_id=[int]$identity.process_id;start_time_filetime_utc=[int64]$identity.start_time_filetime_utc
+    } | ConvertTo-Json -Compress)
+    $identityBytes = [Text.UTF8Encoding]::new($false).GetBytes($identityText)
+    $identityDigest = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($identityBytes)).ToLowerInvariant()
+    Write-Utf8NoBomCreateNewAtomic -Path $IdentityPath -Content $identityText
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds(10)
+    while ([DateTimeOffset]::UtcNow -lt $deadline -and -not (Test-Path -LiteralPath $acceptedPath -PathType Leaf)) {
+        if ($RootProcess.HasExited) { throw 'Codex exited before the OTLP collector acknowledged its identity.' }
+        Start-Sleep -Milliseconds 20
+    }
+    if (-not (Test-Path -LiteralPath $acceptedPath -PathType Leaf)) { throw 'OTLP collector did not acknowledge the Codex client before the prompt deadline.' }
+    $acceptedItem = Get-Item -LiteralPath $acceptedPath -Force -ErrorAction Stop
+    if (($acceptedItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $acceptedItem.Length -le 0 -or $acceptedItem.Length -gt 4096) { throw 'OTLP client acknowledgement file is invalid.' }
+    $ack = [IO.File]::ReadAllText($acceptedPath,[Text.UTF8Encoding]::new($false,$true)) | ConvertFrom-Json -AsHashtable -Depth 5
+    $actualKeys = @($ack.Keys | ForEach-Object { [string]$_ } | Sort-Object)
+    $expectedKeys = @('schema_version','collector_instance_id','round','identity_sha256') | Sort-Object
+    if ($actualKeys.Count -ne $expectedKeys.Count -or @(Compare-Object $actualKeys $expectedKeys -SyncWindow 0).Count -ne 0 -or [string]$ack.schema_version -cne 'host-benchmark-otel-client-ack/v1' -or [string]$ack.collector_instance_id -cne $CollectorInstanceId -or [int]$ack.round -ne $Round -or [string]$ack.identity_sha256 -cne $identityDigest) { throw 'OTLP client acknowledgement does not bind the expected identity.' }
+    [IO.File]::Delete($IdentityPath)
+    [IO.File]::Delete($acceptedPath)
+    if ((Test-Path -LiteralPath $IdentityPath) -or (Test-Path -LiteralPath $acceptedPath)) { throw 'OTLP client identity controls were not removed before the prompt.' }
+}
+
 function Convert-CertificateToPem {
     param([byte[]]$RawData)
 
@@ -217,23 +347,13 @@ function Resolve-CodexLaunch {
         if ((Split-Path -Leaf $hostPath) -notmatch '^pwsh(\.exe)?$') {
             throw 'invoke_codex.ps1 requires the pwsh host.'
         }
-        $payload = [ordered]@{ script = $path; arguments = @($CodexArguments) } | ConvertTo-Json -Compress
-        $payloadBase64 = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($payload))
-        $launcher = @"
-`$ErrorActionPreference = 'Stop'
-`$PSNativeCommandArgumentPassing = 'Standard'
-`$payload = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('$payloadBase64')) | ConvertFrom-Json
-`$scriptPath = [string]`$payload.script
-`$arguments = @(`$payload.arguments | ForEach-Object { [string]`$_ })
-& `$scriptPath @arguments
-if (`$null -eq `$LASTEXITCODE) { exit 0 }
-exit `$LASTEXITCODE
-"@
-        $encodedLauncher = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($launcher))
+        $argumentJson = [ordered]@{arguments=@($CodexArguments)} | ConvertTo-Json -Compress
         return [pscustomobject]@{
             FilePath = $hostPath
-            PrefixArguments = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encodedLauncher)
+            PrefixArguments = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, '-InternalShimPath', $path, '-InternalShimArgumentsJson', $argumentJson)
             Arguments = @()
+            EnvironmentOverrides = @{ CODEX_EXECUTABLE = $path }
+            OtelClientMode = 'descendant-codex-exe'
         }
     }
     if ($extension -in @('.cmd', '.bat')) {
@@ -242,7 +362,7 @@ exit `$LASTEXITCODE
     if ($IsWindows -and $extension -ne '.exe') {
         throw "Codex command is not a native executable or PowerShell shim: $path"
     }
-    return [pscustomobject]@{ FilePath = $path; PrefixArguments = @(); Arguments = @($CodexArguments) }
+    return [pscustomobject]@{ FilePath = $path; PrefixArguments = @(); Arguments = @($CodexArguments); EnvironmentOverrides = @{}; OtelClientMode = 'direct' }
 }
 
 function Receive-CodexStreamLines {
@@ -282,7 +402,8 @@ function Invoke-CodexProcess {
         [string]$InputText,
         [int]$TimeoutSeconds,
         [hashtable]$EnvironmentOverrides,
-        [scriptblock]$OnStdOut
+        [scriptblock]$OnStdOut,
+        [object]$OtelRegistration
     )
 
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
@@ -301,6 +422,9 @@ function Invoke-CodexProcess {
         $psi.ArgumentList.Add([string]$argument)
     }
     foreach ($entry in $EnvironmentOverrides.GetEnumerator()) {
+        $psi.Environment[[string]$entry.Key] = [string]$entry.Value
+    }
+    foreach ($entry in $Launch.EnvironmentOverrides.GetEnumerator()) {
         $psi.Environment[[string]$entry.Key] = [string]$entry.Value
     }
 
@@ -328,6 +452,9 @@ function Invoke-CodexProcess {
         $started = $true
         $state.StdOutTask = $process.StandardOutput.ReadLineAsync()
         $state.StdErrTask = $process.StandardError.ReadLineAsync()
+        if ($null -ne $OtelRegistration) {
+            Register-CodexOtelClient -RootProcess $process -Launch $Launch -IdentityPath ([string]$OtelRegistration.identity_path) -CollectorInstanceId ([string]$OtelRegistration.collector_instance_id) -Round ([int]$OtelRegistration.round)
+        }
         $inputTask = $process.StandardInput.WriteAsync($InputText)
         while ($true) {
             $madeProgress = Receive-CodexStreamLines -Process $process -State $state -OnStdOut $OnStdOut
@@ -374,6 +501,16 @@ function Invoke-CodexProcess {
                     if (-not $madeProgress) { Start-Sleep -Milliseconds 10 }
                 }
             } catch { $cleanupErrors.Add('drain output: ' + $_.Exception.Message) }
+        }
+        if ($null -ne $OtelRegistration) {
+            foreach ($controlPath in @([string]$OtelRegistration.identity_path,([string]$OtelRegistration.identity_path + '.accepted'))) {
+                try {
+                    if (Test-Path -LiteralPath $controlPath) {
+                        if (-not (Test-Path -LiteralPath $controlPath -PathType Leaf)) { throw 'control path is not a file' }
+                        [IO.File]::Delete($controlPath)
+                    }
+                } catch { $cleanupErrors.Add('remove OTLP identity control: ' + $_.Exception.Message) }
+            }
         }
         try { $process.Dispose() } catch { $cleanupErrors.Add('dispose process: ' + $_.Exception.Message) }
     }
@@ -453,6 +590,35 @@ if (-not [string]::IsNullOrWhiteSpace($TelemetryOutput)) {
     if (-not [System.IO.Path]::IsPathRooted($TelemetryOutput)) { $TelemetryOutput = Join-Path (Get-Location).Path $TelemetryOutput }
     $TelemetryOutput = [System.IO.Path]::GetFullPath($TelemetryOutput)
 }
+$otelTraceUri = $null
+$otelRound = 0
+if (-not [string]::IsNullOrWhiteSpace($OtelTraceEndpoint)) {
+    if (-not [Uri]::TryCreate($OtelTraceEndpoint,[UriKind]::Absolute,[ref]$otelTraceUri) -or
+        $otelTraceUri.Scheme -cne 'http' -or $otelTraceUri.Host -cne '127.0.0.1' -or
+        $otelTraceUri.Port -le 0 -or -not [string]::IsNullOrEmpty($otelTraceUri.UserInfo) -or
+        -not [string]::IsNullOrEmpty($otelTraceUri.Query) -or -not [string]::IsNullOrEmpty($otelTraceUri.Fragment) -or
+        $otelTraceUri.AbsolutePath -cnotmatch '^/v1/traces/round-[1-9][0-9]*$') {
+        throw 'OtelTraceEndpoint must be an absolute loopback HTTP URL ending in /v1/traces/round-N.'
+    }
+    $OtelTraceEndpoint = $otelTraceUri.AbsoluteUri
+    $otelRound = [int]([regex]::Match($otelTraceUri.AbsolutePath,'round-([1-9][0-9]*)$').Groups[1].Value)
+}
+$hasOtelEndpoint = -not [string]::IsNullOrWhiteSpace($OtelTraceEndpoint)
+$hasOtelIdentity = -not [string]::IsNullOrWhiteSpace($OtelClientIdentityPath)
+$hasOtelInstance = -not [string]::IsNullOrWhiteSpace($OtelCollectorInstanceId)
+if (($hasOtelEndpoint -or $hasOtelIdentity -or $hasOtelInstance) -and -not ($hasOtelEndpoint -and $hasOtelIdentity -and $hasOtelInstance)) {
+    throw 'OtelTraceEndpoint, OtelClientIdentityPath, and OtelCollectorInstanceId must be provided together.'
+}
+if ($hasOtelEndpoint) {
+    if (-not $IsWindows) { throw 'Release-qualification OTLP client provenance is supported on Windows only.' }
+    if ($OtelCollectorInstanceId -cnotmatch '^[0-9a-f]{32}$') { throw 'OtelCollectorInstanceId must be 32 lowercase hexadecimal characters.' }
+    if (-not [IO.Path]::IsPathRooted($OtelClientIdentityPath)) { throw 'OtelClientIdentityPath must be absolute.' }
+    $OtelClientIdentityPath = [IO.Path]::GetFullPath($OtelClientIdentityPath)
+    $identityParent = [IO.Path]::GetDirectoryName($OtelClientIdentityPath)
+    if (-not (Test-Path -LiteralPath $identityParent -PathType Container)) { throw 'OtelClientIdentityPath parent does not exist.' }
+    $identityParentItem = Get-Item -LiteralPath $identityParent -Force -ErrorAction Stop
+    if (($identityParentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or (Test-Path -LiteralPath $OtelClientIdentityPath) -or (Test-Path -LiteralPath ($OtelClientIdentityPath + '.accepted'))) { throw 'OtelClientIdentityPath must start as a new regular control file.' }
+}
 
 $fileBlock = ''
 foreach ($ref in @($File)) {
@@ -486,6 +652,13 @@ if ($Session) {
 }
 $codexArgs.Add('-c')
 $codexArgs.Add(('model_reasoning_effort="{0}"' -f $Reasoning))
+if ($OtelTraceEndpoint) {
+    $codexArgs.Add('-c'); $codexArgs.Add('otel.environment="release-qualification"')
+    $codexArgs.Add('-c'); $codexArgs.Add('otel.log_user_prompt=false')
+    $codexArgs.Add('-c'); $codexArgs.Add('otel.exporter="none"')
+    $codexArgs.Add('-c'); $codexArgs.Add(('otel.trace_exporter={{"otlp-http"={{endpoint="{0}",protocol="json"}}}}' -f $OtelTraceEndpoint))
+    $codexArgs.Add('-c'); $codexArgs.Add('otel.metrics_exporter="none"')
+}
 if ($Session) {
     if ($ReadOnly) {
         $codexArgs.Add('-c'); $codexArgs.Add('sandbox_mode="read-only"')
@@ -506,6 +679,9 @@ if ($Session) { $codexArgs.Add('--'); $codexArgs.Add($Session) }
 $codexArgs.Add('-')
 
 $launch = Resolve-CodexLaunch -CodexArguments $codexArgs.ToArray()
+$otelRegistration = if ($hasOtelEndpoint) {
+    [pscustomobject]@{identity_path=$OtelClientIdentityPath;collector_instance_id=$OtelCollectorInstanceId;round=$otelRound}
+} else { $null }
 $caBundlePath = ''
 $primaryError = $null
 $caCleanupError = $null
@@ -577,7 +753,7 @@ try {
             Write-Host "[codex] custom CA bundle unavailable: $($_.Exception.Message)" -ForegroundColor Yellow
         }
     }
-    $invocation = Invoke-CodexProcess -Launch $launch -Arguments $launch.Arguments -WorkingDirectory $Workspace -InputText $prompt -TimeoutSeconds $TimeoutSeconds -EnvironmentOverrides $environmentOverrides -OnStdOut $onStdOut
+    $invocation = Invoke-CodexProcess -Launch $launch -Arguments $launch.Arguments -WorkingDirectory $Workspace -InputText $prompt -TimeoutSeconds $TimeoutSeconds -EnvironmentOverrides $environmentOverrides -OnStdOut $onStdOut -OtelRegistration $otelRegistration
 
     foreach ($line in $invocation.StdErrLines) {
         if (-not [string]::IsNullOrWhiteSpace($line)) { [Console]::Error.WriteLine('[codex stderr] ' + $line) }
@@ -675,6 +851,11 @@ if ($TelemetryOutput) {
             file_change = [int]$telemetryState.FileChangeCount
         }
         lifecycle_skill_loads = [int]$telemetryState.SkillLoadCount
+        otel_trace = [ordered]@{
+            enabled = -not [string]::IsNullOrWhiteSpace($OtelTraceEndpoint)
+            contract = $(if ($OtelTraceEndpoint) { 'codex-0.144.4-successful-websocket-send/v2' } else { $null })
+            provenance = $(if ($OtelTraceEndpoint) { 'verified-owner-pid-start-time/v1' } else { $null })
+        }
         tokens = [ordered]@{
             status = $tokenStatus
             input = $telemetryState.InputTokens

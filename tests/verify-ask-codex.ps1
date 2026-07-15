@@ -530,6 +530,26 @@ $parameters = @{
         }
     }
 
+    $internalBypassCase = 'internal-shim-binding'
+    $internalBypassResult = Invoke-AskCodex -ScriptPath $scriptPath -Arguments @('-InternalShimPath',$resumeDriverPath,'-InternalShimArgumentsJson','{"arguments":[]}') -Environment (New-CaseEnvironment -CaseId $internalBypassCase) -WorkingDirectory $callerRoot -Label $internalBypassCase
+    if ($internalBypassResult.ExitCode -ne 0 -and $internalBypassResult.StdErr -match 'Internal shim path must match the resolved Codex command' -and $null -eq (Read-MockRecord -CaptureRoot $captureRoot -CaseId $internalBypassCase)) {
+        Add-Check 'internal shim mode is bound to the resolved Codex command and rejects arbitrary scripts'
+    } else {
+        Add-Failure "internal shim binding was bypassed: exit=$($internalBypassResult.ExitCode) stdout=[$($internalBypassResult.StdOut)] stderr=[$($internalBypassResult.StdErr)]"
+    }
+
+    $relativeExecutableCase = 'relative-codex-executable'
+    $relativeExecutableOutput = Join-Path $scratchRoot 'outputs\relative-codex-executable.md'
+    $relativeExecutableEnvironment = New-CaseEnvironment -CaseId $relativeExecutableCase
+    $relativeExecutableEnvironment.CODEX_EXECUTABLE = [IO.Path]::GetRelativePath($callerRoot,$mockScriptPath)
+    $relativeExecutableResult = Invoke-AskCodex -ScriptPath $scriptPath -Arguments @('-Task','relative executable compatibility','-Workspace',$workspace,'-Output',$relativeExecutableOutput,'-TimeoutSeconds','5') -Environment $relativeExecutableEnvironment -WorkingDirectory $callerRoot -Label $relativeExecutableCase
+    $relativeExecutableRecord = Read-MockRecord -CaptureRoot $captureRoot -CaseId $relativeExecutableCase
+    if ($relativeExecutableResult.ExitCode -eq 0 -and $null -ne $relativeExecutableRecord -and [string]$relativeExecutableRecord.current_directory -ceq $workspace) {
+        Add-Check 'relative CODEX_EXECUTABLE remains bound after the child changes to the workspace directory'
+    } else {
+        Add-Failure "relative CODEX_EXECUTABLE compatibility failed: exit=$($relativeExecutableResult.ExitCode) stdout=[$($relativeExecutableResult.StdOut)] stderr=[$($relativeExecutableResult.StdErr)]"
+    }
+
     $ps5Case = 'ps5-gate'
     $ps5Output = Join-Path $callerRoot 'ps5-must-not-exist.md'
     $ps5Before = Get-TreeSnapshot -Root $workspace
