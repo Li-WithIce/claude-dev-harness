@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/dev-harness/schemas/model-eval-observation.schema.json",
+  "title": "Thin Harness model evaluation observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "action", "ask_required", "profile", "write_authorized", "completion_allowed", "verification_status", "selected_protocol", "required_capabilities", "lifecycle_skills_loaded", "scope_expanded", "reason_code"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "harness-model-observation/v1" },
+    "action": { "type": "string", "enum": ["ask", "inspect", "execute", "block"] },
+    "ask_required": { "type": "boolean" },
+    "profile": { "type": "string", "enum": ["inspect", "direct", "governed", "critical", "none"] },
+    "write_authorized": { "type": "boolean" },
+    "completion_allowed": { "type": "boolean" },
+    "verification_status": { "type": "string", "enum": ["required", "pending", "pass", "fail", "unavailable", "not_applicable"] },
+    "selected_protocol": { "type": "string", "enum": ["v1", "v2", "none"] },
+    "required_capabilities": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["approval", "evidence", "dry_run_required", "independent_review", "verification"] }
+    },
+    "lifecycle_skills_loaded": { "type": "integer", "minimum": 0 },
+    "scope_expanded": { "type": "boolean" },
+    "reason_code": { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,63}$" }
+  }
+}

@@ -18,7 +18,7 @@ param(
 
     [string]$Model,
 
-    [ValidateSet('low', 'medium', 'high')]
+    [ValidateSet('low', 'medium', 'high', 'max')]
     [string]$Reasoning = 'medium',
 
     [ValidateSet('read-only', 'workspace-write', 'danger-full-access')]
@@ -35,6 +35,16 @@ param(
 
     [Alias('o')]
     [string]$Output,
+
+    [string]$OutputSchema,
+
+    [string]$TelemetryOutput,
+
+    [switch]$AgentOutputOnly,
+
+    [switch]$Quiet,
+
+    [switch]$Isolated,
 
     [switch]$Help
 )
@@ -61,13 +71,18 @@ Multi-turn:
 Options:
   -Workspace, -w <path>        Workspace directory (default: current directory)
   -Model <name>                Model override
-  -Reasoning <level>           Reasoning effort: low, medium, high (default: medium)
+  -Reasoning <level>           Reasoning effort: low, medium, high, max (default: medium)
   -Sandbox <mode>              read-only, workspace-write, or danger-full-access
   -ReadOnly                    Read-only sandbox, including resume mode
   -FullAuto                    Full-auto mode for a new session
   -Ephemeral                   Do not persist Codex session files
   -TimeoutSeconds <seconds>    Main Codex timeout (default: 1800)
   -Output, -o <path>           Output file; relative paths use the caller's current directory
+  -OutputSchema <path>         JSON Schema for the final model response
+  -TelemetryOutput <path>      Sanitized aggregate telemetry JSON (no prompt, command, or thread id)
+  -AgentOutputOnly             Omit command summaries from the response file
+  -Quiet                       Suppress live command/message previews
+  -Isolated                    Disable plugins, apps, memory, browser/computer, and multi-agent features
   -Help                        Show this help
 
 Success requires Codex exit 0 and an agent response. Only then are these printed:
@@ -183,6 +198,14 @@ function Resolve-CodexLaunch {
     $path = [string]$command.Path
     if ([string]::IsNullOrWhiteSpace($path)) {
         throw "Unsupported Codex command type: $($command.CommandType)"
+    }
+    if ($IsWindows -and $path -match '(?i)[\\/]WindowsApps[\\/]' -and [string]::IsNullOrWhiteSpace($env:CODEX_EXECUTABLE)) {
+        $appBinary = Join-Path $HOME '.codex\.sandbox-bin\codex.exe'
+        if (Test-Path -LiteralPath $appBinary -PathType Leaf) { $path = (Resolve-Path -LiteralPath $appBinary).Path }
+    } elseif (-not [string]::IsNullOrWhiteSpace($env:CODEX_EXECUTABLE)) {
+        $configured = [System.IO.Path]::GetFullPath($env:CODEX_EXECUTABLE)
+        if (-not (Test-Path -LiteralPath $configured -PathType Leaf)) { throw "CODEX_EXECUTABLE does not exist: $configured" }
+        $path = $configured
     }
     $extension = [System.IO.Path]::GetExtension($path).ToLowerInvariant()
     if ($extension -eq '.ps1') {
@@ -366,6 +389,7 @@ function Invoke-CodexProcess {
     return [pscustomobject]@{
         ExitCode = $(if ($timedOut) { 124 } else { $exitCode })
         TimedOut = $timedOut
+        DurationMs = [Math]::Round($timer.Elapsed.TotalMilliseconds, 2)
         StdOutLines = $state.StdOutLines.ToArray()
         StdErrLines = $state.StdErrLines.ToArray()
     }
@@ -416,6 +440,15 @@ if ([string]::IsNullOrWhiteSpace($Output)) {
     $Output = Join-Path (Get-Location).Path $Output
 }
 $Output = [System.IO.Path]::GetFullPath($Output)
+if (-not [string]::IsNullOrWhiteSpace($OutputSchema)) {
+    if (-not [System.IO.Path]::IsPathRooted($OutputSchema)) { $OutputSchema = Join-Path (Get-Location).Path $OutputSchema }
+    $OutputSchema = [System.IO.Path]::GetFullPath($OutputSchema)
+    if (-not (Test-Path -LiteralPath $OutputSchema -PathType Leaf)) { throw "Output schema does not exist: $OutputSchema" }
+}
+if (-not [string]::IsNullOrWhiteSpace($TelemetryOutput)) {
+    if (-not [System.IO.Path]::IsPathRooted($TelemetryOutput)) { $TelemetryOutput = Join-Path (Get-Location).Path $TelemetryOutput }
+    $TelemetryOutput = [System.IO.Path]::GetFullPath($TelemetryOutput)
+}
 
 $fileBlock = ''
 foreach ($ref in @($File)) {
@@ -431,6 +464,11 @@ if ($fileBlock) { $prompt += "`nPriority files (read these first before making c
 $codexArgs = [System.Collections.Generic.List[string]]::new()
 $codexArgs.Add('exec')
 $codexArgs.Add('--ignore-user-config')
+if ($Isolated) {
+    foreach ($feature in @('plugins','remote_plugin','apps','browser_use','computer_use','memories','multi_agent','multi_agent_v2','enable_fanout','in_app_browser','image_generation')) {
+        $codexArgs.Add('--disable'); $codexArgs.Add($feature)
+    }
+}
 if ($Session) {
     $codexArgs.Add('resume')
     $codexArgs.Add('--json')
@@ -458,6 +496,7 @@ if ($Session) {
 }
 if ($Model) { $codexArgs.Add('-m'); $codexArgs.Add($Model) }
 if ($Ephemeral) { $codexArgs.Add('--ephemeral') }
+if ($OutputSchema) { $codexArgs.Add('--output-schema'); $codexArgs.Add($OutputSchema) }
 if ($Session) { $codexArgs.Add('--'); $codexArgs.Add($Session) }
 $codexArgs.Add('-')
 
@@ -467,6 +506,62 @@ $primaryError = $null
 $caCleanupError = $null
 $threadId = if ($Session) { $Session } else { '' }
 $outputContent = [System.Collections.Generic.List[string]]::new()
+$streamTimer = [System.Diagnostics.Stopwatch]::StartNew()
+$telemetryState = @{
+    FirstUsefulActionMs = $null
+    TurnCount = 0
+    AgentMessageCount = 0
+    CommandCallCount = 0
+    McpCallCount = 0
+    WebSearchCount = 0
+    FileChangeCount = 0
+    SkillLoadCount = 0
+    InputTokens = $null
+    CachedInputTokens = $null
+    OutputTokens = $null
+}
+$onStdOut = {
+    param([string]$Line)
+
+    if (-not $Quiet) { Show-CodexProgressLine -Line $Line }
+    $clean = $Line -replace "`r", '' -replace [char]4, ''
+    if (-not $clean.TrimStart().StartsWith('{')) { return }
+    try { $event = $clean | ConvertFrom-Json -ErrorAction Stop } catch { return }
+    $type = [string](Get-PropertyValue -Object $event -Name 'type')
+    $item = Get-PropertyValue -Object $event -Name 'item'
+    $itemType = [string](Get-PropertyValue -Object $item -Name 'type')
+    if ($type -eq 'turn.started') { $telemetryState.TurnCount++ }
+    if ($type -eq 'item.started' -and $null -eq $telemetryState.FirstUsefulActionMs -and $itemType -in @('command_execution','mcp_tool_call','web_search','file_change')) {
+        $telemetryState.FirstUsefulActionMs = [Math]::Round($streamTimer.Elapsed.TotalMilliseconds, 2)
+    }
+    if ($type -eq 'item.completed') {
+        switch ($itemType) {
+            'agent_message' {
+                $telemetryState.AgentMessageCount++
+                if ($null -eq $telemetryState.FirstUsefulActionMs) { $telemetryState.FirstUsefulActionMs = [Math]::Round($streamTimer.Elapsed.TotalMilliseconds, 2) }
+            }
+            'command_execution' {
+                $telemetryState.CommandCallCount++
+                $commandText = [string](Get-PropertyValue -Object $item -Name 'command')
+                if ($commandText -match '(?i)(^|[\\/])SKILL\.md(?:\s|$|["''])') { $telemetryState.SkillLoadCount++ }
+            }
+            'mcp_tool_call' { $telemetryState.McpCallCount++ }
+            'web_search' { $telemetryState.WebSearchCount++ }
+            'file_change' { $telemetryState.FileChangeCount++ }
+        }
+    }
+    if ($type -eq 'turn.completed') {
+        $usage = Get-PropertyValue -Object $event -Name 'usage'
+        foreach ($mapping in @(
+            @('input_tokens','InputTokens'),
+            @('cached_input_tokens','CachedInputTokens'),
+            @('output_tokens','OutputTokens')
+        )) {
+            $value = Get-PropertyValue -Object $usage -Name $mapping[0]
+            if ($null -ne $value) { $telemetryState[$mapping[1]] = [long]$value }
+        }
+    }
+}
 try {
     $environmentOverrides = @{}
     if ($IsWindows -and [string]::IsNullOrWhiteSpace($env:CODEX_CA_CERTIFICATE)) {
@@ -477,13 +572,30 @@ try {
             Write-Host "[codex] custom CA bundle unavailable: $($_.Exception.Message)" -ForegroundColor Yellow
         }
     }
-    $invocation = Invoke-CodexProcess -Launch $launch -Arguments $launch.Arguments -WorkingDirectory $Workspace -InputText $prompt -TimeoutSeconds $TimeoutSeconds -EnvironmentOverrides $environmentOverrides -OnStdOut ${function:Show-CodexProgressLine}
+    $invocation = Invoke-CodexProcess -Launch $launch -Arguments $launch.Arguments -WorkingDirectory $Workspace -InputText $prompt -TimeoutSeconds $TimeoutSeconds -EnvironmentOverrides $environmentOverrides -OnStdOut $onStdOut
 
     foreach ($line in $invocation.StdErrLines) {
         if (-not [string]::IsNullOrWhiteSpace($line)) { [Console]::Error.WriteLine('[codex stderr] ' + $line) }
     }
     if ($invocation.TimedOut) { throw "Codex timed out after $TimeoutSeconds seconds." }
-    if ($invocation.ExitCode -ne 0) { throw "Codex exited with code $($invocation.ExitCode)." }
+    if ($invocation.ExitCode -ne 0) {
+        $diagnostic = ''
+        foreach ($line in $invocation.StdOutLines) {
+            try {
+                $event = $line | ConvertFrom-Json -ErrorAction Stop
+                if ([string](Get-PropertyValue -Object $event -Name 'type') -ceq 'error') {
+                    $diagnostic = [string](Get-PropertyValue -Object $event -Name 'message')
+                    break
+                }
+            } catch {}
+        }
+        if ($diagnostic) {
+            $diagnostic = $diagnostic -replace [regex]::Escape($Workspace), '<workspace>' -replace [regex]::Escape($HOME), '<home>'
+            if ($diagnostic.Length -gt 500) { $diagnostic = $diagnostic.Substring(0,500) }
+            throw "Codex exited with code $($invocation.ExitCode): $diagnostic"
+        }
+        throw "Codex exited with code $($invocation.ExitCode)."
+    }
 
     $hasAgentResponse = $false
     foreach ($line in $invocation.StdOutLines) {
@@ -507,7 +619,7 @@ try {
             if ($null -ne $rawText -and $rawText -isnot [string]) { throw 'Codex agent message text must be a string.' }
             $text = [string]$rawText
             if (-not [string]::IsNullOrWhiteSpace($text)) { $outputContent.Add($text); $hasAgentResponse = $true }
-        } elseif ($itemType -eq 'command_execution') {
+        } elseif ($itemType -eq 'command_execution' -and -not $AgentOutputOnly) {
             $command = [string](Get-PropertyValue -Object $item -Name 'command')
             $aggregated = [string](Get-PropertyValue -Object $item -Name 'aggregated_output')
             if ($command) {
@@ -532,5 +644,40 @@ if ($null -ne $caCleanupError) {
 if ($null -ne $primaryError) { throw $primaryError }
 
 Write-Utf8NoBomAtomic -Path $Output -Content ($outputContent -join "`n")
+if ($TelemetryOutput) {
+    $effectiveSandbox = if ($ReadOnly) { 'read-only' } elseif ($Sandbox) { $Sandbox } elseif ($FullAuto) { 'workspace-write' } else { 'default' }
+    $tokenStatus = if ($null -ne $telemetryState.InputTokens -and $null -ne $telemetryState.OutputTokens) { 'measured' } else { 'unavailable' }
+    $telemetry = [ordered]@{
+        schema_version = 'codex-invocation-telemetry/v1'
+        status = 'measured'
+        model = $(if ($Model) { $Model } else { 'inherit' })
+        reasoning = $Reasoning
+        sandbox = $effectiveSandbox
+        ephemeral = [bool]$Ephemeral
+        duration_ms = [double]$invocation.DurationMs
+        first_useful_action_ms = $telemetryState.FirstUsefulActionMs
+        model_turns = [int]$telemetryState.TurnCount
+        agent_messages = [int]$telemetryState.AgentMessageCount
+        tool_calls = [ordered]@{
+            command = [int]$telemetryState.CommandCallCount
+            mcp = [int]$telemetryState.McpCallCount
+            web_search = [int]$telemetryState.WebSearchCount
+            file_change = [int]$telemetryState.FileChangeCount
+        }
+        lifecycle_skill_loads = [int]$telemetryState.SkillLoadCount
+        tokens = [ordered]@{
+            status = $tokenStatus
+            input = $telemetryState.InputTokens
+            cached_input = $telemetryState.CachedInputTokens
+            output = $telemetryState.OutputTokens
+        }
+        output_schema = [ordered]@{
+            enabled = -not [string]::IsNullOrWhiteSpace($OutputSchema)
+            digest = $(if ($OutputSchema) { 'sha256:' + (Get-FileHash -LiteralPath $OutputSchema -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null })
+        }
+    }
+    Write-Utf8NoBomAtomic -Path $TelemetryOutput -Content ($telemetry | ConvertTo-Json -Depth 8)
+}
 if ($threadId) { Write-Output "session_id=$threadId" }
 Write-Output "output_path=$Output"
+if ($TelemetryOutput) { Write-Output "telemetry_path=$TelemetryOutput" }

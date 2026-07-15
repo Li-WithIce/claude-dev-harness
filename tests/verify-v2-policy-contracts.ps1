@@ -108,6 +108,7 @@ $expectedSchemaFiles = @(
     'event.schema.json',
     'evidence.schema.json',
     'protected-actions-overlay.schema.json',
+    'model-eval-observation.schema.json',
     'requirement-contract.schema.json',
     'task-state.schema.json'
 )

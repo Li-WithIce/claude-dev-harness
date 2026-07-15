@@ -568,6 +568,33 @@ $parameters = @{
         $newRecordText = if ($null -eq $newRecord) { '<missing>' } else { $newRecord | ConvertTo-Json -Depth 8 -Compress }
         Add-Failure "new session behavior mismatch: exit=$($newResult.ExitCode) outer_timeout=$($newResult.OuterTimedOut) record=[$newRecordText] stdout=[$($newResult.StdOut)] stderr=[$($newResult.StdErr)]"
     }
+
+    $structuredCase = 'structured-telemetry'
+    $structuredOutput = Join-Path $scratchRoot 'outputs\structured.json'
+    $structuredTelemetry = Join-Path $scratchRoot 'outputs\structured.telemetry.json'
+    $structuredSchema = Join-Path $scratchRoot 'structured-output.schema.json'
+    Write-Utf8NoBom -Path $structuredSchema -Content '{"type":"object","additionalProperties":false,"required":["value"],"properties":{"value":{"type":"string"}}}'
+    $structuredModel = 'gpt-5.6-sol'
+    $structuredArgs = @('-Task','structured result','-Workspace',$workspace,'-Model',$structuredModel,'-Reasoning','max','-ReadOnly','-Ephemeral','-Isolated','-AgentOutputOnly','-Quiet','-OutputSchema',$structuredSchema,'-Output',$structuredOutput,'-TelemetryOutput',$structuredTelemetry,'-TimeoutSeconds','5')
+    $structuredResult = Invoke-AskCodex -ScriptPath $scriptPath -Arguments $structuredArgs -Environment (New-CaseEnvironment -CaseId $structuredCase) -WorkingDirectory $callerRoot -Label $structuredCase
+    $structuredRecord = Read-MockRecord -CaptureRoot $captureRoot -CaseId $structuredCase
+    $isolationFeatures = @('plugins','remote_plugin','apps','browser_use','computer_use','memories','multi_agent','multi_agent_v2','enable_fanout','in_app_browser','image_generation')
+    $expectedStructuredArgs = [System.Collections.Generic.List[string]]::new()
+    foreach ($value in @('exec','--ignore-user-config')) { $expectedStructuredArgs.Add($value) }
+    foreach ($feature in $isolationFeatures) { $expectedStructuredArgs.Add('--disable'); $expectedStructuredArgs.Add($feature) }
+    foreach ($value in @('--cd',$workspace,'--skip-git-repo-check','--json','-c','model_reasoning_effort="max"','--sandbox','read-only','-m',$structuredModel,'--ephemeral','--output-schema',$structuredSchema,'-')) { $expectedStructuredArgs.Add($value) }
+    $structuredTelemetryValue = if (Test-Path -LiteralPath $structuredTelemetry -PathType Leaf) { Get-Content -LiteralPath $structuredTelemetry -Raw -Encoding utf8 | ConvertFrom-Json } else { $null }
+    if ($structuredResult.ExitCode -eq 0 -and $null -ne $structuredRecord -and
+        (Test-StringSequenceEqual -Actual @($structuredRecord.argv) -Expected $expectedStructuredArgs.ToArray()) -and
+        $null -ne $structuredTelemetryValue -and [string]$structuredTelemetryValue.schema_version -ceq 'codex-invocation-telemetry/v1' -and
+        [string]$structuredTelemetryValue.model -ceq $structuredModel -and [string]$structuredTelemetryValue.reasoning -ceq 'max' -and
+        [bool]$structuredTelemetryValue.ephemeral -and [string]$structuredTelemetryValue.sandbox -ceq 'read-only' -and
+        [int]$structuredTelemetryValue.agent_messages -eq 3 -and [string]$structuredTelemetryValue.tokens.status -ceq 'unavailable' -and
+        $structuredResult.StdOut -match '(?m)^telemetry_path=' -and (Test-Path -LiteralPath $structuredOutput -PathType Leaf)) {
+        Add-Check 'isolated max session preserves structured-output argv and publishes sanitized aggregate telemetry'
+    } else {
+        Add-Failure "structured telemetry contract failed: exit=$($structuredResult.ExitCode) record=[$($structuredRecord | ConvertTo-Json -Depth 8 -Compress)] telemetry=[$($structuredTelemetryValue | ConvertTo-Json -Depth 8 -Compress)] stderr=[$($structuredResult.StdErr)]"
+    }
     $observedNativeMode = if ($null -eq $newRecord) { '' } else { [string]$newRecord.native_argument_mode }
     if ($observedNativeMode -ceq 'Standard') {
         Add-Check 'PowerShell shim observes Standard native argument passing at runtime'
