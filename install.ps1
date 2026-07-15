@@ -2474,10 +2474,17 @@ function Get-InstallPresetDefinition {
             vault_profile = 'minimal'
         }
     }
+    $fullSkills = @(
+        '.system'
+        Get-ChildItem -LiteralPath $RepoSkillsPath -Force -Directory |
+            Where-Object { $_.Name -cne '.system' } |
+            Sort-Object Name |
+            Select-Object -ExpandProperty Name
+    )
     return [ordered]@{
         name = 'full'
         features = @('core','v1-compatibility','governed','memory','team','md-html','adapters','provider-references')
-        skills = @(Get-ChildItem -LiteralPath $RepoSkillsPath -Force | Sort-Object Name | Select-Object -ExpandProperty Name)
+        skills = $fullSkills
         hooks = @('pretooluse.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js')
         vault_profile = 'full'
     }

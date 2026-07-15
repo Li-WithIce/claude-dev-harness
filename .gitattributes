@@ -1,0 +1,5 @@
+/policies/entry-contract.md text eol=lf
+/agent-configs/workspace/AGENTS.md.template text eol=lf
+/agent-configs/codex/AGENTS.md.template text eol=lf
+/agent-configs/claude/CLAUDE.md.template text eol=lf
+/vault-template/entry/AGENTS.md.template text eol=lf

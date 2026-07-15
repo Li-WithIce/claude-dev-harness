@@ -165,7 +165,13 @@ $script:Failures = [System.Collections.Generic.List[string]]::new()
 $script:ScratchRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('dev-harness-preset-test-' + [guid]::NewGuid().ToString('N'))
 $coreSkills = @('.system','entry-router','orchestrator','plan','implement','review','test','spec')
 $governedSkills = @($coreSkills + @('planning','audit'))
-$fullSkills = @(Get-ChildItem -LiteralPath (Join-Path $script:RepoRoot 'skills') -Force | Sort-Object Name | Select-Object -ExpandProperty Name)
+$fullSkills = @(
+    '.system'
+    Get-ChildItem -LiteralPath (Join-Path $script:RepoRoot 'skills') -Force -Directory |
+        Where-Object { $_.Name -cne '.system' } |
+        Sort-Object Name |
+        Select-Object -ExpandProperty Name
+)
 $coreHooks = @('pretooluse.ps1','stop.js','workspace-resolver.js')
 $fullHooks = @('pretooluse.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js')
 $coreFeatures = @('core','v1-compatibility')
