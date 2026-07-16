@@ -47,7 +47,7 @@ function Get-HostGitState {
     if ($IncludeIgnored) {
         foreach ($path in @(Invoke-HostGit -Root $Root -Arguments @('-c','core.quotepath=false','ls-files','--others','--ignored','--exclude-standard','--'))) { $status.Add('!! ' + [string]$path) }
     }
-    $statusText = @($status) -join "`n"
+    $statusText = @($status | Sort-Object) -join "`n"
     return [ordered]@{
         revision=$revision
         commit_tree_oid=$tree
@@ -55,7 +55,7 @@ function Get-HostGitState {
         dirty=$status.Count -gt 0
         status_entry_count=$status.Count
         status_digest=Get-HarnessSha256Text -Content $statusText
-        state_digest=Get-HarnessSha256Text -Content ("{0}`n{1}`n{2}" -f $revision,$tree,$statusText)
+        state_digest=Get-HarnessSha256Text -Content ("{0}`n{1}`n{2}`n{3}" -f $revision,$tree,$objectFormat,$statusText)
         state_basis=$(if($IncludeIgnored){'git-revision-tree-status-ignored/v1'}else{'git-revision-tree-status/v1'})
     }
 }

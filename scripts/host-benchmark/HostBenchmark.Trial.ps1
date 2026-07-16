@@ -229,6 +229,7 @@ function Assert-HostCodexHome {
         if ((Test-HostPathAtOrBelow -Path ([string]$resolvedPhysical.physical_path) -Root ([string]$unsafePhysical.physical_path)) -or (Test-HostPathAtOrBelow -Path ([string]$unsafePhysical.physical_path) -Root ([string]$resolvedPhysical.physical_path))) { throw 'host-benchmark-auth-home-unsafe-location' }
     }
     $candidateAuthIdentity = Get-HostFileSystemIdentity -Path (Join-Path $resolved 'auth.json')
+    $candidateAuthDigest = (Get-FileHash -LiteralPath (Join-Path $resolved 'auth.json') -Algorithm SHA256 -ErrorAction Stop).Hash
     $defaultHome = if ([string]::IsNullOrWhiteSpace($env:USERPROFILE)) { '' } else { Join-Path $env:USERPROFILE '.codex' }
     foreach ($unsafeHome in @([Environment]::GetEnvironmentVariable('CODEX_HOME',[EnvironmentVariableTarget]::Process),$defaultHome)) {
         if (-not [string]::IsNullOrWhiteSpace($unsafeHome) -and [IO.Path]::GetFullPath($unsafeHome).TrimEnd('\').Equals($resolved,[StringComparison]::OrdinalIgnoreCase)) { throw 'host-benchmark-auth-home-not-dedicated' }
@@ -239,8 +240,9 @@ function Assert-HostCodexHome {
                 if (-not [string]::IsNullOrWhiteSpace([string]$unsafeItem.LinkType)) { throw 'host-benchmark-auth-home-not-dedicated' }
                 $unsafeIdentity = Get-HostFileSystemIdentity -Path $unsafeAuth
                 $sameAuth = [string]$unsafeIdentity.volume -ceq [string]$candidateAuthIdentity.volume -and [string]$unsafeIdentity.file_id -ceq [string]$candidateAuthIdentity.file_id
+                $sameAuthBytes = [string](Get-FileHash -LiteralPath $unsafeAuth -Algorithm SHA256 -ErrorAction Stop).Hash -ceq [string]$candidateAuthDigest
                 $unsafePhysicalHome = [IO.Path]::GetDirectoryName([string]$unsafeIdentity.physical_path)
-                if ($sameAuth -or (Test-HostPathAtOrBelow -Path ([string]$resolvedPhysical.physical_path) -Root $unsafePhysicalHome) -or (Test-HostPathAtOrBelow -Path $unsafePhysicalHome -Root ([string]$resolvedPhysical.physical_path))) { throw 'host-benchmark-auth-home-not-dedicated' }
+                if ($sameAuth -or $sameAuthBytes -or (Test-HostPathAtOrBelow -Path ([string]$resolvedPhysical.physical_path) -Root $unsafePhysicalHome) -or (Test-HostPathAtOrBelow -Path $unsafePhysicalHome -Root ([string]$resolvedPhysical.physical_path))) { throw 'host-benchmark-auth-home-not-dedicated' }
             }
         }
     }

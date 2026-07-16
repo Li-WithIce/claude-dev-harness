@@ -130,6 +130,7 @@ $coreScripts = @(
     'verify-v2-runtime-memory-decoupling.ps1',
     'run-scenario-evals.ps1',
     'verify-model-eval-runner.ps1',
+    'verify-rollout-evidence.ps1',
     'verify-host-benchmark-runner.ps1',
     'verify-host-benchmark-otel.ps1',
     'verify-host-benchmark-qualification.ps1',

@@ -512,6 +512,12 @@ $quietProcessSource = if ($null -eq $quietProcessFunction) { '' } else { $quietP
 $workflow = Get-Content -LiteralPath $workflowPath -Raw -Encoding utf8
 $readme = Get-Content -LiteralPath $readmePath -Raw -Encoding utf8
 $rolloutGenerator = Get-Content -LiteralPath (Join-Path $RepoRoot 'scripts\generate-v2-rollout-report.ps1') -Raw -Encoding utf8
+$releaseModelJob = [regex]::Match($workflow,'(?ms)^  release-model:\s*$.*?(?=^  release-host:\s*$)').Value
+$releaseHostJob = [regex]::Match($workflow,'(?ms)^  release-host:\s*$.*?(?=^  release-full:\s*$)').Value
+$releaseJob = [regex]::Match($workflow,'(?ms)^  release-full:\s*$.*\z').Value
+$modelUpload = [regex]::Match($releaseModelJob,'(?ms)^      - name: Upload model evidence\s*$.*\z').Value
+$hostUpload = [regex]::Match($releaseHostJob,'(?ms)^      - name: Upload host evidence\s*$.*\z').Value
+$releaseUpload = [regex]::Match($releaseJob,'(?ms)^      - name: Upload rollout evidence\s*$.*\z').Value
 
 if ($runnerParseErrors.Count -eq 0 -and
     $validationProcessParseErrors.Count -eq 0 -and
@@ -688,23 +694,78 @@ if ($null -eq $quietProcessFunction) {
 if ($runner -match '(?m)^\s*\[int\]\$CheckTimeoutSeconds = 360\s*$' -and
     $runner -match "verify-host-benchmark-qualification\.ps1'\) \{ \[math\]::Max\(\`$CheckTimeoutSeconds,900\)" -and
     $workflow -match '(?m)^\s*timeout-minutes:\s*30\s*$' -and
-    $workflow -match '(?m)^\s*timeout-minutes:\s*45\s*$' -and
+    $releaseModelJob -match '(?m)^\s*timeout-minutes:\s*120\s*$' -and
+    $releaseHostJob -match '(?m)^\s*timeout-minutes:\s*180\s*$' -and
+    $releaseJob -match '(?m)^\s*timeout-minutes:\s*120\s*$' -and
+    $releaseJob -match '(?m)^\s*fetch-depth:\s*0\s*$' -and
     $workflow -match 'run-validation\.ps1 -Suite core -CheckTimeoutSeconds 360' -and
     $rolloutGenerator -match 'run-validation\.ps1 -Suite all -CheckTimeoutSeconds 360 -VerboseOutput' -and
     $rolloutGenerator -match '\(\?m\)\^\\\[UNAVAILABLE\\\]\\s\+' -and
     $workflow -match 'run-changed-optional-validation\.ps1' -and
     $workflow -match 'run-isolated-install-smoke\.ps1 -RepoRoot \$PWD -Preset core' -and
-    $workflow -match 'generate-v2-rollout-report\.ps1 -RepoRoot \$PWD' -and
     $rolloutGenerator -match 'run-isolated-install-smoke\.ps1 -Preset core' -and
     $rolloutGenerator -match 'run-isolated-install-smoke\.ps1 -Preset full' -and
-    $rolloutGenerator -match 'run-scenario-evals\.ps1 -Suite core' -and
-    $rolloutGenerator -match 'benchmark-harness\.ps1 -Compare bare,v1,v2' -and
     $workflow -notmatch 'verify-installation\.ps1' -and
     $workflow -notmatch '(?m)^\s*&\s+\.\\uninstall\.ps1' -and
-    $readme -match 'PR job 上限为 30 分钟，release job 上限为 45 分钟；常规 verify 脚本上限为 360 秒，磁盘密集的 host benchmark qualification 单项上限为 900 秒') {
+    $readme -match 'PR job 上限为 30 分钟，model/host/聚合 job 上限分别为 120/180/120 分钟；model/host 的单次 Codex 调用上限分别为 120/900 秒；常规 verify 脚本上限为 360 秒，磁盘密集的 host benchmark qualification 单项上限为 900 秒') {
     Add-Check 'CI layers share bounded validation budgets and delegate install rollback to the smoke runner'
 } else {
     Add-Failure 'CI layers, local runner, and README should share bounded budgets and delegate install rollback to the smoke runner'
+}
+
+if ($releaseModelJob -match 'run-model-evals\.ps1[^\r\n]+-TimeoutSeconds 120[^\r\n]+-CodexHome \$env:HOST_BENCHMARK_CODEX_HOME[^\r\n]+model-eval\.json' -and
+    $releaseHostJob -match 'run-host-benchmark\.ps1[^\r\n]+-TimeoutSeconds 900[^\r\n]+-CodexHome \$env:HOST_BENCHMARK_CODEX_HOME[^\r\n]+-Trials 3[^\r\n]+host-benchmark\.json' -and
+    $releaseHostJob -match '(?m)^\s*needs:\s*release-model\s*$' -and
+    $releaseModelJob -notmatch '(?m)^\s*continue-on-error:' -and $releaseHostJob -notmatch '(?m)^\s*continue-on-error:') {
+    Add-Check 'release CI serializes and bounds real model and three-trial host evidence without masking failures'
+} else {
+    Add-Failure 'release CI must run both real qualification reports before rollout generation'
+}
+
+if (@($releaseModelJob,$releaseHostJob | Where-Object { $_ -match '(?m)^\s*runs-on:\s*\$\{\{\s*vars\.THIN_V2_RELEASE_RUNNER\s*\|\|\s*''windows-latest''\s*\}\}\s*$' -and $_ -match '(?m)^\s*HOST_BENCHMARK_CODEX_HOME:\s*\$\{\{\s*vars\.HOST_BENCHMARK_CODEX_HOME\s*\}\}\s*$' -and $_ -match '(?m)^\s*environment:\s*thin-v2-release\s*$' -and $_ -match '(?m)^\s*persist-credentials:\s*false\s*$' -and $_ -match 'refs/heads/codex/thin-harness-v2-refactor' -and $_ -notmatch '(?i)secrets\.' }).Count -eq 2 -and
+    $releaseJob -match '(?m)^\s*runs-on:\s*windows-latest\s*$' -and $releaseJob -match '(?m)^\s*persist-credentials:\s*false\s*$' -and $releaseJob -notmatch 'HOST_BENCHMARK_CODEX_HOME') {
+    Add-Check 'credentialed producers are trusted-ref/environment bound and release checkouts do not persist GitHub credentials'
+} else {
+    Add-Failure 'release CI must map the approved runner and Codex-home repository variables without credential transport'
+}
+
+$checkoutAction = 'actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5'
+$uploadAction = 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'
+$downloadAction = 'actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093'
+
+if (@([regex]::Matches($workflow,[regex]::Escape($checkoutAction))).Count -eq 5 -and
+    @([regex]::Matches($workflow,[regex]::Escape($uploadAction))).Count -eq 3 -and
+    @([regex]::Matches($workflow,[regex]::Escape($downloadAction))).Count -eq 2 -and
+    $workflow -notmatch 'actions/(?:checkout|upload-artifact|download-artifact)@v\d+') {
+    Add-Check 'release workflow pins every GitHub Action dependency to a verified full commit SHA'
+} else {
+    Add-Failure 'release workflow must pin GitHub Action dependencies to the approved commits'
+}
+
+if ($releaseJob -match '(?ms)^\s*needs:\s*\r?\n\s*- release-model\s*\r?\n\s*- release-host' -and
+    $releaseJob -match '!cancelled\(\)' -and $releaseJob -notmatch 'always\(\)' -and
+    @([regex]::Matches($releaseJob,[regex]::Escape($downloadAction))).Count -eq 2 -and
+    $releaseJob -match 'generate-v2-rollout-report\.ps1[^\r\n]+-ModelEvalReportPath[^\r\n]+model-eval\.json[^\r\n]+-HostBenchmarkReportPath[^\r\n]+host-benchmark\.json[^\r\n]+v2-rollout-eligibility\.json[^\r\n]+-RequireEligible' -and
+    $releaseJob -match 'GITHUB_RUN_ID-\$env:GITHUB_RUN_ATTEMPT\\aggregate' -and
+    $rolloutGenerator -match 'ModelEvalReportPath' -and
+    $rolloutGenerator -match 'HostBenchmarkReportPath' -and
+    $rolloutGenerator -notmatch 'run-scenario-evals\.ps1 -Suite core' -and
+    $rolloutGenerator -notmatch 'benchmark-harness\.ps1 -Compare bare,v1,v2') {
+    Add-Check 'rollout generator consumes real evidence instead of deterministic or fixture proxies'
+} else {
+    Add-Failure 'rollout generator must bind real model and host reports'
+}
+
+if ($modelUpload -match [regex]::Escape($uploadAction) -and $modelUpload -match '(?m)^\s*path:\s*\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/model-eval\.json\s*$' -and $modelUpload -match '(?m)^\s*if-no-files-found:\s*error\s*$' -and
+    $hostUpload -match [regex]::Escape($uploadAction) -and $hostUpload -match '(?m)^\s*path:\s*\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/host-benchmark\.json\s*$' -and $hostUpload -match '(?m)^\s*if-no-files-found:\s*error\s*$' -and
+    $releaseUpload -match '!cancelled\(\)' -and
+    $releaseUpload -match [regex]::Escape($uploadAction) -and
+    $releaseUpload -match '(?m)^\s*if-no-files-found:\s*warn\s*$' -and
+    @([regex]::Matches($releaseUpload,'(?m)^\s+\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/[a-z0-9-]+\.json\s*$')).Count -eq 3 -and
+    ($modelUpload + $hostUpload + $releaseUpload) -notmatch '(?i)auth\.json|CODEX_ACCESS_TOKEN|OPENAI_API_KEY|secrets\.') {
+    Add-Check 'release CI uses fresh one-file producer artifacts and limits final upload scope to three sanitized JSON paths'
+} else {
+    Add-Failure 'release artifact upload must be always-on, exact, and credential-free'
 }
 
 if (-not (Test-Path -LiteralPath $smokeRunnerPath -PathType Leaf)) {

@@ -12,9 +12,9 @@ function Check($Condition,$Pass,$Fail){if($Condition){$script:checks.Add($Pass)}
 function New-Gates([string]$Performance='pass'){
     $digest='sha256:'+('2'*64)
     return [ordered]@{
-        behavior=[ordered]@{status='pass';evidence_digest=$digest;command='tests/run-scenario-evals.ps1 -Suite core'}
+        behavior=[ordered]@{status='pass';evidence_digest=$digest;command='scripts/run-model-evals.ps1 -Model gpt-5.6-sol -Reasoning max'}
         v1_compatibility=[ordered]@{status='pass';evidence_digest=$digest;command='scripts/run-validation.ps1 -Suite all -CheckTimeoutSeconds 360 -VerboseOutput'}
-        direct_performance=[ordered]@{status=$Performance;evidence_digest=$digest;command='scripts/benchmark-harness.ps1 -Compare bare,v1,v2'}
+        direct_performance=[ordered]@{status=$Performance;evidence_digest=$digest;command='scripts/run-host-benchmark.ps1 -Trials 3 -Model gpt-5.6-sol -Reasoning max'}
         core_install_rollback=[ordered]@{status='pass';evidence_digest=$digest;command='scripts/run-isolated-install-smoke.ps1 -Preset core'}
         full_install_rollback=[ordered]@{status='pass';evidence_digest=$digest;command='scripts/run-isolated-install-smoke.ps1 -Preset full'}
     }
@@ -28,8 +28,13 @@ function New-V2TaskDocument($TaskId){$now=[DateTimeOffset]::UtcNow.ToString('o')
 $protocolPath=Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1';$generatorPath=Join-Path $RepoRoot 'scripts\generate-v2-rollout-report.ps1';$docPath=Join-Path $RepoRoot 'docs\release\compatibility-policy.md'
 $repoBefore=@(&git -C $RepoRoot status --porcelain --untracked-files=all)
 $temp=Join-Path ([IO.Path]::GetTempPath()) ('thin-v2-pr14-'+[guid]::NewGuid().ToString('N'));$workspace=Join-Path $temp 'workspace'
+$oldGitDir=[Environment]::GetEnvironmentVariable('GIT_DIR',[EnvironmentVariableTarget]::Process);$oldGitWorkTree=[Environment]::GetEnvironmentVariable('GIT_WORK_TREE',[EnvironmentVariableTarget]::Process)
 try{
     [void][IO.Directory]::CreateDirectory($workspace)
+    $shadowRepo=Join-Path $temp 'qualification-git';$null=@(&git init --quiet -- $shadowRepo 2>&1);if($LASTEXITCODE-ne0){throw 'shadow qualification Git init failed'}
+    $env:GIT_DIR=Join-Path $shadowRepo '.git';$env:GIT_WORK_TREE=$RepoRoot
+    $null=@(&git -C $RepoRoot add -A -- 2>&1);if($LASTEXITCODE-ne0){throw 'shadow qualification Git add failed'}
+    $null=@(&git -C $RepoRoot -c user.name='Rollout Test' -c user.email='rollout@test.invalid' commit --quiet -m qualification-snapshot 2>&1);if($LASTEXITCODE-ne0){throw 'shadow qualification Git commit failed'}
     foreach($file in @($protocolPath,$generatorPath,$PSCommandPath)){$tokens=$null;$errors=$null;[Management.Automation.Language.Parser]::ParseFile($file,[ref]$tokens,[ref]$errors)|Out-Null;Check (@($errors).Count-eq0) "$(Split-Path -Leaf $file) parses" "$(Split-Path -Leaf $file) parse failed";Check (Test-FileHasUtf8Bom $file) "$(Split-Path -Leaf $file) has UTF-8 BOM" "$(Split-Path -Leaf $file) lacks UTF-8 BOM"}
     $script:protocolModule=Import-Module $protocolPath -Force -PassThru
     $exports=@($script:protocolModule.ExportedFunctions.Keys)
@@ -44,6 +49,10 @@ try{
 
     $pass=New-Report (New-Gates);$passPath=Write-Report $workspace 'pass' $pass;$eligible=Resolve-Protocol $workspace $passPath
     Check ($eligible.selected_protocol-ceq'v2'-and$eligible.reason-ceq'eligible-rollout-report'-and$eligible.rollout_eligibility.status-ceq'pass'-and$null-eq$eligible.warning) 'current all-pass report flips only a new auto task to v2' 'all-pass current report did not select v2'
+    $null=@(&git -C $RepoRoot rm --cached --quiet -- scripts/lib/Harness.RolloutEvidence.psm1 2>&1);if($LASTEXITCODE-ne0){throw 'shadow untracked-source setup failed'}
+    $dirtyDistribution=Resolve-Protocol $workspace $passPath
+    Check ($dirtyDistribution.selected_protocol-ceq'v1'-and$dirtyDistribution.reason-ceq'rollout-source-dirty') 'untracked distribution source invalidates an otherwise current report' 'untracked distribution source kept auto on v2'
+    $null=@(&git -C $RepoRoot add -- scripts/lib/Harness.RolloutEvidence.psm1 2>&1);if($LASTEXITCODE-ne0){throw 'shadow untracked-source restore failed'}
 
     foreach($status in @('fail','blocked','unavailable','simulated')){
         $document=New-Report (New-Gates $status);$path=Write-Report $workspace "performance-$status" $document;$result=Resolve-Protocol $workspace $path
@@ -67,6 +76,8 @@ try{
     Check ($result.selected_protocol-ceq'v1'-and$result.reason-ceq'rollout-report-stale-generator') 'stale generator digest fails closed' 'stale generator selected v2'
     $tampered=($pass|ConvertTo-Json -Depth 30)|ConvertFrom-Json -AsHashtable -Depth 30;$tampered.gates.behavior.evidence_digest='sha256:'+('5'*64);$path=Write-Report $workspace 'tampered' $tampered;$result=Resolve-Protocol $workspace $path
     Check ($result.selected_protocol-ceq'v1'-and$result.reason-ceq'rollout-report-digest-mismatch') 'tampered report digest fails closed' 'tampered report selected v2'
+    $proxy=($pass|ConvertTo-Json -Depth 30)|ConvertFrom-Json -AsHashtable -Depth 30;$proxy.gates.behavior.command='tests/run-scenario-evals.ps1 -Suite core';Set-ReportDigest $proxy;$path=Write-Report $workspace 'proxy-command' $proxy;$result=Resolve-Protocol $workspace $path
+    Check ($result.selected_protocol-ceq'v1'-and$result.reason-ceq'rollout-report-invalid-gate') 'deterministic proxy command fails closed' 'deterministic proxy command selected v2'
     $extra=($pass|ConvertTo-Json -Depth 30)|ConvertFrom-Json -AsHashtable -Depth 30;$extra['authorization_bypass']=$true;$path=Write-Report $workspace 'extra-key' $extra;$result=Resolve-Protocol $workspace $path
     Check ($result.selected_protocol-ceq'v1'-and$result.reason-ceq'rollout-report-invalid-document') 'unknown report fields fail closed' 'unknown report field selected v2'
     $outside=Resolve-Protocol $workspace '..\outside-report.json'
@@ -86,6 +97,10 @@ try{
 
     $doc=Get-Content -LiteralPath $docPath -Raw -Encoding utf8
     Check ($doc-match'HARNESS_PROTOCOL=v1'-and$doc-match'does not delete v1'-and$doc-match'complete external release cycle') 'compatibility policy documents rollback, retention, and external release-cycle boundary' 'compatibility policy is incomplete'
-}finally{Remove-Module Harness.Protocol -ErrorAction Ignore;if(Test-Path $temp){Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue}}
+}finally{
+    if($null-eq$oldGitDir){Remove-Item Env:GIT_DIR -ErrorAction Ignore}else{$env:GIT_DIR=$oldGitDir}
+    if($null-eq$oldGitWorkTree){Remove-Item Env:GIT_WORK_TREE -ErrorAction Ignore}else{$env:GIT_WORK_TREE=$oldGitWorkTree}
+    Remove-Module Harness.Protocol -ErrorAction Ignore;if(Test-Path $temp){Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue}
+}
 $repoAfter=@(&git -C $RepoRoot status --porcelain --untracked-files=all);Check (@(Compare-Object $repoBefore $repoAfter).Count-eq0) 'default-flip verifier leaves repository state unchanged' 'default-flip verifier changed repository state'
 foreach($item in $script:checks){"[PASS] $item"};foreach($item in $script:failures){"[FAIL] $item"};if($script:failures.Count){"STATUS: FAIL ($($script:failures.Count) failed)";exit 1};"STATUS: PASS ($($script:checks.Count) checks)";exit 0

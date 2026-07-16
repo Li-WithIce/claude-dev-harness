@@ -161,6 +161,12 @@ try {
         try { $null = Assert-HostCodexHome -Path $authHome -RepoRoot $RepoRoot -ScratchRoot $unrelatedScratch } catch { $realHomeRejected = $_.Exception.Message -ceq 'host-benchmark-auth-home-not-dedicated' }
         Check $realHomeRejected 'current Codex home was accepted as a dedicated benchmark home'
 
+        $copiedAuthHome = Join-Path $scratch 'copied-auth-home'
+        Write-Utf8 (Join-Path $copiedAuthHome 'auth.json') ([IO.File]::ReadAllText((Join-Path $authHome 'auth.json'),[Text.UTF8Encoding]::new($false,$true)))
+        $copiedAuthRejected = $false
+        try { $null = Assert-HostCodexHome -Path $copiedAuthHome -RepoRoot $RepoRoot -ScratchRoot $unrelatedScratch } catch { $copiedAuthRejected = $_.Exception.Message -ceq 'host-benchmark-auth-home-not-dedicated' }
+        Check $copiedAuthRejected 'byte-for-byte copied personal auth was accepted as an independently logged-in benchmark home'
+
         $authAlias = Join-Path $scratch 'auth-home-alias'
         [void](New-Item -ItemType Junction -Path $authAlias -Target $authHome -ErrorAction Stop)
         try {

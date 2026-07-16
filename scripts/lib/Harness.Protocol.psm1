@@ -84,22 +84,23 @@ function Assert-HarnessRolloutKeys {
 
 function Get-HarnessRolloutSourcePaths {
     param([string]$RepoRoot)
-    $paths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
-    foreach ($relativeRoot in @('agent-configs','policies','runtime-hooks','schemas','scripts','skills','templates','tests','vault-template')) {
-        $sourceRoot = Join-Path $RepoRoot $relativeRoot
-        if (-not (Test-Path -LiteralPath $sourceRoot -PathType Container)) { throw 'rollout-source-directory-missing' }
-        foreach ($file in Get-ChildItem -LiteralPath $sourceRoot -File -Recurse -Force -ErrorAction Stop) {
-            [void]$paths.Add((Get-HarnessRelativePath -WorkspaceRoot $RepoRoot -Path $file.FullName))
-        }
+    $roots = @('agent-configs','policies','runtime-hooks','schemas','scripts','skills','templates','tests','vault-template')
+    $entryFiles = @('harness.ps1','install.ps1','uninstall.ps1')
+    foreach ($relativeRoot in $roots) {
+        if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot $relativeRoot) -PathType Container)) { throw 'rollout-source-directory-missing' }
     }
-    foreach ($relative in @(
-        'harness.ps1',
-        'install.ps1',
-        'uninstall.ps1'
-    )) {
-        $fullPath = Join-Path $RepoRoot $relative
-        if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) { throw 'rollout-source-file-missing' }
+    $tracked = @(& git -C $RepoRoot -c core.quotepath=false ls-files -- @roots @entryFiles 2>$null | ForEach-Object { ([string]$_).Replace('\','/') })
+    if ($LASTEXITCODE -ne 0) { throw 'rollout-source-tracked-files-unavailable' }
+    $paths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($relative in $tracked) {
+        if ([string]::IsNullOrWhiteSpace($relative)) { continue }
+        $inRoot = @($roots | Where-Object { $relative.StartsWith($_ + '/',[StringComparison]::Ordinal) }).Count -gt 0
+        if (-not $inRoot -and $relative -cnotin $entryFiles) { throw 'rollout-source-tracked-path-invalid' }
+        if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot $relative) -PathType Leaf)) { throw 'rollout-source-file-missing' }
         [void]$paths.Add($relative)
+    }
+    foreach ($relative in $entryFiles) {
+        if (-not $paths.Contains($relative)) { throw 'rollout-source-entry-untracked' }
     }
     return @($paths | Sort-Object)
 }
@@ -120,6 +121,33 @@ function Get-HarnessRolloutRevision {
     return ($value -join '').Trim()
 }
 
+function Assert-HarnessRolloutRepositoryClean {
+    param([string]$RepoRoot)
+    $status = @(& git -C $RepoRoot -c core.quotepath=false status --porcelain=v1 --untracked-files=all 2>$null | ForEach-Object { [string]$_ })
+    if ($LASTEXITCODE -ne 0) { throw 'rollout-source-status-unavailable' }
+    $indexFlags = @(& git -C $RepoRoot -c core.quotepath=false ls-files -v -- 2>$null | Where-Object { [string]$_ -cnotmatch '^H ' })
+    if ($LASTEXITCODE -ne 0) { throw 'rollout-source-index-unavailable' }
+    if (@($status | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count -ne 0 -or $indexFlags.Count -ne 0) { throw 'rollout-source-dirty' }
+}
+
+function Assert-HarnessRolloutDistributionClean {
+    param([string]$RepoRoot)
+    $paths = @('agent-configs','policies','runtime-hooks','schemas','scripts','skills','templates','tests','vault-template','harness.ps1','install.ps1','uninstall.ps1')
+    $status = @(& git -C $RepoRoot -c core.quotepath=false status --porcelain=v1 --untracked-files=all -- @paths 2>$null | ForEach-Object { [string]$_ })
+    if ($LASTEXITCODE -ne 0) { throw 'rollout-source-status-unavailable' }
+    if (@($status | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count -ne 0) { throw 'rollout-source-dirty' }
+}
+
+function Assert-HarnessRolloutSourceHeadBound {
+    param([string]$RepoRoot)
+    $paths = @(Get-HarnessRolloutSourcePaths -RepoRoot $RepoRoot)
+    $null = @(& git -C $RepoRoot diff --quiet HEAD -- @paths 2>$null)
+    if ($LASTEXITCODE -eq 1) { throw 'rollout-source-not-head-bound' }
+    if ($LASTEXITCODE -ne 0) { throw 'rollout-source-head-binding-unavailable' }
+    $flags = @(& git -C $RepoRoot -c core.quotepath=false ls-files -v -- @paths 2>$null | ForEach-Object { [string]$_ })
+    if ($LASTEXITCODE -ne 0 -or $flags.Count -ne $paths.Count -or @($flags | Where-Object { $_ -cnotmatch '^H ' }).Count -ne 0) { throw 'rollout-source-index-flag-invalid' }
+}
+
 function Get-HarnessRolloutReportDigest {
     param([System.Collections.IDictionary]$Document)
     $body = [ordered]@{
@@ -137,6 +165,13 @@ function Get-HarnessRolloutReportDigest {
 function Assert-HarnessRolloutReport {
     param([string]$RepoRoot,[System.Collections.IDictionary]$Document)
     $gateNames = @('behavior','v1_compatibility','direct_performance','core_install_rollback','full_install_rollback')
+    $gateCommands = [ordered]@{
+        behavior = 'scripts/run-model-evals.ps1 -Model gpt-5.6-sol -Reasoning max'
+        v1_compatibility = 'scripts/run-validation.ps1 -Suite all -CheckTimeoutSeconds 360 -VerboseOutput'
+        direct_performance = 'scripts/run-host-benchmark.ps1 -Trials 3 -Model gpt-5.6-sol -Reasoning max'
+        core_install_rollback = 'scripts/run-isolated-install-smoke.ps1 -Preset core'
+        full_install_rollback = 'scripts/run-isolated-install-smoke.ps1 -Preset full'
+    }
     Assert-HarnessRolloutKeys -Value $Document -Expected @('schema_version','source_revision','source_digest','generator_digest','generated_at_utc','gates','eligible','report_digest') -Label 'document'
     if ([string]$Document.schema_version -cne 'rollout-eligibility/v1') { throw 'rollout-report-invalid-schema' }
     if ([string]$Document.source_revision -cnotmatch '^[0-9a-f]{40}$' -or [string]$Document.source_digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or [string]$Document.generator_digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or [string]$Document.report_digest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'rollout-report-invalid-digest' }
@@ -148,11 +183,13 @@ function Assert-HarnessRolloutReport {
         $gate = $Document.gates[$name]
         Assert-HarnessRolloutKeys -Value $gate -Expected @('status','evidence_digest','command') -Label "gate-$name"
         if ([string]$gate.status -cnotin @('pass','fail','blocked','unavailable','simulated')) { throw 'rollout-report-invalid-status' }
-        if ([string]$gate.evidence_digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or [string]::IsNullOrWhiteSpace([string]$gate.command)) { throw 'rollout-report-invalid-gate' }
+        if ([string]$gate.evidence_digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or [string]$gate.command -cne [string]$gateCommands[$name]) { throw 'rollout-report-invalid-gate' }
         if ([string]$gate.status -cne 'pass') { $allPass = $false }
     }
     if ([bool]$Document.eligible -ne $allPass) { throw 'rollout-report-invalid-eligibility' }
     if ([string]$Document.report_digest -cne (Get-HarnessRolloutReportDigest -Document $Document)) { throw 'rollout-report-digest-mismatch' }
+    Assert-HarnessRolloutDistributionClean -RepoRoot $RepoRoot
+    Assert-HarnessRolloutSourceHeadBound -RepoRoot $RepoRoot
     if ([string]$Document.source_revision -cne (Get-HarnessRolloutRevision -RepoRoot $RepoRoot)) { throw 'rollout-report-stale-revision' }
     if ([string]$Document.source_digest -cne (Get-HarnessRolloutSourceDigest -RepoRoot $RepoRoot)) { throw 'rollout-report-stale-source' }
     $generatorDigest = Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path 'scripts/generate-v2-rollout-report.ps1'
@@ -161,6 +198,7 @@ function Assert-HarnessRolloutReport {
 
 function New-HarnessRolloutReportDocument {
     param([string]$RepoRoot,[System.Collections.IDictionary]$Gates)
+    Assert-HarnessRolloutRepositoryClean -RepoRoot $RepoRoot
     $gateNames = @('behavior','v1_compatibility','direct_performance','core_install_rollback','full_install_rollback')
     Assert-HarnessRolloutKeys -Value $Gates -Expected $gateNames -Label 'gates'
     $eligible = @($gateNames | Where-Object { [string]$Gates[$_].status -cne 'pass' }).Count -eq 0

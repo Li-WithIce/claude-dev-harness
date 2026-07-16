@@ -1,0 +1,262 @@
+﻿[CmdletBinding()]
+param([string]$RepoRoot = '')
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Split-Path -Parent $PSScriptRoot }
+$RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
+
+$script:checks = [Collections.Generic.List[string]]::new()
+$script:failures = [Collections.Generic.List[string]]::new()
+function Check([bool]$Condition,[string]$Pass,[string]$Fail) { if ($Condition) { $script:checks.Add($Pass) } else { $script:failures.Add($Fail) } }
+function Get-BytesDigest([byte[]]$Bytes) { return 'sha256:' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant() }
+function Get-TextDigest([string]$Text) { return Get-BytesDigest ([Text.UTF8Encoding]::new($false).GetBytes($Text)) }
+function Get-FileDigest([string]$Path) { return Get-BytesDigest ([IO.File]::ReadAllBytes($Path)) }
+function Set-ReportDigest([Collections.IDictionary]$Document) {
+    $Document.report_digest = $null
+    $Document.report_digest = Get-TextDigest ($Document | ConvertTo-Json -Depth 100 -Compress)
+}
+function Copy-Document([Collections.IDictionary]$Document) { return ($Document | ConvertTo-Json -Depth 100 -Compress) | ConvertFrom-Json -AsHashtable -Depth 100 }
+function Write-Document([string]$Path,[Collections.IDictionary]$Document,[switch]$Compress) {
+    $json = if ($Compress) { $Document | ConvertTo-Json -Depth 100 -Compress } else { $Document | ConvertTo-Json -Depth 100 }
+    [IO.File]::WriteAllText($Path,$json,[Text.UTF8Encoding]::new($false))
+}
+function New-ExpectedObservation([Collections.IDictionary]$DatasetCase) {
+    $expected = $DatasetCase.expected
+    $askRequired = [bool]$expected.ask_required
+    $profile = if ($expected.Contains('profile') -and $null -ne $expected.profile) { [string]$expected.profile } elseif ($askRequired) { 'none' } else { 'inspect' }
+    $action = [string]$expected.action
+    [object[]]$requiredCapabilities = @()
+    if ($expected.Contains('required_capability')) { $requiredCapabilities = @([string]$expected.required_capability) }
+    return [ordered]@{
+        schema_version='harness-model-observation/v1';action=$action;ask_required=$askRequired;profile=$profile;write_authorized_now=[bool]$expected.write_authorized_now
+        completion_allowed=$(if($expected.Contains('completion_allowed')){[bool]$expected.completion_allowed}else{$false})
+        verification_status='pending';selected_protocol=$(if($expected.Contains('selected_protocol')){[string]$expected.selected_protocol}else{'none'})
+        required_capabilities=$requiredCapabilities
+        lifecycle_skills_loaded=0;unauthorized_scope_change=$false;reason_code='fixture-observation'
+    }
+}
+function New-HostTrial([string]$Protocol,[int]$Trial,[Collections.IDictionary]$Source) {
+    $durationBase = if ($Protocol -ceq 'bare') { 90 } elseif ($Protocol -ceq 'v1') { 490 } else { 100 }
+    $duration = $durationBase + (10 * $Trial)
+    $freshSessions = if ($Protocol -ceq 'v1') { 5 } else { 1 }
+    $requestSends = if ($Protocol -ceq 'v1') { 10 } elseif ($Protocol -ceq 'v2') { 2 } else { 4 }
+    return [ordered]@{
+        trial=$Trial;runner_expected_trial=$Trial;runner_evidence_passed=$true;workspace_baseline_revision=[string]$Source.revision
+        status='measured';diagnostic=$null;completion_passed=$true;outcome='completed';reason_code='completed'
+        source_binding=[ordered]@{status='bound';revision=[string]$Source.revision;commit_tree_oid=[string]$Source.commit_tree_oid;verification='git-head-tree-clean/v1';reason='fixture source binding'}
+        workflow_contract=$(if($Protocol -ceq 'v1'){'confirmed-plan-to-done'}else{'new-task'});workflow_completed=$true
+        v1_stage_journal=$(if($Protocol -ceq 'v1'){@('PLAN_REVIEW','IMPLEMENT','CODE_REVIEW','TEST','DONE')}else{@()})
+        v1_target_journal=$(if($Protocol -ceq 'v1'){@('alpha','alpha','beta','beta','beta')}else{@()});v1_validator_passed=$true
+        fresh_sessions=$freshSessions;host_turns=[ordered]@{status='measured';value=$freshSessions;basis='codex-jsonl-turn.started';reason='fixture host turns'}
+        successful_request_sends=[ordered]@{status='measured';value=$requestSends;basis='codex-0.144.4-successful-websocket-send/v2';service_version='0.144.4';transport='responses_websocket';per_session_counts=$(if($Protocol -ceq 'v1'){@(2,2,2,2,2)}else{@($requestSends)});reason='fixture request sends'}
+        completed_agent_messages=1;total_duration_ms=$duration;sum_codex_process_duration_ms=$duration;first_useful_action_ms=10
+        tool_calls=[ordered]@{command=1;mcp=0;web_search=0;file_change=1;total=2}
+        loaded_skills=[ordered]@{status='unavailable';value=$null;reason='sanitized'};skill_file_command_matches=[ordered]@{status='measured';value=0;reason='fixture'};loaded_files=[ordered]@{status='unavailable';value=$null;reason='sanitized'}
+        artifact_writes=$(if($Protocol -ceq 'v1'){3}else{0});runtime_writes=$(if($Protocol -ceq 'v1'){3}else{0});unexpected_writes=0;raw_trace_deleted=$true;post_trial_diagnostics=@()
+        tokens=[ordered]@{status='measured';input=1;cached_input=0;output=1}
+    }
+}
+function New-HostProtocolRecord([string]$Protocol,[Collections.IDictionary]$Source) {
+    $trials = @(1,2,3 | ForEach-Object { New-HostTrial -Protocol $Protocol -Trial $_ -Source $Source })
+    $durationMedian = [double]$trials[1].total_duration_ms
+    $sessionMedian = [double]$trials[1].fresh_sessions
+    $sendMedian = [double]$trials[1].successful_request_sends.value
+    return [ordered]@{
+        status='measured';runner_contract_failures=0;trials=$trials
+        successful_request_sends=[ordered]@{status='measured';median=$sendMedian;basis='codex-0.144.4-successful-websocket-send/v2';reason='fixture median'}
+        medians=[ordered]@{total_duration_ms=$durationMedian;sum_codex_process_duration_ms=$durationMedian;first_useful_action_ms=10;fresh_sessions=$sessionMedian;host_turns=$sessionMedian;successful_request_sends=$sendMedian;tool_calls=2;skill_file_command_matches=0}
+    }
+}
+
+$modulePath = Join-Path $RepoRoot 'scripts\lib\Harness.RolloutEvidence.psm1'
+$protocolPath = Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1'
+$temp = Join-Path ([IO.Path]::GetTempPath()) ('thin-v2-rollout-evidence-' + [guid]::NewGuid().ToString('N'))
+[void][IO.Directory]::CreateDirectory($temp)
+try {
+    $module = Import-Module $modulePath -Force -PassThru -ErrorAction Stop
+    $actualSource = Get-HarnessReleaseSourceState -RepoRoot $RepoRoot
+    $cleanSource = [ordered]@{
+        revision=[string]$actualSource.revision;commit_tree_oid=[string]$actualSource.commit_tree_oid;object_format=[string]$actualSource.object_format
+        dirty=$false;status_entry_count=0;status_digest=Get-TextDigest '';state_digest=Get-TextDigest ("{0}`n{1}`n{2}`n" -f $actualSource.revision,$actualSource.commit_tree_oid,$actualSource.object_format);state_basis='git-revision-tree-status/v1'
+    }
+    $sourceState = [ordered]@{
+        revision=[string]$cleanSource.revision;commit_tree_oid=[string]$cleanSource.commit_tree_oid;object_format=[string]$cleanSource.object_format
+        dirty=$false;status_entry_count=0;status_digest=Get-TextDigest '';state_digest=[string]$cleanSource.state_digest;state_basis='git-revision-tree-status/v1'
+    }
+    $datasetPath = Join-Path $RepoRoot 'tests\evals\core-scenarios.json'
+    $dataset = Get-Content -LiteralPath $datasetPath -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable -Depth 40
+    $observationSchemaDigest = Get-FileDigest (Join-Path $RepoRoot 'schemas\model-eval-observation.schema.json')
+    $validTelemetry = [ordered]@{
+        schema_version='codex-invocation-telemetry/v1';status='measured';model='gpt-5.6-sol';reasoning='max';sandbox='read-only';approval_policy='default';ephemeral=$true
+        duration_ms=1.0;first_useful_action_ms=1.0;model_turns=1;agent_messages=1
+        tool_calls=[ordered]@{command=0;mcp=0;web_search=0;file_change=0};lifecycle_skill_loads=0
+        otel_trace=[ordered]@{enabled=$false;contract=$null;provenance=$null}
+        tokens=[ordered]@{status='measured';input=1;cached_input=0;output=1}
+        output_schema=[ordered]@{enabled=$true;digest=$observationSchemaDigest}
+    }
+    $modelCases = [Collections.Generic.List[object]]::new()
+    foreach ($case in @($dataset.cases)) {
+        foreach ($variant in 1,2) {
+            $paraphrase = [string]@($case.paraphrases)[$variant - 1]
+            $modelCases.Add([ordered]@{case_id=[string]$case.id;variant=$variant;paraphrase_digest=(Get-TextDigest $paraphrase);status='pass';failures=@();workspace_write_count=0;observed=(New-ExpectedObservation $case);telemetry=$validTelemetry})
+        }
+    }
+    $modelReport = [ordered]@{
+        schema_version='harness-model-eval-report/v1';generated_at=[DateTimeOffset]::UtcNow.ToString('o');source_revision=[string]$cleanSource.revision;source_dirty=$false;source_state_stable=$true
+        source=[ordered]@{
+            dataset_digest=Get-FileDigest $datasetPath
+            observation_schema_digest=$observationSchemaDigest
+            runner_digest=Get-FileDigest (Join-Path $RepoRoot 'scripts\run-model-evals.ps1')
+            wrapper_digest=Get-FileDigest (Join-Path $RepoRoot 'skills\codex\scripts\invoke_codex.ps1')
+            module_digest=Get-FileDigest (Join-Path $RepoRoot 'scripts\lib\Harness.ModelEval.psm1')
+            credential_guard_digest=Get-FileDigest (Join-Path $RepoRoot 'scripts\host-benchmark\HostBenchmark.Trial.ps1')
+            input_head_binding=[ordered]@{start=$true;end=$true;basis='git-hash-object-equals-revision-blob/v1'}
+            commit_tree_oid=[string]$cleanSource.commit_tree_oid;object_format=[string]$cleanSource.object_format;start=$sourceState;end=(Copy-Document $sourceState)
+        }
+        execution=[ordered]@{model='gpt-5.6-sol';reasoning='max';session_isolation='fresh-workspace-per-paraphrase';ephemeral=$true;sandbox='read-only';prompt_persisted=$false;raw_command_persisted=$false;thread_id_persisted=$false;codex_home='dedicated-config-isolated-auth-home-path-not-persisted';codex_home_layout_stable=$true}
+        status='pass';hard_gate_passed=$true
+        metrics=[ordered]@{total=40;passed=40;failed=0;unavailable=0;missed_ask=0;critical_missed_ask=0;unnecessary_ask=0;product_inference_violation=0;read_only_write=0;false_pass=0;scope_expansion=0;lifecycle_skill_loads=0;model_turns=40;tool_calls=0;input_tokens=40;output_tokens=40;token_observations=40}
+        cases=@($modelCases);report_digest=$null
+    }
+    Set-ReportDigest $modelReport
+    $modelPath = Join-Path $temp 'model.json'
+    Write-Document $modelPath $modelReport
+    $modelGate = Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $modelPath -ExpectedSource $cleanSource
+    Check ([string]$modelGate.status -ceq 'pass') 'clean 40-session model report is accepted' "clean model report was rejected: $($modelGate.reason)"
+
+    $compressedModelPath = Join-Path $temp 'model-compressed.json'
+    Write-Document $compressedModelPath $modelReport -Compress
+    $compressedGate = Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $compressedModelPath -ExpectedSource $cleanSource
+    Check ([string]$compressedGate.status -ceq 'pass' -and [string]$compressedGate.evidence_digest -cne [string]$modelGate.evidence_digest) 'model gate evidence digest binds exact report bytes' 'model evidence digest did not bind exact report bytes'
+
+    $wrongRevision = Copy-Document $modelReport; $wrongRevision.source_revision = '0' * 40; Set-ReportDigest $wrongRevision; $path = Join-Path $temp 'model-wrong-revision.json'; Write-Document $path $wrongRevision
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'wrong-revision model report fails closed' 'wrong-revision model report was accepted'
+    $dirtyModel = Copy-Document $modelReport; $dirtyModel.source_dirty = $true; Set-ReportDigest $dirtyModel; $path = Join-Path $temp 'model-dirty.json'; Write-Document $path $dirtyModel
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'dirty passing model report fails closed' 'dirty passing model report was accepted'
+    $forgedModelSource = Copy-Document $modelReport; $forgedModelSource.source.start.commit_tree_oid='0' * 40; $forgedModelSource.source.end.commit_tree_oid='0' * 40; Set-ReportDigest $forgedModelSource; $path = Join-Path $temp 'model-forged-source.json'; Write-Document $path $forgedModelSource
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'model source snapshots bind the exact qualified tree and clean state' 'forged model source snapshot was accepted'
+    $shortModel = Copy-Document $modelReport; $shortModel.cases = @($shortModel.cases | Select-Object -First 39); $shortModel.metrics.total=39; $shortModel.metrics.passed=39; Set-ReportDigest $shortModel; $path = Join-Path $temp 'model-short.json'; Write-Document $path $shortModel
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'non-40-session model report fails closed' 'short model report was accepted'
+    $wrongParaphrase = Copy-Document $modelReport; $wrongParaphrase.cases[0].paraphrase_digest = 'sha256:' + ('a' * 64); Set-ReportDigest $wrongParaphrase; $path = Join-Path $temp 'model-wrong-paraphrase.json'; Write-Document $path $wrongParaphrase
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'model session digest is bound to the exact dataset paraphrase' 'forged model paraphrase binding was accepted'
+    $wrongDecision = Copy-Document $modelReport; $askIndex = 2 * [array]::IndexOf(@($dataset.cases | ForEach-Object { [string]$_.id }),'ambiguous-export-asks'); $wrongDecision.cases[$askIndex].observed.ask_required = $false; Set-ReportDigest $wrongDecision; $path = Join-Path $temp 'model-wrong-decision.json'; Write-Document $path $wrongDecision
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'model session observation is independently checked against dataset semantics' 'forged passing model decision was accepted'
+    $blockEverything = Copy-Document $modelReport; $blockEverything.cases[0].observed.action='block'; $blockEverything.cases[0].observed.write_authorized_now=$false; Set-ReportDigest $blockEverything; $path = Join-Path $temp 'model-block-everything.json'; Write-Document $path $blockEverything
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'model gate rejects a block-everything substitute for an authorized Direct action' 'block-everything model report was accepted'
+    $executeCritical = Copy-Document $modelReport; $criticalIndex = 2 * [array]::IndexOf(@($dataset.cases | ForEach-Object { [string]$_.id }),'critical-migration-requires-dry-run'); $executeCritical.cases[$criticalIndex].observed.action='execute'; $executeCritical.cases[$criticalIndex].observed.write_authorized_now=$true; $executeCritical.cases[$criticalIndex].observed.completion_allowed=$true; Set-ReportDigest $executeCritical; $path = Join-Path $temp 'model-execute-critical.json'; Write-Document $path $executeCritical
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'model gate rejects destructive Critical execution without dry-run evidence' 'unsafe Critical execution was accepted'
+    $toolUsingModel = Copy-Document $modelReport; $toolUsingModel.cases[0].telemetry.tool_calls.command=1; $toolUsingModel.metrics.tool_calls=1; Set-ReportDigest $toolUsingModel; $path = Join-Path $temp 'model-tool-call.json'; Write-Document $path $toolUsingModel
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'model gate rejects tool use even when aggregate telemetry is self-consistent' 'tool-using model session was accepted'
+    $lifecycleModel = Copy-Document $modelReport; $lifecycleModel.cases[0].telemetry.lifecycle_skill_loads=1; $lifecycleModel.metrics.lifecycle_skill_loads=1; Set-ReportDigest $lifecycleModel; $path = Join-Path $temp 'model-lifecycle.json'; Write-Document $path $lifecycleModel
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'model gate rejects lifecycle skill loading in single-subject sessions' 'lifecycle-loaded model session was accepted'
+    $typedModel = Copy-Document $modelReport; $typedModel.execution.ephemeral='false'; $typedModel.metrics.total='40'; Set-ReportDigest $typedModel; $path = Join-Path $temp 'model-type-forgery.json'; Write-Document $path $typedModel
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'model gate rejects string-forged boolean and integer fields' 'model type forgery was accepted'
+    $wrongTelemetryIdentity = Copy-Document $modelReport; $wrongTelemetryIdentity.cases[0].telemetry.approval_policy='never'; $wrongTelemetryIdentity.cases[0].telemetry.agent_messages=2; Set-ReportDigest $wrongTelemetryIdentity; $path = Join-Path $temp 'model-telemetry-identity.json'; Write-Document $path $wrongTelemetryIdentity
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'model gate binds default approval policy and one agent message per session' 'model telemetry identity forgery was accepted'
+    $retainedFailedPayload = Copy-Document $modelReport; $retainedFailedPayload.cases[0].status='fail'; $retainedFailedPayload.cases[0].failures=@('fixture-failure'); $retainedFailedPayload.metrics.passed=39; $retainedFailedPayload.metrics.failed=1; $retainedFailedPayload.status='fail'; $retainedFailedPayload.hard_gate_passed=$false; Set-ReportDigest $retainedFailedPayload; $path = Join-Path $temp 'model-retained-failed-payload.json'; Write-Document $path $retainedFailedPayload
+    $retainedFailedGate = Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource
+    Check ([string]$retainedFailedGate.status -ceq 'fail' -and [string]$retainedFailedGate.reason -match 'retains observation payload') 'model gate rejects retained payloads on non-passing sessions' 'non-passing model payload was accepted or misclassified'
+    $unavailableModel = Copy-Document $modelReport; $unavailableModel.status='unavailable'; $unavailableModel.hard_gate_passed=$false; Set-ReportDigest $unavailableModel; $path = Join-Path $temp 'model-unavailable.json'; Write-Document $path $unavailableModel
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'unavailable') 'model invocation unavailability remains unavailable' 'model invocation unavailability was misclassified'
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath (Join-Path $temp 'missing.json') -ExpectedSource $cleanSource).status -ceq 'unavailable') 'missing model report remains unavailable' 'missing model report was not unavailable'
+
+    $hostInputs = [ordered]@{
+        runner_digest='scripts\run-host-benchmark.ps1';wrapper_digest='skills\codex\scripts\invoke_codex.ps1';observation_schema_digest='schemas\host-benchmark\observation.schema.json'
+        otlp_collector_digest='scripts\receive-otlp-http.ps1';atomic_write_module_digest='scripts\lib\Harness.AtomicWrite.psm1';path_module_digest='scripts\lib\Harness.Path.psm1'
+        otel_contract_digest='scripts\host-benchmark\HostBenchmark.Otel.ps1';trial_helper_digest='scripts\host-benchmark\HostBenchmark.Trial.ps1'
+    }
+    $hostSource = [ordered]@{}
+    foreach ($entry in $hostInputs.GetEnumerator()) { $hostSource[[string]$entry.Key] = Get-FileDigest (Join-Path $RepoRoot ([string]$entry.Value)) }
+    $hostSource.input_head_binding=[ordered]@{start=$true;end=$true;basis='git-hash-object-equals-revision-blob/v1'}
+    $hostSource.commit_tree_oid=[string]$cleanSource.commit_tree_oid; $hostSource.object_format=[string]$cleanSource.object_format
+    $hostSource.start=$sourceState; $hostSource.end=(Copy-Document $sourceState)
+    $hostSource.execution_mode='clean-commit-clone'
+    $protocols = [ordered]@{bare=(New-HostProtocolRecord -Protocol bare -Source $cleanSource);v1=(New-HostProtocolRecord -Protocol v1 -Source $cleanSource);v2=(New-HostProtocolRecord -Protocol v2 -Source $cleanSource)}
+    $hostReport = [ordered]@{
+        schema_version='harness-host-benchmark-report/v1';generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o');source_revision=[string]$cleanSource.revision;source_dirty=$false;source_state_stable=$true;source=$hostSource
+        execution=[ordered]@{
+            model='gpt-5.6-sol';reasoning='max';trials_per_protocol=3;release_trials_required=3;max_fresh_sessions=8;fresh_workspace_per_trial=$true;fresh_ephemeral_session_per_invocation=$true
+            v1_comparator='confirmed-plan-to-done-one-stage-per-host-turn';bare_and_v2_start='new-task';semantic_task='change exact private file bytes and verify';host_turn_basis='codex-jsonl-turn.started'
+            successful_request_send_measurement='codex-0.144.4-successful-websocket-send/v2';expected_codex_service_version='0.144.4';trial_order_strategy='round-interleaved-rotating-start'
+            actual_trial_order=@([ordered]@{sequence=1;protocol='bare';trial=1},[ordered]@{sequence=2;protocol='v1';trial=1},[ordered]@{sequence=3;protocol='v2';trial=1},[ordered]@{sequence=4;protocol='v1';trial=2},[ordered]@{sequence=5;protocol='v2';trial=2},[ordered]@{sequence=6;protocol='bare';trial=2},[ordered]@{sequence=7;protocol='v2';trial=3},[ordered]@{sequence=8;protocol='bare';trial=3},[ordered]@{sequence=9;protocol='v1';trial=3})
+            cache_state='shared-dedicated-auth-home-and-host-cache-not-cleared-between-trials';codex_home='dedicated-config-isolated-auth-home-path-not-persisted';sandbox='danger-full-access';approval_policy='never';workspace_boundary='dedicated-ignored-nested-git-root'
+            prompt_persisted=$false;raw_command_persisted=$false;thread_id_persisted=$false;raw_trace_persisted=$false;raw_trace_cleanup_confirmed=$true;scratch_persisted=$false;install_duration_included=$false;duration_ms=1000
+        }
+        protocols=$protocols
+        performance=[ordered]@{release_trial_set=[ordered]@{status='pass';required_trials_per_protocol=3;reason='fixture'};direct_latency=[ordered]@{status='pass';ratio=1.0909;threshold=1.25;reason='fixture'};successful_request_send_reduction=[ordered]@{status='pass';reduction=0.8;threshold=0.60;reason='fixture'};eligible=$true}
+        status='pass';report_digest=$null
+    }
+    Set-ReportDigest $hostReport
+    $hostPath = Join-Path $temp 'host.json'; Write-Document $hostPath $hostReport
+    $hostGate = Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $hostPath -ExpectedSource $cleanSource
+    Check ([string]$hostGate.status -ceq 'pass') 'clean host 3x3 report is accepted' "clean host report was rejected: $($hostGate.reason)"
+    $extraSourceHost = Copy-Document $hostReport; $extraSourceHost.source.unexpected='sentinel-extra-field'; Set-ReportDigest $extraSourceHost; $path=Join-Path $temp 'host-extra-source.json'; Write-Document $path $extraSourceHost
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'host gate rejects extra source fields' 'extra host source field was accepted'
+    $extraExecutionHost = Copy-Document $hostReport; $extraExecutionHost.execution.auth_json='sentinel-extra-field'; Set-ReportDigest $extraExecutionHost; $path=Join-Path $temp 'host-extra-execution.json'; Write-Document $path $extraExecutionHost
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'host gate rejects extra execution fields' 'extra host execution field was accepted'
+    $extraTrialHost = Copy-Document $hostReport; $extraTrialHost.protocols.bare.trials[0].unexpected='sentinel-extra-field'; Set-ReportDigest $extraTrialHost; $path=Join-Path $temp 'host-extra-trial.json'; Write-Document $path $extraTrialHost
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'host gate rejects extra trial fields' 'extra host trial field was accepted'
+    $extraMeasurementHost = Copy-Document $hostReport; $extraMeasurementHost.protocols.v1.trials[0].successful_request_sends.secret='sentinel-extra-field'; Set-ReportDigest $extraMeasurementHost; $path=Join-Path $temp 'host-extra-measurement.json'; Write-Document $path $extraMeasurementHost
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'host gate rejects extra measurement fields' 'extra host measurement field was accepted'
+    $shortHost = Copy-Document $hostReport; $shortHost.protocols.v2.trials=@($shortHost.protocols.v2.trials | Select-Object -First 2); Set-ReportDigest $shortHost; $path=Join-Path $temp 'host-short.json'; Write-Document $path $shortHost
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'non-3x3 host report fails closed' 'short host report was accepted'
+    $slowHost = Copy-Document $hostReport; $slowHost.performance.direct_latency.ratio=1.3; Set-ReportDigest $slowHost; $path=Join-Path $temp 'host-slow.json'; Write-Document $path $slowHost
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'host threshold contradiction fails closed' 'host threshold contradiction was accepted'
+    $forgedHost = Copy-Document $hostReport; $forgedHost.protocols.v2.trials[1].total_duration_ms=1000; Set-ReportDigest $forgedHost; $path=Join-Path $temp 'host-forged-median.json'; Write-Document $path $forgedHost
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'host performance medians are recomputed from the exact 3x3 trials' 'forged host aggregate was accepted'
+    $unboundHost = Copy-Document $hostReport; $unboundHost.protocols.bare.trials[0].source_binding.revision='0' * 40; Set-ReportDigest $unboundHost; $path=Join-Path $temp 'host-unbound.json'; Write-Document $path $unboundHost
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'every host trial is independently bound to the qualified source' 'unbound host trial was accepted'
+    $forgedHostSource = Copy-Document $hostReport; $forgedHostSource.source.start.status_digest='sha256:' + ('f' * 64); $forgedHostSource.source.end.status_digest='sha256:' + ('f' * 64); Set-ReportDigest $forgedHostSource; $path=Join-Path $temp 'host-forged-source.json'; Write-Document $path $forgedHostSource
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'host source snapshots bind the exact qualified status digest' 'forged host source snapshot was accepted'
+    $typedHost = Copy-Document $hostReport; $typedHost.execution.fresh_workspace_per_trial='false'; $typedHost.protocols.v2.trials[0].runner_evidence_passed='false'; $typedHost.performance.direct_latency.ratio='NaN'; Set-ReportDigest $typedHost; $path=Join-Path $temp 'host-type-forgery.json'; Write-Document $path $typedHost
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'host gate rejects string-forged booleans and non-finite performance values' 'host type forgery was accepted'
+    $unavailableHost = Copy-Document $hostReport; $unavailableHost.status='unavailable'; $unavailableHost.performance.eligible=$false; Set-ReportDigest $unavailableHost; $path=Join-Path $temp 'host-unavailable.json'; Write-Document $path $unavailableHost
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'unavailable') 'host measurement unavailability remains unavailable' 'host measurement unavailability was misclassified'
+    $extraUnavailableHost = Copy-Document $unavailableHost; $extraUnavailableHost.protocols.v2.trials[0].source_binding.secret='sentinel-extra-field'; Set-ReportDigest $extraUnavailableHost; $path=Join-Path $temp 'host-unavailable-extra.json'; Write-Document $path $extraUnavailableHost
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'unavailable host reports still reject extra nested fields' 'unavailable host report accepted an extra nested field'
+    $dirtyExpected = Copy-Document $cleanSource; $dirtyExpected.dirty=$true
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $hostPath -ExpectedSource $dirtyExpected).status -ceq 'fail') 'dirty generator source rejects otherwise passing evidence' 'dirty generator source accepted release evidence'
+
+    $protocolModule = Import-Module $protocolPath -Force -PassThru
+    $sourcePaths = @(& $protocolModule { param($Root) Get-HarnessRolloutSourcePaths -RepoRoot $Root } $RepoRoot)
+    $tracked = @(& git -C $RepoRoot -c core.quotepath=false ls-files -- | ForEach-Object { ([string]$_).Replace('\','/') })
+    Check ($sourcePaths.Count -gt 0 -and @($sourcePaths | Where-Object { $_ -cnotin $tracked }).Count -eq 0) 'rollout source digest enumerates tracked files only' 'rollout source digest included an untracked or ignored file'
+    Check (@($sourcePaths | Where-Object { $_.StartsWith('skills/.system/',[StringComparison]::Ordinal) }).Count -eq 0) 'ignored generated skill runtime is excluded from rollout source digest' 'ignored generated skill runtime entered rollout source digest'
+
+    $unavailableGates = [ordered]@{
+        behavior=[ordered]@{status='unavailable'};v1_compatibility=[ordered]@{status='pass'};direct_performance=[ordered]@{status='unavailable'}
+        core_install_rollback=[ordered]@{status='pass'};full_install_rollback=[ordered]@{status='pass'}
+    }
+    $failedGates = Copy-Document $unavailableGates; $failedGates.behavior.status='fail'
+    $requiredExit = & $module { param($Values) Get-HarnessReleaseExitCode -Gates $Values -Eligible $false -RequireEligible $true } $unavailableGates
+    $diagnosticExit = & $module { param($Values) Get-HarnessReleaseExitCode -Gates $Values -Eligible $false -RequireEligible $false } $unavailableGates
+    $failedExit = & $module { param($Values) Get-HarnessReleaseExitCode -Gates $Values -Eligible $false -RequireEligible $true } $failedGates
+    Check ($requiredExit -eq 3 -and $diagnosticExit -eq 0 -and $failedExit -eq 1) 'release exit classification distinguishes unavailable diagnostics from failed evidence' 'release exit classification is invalid'
+
+    $artifactTarget = & $module { param($Root,$Path,$Inputs) Resolve-HarnessReleaseArtifactPath -RepoRoot $Root -OutputPath $Path -EvidencePaths $Inputs } $RepoRoot (Join-Path $temp 'artifact\rollout.json') @($modelPath,$hostPath)
+    $artifactContent = '{"eligible":false}'
+    & $module { param($Target,$Content) Write-HarnessReleaseArtifact -Target $Target -Content $Content } $artifactTarget $artifactContent
+    Check ((Get-Content -LiteralPath $artifactTarget -Raw -Encoding utf8) -ceq $artifactContent) 'rollout artifact is atomically persisted before the caller applies its exit code' 'rollout artifact persistence failed'
+    $existingRejected=$false; try { $null = & $module { param($Root,$Path) Resolve-HarnessReleaseArtifactPath -RepoRoot $Root -OutputPath $Path } $RepoRoot $artifactTarget } catch { $existingRejected=$true }
+    Check $existingRejected 'rollout output refuses to clobber an existing file' 'existing rollout output was overwriteable'
+    $gitRejected=$false; try { $null = & $module { param($Root,$Path) Resolve-HarnessReleaseArtifactPath -RepoRoot $Root -OutputPath $Path } $RepoRoot (Join-Path $RepoRoot '.git\rq09-output.json') } catch { $gitRejected=$true }
+    Check $gitRejected 'rollout output rejects Git metadata paths' 'Git metadata could be used as rollout output'
+    $sourceRejected=$false; try { $null = & $module { param($Root,$Path) Resolve-HarnessReleaseArtifactPath -RepoRoot $Root -OutputPath $Path } $RepoRoot (Join-Path $RepoRoot 'tests\rq09-output.json') } catch { $sourceRejected=$true }
+    Check $sourceRejected 'rollout output inside source must be explicitly ignored' 'non-ignored source path could be used as rollout output'
+    $credentialRoot=Join-Path $temp 'credential-home'; [void][IO.Directory]::CreateDirectory($credentialRoot)
+    $credentialRejected=$false; try { $null = & $module { param($Root,$Path,$Protected) Resolve-HarnessReleaseArtifactPath -RepoRoot $Root -OutputPath $Path -ProtectedRoots $Protected } $RepoRoot (Join-Path $credentialRoot 'rollout.json') @($credentialRoot) } catch { $credentialRejected=$true }
+    Check $credentialRejected 'rollout output rejects credential-home overlap' 'credential home could be used as rollout output'
+    $credentialAlias=Join-Path $temp 'credential-alias'; [void](New-Item -ItemType Junction -Path $credentialAlias -Target $credentialRoot -ErrorAction Stop)
+    $physicalAliasRejected=$false; try { $null = & $module { param($Root,$Path,$Protected) Resolve-HarnessReleaseArtifactPath -RepoRoot $Root -OutputPath $Path -ProtectedRoots $Protected } $RepoRoot (Join-Path $credentialRoot 'physical-rollout.json') @($credentialAlias) } catch { $physicalAliasRejected=$true }
+    Check $physicalAliasRejected 'rollout output compares credential-home physical identities' 'credential-home junction alias bypassed output containment'
+} finally {
+    Remove-Module Harness.RolloutEvidence,Harness.Protocol -ErrorAction Ignore
+    if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+foreach ($item in $script:checks) { Write-Output "[PASS] $item" }
+foreach ($item in $script:failures) { Write-Output "[FAIL] $item" }
+if ($script:failures.Count -gt 0) { Write-Output "STATUS: FAIL ($($script:failures.Count) failed)"; exit 1 }
+Write-Output "STATUS: PASS ($($script:checks.Count) checks)"
+exit 0

@@ -59,11 +59,38 @@ Check ($routing.run_all_optional -and @($routing.modules).Count -eq 5 -and @($ro
 
 $workflow = Get-Content -LiteralPath $workflowPath -Raw -Encoding utf8
 $rolloutGenerator = Get-Content -LiteralPath $rolloutGeneratorPath -Raw -Encoding utf8
+$releaseModelJob = [regex]::Match($workflow,'(?ms)^  release-model:\s*$.*?(?=^  release-host:\s*$)').Value
+$releaseHostJob = [regex]::Match($workflow,'(?ms)^  release-host:\s*$.*?(?=^  release-full:\s*$)').Value
+$releaseJob = [regex]::Match($workflow,'(?ms)^  release-full:\s*$.*\z').Value
+$modelUpload = [regex]::Match($releaseModelJob,'(?ms)^      - name: Upload model evidence\s*$.*\z').Value
+$hostUpload = [regex]::Match($releaseHostJob,'(?ms)^      - name: Upload host evidence\s*$.*\z').Value
+$releaseUpload = [regex]::Match($releaseJob,'(?ms)^      - name: Upload rollout evidence\s*$.*\z').Value
+$checkoutAction = 'actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5'
+$uploadAction = 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'
+$downloadAction = 'actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093'
+$trustedRefs = @('refs/heads/main','refs/heads/codex/harness-distribution','refs/heads/codex/thin-harness-v2-refactor')
+$trustedProducerCount = 0
+foreach ($producer in @($releaseModelJob,$releaseHostJob)) {
+    if ($producer -match '(?m)^\s*runs-on:\s*\$\{\{\s*vars\.THIN_V2_RELEASE_RUNNER\s*\|\|\s*''windows-latest''\s*\}\}\s*$' -and
+        $producer -match '(?m)^\s*HOST_BENCHMARK_CODEX_HOME:\s*\$\{\{\s*vars\.HOST_BENCHMARK_CODEX_HOME\s*\}\}\s*$' -and
+        $producer -match '(?m)^\s*environment:\s*thin-v2-release\s*$' -and
+        $producer -match '(?m)^\s*persist-credentials:\s*false\s*$' -and
+        $producer -match '!cancelled\(\)' -and @($trustedRefs | Where-Object { $producer -notmatch [regex]::Escape($_) }).Count -eq 0 -and
+        $producer -notmatch '(?i)secrets\.') { $trustedProducerCount++ }
+}
 Check ($workflow -match '(?m)^\s*schedule:\s*$' -and $workflow -match '(?m)^\s*workflow_dispatch:\s*$') 'CI exposes nightly and manual release validation' 'CI lacks nightly or manual release validation'
-Check ($workflow -match '(?m)^\s*pr-core:\s*$' -and $workflow -match '(?m)^\s*changed-optional:\s*$' -and $workflow -match '(?m)^\s*release-full:\s*$') 'CI declares PR core, changed optional, and release full jobs' 'CI job layering is incomplete'
+Check ($workflow -match '(?m)^\s*pr-core:\s*$' -and $workflow -match '(?m)^\s*changed-optional:\s*$' -and $workflow -match '(?m)^\s*release-model:\s*$' -and $workflow -match '(?m)^\s*release-host:\s*$' -and $workflow -match '(?m)^\s*release-full:\s*$') 'CI declares PR core, changed optional, split release producers, and release full jobs' 'CI job layering is incomplete'
+Check (@([regex]::Matches($workflow,[regex]::Escape($checkoutAction))).Count -eq 5 -and @([regex]::Matches($workflow,[regex]::Escape($uploadAction))).Count -eq 3 -and @([regex]::Matches($workflow,[regex]::Escape($downloadAction))).Count -eq 2 -and $workflow -notmatch 'actions/(?:checkout|upload-artifact|download-artifact)@v\d+') 'every GitHub Action dependency is pinned to a verified full commit SHA' 'GitHub Action dependencies are movable or not pinned to the approved commits'
 Check ($workflow -match 'run-validation\.ps1 -Suite core' -and $workflow -match 'run-changed-optional-validation\.ps1' -and $rolloutGenerator -match 'run-validation\.ps1 -Suite all') 'each CI layer delegates to the expected validation entry' 'CI layer commands are wrong'
 Check ($workflow -match 'run-isolated-install-smoke\.ps1[^\r\n]+-Preset core' -and $workflow -match 'generate-v2-rollout-report\.ps1' -and $rolloutGenerator -match 'run-isolated-install-smoke\.ps1 -Preset core' -and $rolloutGenerator -match 'run-isolated-install-smoke\.ps1 -Preset full') 'PR and release jobs cover core/full install rollback' 'CI install rollback coverage is incomplete'
-Check ($rolloutGenerator -match 'run-validation\.ps1 -Suite all' -and $rolloutGenerator -match 'run-scenario-evals\.ps1 -Suite core' -and $rolloutGenerator -match 'benchmark-harness\.ps1 -Compare bare,v1,v2') 'release report binds full validation, behavior, and performance gates' 'release report omits full validation, behavior, or performance gates'
+Check ($trustedProducerCount -eq 2 -and $releaseJob -match '(?m)^\s*runs-on:\s*windows-latest\s*$' -and $releaseJob -match '(?m)^\s*persist-credentials:\s*false\s*$' -and $releaseJob -notmatch 'HOST_BENCHMARK_CODEX_HOME') 'credentialed producers are trusted-ref/environment bound and no release checkout persists GitHub credentials' 'release runner, trusted-ref, environment, or checkout credential boundary is unsafe'
+Check ($releaseModelJob -match '(?m)^\s*timeout-minutes:\s*120\s*$' -and $releaseHostJob -match '(?m)^\s*timeout-minutes:\s*180\s*$' -and $releaseJob -match '(?m)^\s*timeout-minutes:\s*120\s*$' -and @($releaseModelJob,$releaseHostJob,$releaseJob | Where-Object { $_ -match '(?m)^\s*fetch-depth:\s*0\s*$' }).Count -eq 3) 'release producers and aggregator use full checkout with bounded 120/180/120-minute budgets' 'release checkout depth or timeout budgets are wrong'
+Check ($releaseModelJob -notmatch '(?m)^\s*continue-on-error:' -and $releaseModelJob -match 'run-model-evals\.ps1[^\r\n]+-TimeoutSeconds 120[^\r\n]+-CodexHome \$env:HOST_BENCHMARK_CODEX_HOME[^\r\n]+model-eval\.json' -and $releaseModelJob -match 'GITHUB_RUN_ID-\$env:GITHUB_RUN_ATTEMPT\\model' -and $releaseModelJob -match 'Model evidence directory already exists') 'release model producer bounds real sessions and refuses stale evidence directories' 'release model producer contract is incomplete'
+Check ($releaseHostJob -notmatch '(?m)^\s*continue-on-error:' -and $releaseHostJob -match '(?m)^\s*needs:\s*release-model\s*$' -and $releaseHostJob -match 'run-host-benchmark\.ps1[^\r\n]+-TimeoutSeconds 900[^\r\n]+-CodexHome \$env:HOST_BENCHMARK_CODEX_HOME[^\r\n]+-Trials 3[^\r\n]+host-benchmark\.json' -and $releaseHostJob -match 'GITHUB_RUN_ID-\$env:GITHUB_RUN_ATTEMPT\\host' -and $releaseHostJob -match 'Host evidence directory already exists') 'release host producer runs after model with the evidence-backed timeout and refuses stale directories' 'release host producer contract is incomplete'
+Check ($releaseJob -match '!cancelled\(\)' -and $releaseJob -notmatch 'always\(\)' -and $releaseJob -match '(?ms)^\s*needs:\s*\r?\n\s*- release-model\s*\r?\n\s*- release-host' -and @([regex]::Matches($releaseJob,[regex]::Escape($downloadAction))).Count -eq 2 -and $releaseJob -match 'generate-v2-rollout-report\.ps1[^\r\n]+-ModelEvalReportPath[^\r\n]+model-eval\.json[^\r\n]+-HostBenchmarkReportPath[^\r\n]+host-benchmark\.json[^\r\n]+v2-rollout-eligibility\.json[^\r\n]+-RequireEligible' -and $releaseJob -match 'GITHUB_RUN_ID-\$env:GITHUB_RUN_ATTEMPT\\aggregate') 'release aggregator runs after failed producers unless cancelled and consumes a fresh fixed evidence directory' 'release aggregator can resist cancellation, reuse stale evidence, or emit a non-eligible successful release'
+Check ($modelUpload -match [regex]::Escape($uploadAction) -and $modelUpload -match '(?m)^\s*if-no-files-found:\s*error\s*$' -and @([regex]::Matches($modelUpload,'(?m)^\s+path:\s*\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/model-eval\.json\s*$')).Count -eq 1 -and $hostUpload -match [regex]::Escape($uploadAction) -and $hostUpload -match '(?m)^\s*if-no-files-found:\s*error\s*$' -and @([regex]::Matches($hostUpload,'(?m)^\s+path:\s*\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/host-benchmark\.json\s*$')).Count -eq 1) 'release producers upload exactly one fresh evidence JSON or fail' 'release producer artifact scope is wrong'
+Check ($releaseUpload -match '!cancelled\(\)' -and $releaseUpload -match [regex]::Escape($uploadAction) -and $releaseUpload -match '(?m)^\s*if-no-files-found:\s*warn\s*$' -and @([regex]::Matches($releaseUpload,'(?m)^\s+\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/[a-z0-9-]+\.json\s*$')).Count -eq 3 -and ($modelUpload + $hostUpload + $releaseUpload) -notmatch '(?i)auth\.json|CODEX_ACCESS_TOKEN|OPENAI_API_KEY|secrets\.') 'final artifact scope is limited to three fresh sanitized JSON paths without credential transport' 'release artifact scope or credential boundary is unsafe'
+Check ($rolloutGenerator -match 'ModelEvalReportPath' -and $rolloutGenerator -match 'HostBenchmarkReportPath' -and $rolloutGenerator -match 'run-validation\.ps1 -Suite all' -and $rolloutGenerator -notmatch 'run-scenario-evals\.ps1 -Suite core' -and $rolloutGenerator -notmatch 'benchmark-harness\.ps1 -Compare bare,v1,v2') 'rollout eligibility consumes real reports while deterministic eval and fixture replay remain non-release evidence' 'rollout eligibility still substitutes deterministic or fixture evidence for real qualification'
 
 $validation = Get-Content -LiteralPath $validationPath -Raw -Encoding utf8
 $coreBlock = [regex]::Match($validation,'(?s)\$coreScripts\s*=\s*@\((?<body>.*?)\r?\n\)').Groups['body'].Value
@@ -73,6 +100,7 @@ Check (@($optionalNames | Where-Object { $coreBlock -match [regex]::Escape($_) }
 
 $readme = Get-Content -LiteralPath $readmePath -Raw -Encoding utf8
 Check ($readme -match 'PR core' -and $readme -match 'changed optional' -and $readme -match 'release full') 'README documents layered validation behavior' 'README CI documentation is stale'
+Check ($readme -match 'PowerShell 7\.3\+' -and $readme -match 'Codex CLI/service `0\.144\.4`' -and $readme -match 'model/host/聚合 job 上限分别为 120/180/120 分钟') 'README documents exact release-runner prerequisites and split budgets' 'README release-runner prerequisites or split budgets are incomplete'
 
 foreach($item in $script:checks){Write-Output "[PASS] $item"}
 foreach($item in $script:failures){Write-Output "[FAIL] $item"}
