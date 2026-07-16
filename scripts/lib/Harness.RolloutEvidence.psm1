@@ -1,6 +1,7 @@
 ﻿Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
+Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop
 . (Join-Path $PSScriptRoot '..\host-benchmark\HostBenchmark.Trial.ps1')
 
 function Get-ReleaseSha256Bytes {
@@ -84,6 +85,79 @@ function Resolve-HarnessReleaseArtifactPath {
         if ($LASTEXITCODE -ne 0) { throw 'release-output-inside-source-must-be-ignored' }
     }
     return $target
+}
+
+function Resolve-ReleaseGitPath {
+    param([Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$Argument)
+    $value = (@(Invoke-ReleaseGit -RepoRoot $RepoRoot -Arguments @('rev-parse',$Argument)) -join '').Trim()
+    if ([string]::IsNullOrWhiteSpace($value)) { throw 'rollout-promotion-git-path-unavailable' }
+    if ([IO.Path]::IsPathRooted($value)) { return [IO.Path]::GetFullPath($value) }
+    return [IO.Path]::GetFullPath((Join-Path $RepoRoot $value))
+}
+
+function Assert-ReleaseSingleLinkFile {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$Label)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "rollout-promotion-$Label-not-file" }
+    $links = @(& fsutil hardlink list $Path 2>$null | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($LASTEXITCODE -ne 0) { throw "rollout-promotion-$Label-physical-identity-unavailable" }
+    if ($links.Count -ne 1) { throw "rollout-promotion-$Label-hardlink-rejected" }
+}
+
+function Assert-ReleaseSingleDataStreamFile {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$Label)
+    $streams = @(Get-Item -LiteralPath $Path -Stream * -ErrorAction Stop)
+    if ($streams.Count -ne 1 -or [string]$streams[0].Stream -cne ':$DATA') { throw "rollout-promotion-$Label-alternate-stream-rejected" }
+}
+
+function Resolve-HarnessRolloutPromotionPaths {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$WorkspaceRoot,
+        [Parameter(Mandatory)][string]$ReportPath,
+        [string[]]$ProtectedRoots = @()
+    )
+
+    $repo = (Resolve-Path -LiteralPath $RepoRoot).Path
+    $workspace = Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
+    $physicalWorkspace = Get-HostPhysicalPathInfo -Path $workspace -RejectLinks
+    $workspaceIdentity = ('{0}|{1}' -f [string]$physicalWorkspace.volume,[string]$physicalWorkspace.file_id).ToLowerInvariant()
+    if (-not [IO.Path]::IsPathRooted($ReportPath)) { throw 'rollout-promotion-input-must-be-absolute' }
+    $source = [IO.Path]::GetFullPath($ReportPath)
+    Assert-ReleasePathHasNoReparseAncestor -Path $source
+    Assert-ReleaseSingleLinkFile -Path $source -Label 'input'
+    Assert-ReleaseSingleDataStreamFile -Path $source -Label 'input'
+    $physicalSource = Get-HostPhysicalPathInfo -Path $source -RejectLinks
+
+    $gitDirectory = Resolve-ReleaseGitPath -RepoRoot $repo -Argument '--git-dir'
+    $gitCommonDirectory = Resolve-ReleaseGitPath -RepoRoot $repo -Argument '--git-common-dir'
+    $forbidden = @($repo,$workspace,$gitDirectory,$gitCommonDirectory) + @($ProtectedRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { [IO.Path]::GetFullPath($_) })
+    foreach ($root in @($forbidden | Select-Object -Unique)) {
+        if (Test-ReleasePathAtOrBelow -Path $source -Root $root) { throw 'rollout-promotion-input-overlaps-protected-root' }
+        $physicalRoot = Get-HostPhysicalPathInfo -Path $root -AllowMissing
+        if ((Test-ReleasePathAtOrBelow -Path ([string]$physicalSource.physical_path) -Root ([string]$physicalRoot.physical_path)) -or
+            (Test-ReleasePathAtOrBelow -Path ([string]$physicalRoot.physical_path) -Root ([string]$physicalSource.physical_path))) {
+            throw 'rollout-promotion-input-overlaps-protected-root'
+        }
+    }
+
+    $targetRelative = '.assistant/runtime/rollout/v2-eligibility.json'
+    $target = Resolve-HarnessContainedPath -WorkspaceRoot $workspace -Path $targetRelative -Label 'rollout promotion target' -AllowMissing
+    Assert-ReleasePathHasNoReparseAncestor -Path $target
+    if ((Test-Path -LiteralPath $target) -and -not (Test-Path -LiteralPath $target -PathType Leaf)) { throw 'rollout-promotion-target-not-file' }
+    if (Test-Path -LiteralPath $target -PathType Leaf) {
+        Assert-ReleaseSingleLinkFile -Path $target -Label 'target'
+        Assert-ReleaseSingleDataStreamFile -Path $target -Label 'target'
+    }
+    $physicalTarget = Get-HostPhysicalPathInfo -Path $target -AllowMissing -RejectLinks
+    if ([string]$physicalSource.volume -ceq [string]$physicalTarget.volume -and [string]$physicalSource.file_id -ceq [string]$physicalTarget.file_id) { throw 'rollout-promotion-input-overlaps-target' }
+    foreach ($root in @(@($gitDirectory,$gitCommonDirectory) + @($ProtectedRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }))) {
+        $physicalRoot = Get-HostPhysicalPathInfo -Path ([IO.Path]::GetFullPath($root)) -AllowMissing
+        if ((Test-ReleasePathAtOrBelow -Path $target -Root $root) -or
+            (Test-ReleasePathAtOrBelow -Path ([string]$physicalTarget.physical_path) -Root ([string]$physicalRoot.physical_path))) {
+            throw 'rollout-promotion-target-overlaps-protected-root'
+        }
+    }
+    return [ordered]@{source=$source;target=$target;target_relative=$targetRelative;workspace=$workspace;workspace_identity=$workspaceIdentity}
 }
 
 function Write-HarnessReleaseArtifact {

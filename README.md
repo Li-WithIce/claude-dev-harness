@@ -42,6 +42,8 @@ pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\dev-harn
 
 ### 日常使用
 
+普通用户在安装 Harness 后，只需用 Codex 桌面版打开目标项目并直接描述需求；无需设置 `HARNESS_PROTOCOL` / `HARNESS_V2_ELIGIBILITY_REPORT`、运行 `task.ps1` 或手工选择 profile。显式协议、报告路径和离线 promotion 是发布维护/诊断入口；`HARNESS_PROTOCOL=v1` 仅作为紧急回滚开关。
+
 安装后的用户视角，日常基本只有 4 件事：
 
 1. 在目标工作区里发起开发或只读工程请求，让入口文档先判定 `resume-current / switch-existing / new-task / authorized durable inbox-first`；`new-task` 再轻量路由到 `quick / workflow / ask`。
@@ -362,7 +364,7 @@ GitHub Actions 使用三层 Windows 验证：pull request 的 **PR core** 运行
 
 两个真实 release job 默认仍使用 `windows-latest` 并在没有合格登录时 fail closed；聚合 job 不接触凭证。正式资格只能运行 `main`、`codex/harness-distribution` 或 `codex/thin-harness-v2-refactor`，并绑定 `thin-v2-release` environment；该 environment 应启用分支限制和必要的审批。仓库管理员须把 `THIN_V2_RELEASE_RUNNER` 设置为本仓库独占的自定义 Windows runner 标签，把 `HOST_BENCHMARK_CODEX_HOME` 设置为隔离 OS 账号下独立登录的目录。runner 不承载其他 secrets 或工作负载，并预装 PowerShell 7.3+、Git、符合 OTel 合同的 Codex CLI/service `0.144.4`；release checkout 使用 `persist-credentials: false`。Codex-home 变量只是非敏感路径，目录内的 `auth.json`、OAuth/token 只留在 runner 文件系统，不能复制到仓库、Actions variable/secret、workflow input 或 artifact。没有合格登录或精确版本时，真实报告保持 `unavailable`。`tests/run-scenario-evals.ps1` 的 deterministic policy/schema 结果和 `scripts/benchmark-harness.ps1` 的 fixture replay 仍用于 PR/本地诊断，均不能替代 release model/host evidence。
 
-`HARNESS_PROTOCOL=auto` 对既有 task 始终按 v2 `task.json` / 合法 v1 `plan.md` artifact 识别；仅当无既有 task 且通过 `HARNESS_V2_ELIGIBILITY_REPORT` 显式提供的 workspace-contained、revision-bound report 全部 gate 为 `pass` 时才选择 v2。CI 上传只持久化审计证据，本批不自动下载、安装或发现报告；在独立交付链完成前，未显式提供合法报告的工作区继续选择 v1。缺失、dirty、stale、篡改、failed、blocked、simulated 或 unavailable report 均诊断后回退 v1；`HARNESS_PROTOCOL=v1` 永久保留为止损开关。生成、交付、deprecation 与 v1 退役条件见 `docs/release/compatibility-policy.md`。
+`HARNESS_PROTOCOL=auto` 对既有 task 始终按 v2 `task.json` / 合法 v1 `plan.md` artifact 识别；无既有 task 时按显式 `EligibilityReportPath`、`HARNESS_V2_ELIGIBILITY_REPORT`、workspace canonical `.assistant/runtime/rollout/v2-eligibility.json` 的固定优先级查找 revision-bound report。高优先级来源一旦被选中但 missing/invalid 会直接回退 v1，不会用 canonical 掩盖错误。CI artifact 仍不自动下载；把 artifact 保存为 repo、workspace、Git metadata 和 credential home 之外的普通文件后，使用透明、无网络的 `scripts/promote-v2-rollout-report.ps1` 原子发布到固定 canonical 路径。installer/update/uninstall 不生成、接管或删除该证据。缺失、dirty、stale、篡改、failed、blocked、simulated 或 unavailable report 均诊断后回退 v1；`HARNESS_PROTOCOL=v1` 永久保留为止损开关。生成、显式发布、deprecation 与 v1 退役条件见 `docs/release/compatibility-policy.md`。
 
 ### 跑完整 verify 套件
 

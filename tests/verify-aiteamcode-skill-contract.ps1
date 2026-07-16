@@ -471,23 +471,30 @@ function Invoke-Adapter {
         [string]$PayloadJson = '{}'
     )
 
-    $wrapperPath = Join-Path ([System.IO.Path]::GetTempPath()) ('invoke-adapter-wrapper-' + [guid]::NewGuid().ToString('N') + '.ps1')
-    $toolProfileArgument = if ([string]::IsNullOrWhiteSpace($ToolProfileId)) { '' } else { " -ToolProfileId '$ToolProfileId'" }
-    $wrapperContent = @"
-& '$AdapterPath' -TaskId '$TaskId' -Stage '$Stage' -Skill '$Skill' -Tool '$Tool'$toolProfileArgument -WorkspaceRoot '$WorkspaceRoot' -Mode '$Mode' -PayloadJson @'
-$PayloadJson
-'@
-exit `$LASTEXITCODE
-"@
+    $arguments = @(
+        '-TaskId', $TaskId,
+        '-Stage', $Stage,
+        '-Skill', $Skill,
+        '-Tool', $Tool
+    )
+    if (-not [string]::IsNullOrWhiteSpace($ToolProfileId)) {
+        $arguments += @('-ToolProfileId', $ToolProfileId)
+    }
+    $arguments += @(
+        '-WorkspaceRoot', $WorkspaceRoot,
+        '-Mode', $Mode,
+        '-PayloadJson', $PayloadJson
+    )
 
-    try {
-        Write-Utf8Bom -Path $wrapperPath -Content $wrapperContent
-        return Invoke-PowerShellWithStreams -Arguments @(
-            '-NoProfile',
-            '-File', $wrapperPath
-        )
-    } finally {
-        Remove-Item -LiteralPath $wrapperPath -Force -ErrorAction SilentlyContinue
+    $hostPath = (Get-Command powershell.exe -CommandType Application -ErrorAction Stop).Source
+    $capture = Start-LifecyclePowerShell -HostPath $hostPath -ScriptPath $AdapterPath -Arguments $arguments
+    $result = Complete-LifecyclePowerShell -Capture $capture -Label 'Invoke-Adapter' -TimeoutMilliseconds 1830000
+    $combined = @($result.StdOut, $result.StdErr) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    return [pscustomobject]@{
+        ExitCode = $result.ExitCode
+        StdOut = $result.StdOut
+        StdErr = $result.StdErr
+        Combined = ($combined -join "`n")
     }
 }
 

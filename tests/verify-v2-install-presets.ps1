@@ -118,6 +118,13 @@ function Test-ExactSet {
     return @(Compare-Object @($Actual) @($Expected)).Count -eq 0
 }
 
+function Test-ManifestExcludesPath {
+    param($Manifest,[string]$Path)
+    $expected = Get-NormalizedPath -Path $Path
+    $recorded = @($Manifest.managed_backup_targets) + @($Manifest.backups | ForEach-Object { $_.path })
+    return @($recorded | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) -and (Get-NormalizedPath -Path $_) -eq $expected }).Count -eq 0
+}
+
 function Assert-ManifestPreset {
     param(
         $Manifest,
@@ -154,6 +161,12 @@ function Assert-UninstallExit {
     if ($Result.ExitCode -eq 0) { Add-Check "$Label uninstall succeeds" } else { Add-Failure "$Label uninstall failed: $($Result.Output)" }
 }
 
+function Assert-RolloutAbsent {
+    param($Fixture,[string]$Label)
+    $path = Join-Path $Fixture.Workspace '.assistant\runtime\rollout\v2-eligibility.json'
+    if (-not (Test-Path -LiteralPath $path)) { Add-Check "$Label leaves the canonical rollout report absent" } else { Add-Failure "$Label generated or restored the canonical rollout report" }
+}
+
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent $PSScriptRoot
 }
@@ -185,10 +198,16 @@ try {
     $foreignSentinel = Join-Path $defaultFixture.User '.codex\skills\foreign-skill\sentinel.txt'
     New-Item -ItemType Directory -Path (Split-Path -Parent $foreignSentinel) -Force | Out-Null
     [System.IO.File]::WriteAllText($foreignSentinel,'foreign-user-asset',[System.Text.UTF8Encoding]::new($false))
+    $coreRolloutSentinel = Join-Path $defaultFixture.Workspace '.assistant\runtime\rollout\v2-eligibility.json'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $coreRolloutSentinel) -Force | Out-Null
+    $coreRolloutBytes = [System.Text.UTF8Encoding]::new($false).GetBytes('{"installer_owned":false}')
+    [System.IO.File]::WriteAllBytes($coreRolloutSentinel,$coreRolloutBytes)
     $defaultInstall = Invoke-Install -Fixture $defaultFixture
     Assert-InstallExit $defaultInstall 'fresh default'
     if ($defaultInstall.ExitCode -eq 0) {
-        Assert-ManifestPreset (Get-LatestManifest $defaultFixture) 'core' 'default-core' $coreFeatures $coreSkills $coreHooks 'minimal'
+        $defaultManifest = Get-LatestManifest $defaultFixture
+        Assert-ManifestPreset $defaultManifest 'core' 'default-core' $coreFeatures $coreSkills $coreHooks 'minimal'
+        if (([System.IO.File]::ReadAllBytes($coreRolloutSentinel) -join ',') -ceq ($coreRolloutBytes -join ',') -and (Test-ManifestExcludesPath $defaultManifest $coreRolloutSentinel)) { Add-Check 'core install preserves and does not claim the canonical rollout report' } else { Add-Failure 'core install changed or claimed the canonical rollout report' }
         $optionalPaths = @(
             (Join-Path $defaultFixture.User '.codex\skills\obsidian-memory'),
             (Join-Path $defaultFixture.User '.codex\skills\workflow-team'),
@@ -212,12 +231,18 @@ try {
         } else {
             Add-Failure "Claude PreToolUse adapter rejected a valid Write payload: $($adapterResult.StdErr)"
         }
+        $coreUpdate = Invoke-Install -Fixture $defaultFixture
+        Assert-InstallExit $coreUpdate 'core update'
+        if ($coreUpdate.ExitCode -eq 0) {
+            $coreUpdateManifest = Get-LatestManifest $defaultFixture
+            if (([System.IO.File]::ReadAllBytes($coreRolloutSentinel) -join ',') -ceq ($coreRolloutBytes -join ',') -and (Test-ManifestExcludesPath $coreUpdateManifest $coreRolloutSentinel)) { Add-Check 'core update preserves and does not claim the canonical rollout report' } else { Add-Failure 'core update changed or claimed the canonical rollout report' }
+        }
         Assert-UninstallExit (Invoke-Uninstall $defaultFixture) 'fresh default'
-        if ((Test-Path -LiteralPath $foreignSentinel -PathType Leaf) -and
-            [System.IO.File]::ReadAllText($foreignSentinel) -ceq 'foreign-user-asset') {
-            Add-Check 'core install and uninstall preserve foreign skill assets'
+        if ((Test-Path -LiteralPath $foreignSentinel -PathType Leaf) -and [System.IO.File]::ReadAllText($foreignSentinel) -ceq 'foreign-user-asset' -and
+            (Test-Path -LiteralPath $coreRolloutSentinel -PathType Leaf) -and ([System.IO.File]::ReadAllBytes($coreRolloutSentinel) -join ',') -ceq ($coreRolloutBytes -join ',')) {
+            Add-Check 'core install and uninstall preserve foreign skill assets and canonical rollout evidence'
         } else {
-            Add-Failure 'core install or uninstall changed a foreign skill asset'
+            Add-Failure 'core install or uninstall changed a foreign skill asset or canonical rollout evidence'
         }
     }
 
@@ -245,6 +270,27 @@ try {
         Assert-UninstallExit (Invoke-Uninstall $minimalFixture) 'legacy minimal'
     }
 
+    $presetCoreFixture = New-PresetFixture -Name 'preset-core-absent-rollout'
+    $presetCoreInstall = Invoke-Install -Fixture $presetCoreFixture -ExtraArguments @('-Preset','core')
+    Assert-InstallExit $presetCoreInstall 'explicit core without rollout report'
+    if ($presetCoreInstall.ExitCode -eq 0) {
+        Assert-RolloutAbsent $presetCoreFixture 'core install'
+        $presetCoreManifest = Get-LatestManifest $presetCoreFixture
+        $presetCoreRolloutSentinel = Join-Path $presetCoreFixture.Workspace '.assistant\runtime\rollout\v2-eligibility.json'
+        if (Test-ManifestExcludesPath $presetCoreManifest $presetCoreRolloutSentinel) { Add-Check 'core install does not claim an absent canonical rollout report' } else { Add-Failure 'core install claimed an absent canonical rollout report' }
+        $presetCoreRolloutBytes = [System.Text.UTF8Encoding]::new($false).GetBytes('{"installer_owned":false,"arrival":"after-core-install"}')
+        New-Item -ItemType Directory -Path (Split-Path -Parent $presetCoreRolloutSentinel) -Force | Out-Null
+        [System.IO.File]::WriteAllBytes($presetCoreRolloutSentinel,$presetCoreRolloutBytes)
+        $presetCoreUpdate = Invoke-Install -Fixture $presetCoreFixture -ExtraArguments @('-Preset','core')
+        Assert-InstallExit $presetCoreUpdate 'explicit core update without rollout report'
+        if ($presetCoreUpdate.ExitCode -eq 0) {
+            $presetCoreUpdateManifest = Get-LatestManifest $presetCoreFixture
+            if (([System.IO.File]::ReadAllBytes($presetCoreRolloutSentinel) -join ',') -ceq ($presetCoreRolloutBytes -join ',') -and (Test-ManifestExcludesPath $presetCoreUpdateManifest $presetCoreRolloutSentinel)) { Add-Check 'core update preserves and does not claim a rollout report created after install' } else { Add-Failure 'core update changed or claimed a rollout report created after install' }
+        }
+        Assert-UninstallExit (Invoke-Uninstall $presetCoreFixture) 'explicit core without rollout report'
+        if ((Test-Path -LiteralPath $presetCoreRolloutSentinel -PathType Leaf) -and ([System.IO.File]::ReadAllBytes($presetCoreRolloutSentinel) -join ',') -ceq ($presetCoreRolloutBytes -join ',')) { Add-Check 'core uninstall preserves a rollout report created after install' } else { Add-Failure 'core uninstall removed or changed a rollout report created after install' }
+    }
+
     $detectedFullFixture = New-PresetFixture -Name 'detected-full-vault'
     New-Item -ItemType Directory -Path (Join-Path $detectedFullFixture.Workspace '.assistant\工作流') -Force | Out-Null
     $detectedFullInstall = Invoke-Install -Fixture $detectedFullFixture
@@ -255,15 +301,20 @@ try {
     }
 
     $fullFixture = New-PresetFixture -Name 'legacy-full-preserve'
+    $fullRolloutSentinel=Join-Path $fullFixture.Workspace '.assistant\runtime\rollout\v2-eligibility.json';New-Item -ItemType Directory -Path (Split-Path -Parent $fullRolloutSentinel) -Force|Out-Null;$fullRolloutBytes=[System.Text.UTF8Encoding]::new($false).GetBytes('{"installer_owned":false,"preset":"full"}');[System.IO.File]::WriteAllBytes($fullRolloutSentinel,$fullRolloutBytes)
     $fullInstall = Invoke-Install -Fixture $fullFixture -ExtraArguments @('-VaultProfile','full')
     Assert-InstallExit $fullInstall 'legacy full'
     if ($fullInstall.ExitCode -eq 0) {
         Assert-ManifestPreset (Get-LatestManifest $fullFixture) 'full' 'vault-profile:full' $fullFeatures $fullSkills $fullHooks 'full'
         if ($fullInstall.Output -match 'VaultProfile is deprecated') { Add-Check 'legacy full emits migration warning' } else { Add-Failure 'legacy full did not emit migration warning' }
+        $fullInstallManifest=Get-LatestManifest $fullFixture
+        if (([System.IO.File]::ReadAllBytes($fullRolloutSentinel)-join',') -ceq ($fullRolloutBytes-join',') -and (Test-ManifestExcludesPath $fullInstallManifest $fullRolloutSentinel)) { Add-Check 'full fresh install preserves and does not claim the canonical rollout report' } else { Add-Failure 'full fresh install changed or claimed the canonical rollout report' }
         $preserveInstall = Invoke-Install -Fixture $fullFixture
         Assert-InstallExit $preserveInstall 'implicit full preservation'
         if ($preserveInstall.ExitCode -eq 0) {
-            Assert-ManifestPreset (Get-LatestManifest $fullFixture) 'full' 'manifest-preserve' $fullFeatures $fullSkills $fullHooks 'full'
+            $preserveManifest=Get-LatestManifest $fullFixture
+            Assert-ManifestPreset $preserveManifest 'full' 'manifest-preserve' $fullFeatures $fullSkills $fullHooks 'full'
+            if (([System.IO.File]::ReadAllBytes($fullRolloutSentinel)-join',') -ceq ($fullRolloutBytes-join',') -and (Test-ManifestExcludesPath $preserveManifest $fullRolloutSentinel)) { Add-Check 'full update preserves and does not claim the canonical rollout report' } else { Add-Failure 'full update changed or claimed the canonical rollout report' }
             if ((Test-Path -LiteralPath (Join-Path $fullFixture.User '.codex\skills\obsidian-memory')) -and
                 (Test-Path -LiteralPath (Join-Path $fullFixture.User '.codex\skills\workflow-team')) -and
                 (Test-Path -LiteralPath (Join-Path $fullFixture.User '.claude\hooks-memory\userpromptsubmit.js'))) {
@@ -272,7 +323,29 @@ try {
                 Add-Failure 'implicit update shrank an existing full install'
             }
             Assert-UninstallExit (Invoke-Uninstall $fullFixture) 'preserved full update'
+            if ((Test-Path -LiteralPath $fullRolloutSentinel -PathType Leaf) -and ([System.IO.File]::ReadAllBytes($fullRolloutSentinel)-join',') -ceq ($fullRolloutBytes-join',')) { Add-Check 'full uninstall preserves canonical rollout evidence' } else { Add-Failure 'full uninstall removed or changed canonical rollout evidence' }
         }
+    }
+
+    $presetFullFixture = New-PresetFixture -Name 'preset-full-absent-rollout'
+    $presetFullInstall = Invoke-Install -Fixture $presetFullFixture -ExtraArguments @('-Preset','full')
+    Assert-InstallExit $presetFullInstall 'explicit full without rollout report'
+    if ($presetFullInstall.ExitCode -eq 0) {
+        Assert-RolloutAbsent $presetFullFixture 'full install'
+        $presetFullManifest = Get-LatestManifest $presetFullFixture
+        $presetFullRolloutSentinel = Join-Path $presetFullFixture.Workspace '.assistant\runtime\rollout\v2-eligibility.json'
+        if (Test-ManifestExcludesPath $presetFullManifest $presetFullRolloutSentinel) { Add-Check 'full install does not claim an absent canonical rollout report' } else { Add-Failure 'full install claimed an absent canonical rollout report' }
+        $presetFullRolloutBytes = [System.Text.UTF8Encoding]::new($false).GetBytes('{"installer_owned":false,"arrival":"after-full-install"}')
+        New-Item -ItemType Directory -Path (Split-Path -Parent $presetFullRolloutSentinel) -Force | Out-Null
+        [System.IO.File]::WriteAllBytes($presetFullRolloutSentinel,$presetFullRolloutBytes)
+        $presetFullUpdate = Invoke-Install -Fixture $presetFullFixture -ExtraArguments @('-Preset','full')
+        Assert-InstallExit $presetFullUpdate 'explicit full update without rollout report'
+        if ($presetFullUpdate.ExitCode -eq 0) {
+            $presetFullUpdateManifest = Get-LatestManifest $presetFullFixture
+            if (([System.IO.File]::ReadAllBytes($presetFullRolloutSentinel) -join ',') -ceq ($presetFullRolloutBytes -join ',') -and (Test-ManifestExcludesPath $presetFullUpdateManifest $presetFullRolloutSentinel)) { Add-Check 'full update preserves and does not claim a rollout report created after install' } else { Add-Failure 'full update changed or claimed a rollout report created after install' }
+        }
+        Assert-UninstallExit (Invoke-Uninstall $presetFullFixture) 'explicit full without rollout report'
+        if ((Test-Path -LiteralPath $presetFullRolloutSentinel -PathType Leaf) -and ([System.IO.File]::ReadAllBytes($presetFullRolloutSentinel) -join ',') -ceq ($presetFullRolloutBytes -join ',')) { Add-Check 'full uninstall preserves a rollout report created after install' } else { Add-Failure 'full uninstall removed or changed a rollout report created after install' }
     }
 
     $conflictFixture = New-PresetFixture -Name 'conflict'

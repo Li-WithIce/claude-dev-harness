@@ -218,8 +218,11 @@ function New-HarnessRolloutReportDocument {
 }
 
 function Get-HarnessRolloutEligibility {
-    param([string]$RepoRoot,[string]$WorkspaceRoot,[string]$ReportPath)
-    if ([string]::IsNullOrWhiteSpace($ReportPath)) { $ReportPath = [Environment]::GetEnvironmentVariable('HARNESS_V2_ELIGIBILITY_REPORT',[EnvironmentVariableTarget]::Process) }
+    param(
+        [string]$RepoRoot,
+        [string]$WorkspaceRoot,
+        [AllowEmptyString()][string]$ReportPath = ''
+    )
     if ([string]::IsNullOrWhiteSpace($ReportPath)) { return [ordered]@{status='missing';eligible=$false;reason='rollout-report-missing';report_digest=$null} }
     try {
         $target = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $ReportPath -Label 'rollout eligibility report' -AllowMissing
@@ -301,7 +304,17 @@ function Get-HarnessProtocolResolution {
 
     $rollout = [ordered]@{status='not-required';eligible=$false;reason='artifact-or-explicit-selection';report_digest=$null}
     if ($detected -ceq 'new' -and $requested -ceq 'auto') {
-        $rollout = Get-HarnessRolloutEligibility -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -ReportPath $EligibilityReportPath
+        $reportPath = $EligibilityReportPath
+        $reportPathSelected = $PSBoundParameters.ContainsKey('EligibilityReportPath')
+        if (-not $reportPathSelected) {
+            $environmentReportPath = [Environment]::GetEnvironmentVariable('HARNESS_V2_ELIGIBILITY_REPORT',[EnvironmentVariableTarget]::Process)
+            if ($null -ne $environmentReportPath) {
+                $reportPath = $environmentReportPath
+                $reportPathSelected = $true
+            }
+        }
+        if (-not $reportPathSelected) { $reportPath = '.assistant/runtime/rollout/v2-eligibility.json' }
+        $rollout = Get-HarnessRolloutEligibility -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -ReportPath $reportPath
     }
     $selected = if ($detected -cin @('v1','v2')) {
         $detected
