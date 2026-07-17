@@ -13,8 +13,32 @@ function Assert-HarnessProtectedExactKeys {
 
 function Convert-HarnessProtectedGlob {
     param([string]$Glob)
-    $escaped=[regex]::Escape($Glob.Replace('\','/'));$escaped=$escaped.Replace('\*\*','.*').Replace('\*','[^/]*').Replace('\?','[^/]')
-    return '^'+$escaped+'$'
+
+    $globText = $Glob.Replace('\','/')
+    $builder = [System.Text.StringBuilder]::new('^')
+    for ($index = 0; $index -lt $globText.Length; $index++) {
+        $character = $globText[$index]
+        if ($character -eq '*') {
+            $double = $index + 1 -lt $globText.Length -and $globText[$index + 1] -eq '*'
+            if ($double) {
+                $index++
+                if ($index + 1 -lt $globText.Length -and $globText[$index + 1] -eq '/') {
+                    $index++
+                    [void]$builder.Append('(?:.*/)?')
+                } else {
+                    [void]$builder.Append('.*')
+                }
+            } else {
+                [void]$builder.Append('[^/]*')
+            }
+        } elseif ($character -eq '?') {
+            [void]$builder.Append('[^/]')
+        } else {
+            [void]$builder.Append([regex]::Escape([string]$character))
+        }
+    }
+    [void]$builder.Append('$')
+    return $builder.ToString()
 }
 
 function Assert-HarnessProtectedRule {
@@ -69,6 +93,7 @@ function Read-HarnessProtectedTask {
     try{$task=[IO.File]::ReadAllText($full,[Text.UTF8Encoding]::new($false,$true))|ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop}catch{throw "protected task is invalid: $($_.Exception.Message)"}
     try{$valid=Test-Json -Json ($task|ConvertTo-Json -Depth 30 -Compress) -SchemaFile (Join-Path $RepoRoot 'schemas\task-state.schema.json') -ErrorAction Stop -WarningAction SilentlyContinue}catch{throw "protected task schema is unavailable: $($_.Exception.Message)"}
     if(-not$valid){throw 'protected task failed schema validation'}
+    if([string]$task.task_id-cne$TaskId){throw 'protected task task_id does not match its canonical path'}
     $contractPath=Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path ([string]$task.contract_path) -Label 'protected task Contract' -MustExist File
     try{$contract=[IO.File]::ReadAllText($contractPath,[Text.UTF8Encoding]::new($false,$true))|ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop}catch{throw "protected task Contract is invalid: $($_.Exception.Message)"}
     try{$contractValid=Test-Json -Json ($contract|ConvertTo-Json -Depth 30 -Compress) -SchemaFile (Join-Path $RepoRoot 'schemas\requirement-contract.schema.json') -ErrorAction Stop -WarningAction SilentlyContinue}catch{throw "protected task Contract schema is unavailable: $($_.Exception.Message)"}

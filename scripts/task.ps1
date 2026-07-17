@@ -60,6 +60,8 @@ try {
                 throw 'selected protocol is v1; new v2 task commands require HARNESS_PROTOCOL=v2 and existing v1 tasks require explicit migration'
             }
             $env:HARNESS_PROTOCOL = 'v2'
+        } else {
+            $env:HARNESS_PROTOCOL = 'v2'
         }
         Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.TaskState.psm1') -Force -ErrorAction Stop
         if ($Command -ceq 'create') {

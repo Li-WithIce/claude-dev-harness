@@ -30,9 +30,14 @@ function Test-HarnessApprovalExpiry {
         [System.Collections.IDictionary]$Approval,
         [datetimeoffset]$AsOf = [datetimeoffset]::UtcNow
     )
+    try { $approvedAt = [datetimeoffset]::Parse([string]$Approval.approved_at,[Globalization.CultureInfo]::InvariantCulture) }
+    catch { throw 'Approval approved_at is invalid' }
+    if ($approvedAt -gt $AsOf) { throw 'Approval approved_at is in the future' }
     if ($null -eq $Approval.expires_at) { return $false }
-    try { return [datetimeoffset]::Parse([string]$Approval.expires_at,[Globalization.CultureInfo]::InvariantCulture) -le $AsOf }
-    catch { return $true }
+    try { $expiresAt = [datetimeoffset]::Parse([string]$Approval.expires_at,[Globalization.CultureInfo]::InvariantCulture) }
+    catch { throw 'Approval expires_at is invalid' }
+    if ($expiresAt -le $approvedAt) { throw 'Approval expires_at must be later than approved_at' }
+    return $expiresAt -le $AsOf
 }
 
 function Resolve-HarnessApprovalInputCore {

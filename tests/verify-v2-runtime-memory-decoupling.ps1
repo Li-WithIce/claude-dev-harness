@@ -71,12 +71,29 @@ try {
 
     $execute=Invoke-Task $taskScript $fixture $workspace @('resume-and-execute','-TaskId','recover-task','-ExpectedVersion','1','-AsJson');$executed=Read-Output $execute
     Check ($execute.ExitCode-eq0-and$executed.write_authorized-eq$true-and$executed.task.version-eq2-and$executed.task.status-ceq'running'-and$executed.pointer_action-ceq'activated') 'explicit resume-and-execute writes running state and activates current' 'explicit resume-and-execute failed'
+    $recoveryModule=@(Get-Module Harness.Recovery)[-1];$retryState=[ordered]@{pointer_reads=0}
+    & $recoveryModule {
+        param($State)
+        $script:RecoveryRetryState=$State
+        function script:Read-HarnessRecoveryPointer {
+            param([string]$RepoRoot,[string]$WorkspaceRoot)
+            $script:RecoveryRetryState.pointer_reads++
+            $pointer=[IO.File]::ReadAllText((Join-Path $WorkspaceRoot '.assistant/runtime/current.json'),[Text.UTF8Encoding]::new($false,$true))|ConvertFrom-Json -AsHashtable -DateKind String
+            if($script:RecoveryRetryState.pointer_reads-eq1){$pointer.task_version=[int]$pointer.task_version-1}
+            return $pointer
+        }
+    } $retryState
+    $retryIndex=Get-HarnessRecoveryIndex -RepoRoot $fixture -WorkspaceRoot $workspace
+    Check ($retryState.pointer_reads-eq2-and$retryIndex.current.task_id-ceq'recover-task'-and$retryIndex.current.task_version-eq2) 'recovery index retries a split pointer/task sample and returns the next coherent snapshot' 'recovery index did not execute its bounded retry path'
+    Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Recovery.psm1') -Force
     $index=Read-Output (Invoke-Task $taskScript $fixture $workspace @('status','-AsJson') $null)
     Check ($index.current.task_id-ceq'recover-task'-and$index.current.task_version-eq2-and@($index.tasks|Where-Object is_current).Count-eq1) 'recovery index reflects the activated task' 'recovery index missed current task'
     $before=Snapshot $workspace;$stale=Invoke-Task $taskScript $fixture $workspace @('resume-and-execute','-TaskId','recover-task','-ExpectedVersion','1','-AsJson')
     Check ($stale.ExitCode-eq2-and$stale.StdErr-match'ExpectedVersion mismatch') 'resume-and-execute enforces CAS' 'stale resume-and-execute was accepted';Same $before (Snapshot $workspace) 'stale resume is zero-write' 'stale resume wrote state'
 
     $otherContract=Write-Contract $workspace 'other-task' 'contracts/other.json';$other=Invoke-Task $taskScript $fixture $workspace @('create','-TaskId','other-task','-Contract',$otherContract,'-AsJson')
+    $otherTaskPath=Join-Path $workspace '.assistant/runtime/tasks/other-task/task.json';$otherTaskBytes=[IO.File]::ReadAllBytes($otherTaskPath);$otherTaskDocument=[Text.UTF8Encoding]::new($false,$true).GetString($otherTaskBytes)|ConvertFrom-Json -AsHashtable -DateKind String;$otherTaskDocument.task_id='recover-task';[IO.File]::WriteAllText($otherTaskPath,(($otherTaskDocument|ConvertTo-Json -Depth 50)+"`n"),[Text.UTF8Encoding]::new($false));$identityBefore=Snapshot $workspace;$identityIndex=Invoke-Task $taskScript $fixture $workspace @('status','-AsJson') $null
+    Check ($identityIndex.ExitCode-eq2-and$identityIndex.StdErr-match'task_id does not match its canonical path') 'recovery index rejects a task document stored under another TaskId' 'recovery index trusted a task identity from the wrong directory';Same $identityBefore (Snapshot $workspace) 'recovery task identity rejection is zero-write' 'recovery task identity rejection wrote state';[IO.File]::WriteAllBytes($otherTaskPath,$otherTaskBytes)
     $before=Snapshot $workspace;$collision=Invoke-Task $taskScript $fixture $workspace @('resume-and-execute','-TaskId','other-task','-ExpectedVersion','1','-AsJson')
     Check ($other.ExitCode-eq0-and$collision.ExitCode-eq2-and$collision.StdErr-match'another current task') 'resume-and-execute does not steal a current pointer' 'resume-and-execute stole the current pointer';Same $before (Snapshot $workspace) 'current collision is zero-write' 'current collision wrote state'
     $pause=Invoke-Task $taskScript $fixture $workspace @('transition','-TaskId','recover-task','-ExpectedVersion','2','-To','paused','-AsJson');$resumeAgain=Invoke-Task $taskScript $fixture $workspace @('resume-and-execute','-TaskId','recover-task','-ExpectedVersion','3','-AsJson')

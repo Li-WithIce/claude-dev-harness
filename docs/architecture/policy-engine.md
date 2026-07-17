@@ -15,7 +15,7 @@ The canonical machine sources are:
 
 Documentation and prompts may explain these rules but cannot weaken them. Missing, malformed, unknown, or semantically weaker policy fails closed.
 
-Core ships exactly two protected-action rules: production destructive database commands and authorization-path changes. This is not a claim that two rules cover every Critical trigger. Projects extend the boundary with `protected-actions-overlay/v1`, validated by `schemas/protected-actions-overlay.schema.json`. Overlay rule ids must be unique and cannot replace core ids; each rule may match an exact environment label, command regex, path globs, or their intersection, and may only require Governed/Critical plus an existing Approval type, dry-run, and independent review. A malformed, duplicate, unreadable, or schema-invalid overlay rejects writes fail closed; reads remain available.
+Core ships exactly two protected-action rules: production destructive database commands and authorization-path changes. This is not a claim that two rules cover every Critical trigger. Globstar prefixes such as `**/auth/**` match the protected directory at the workspace root as well as at nested depths. Projects extend the boundary with `protected-actions-overlay/v1`, validated by `schemas/protected-actions-overlay.schema.json`. Overlay rule ids must be unique and cannot replace core ids; each rule may match an exact environment label, command regex, path globs, or their intersection, and may only require Governed/Critical plus an existing Approval type, dry-run, and independent review. A malformed, duplicate, unreadable, or schema-invalid overlay rejects writes fail closed; reads remain available.
 
 ## Resolution flow
 

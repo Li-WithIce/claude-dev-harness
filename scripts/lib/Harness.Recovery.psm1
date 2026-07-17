@@ -37,6 +37,31 @@ function Read-HarnessRecoveryPointer {
     return $pointer
 }
 
+function Test-HarnessRecoverySnapshotConsistency {
+    param([object[]]$Tasks,[AllowNull()][object]$Pointer)
+
+    $currentTasks = @($Tasks | Where-Object { [bool]$_.is_current })
+    if ($null -eq $Pointer) {
+        return [ordered]@{ stable=($currentTasks.Count -eq 0);current=$null }
+    }
+    $matches = @($currentTasks | Where-Object {
+        [string]$_.task_id -ceq [string]$Pointer.task_id -and
+        [int]$_.task_version -eq [int]$Pointer.task_version
+    })
+    if ($currentTasks.Count -ne 1 -or $matches.Count -ne 1) {
+        return [ordered]@{ stable=$false;current=$null }
+    }
+    return [ordered]@{
+        stable = $true
+        current = [ordered]@{
+            task_id = [string]$Pointer.task_id
+            task_version = [int]$Pointer.task_version
+            status = [string]$matches[0].status
+            activated_at = [string]$Pointer.activated_at
+        }
+    }
+}
+
 function Get-HarnessRecoveryIndex {
     [CmdletBinding()]
     param(
@@ -47,53 +72,45 @@ function Get-HarnessRecoveryIndex {
     $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
     $WorkspaceRoot = Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
     $tasksRoot = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path "$($script:RuntimeRelative)/tasks" -Label 'runtime tasks' -AllowMissing
-    $pointer = Read-HarnessRecoveryPointer -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot
-    $tasks = [System.Collections.Generic.List[object]]::new()
+    $tasks = $null
     $terminalCount = 0
-
-    if (Test-Path -LiteralPath $tasksRoot) {
-        if (-not (Test-Path -LiteralPath $tasksRoot -PathType Container)) {
-            throw 'runtime tasks path is not a directory'
-        }
-        foreach ($directory in Get-ChildItem -LiteralPath $tasksRoot -Directory -Force | Sort-Object Name) {
-            if ($directory.Name -cmatch '^\.migration-(?!(?:none|idle|unknown)-)[a-z0-9][a-z0-9-]{0,63}-[0-9a-f]{32}$') {
-                continue
+    $snapshot = $null
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $tasks = [System.Collections.Generic.List[object]]::new()
+        $terminalCount = 0
+        if (Test-Path -LiteralPath $tasksRoot) {
+            if (-not (Test-Path -LiteralPath $tasksRoot -PathType Container)) {
+                throw 'runtime tasks path is not a directory'
             }
-            Assert-HarnessTaskId -TaskId $directory.Name
-            $status = Get-HarnessTaskStatus -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $directory.Name
-            if ([string]$status.task.status -cin @('done','cancelled')) {
-                $terminalCount++
-                continue
+            foreach ($directory in Get-ChildItem -LiteralPath $tasksRoot -Directory -Force | Sort-Object Name) {
+                if ($directory.Name -cmatch '^\.migration-(?!(?:none|idle|unknown)-)[a-z0-9][a-z0-9-]{0,63}-[0-9a-f]{32}$') {
+                    continue
+                }
+                Assert-HarnessTaskId -TaskId $directory.Name
+                $status = Get-HarnessTaskStatus -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $directory.Name
+                if ([string]$status.task.status -cin @('done','cancelled')) {
+                    $terminalCount++
+                    continue
+                }
+                $tasks.Add([ordered]@{
+                    task_id = [string]$status.task.task_id
+                    task_version = [int]$status.task.version
+                    status = [string]$status.task.status
+                    execution_profile = [string]$status.task.execution_profile
+                    requirement_state = [string]$status.task.requirement_state
+                    is_current = [bool]$status.is_current
+                    resume_allowed = [string]$status.task.requirement_state -ceq 'clear' -and [string]$status.task.status -cin @('ready','running','paused','failed')
+                    pending_transactions = @($status.pending_transactions)
+                    updated_at = [string]$status.task.updated_at
+                })
             }
-            $tasks.Add([ordered]@{
-                task_id = [string]$status.task.task_id
-                task_version = [int]$status.task.version
-                status = [string]$status.task.status
-                execution_profile = [string]$status.task.execution_profile
-                requirement_state = [string]$status.task.requirement_state
-                is_current = [bool]$status.is_current
-                resume_allowed = [string]$status.task.requirement_state -ceq 'clear' -and [string]$status.task.status -cin @('ready','running','paused','failed')
-                pending_transactions = @($status.pending_transactions)
-                updated_at = [string]$status.task.updated_at
-            })
         }
+        $pointer = Read-HarnessRecoveryPointer -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot
+        $snapshot = Test-HarnessRecoverySnapshotConsistency -Tasks @($tasks) -Pointer $pointer
+        if ([bool]$snapshot.stable) { break }
     }
-
-    $current = $null
-    if ($null -ne $pointer) {
-        $currentMatches = @($tasks | Where-Object { [string]$_.task_id -ceq [string]$pointer.task_id })
-        if ($currentMatches.Count -ne 1) {
-            throw 'current pointer does not reference one nonterminal runtime task'
-        }
-        if ([int]$currentMatches[0].task_version -ne [int]$pointer.task_version) {
-            throw 'current pointer task_version is stale'
-        }
-        $current = [ordered]@{
-            task_id = [string]$pointer.task_id
-            task_version = [int]$pointer.task_version
-            status = [string]$currentMatches[0].status
-            activated_at = [string]$pointer.activated_at
-        }
+    if ($null -eq $snapshot -or -not [bool]$snapshot.stable) {
+        throw 'recovery state changed during snapshot; retry status'
     }
 
     return [ordered]@{
@@ -101,7 +118,7 @@ function Get-HarnessRecoveryIndex {
         schema_version = 'recovery-index/v2'
         generated_at = [datetimeoffset]::UtcNow.ToString('o')
         source = $script:RuntimeRelative
-        current = $current
+        current = $snapshot.current
         tasks = @($tasks)
         terminal_task_count = $terminalCount
         side_effects = [ordered]@{

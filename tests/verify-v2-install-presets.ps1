@@ -193,20 +193,30 @@ function Assert-InstalledTaskProtocol {
 
     $priorProtocol = $env:HARNESS_PROTOCOL
     $priorReport = $env:HARNESS_V2_ELIGIBILITY_REPORT
+    $result = $null
+    $replayResult = $null
     try {
         $env:HARNESS_PROTOCOL = 'auto'
         Remove-Item Env:HARNESS_V2_ELIGIBILITY_REPORT -ErrorAction SilentlyContinue
         $result = Invoke-ChildScript -UserProfile $Fixture.User -ScriptPath (Join-Path $Fixture.Workspace '.assistant\entry\task.ps1') -Arguments @(
             'protocol','-TaskId',$taskId,'-AsJson'
         )
+        Remove-Item Env:HARNESS_PROTOCOL -ErrorAction SilentlyContinue
+        $replayResult = Invoke-ChildScript -UserProfile $Fixture.User -ScriptPath (Join-Path $Fixture.Workspace '.assistant\entry\task.ps1') -Arguments @(
+            'replay','-TransactionId','txn_00000000000000000000000000000000','-AsJson'
+        )
     } finally {
         if ($null -eq $priorProtocol) { Remove-Item Env:HARNESS_PROTOCOL -ErrorAction SilentlyContinue } else { $env:HARNESS_PROTOCOL = $priorProtocol }
         if ($null -eq $priorReport) { Remove-Item Env:HARNESS_V2_ELIGIBILITY_REPORT -ErrorAction SilentlyContinue } else { $env:HARNESS_V2_ELIGIBILITY_REPORT = $priorReport }
     }
 
+    $resultExit = if ($null -eq $result) { 'unavailable' } else { [string]$result.ExitCode }
+    $resultOutput = if ($null -eq $result) { '' } else { [string]$result.Output }
+    $replayExit = if ($null -eq $replayResult) { 'unavailable' } else { [string]$replayResult.ExitCode }
+    $replayOutput = if ($null -eq $replayResult) { '' } else { [string]$replayResult.Output }
     $value = $null
-    if ($result.ExitCode -eq 0) {
-        try { $value = $result.Output.Trim() | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop } catch {}
+    if ($resultExit -eq '0') {
+        try { $value = $resultOutput.Trim() | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop } catch {}
     }
     if ($null -ne $value -and
         [string]$value.detected_protocol -ceq 'v1' -and
@@ -216,7 +226,12 @@ function Assert-InstalledTaskProtocol {
         [int]$value.side_effects.artifact_writes -eq 0) {
         Add-Check "$Label executes protocol through the installed workspace-bound task shim"
     } else {
-        Add-Failure "$Label installed task shim protocol call failed: exit=$($result.ExitCode) output=$($result.Output)"
+        Add-Failure "$Label installed task shim protocol call failed: exit=$resultExit output=$resultOutput"
+    }
+    if ($null -ne $replayResult -and $replayExit -eq '2' -and $replayOutput -match 'transaction journal not found' -and $replayOutput -notmatch 'HARNESS_PROTOCOL') {
+        Add-Check "$Label installed task shim enters bounded v2 replay without caller protocol state"
+    } else {
+        Add-Failure "$Label installed task shim replay call failed unexpectedly: exit=$replayExit output=$replayOutput"
     }
 }
 

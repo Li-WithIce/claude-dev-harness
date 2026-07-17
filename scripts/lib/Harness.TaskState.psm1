@@ -194,9 +194,10 @@ function Assert-TaskStateDocument {
 }
 
 function Read-TaskStateDocument {
-    param([string]$RepoRoot,[string]$WorkspaceRoot,[string]$Path)
+    param([string]$RepoRoot,[string]$WorkspaceRoot,[string]$Path,[string]$ExpectedTaskId)
     $task = Read-TaskStateJson -WorkspaceRoot $WorkspaceRoot -Path $Path -Label 'task state'
     Assert-TaskStateDocument -RepoRoot $RepoRoot -Task $task
+    if ([string]$task.task_id -cne $ExpectedTaskId) { throw 'persisted task state task_id does not match its canonical path' }
     return $task
 }
 
@@ -323,8 +324,50 @@ function Test-TaskStateIntegerValue {
 
 function Get-TaskReplayCommand {
     param([string]$WorkspaceRoot,[string]$TransactionId)
-    $quotedWorkspace = "'" + ($WorkspaceRoot -replace "'","''") + "'"
-    return "pwsh -File scripts/task.ps1 replay -TransactionId $TransactionId -WorkspaceRoot $quotedWorkspace"
+    $workspace = Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
+    $quotedWorkspace = "'" + ($workspace -replace "'","''") + "'"
+    $repoTaskScript = Join-Path (Split-Path -Parent $PSScriptRoot) 'task.ps1'
+    $quotedTaskScript = "'" + ($repoTaskScript -replace "'","''") + "'"
+    return "pwsh -File $quotedTaskScript replay -TransactionId $TransactionId -WorkspaceRoot $quotedWorkspace"
+}
+
+function Get-TaskReplayCommandWorkspace {
+    param([string]$WorkspaceRoot,[string]$TransactionId,[string]$ReplayCommand,[string]$Label)
+    if ($ReplayCommand -match "[`r`n]") { throw "$Label replay command is invalid" }
+
+    $quotedScriptPattern = "'(?<script>(?:[^'`r`n]|'')+)'"
+    $quotedWorkspacePattern = "'(?<workspace>(?:[^'`r`n]|'')+)'"
+    $transactionPattern = [regex]::Escape($TransactionId)
+    $sourcePattern = '^pwsh -File ' + $quotedScriptPattern + ' replay -TransactionId ' + $transactionPattern + ' -WorkspaceRoot ' + $quotedWorkspacePattern + '$'
+    $legacyPattern = '^pwsh -File scripts/task\.ps1 replay -TransactionId ' + $transactionPattern + ' -WorkspaceRoot ' + $quotedWorkspacePattern + '$'
+
+    $recordedWorkspace = ''
+    $sourceMatch = [regex]::Match($ReplayCommand,$sourcePattern)
+    $legacyMatch = [regex]::Match($ReplayCommand,$legacyPattern)
+    if ($sourceMatch.Success) {
+        $scriptPath = $sourceMatch.Groups['script'].Value.Replace("''", "'")
+        $expectedScript = Join-Path (Split-Path -Parent $PSScriptRoot) 'task.ps1'
+        if (-not [IO.Path]::IsPathFullyQualified($scriptPath)) { throw "$Label replay command is invalid" }
+        try {
+            if ((Resolve-Path -LiteralPath $scriptPath).Path -ine (Resolve-Path -LiteralPath $expectedScript).Path) { throw 'mismatch' }
+        } catch {
+            throw "$Label replay command is invalid"
+        }
+        $recordedWorkspace = $sourceMatch.Groups['workspace'].Value.Replace("''", "'")
+    } elseif ($legacyMatch.Success) {
+        $recordedWorkspace = $legacyMatch.Groups['workspace'].Value.Replace("''", "'")
+    } else {
+        throw "$Label replay command is invalid"
+    }
+
+    try {
+        $recordedIdentity = Get-TaskStateWorkspaceIdentity -WorkspaceRoot $recordedWorkspace
+        $actualIdentity = Get-TaskStateWorkspaceIdentity -WorkspaceRoot $WorkspaceRoot
+    } catch {
+        throw "$Label replay command workspace cannot be verified"
+    }
+    if ($recordedIdentity -cne $actualIdentity) { throw "$Label replay command workspace is invalid" }
+    return $recordedWorkspace
 }
 
 function Get-TransactionIntentDigest {
@@ -577,9 +620,7 @@ function Assert-TransactionJournal {
     }
     $workspace = Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
     if ([string]$Journal.workspace_identity -cne (Get-TaskStateWorkspaceIdentity -WorkspaceRoot $workspace)) { throw 'transaction journal workspace identity is invalid' }
-    $quotedPathPattern = "'(?:[^'\r\n]|'')+'"
-    $replayPattern = '^pwsh -File scripts/task\.ps1 replay -TransactionId ' + [regex]::Escape([string]$Journal.transaction_id) + ' -WorkspaceRoot ' + $quotedPathPattern + '$'
-    if ([string]$Journal.replay_command -cnotmatch $replayPattern -or [string]$Journal.replay_command -match "[`r`n]") { throw 'transaction journal replay command is invalid' }
+    [void](Get-TaskReplayCommandWorkspace -WorkspaceRoot $WorkspaceRoot -TransactionId ([string]$Journal.transaction_id) -ReplayCommand ([string]$Journal.replay_command) -Label 'transaction journal')
     $createdAt = [datetimeoffset]::MinValue
     if (-not [datetimeoffset]::TryParse([string]$Journal.created_at,[ref]$createdAt)) { throw 'transaction journal created_at is invalid' }
     $operation = [string]$Journal.operation
@@ -1034,18 +1075,7 @@ function Assert-LegacyTransactionJournal {
         }
         $targetVersion = [int64]$Journal.expected_version + 1
     }
-    $quotedPathPattern = "'(?<workspace>(?:[^'`r`n]|'')+)'"
-    $replayPattern = '^pwsh -File scripts/task\.ps1 replay -TransactionId ' + [regex]::Escape([string]$Journal.transaction_id) + ' -WorkspaceRoot ' + $quotedPathPattern + '$'
-    $replayMatch = [regex]::Match([string]$Journal.replay_command,$replayPattern)
-    if (-not $replayMatch.Success -or [string]$Journal.replay_command -match "[`r`n]") { throw 'legacy transaction journal replay command is invalid' }
-    try {
-        $recordedWorkspace = $replayMatch.Groups['workspace'].Value.Replace("''", "'")
-        $recordedIdentity = Get-TaskStateWorkspaceIdentity -WorkspaceRoot $recordedWorkspace
-        $actualIdentity = Get-TaskStateWorkspaceIdentity -WorkspaceRoot $WorkspaceRoot
-    } catch {
-        throw 'legacy transaction journal workspace identity cannot be verified'
-    }
-    if ($recordedIdentity -cne $actualIdentity) { throw 'legacy transaction journal workspace identity is invalid' }
+    [void](Get-TaskReplayCommandWorkspace -WorkspaceRoot $WorkspaceRoot -TransactionId ([string]$Journal.transaction_id) -ReplayCommand ([string]$Journal.replay_command) -Label 'legacy transaction journal')
     if (@($Journal.steps).Count -lt 2 -or @($Journal.steps).Count -gt 4) { throw 'legacy transaction journal has an invalid step count' }
 
     $stepIds = [System.Collections.Generic.List[string]]::new()
@@ -1640,7 +1670,8 @@ function Get-HarnessTaskStatus {
     try {
         $taskMutex=Enter-TaskStateMutex -Name (Get-TaskStateMutexName -WorkspaceRoot $WorkspaceRoot -Suffix "task.$TaskId");$currentMutex=Enter-TaskStateMutex -Name (Get-TaskStateMutexName -WorkspaceRoot $WorkspaceRoot -Suffix 'current')
         Assert-TaskStateWorkspaceIdentityCurrent -WorkspaceRoot $WorkspaceRoot
-        $task=Read-TaskStateDocument -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Task;$events=Read-EventLog -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Events;$current=Read-CurrentPointer -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Current;$pending=@(Get-PendingTransactions -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId)
+        $task=Read-TaskStateDocument -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Task -ExpectedTaskId $TaskId;$events=Read-EventLog -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Events;$current=Read-CurrentPointer -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Current;$pending=@(Get-PendingTransactions -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId)
+        if ($null -ne $current -and [string]$current.task_id -ceq $TaskId -and [int]$current.task_version -ne [int]$task.version) { throw 'current pointer task_version is stale' }
         return [ordered]@{operation='status';task=$task;event_count=$events.Count;is_current=($null -ne $current -and [string]$current.task_id -ceq $TaskId);current=$current;pending_transactions=$pending;side_effects=[ordered]@{task_state_writes=0;runtime_writes=0;artifact_writes=0;external_writes=0}}
     } finally {Exit-TaskStateMutex -Mutex $currentMutex;Exit-TaskStateMutex -Mutex $taskMutex}
 }
@@ -1655,7 +1686,7 @@ function Set-HarnessTaskTransition {
     $taskMutex=$null;$currentMutex=$null
     try {
         $taskMutex=Enter-TaskStateMutex -Name (Get-TaskStateMutexName -WorkspaceRoot $WorkspaceRoot -Suffix "task.$TaskId");$currentMutex=Enter-TaskStateMutex -Name (Get-TaskStateMutexName -WorkspaceRoot $WorkspaceRoot -Suffix 'current')
-        $task=Read-TaskStateDocument -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Task
+        $task=Read-TaskStateDocument -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Task -ExpectedTaskId $TaskId
         if ([int]$task.version -ne $ExpectedVersion) { throw "ExpectedVersion mismatch: expected=$ExpectedVersion actual=$($task.version)" }
         $from=[string]$task.status;if (@($script:Transitions[$from]) -cnotcontains $To) { throw "illegal task transition: $from -> $To" }
         if ($To -ceq 'blocked' -and [string]::IsNullOrWhiteSpace($Reason)) { throw 'blocked transition requires -Reason' }
@@ -1701,7 +1732,7 @@ function Resume-HarnessTaskExecution {
     try {
         $taskMutex = Enter-TaskStateMutex -Name (Get-TaskStateMutexName -WorkspaceRoot $WorkspaceRoot -Suffix "task.$TaskId")
         $currentMutex = Enter-TaskStateMutex -Name (Get-TaskStateMutexName -WorkspaceRoot $WorkspaceRoot -Suffix 'current')
-        $task = Read-TaskStateDocument -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Task
+        $task = Read-TaskStateDocument -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Task -ExpectedTaskId $TaskId
         if ([int]$task.version -ne $ExpectedVersion) {
             throw "ExpectedVersion mismatch: expected=$ExpectedVersion actual=$($task.version)"
         }
@@ -1761,7 +1792,7 @@ function Set-HarnessTaskApproval {
     $taskMutex=$null;$currentMutex=$null
     try{
         $taskMutex=Enter-TaskStateMutex -Name (Get-TaskStateMutexName -WorkspaceRoot $WorkspaceRoot -Suffix "task.$TaskId");$currentMutex=Enter-TaskStateMutex -Name (Get-TaskStateMutexName -WorkspaceRoot $WorkspaceRoot -Suffix 'current')
-        $task=Read-TaskStateDocument -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Task
+        $task=Read-TaskStateDocument -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Task -ExpectedTaskId $TaskId
         if([int]$task.version-ne$ExpectedVersion){throw "ExpectedVersion mismatch: expected=$ExpectedVersion actual=$($task.version)"}
         if(-not[bool]$task.policies.approval_required){throw 'task policy does not allow Approval import'}
         if([string]$task.requirement_state-cne'clear'){throw 'blocked Requirement cannot accept Approval'}
@@ -1792,7 +1823,7 @@ function Set-HarnessTaskEvidence {
     $taskMutex=$null;$currentMutex=$null
     try{
         $taskMutex=Enter-TaskStateMutex -Name (Get-TaskStateMutexName -WorkspaceRoot $WorkspaceRoot -Suffix "task.$TaskId");$currentMutex=Enter-TaskStateMutex -Name (Get-TaskStateMutexName -WorkspaceRoot $WorkspaceRoot -Suffix 'current')
-        $task=Read-TaskStateDocument -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Task
+        $task=Read-TaskStateDocument -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Task -ExpectedTaskId $TaskId
         if([int]$task.version-ne$ExpectedVersion){throw "ExpectedVersion mismatch: expected=$ExpectedVersion actual=$($task.version)"}
         if([string]$task.status-cne'verifying'){throw "verify requires task status verifying; actual=$($task.status)"}
         $contract=Get-RequirementContract -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -ContractPath ([string]$task.contract_path)
