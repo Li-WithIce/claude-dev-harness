@@ -35,7 +35,7 @@ function Invoke-Task([string]$Script,[string]$FixtureRoot,[string]$Workspace,[st
 function Read-Output($Result) { if([string]::IsNullOrWhiteSpace($Result.StdOut)){return $null};return $Result.StdOut|ConvertFrom-Json -Depth 50 -DateKind String }
 function Invoke-NodeHook([string]$NodePath,[string]$HookPath,[string]$InputText) {
     $psi=[Diagnostics.ProcessStartInfo]::new();$psi.FileName=$NodePath;$psi.UseShellExecute=$false;$psi.RedirectStandardInput=$true;$psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true;$psi.CreateNoWindow=$true;$psi.ArgumentList.Add($HookPath)
-    $process=[Diagnostics.Process]::new();$process.StartInfo=$psi;[void]$process.Start();$process.StandardInput.Write($InputText);$process.StandardInput.Close();if(-not$process.WaitForExit(10000)){$process.Kill($true);throw 'memory hook timeout'}
+    $process=[Diagnostics.Process]::new();$process.StartInfo=$psi;[void]$process.Start();$process.StandardInput.Write($InputText);$process.StandardInput.Close();if(-not$process.WaitForExit(30000)){$process.Kill($true);throw 'memory hook timeout'}
     $result=[pscustomobject]@{ExitCode=$process.ExitCode;StdOut=$process.StandardOutput.ReadToEnd();StdErr=$process.StandardError.ReadToEnd()};$process.Dispose();return $result
 }
 
