@@ -137,10 +137,20 @@ function Invoke-ReleaseValidationFixture {
             return $result.ExitCode
         }
         'install' {
+            if ([string]::IsNullOrWhiteSpace($Preset)) {
+                Write-SmokeTrace ('update|{0}|{1}|{2}|{3}' -f $WorkspaceRoot,$env:USERPROFILE,$RepoRoot,$Preset)
+                return [int]$env:DEV_HARNESS_SMOKE_UPDATE_EXIT
+            }
             Write-SmokeTrace ('install|{0}|{1}|{2}|{3}' -f $WorkspaceRoot,$env:USERPROFILE,$RepoRoot,$Preset)
             return [int]$env:DEV_HARNESS_SMOKE_INSTALL_EXIT
         }
         'verify' {
+            $isSecondVerify = (Test-Path -LiteralPath $env:DEV_HARNESS_SMOKE_TRACE -PathType Leaf) -and
+                [System.IO.File]::ReadAllText($env:DEV_HARNESS_SMOKE_TRACE).Contains('verify|')
+            if ($isSecondVerify) {
+                Write-SmokeTrace ('second-verify|{0}|{1}|{2}|{3}|{4}' -f $WorkspaceRoot,$env:USERPROFILE,$UserProfileRoot,$RepoRoot,$Scope)
+                return [int]$env:DEV_HARNESS_SMOKE_SECOND_VERIFY_EXIT
+            }
             Write-SmokeTrace ('verify|{0}|{1}|{2}|{3}|{4}' -f $WorkspaceRoot,$env:USERPROFILE,$UserProfileRoot,$RepoRoot,$Scope)
             return [int]$env:DEV_HARNESS_SMOKE_VERIFY_EXIT
         }
@@ -777,6 +787,8 @@ if (-not (Test-Path -LiteralPath $smokeRunnerPath -PathType Leaf)) {
     $originalTrace = $env:DEV_HARNESS_SMOKE_TRACE
     $originalInstallExit = $env:DEV_HARNESS_SMOKE_INSTALL_EXIT
     $originalVerifyExit = $env:DEV_HARNESS_SMOKE_VERIFY_EXIT
+    $originalUpdateExit = $env:DEV_HARNESS_SMOKE_UPDATE_EXIT
+    $originalSecondVerifyExit = $env:DEV_HARNESS_SMOKE_SECOND_VERIFY_EXIT
     $originalUninstallExit = $env:DEV_HARNESS_SMOKE_UNINSTALL_EXIT
     $originalCleanupLock = $env:DEV_HARNESS_SMOKE_CLEANUP_LOCK
     $originalHolderPidPath = $env:DEV_HARNESS_SMOKE_HOLDER_PID_PATH
@@ -793,13 +805,15 @@ if (-not (Test-Path -LiteralPath $smokeRunnerPath -PathType Leaf)) {
         $env:DEV_HARNESS_RELEASE_VALIDATION_FIXTURE = '1'
 
         $cases = @(
-            [pscustomobject]@{ Name = 'success'; Install = 0; Verify = 0; Uninstall = 0; Cleanup = 0; CleanupLock = $false; Expected = 0; Sequence = @('install','verify','uninstall') },
-            [pscustomobject]@{ Name = 'verify-failure'; Install = 0; Verify = 21; Uninstall = 0; Cleanup = 0; CleanupLock = $false; Expected = 21; Sequence = @('install','verify','uninstall') },
-            [pscustomobject]@{ Name = 'uninstall-failure'; Install = 0; Verify = 0; Uninstall = 22; Cleanup = 0; CleanupLock = $false; Expected = 22; Sequence = @('install','verify','uninstall') },
-            [pscustomobject]@{ Name = 'install-failure'; Install = 20; Verify = 0; Uninstall = 0; Cleanup = 0; CleanupLock = $false; Expected = 20; Sequence = @('install') },
-            [pscustomobject]@{ Name = 'verify-and-uninstall-failure'; Install = 0; Verify = 21; Uninstall = 22; Cleanup = 0; CleanupLock = $false; Expected = 21; Sequence = @('install','verify','uninstall') },
-            [pscustomobject]@{ Name = 'cleanup-failure'; Install = 0; Verify = 0; Uninstall = 0; Cleanup = 1; CleanupLock = $true; Expected = 1; Sequence = @('install','verify','uninstall') },
-            [pscustomobject]@{ Name = 'verify-uninstall-cleanup-failure'; Install = 0; Verify = 21; Uninstall = 22; Cleanup = 1; CleanupLock = $true; Expected = 21; Sequence = @('install','verify','uninstall') }
+            [pscustomobject]@{ Name = 'success'; Install = 0; Verify = 0; Update = 0; SecondVerify = 0; Uninstall = 0; Cleanup = 0; CleanupLock = $false; Expected = 0; Sequence = @('install','verify','update','second-verify','uninstall') },
+            [pscustomobject]@{ Name = 'verify-failure'; Install = 0; Verify = 21; Update = 0; SecondVerify = 0; Uninstall = 0; Cleanup = 0; CleanupLock = $false; Expected = 21; Sequence = @('install','verify','uninstall') },
+            [pscustomobject]@{ Name = 'update-failure'; Install = 0; Verify = 0; Update = 23; SecondVerify = 0; Uninstall = 0; Cleanup = 0; CleanupLock = $false; Expected = 23; Sequence = @('install','verify','update','uninstall') },
+            [pscustomobject]@{ Name = 'second-verify-failure'; Install = 0; Verify = 0; Update = 0; SecondVerify = 24; Uninstall = 0; Cleanup = 0; CleanupLock = $false; Expected = 24; Sequence = @('install','verify','update','second-verify','uninstall') },
+            [pscustomobject]@{ Name = 'uninstall-failure'; Install = 0; Verify = 0; Update = 0; SecondVerify = 0; Uninstall = 22; Cleanup = 0; CleanupLock = $false; Expected = 22; Sequence = @('install','verify','update','second-verify','uninstall') },
+            [pscustomobject]@{ Name = 'install-failure'; Install = 20; Verify = 0; Update = 0; SecondVerify = 0; Uninstall = 0; Cleanup = 0; CleanupLock = $false; Expected = 20; Sequence = @('install') },
+            [pscustomobject]@{ Name = 'verify-and-uninstall-failure'; Install = 0; Verify = 21; Update = 0; SecondVerify = 0; Uninstall = 22; Cleanup = 0; CleanupLock = $false; Expected = 21; Sequence = @('install','verify','uninstall') },
+            [pscustomobject]@{ Name = 'cleanup-failure'; Install = 0; Verify = 0; Update = 0; SecondVerify = 0; Uninstall = 0; Cleanup = 1; CleanupLock = $true; Expected = 1; Sequence = @('install','verify','update','second-verify','uninstall') },
+            [pscustomobject]@{ Name = 'second-verify-uninstall-cleanup-failure'; Install = 0; Verify = 0; Update = 0; SecondVerify = 24; Uninstall = 22; Cleanup = 1; CleanupLock = $true; Expected = 24; Sequence = @('install','verify','update','second-verify','uninstall') }
         )
 
         foreach ($case in $cases) {
@@ -808,6 +822,8 @@ if (-not (Test-Path -LiteralPath $smokeRunnerPath -PathType Leaf)) {
             $env:DEV_HARNESS_SMOKE_TRACE = $tracePath
             $env:DEV_HARNESS_SMOKE_INSTALL_EXIT = [string]$case.Install
             $env:DEV_HARNESS_SMOKE_VERIFY_EXIT = [string]$case.Verify
+            $env:DEV_HARNESS_SMOKE_UPDATE_EXIT = [string]$case.Update
+            $env:DEV_HARNESS_SMOKE_SECOND_VERIFY_EXIT = [string]$case.SecondVerify
             $env:DEV_HARNESS_SMOKE_UNINSTALL_EXIT = [string]$case.Uninstall
             $env:DEV_HARNESS_SMOKE_CLEANUP_LOCK = if ($case.CleanupLock) { '1' } else { '0' }
             $env:DEV_HARNESS_SMOKE_HOLDER_PID_PATH = $holderPidPath
@@ -829,15 +845,32 @@ if (-not (Test-Path -LiteralPath $smokeRunnerPath -PathType Leaf)) {
                     -not (Test-Path -LiteralPath $installFields[2])
                 $cleanupStateWasCorrect = if ($case.Cleanup -eq 0) { $pathsWereRemoved } else { -not $pathsWereRemoved }
                 $argumentsWereCorrect = $installFields.Count -eq 5 -and $installFields[4] -eq 'full'
+                $updateFields = @($traceLines | Where-Object { $_ -like 'update|*' } | Select-Object -First 1) -split '\|'
+                if ($updateFields.Count -gt 1) {
+                    $argumentsWereCorrect = $argumentsWereCorrect -and $updateFields.Count -eq 5 -and
+                        [string]::IsNullOrWhiteSpace($updateFields[4])
+                }
                 $verifyFields = @($traceLines | Where-Object { $_ -like 'verify|*' } | Select-Object -First 1) -split '\|'
                 if ($verifyFields.Count -gt 1) {
                     $argumentsWereCorrect = $argumentsWereCorrect -and $verifyFields.Count -eq 6 -and
                         $verifyFields[2] -eq $verifyFields[3] -and $verifyFields[5] -eq 'All'
                 }
+                $secondVerifyFields = @($traceLines | Where-Object { $_ -like 'second-verify|*' } | Select-Object -First 1) -split '\|'
+                if ($secondVerifyFields.Count -gt 1) {
+                    $argumentsWereCorrect = $argumentsWereCorrect -and $secondVerifyFields.Count -eq 6 -and
+                        $secondVerifyFields[2] -eq $secondVerifyFields[3] -and $secondVerifyFields[5] -eq 'All'
+                }
                 $failedStageOutputWasPreserved = $true
-                foreach ($stage in @('install','verify','uninstall','cleanup')) {
-                    $expectedStageExit = [int]$case.$(([string]$stage[0]).ToUpperInvariant() + $stage.Substring(1))
-                    if ($expectedStageExit -ne 0 -and ($caseOutput -join "`n") -notmatch ('(?m)^- {0}_exit: {1}$' -f $stage,$expectedStageExit)) {
+                $stageExits = [ordered]@{
+                    install = [int]$case.Install
+                    verify = [int]$case.Verify
+                    update = [int]$case.Update
+                    second_verify = [int]$case.SecondVerify
+                    uninstall = [int]$case.Uninstall
+                    cleanup = [int]$case.Cleanup
+                }
+                foreach ($stage in $stageExits.GetEnumerator()) {
+                    if ($stage.Value -ne 0 -and ($caseOutput -join "`n") -notmatch ('(?m)^- {0}_exit: {1}$' -f $stage.Key,$stage.Value)) {
                         $failedStageOutputWasPreserved = $false
                     }
                 }
@@ -883,6 +916,8 @@ if (-not (Test-Path -LiteralPath $smokeRunnerPath -PathType Leaf)) {
         $env:DEV_HARNESS_SMOKE_TRACE = $originalTrace
         $env:DEV_HARNESS_SMOKE_INSTALL_EXIT = $originalInstallExit
         $env:DEV_HARNESS_SMOKE_VERIFY_EXIT = $originalVerifyExit
+        $env:DEV_HARNESS_SMOKE_UPDATE_EXIT = $originalUpdateExit
+        $env:DEV_HARNESS_SMOKE_SECOND_VERIFY_EXIT = $originalSecondVerifyExit
         $env:DEV_HARNESS_SMOKE_UNINSTALL_EXIT = $originalUninstallExit
         $env:DEV_HARNESS_SMOKE_CLEANUP_LOCK = $originalCleanupLock
         $env:DEV_HARNESS_SMOKE_HOLDER_PID_PATH = $originalHolderPidPath

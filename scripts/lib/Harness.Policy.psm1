@@ -205,6 +205,7 @@ function Resolve-HarnessExecutionProfile {
     $artifactPolicy = 'none'
     $reviewPolicy = 'self'
     $approvalPolicy = 'none'
+    $approvalTypes = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
 
     if ($selectedProtocol -ceq 'v2' -and -not $blocked) {
         if ($Intent -ceq 'read') {
@@ -241,9 +242,11 @@ function Resolve-HarnessExecutionProfile {
                 $triggers.Add("protected:$($rule.id)")
                 $profile = Get-RaisedProfile -Current $profile -Required ([string]$rule.requires_profile)
                 if ($rule.requires_independent_review -eq $true) { $reviewPolicy = 'independent' }
-                if ([string]$rule.requires_approval -cne 'none') { $approvalPolicy = [string]$rule.requires_approval }
+                if ([string]$rule.requires_approval -cne 'none') { [void]$approvalTypes.Add([string]$rule.requires_approval) }
                 if ($rule.requires_dry_run -eq $true) { $triggers.Add('dry-run-required') }
             }
+            if ($approvalTypes.Count -gt 1) { throw 'matched protected rules require conflicting Approval types' }
+            if ($approvalTypes.Count -eq 1) { $approvalPolicy = [string](@($approvalTypes)[0]) }
             $handoff = if ($profile -ceq 'direct') { 'main-agent' } else { 'reroute-before-write' }
         }
         $profilePolicy = $policies.Execution.profiles[$profile]

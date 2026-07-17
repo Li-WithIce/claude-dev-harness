@@ -26,9 +26,10 @@ function Invoke-RepoScript {
         }
 
         $output = @(& $ScriptPath @Arguments 2>&1)
+        $scriptSucceeded = $?
         return [pscustomobject]@{
             Output   = $output
-            ExitCode = $LASTEXITCODE
+            ExitCode = if ($scriptSucceeded) { 0 } elseif ($LASTEXITCODE -is [int]) { $LASTEXITCODE } else { 1 }
         }
     } finally {
         if (-not [string]::IsNullOrWhiteSpace($originalLocation)) {
@@ -47,6 +48,16 @@ function Add-Check {
 function Add-Failure {
     param([string]$Message)
     $script:Failures += $Message
+}
+
+function Invoke-GitChecked {
+    param([string[]]$Arguments,[string]$Label)
+
+    $output = @(& git @Arguments 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw ("{0} failed: {1}" -f $Label, ($output -join [Environment]::NewLine))
+    }
+    return @($output)
 }
 
 function Normalize-ContractText {
@@ -237,12 +248,28 @@ $submoduleInstall = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Joi
 if ($submoduleInstall.ExitCode -ne 0) {
     Add-Failure 'install.ps1 should succeed before the submodule regression runs'
 } else {
-    New-Item -ItemType Directory -Path $submoduleWorking -Force | Out-Null
-    # A submodule working tree carries a `.git` gitlink FILE, not a directory.
-    Set-Content -LiteralPath (Join-Path $submoduleRepo '.git') -Value 'gitdir: ../../.git/modules/vendor/submodule' -Encoding ascii
+    $submoduleSource = Join-Path $caseRoot 'submodule-source'
+    $submoduleSourceFile = Join-Path $submoduleSource 'src\source.txt'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $submoduleSourceFile) -Force | Out-Null
+    [System.IO.File]::WriteAllText($submoduleSourceFile,"submodule`n",[System.Text.UTF8Encoding]::new($false))
+    [void](Invoke-GitChecked -Arguments @('-C',$submoduleSource,'init','--quiet') -Label 'submodule source init')
+    [void](Invoke-GitChecked -Arguments @('-C',$submoduleSource,'config','user.email','harness@example.invalid') -Label 'submodule source email config')
+    [void](Invoke-GitChecked -Arguments @('-C',$submoduleSource,'config','user.name','Harness') -Label 'submodule source name config')
+    [void](Invoke-GitChecked -Arguments @('-C',$submoduleSource,'add','.') -Label 'submodule source add')
+    [void](Invoke-GitChecked -Arguments @('-C',$submoduleSource,'commit','--quiet','-m','source') -Label 'submodule source commit')
+
+    $parentAnchor = Join-Path $workspaceRoot 'parent.txt'
+    [System.IO.File]::WriteAllText($parentAnchor,"parent`n",[System.Text.UTF8Encoding]::new($false))
+    [void](Invoke-GitChecked -Arguments @('-C',$workspaceRoot,'init','--quiet') -Label 'submodule parent init')
+    [void](Invoke-GitChecked -Arguments @('-C',$workspaceRoot,'config','user.email','harness@example.invalid') -Label 'submodule parent email config')
+    [void](Invoke-GitChecked -Arguments @('-C',$workspaceRoot,'config','user.name','Harness') -Label 'submodule parent name config')
+    [void](Invoke-GitChecked -Arguments @('-C',$workspaceRoot,'add','parent.txt') -Label 'submodule parent add')
+    [void](Invoke-GitChecked -Arguments @('-C',$workspaceRoot,'commit','--quiet','-m','parent') -Label 'submodule parent commit')
+    [void](Invoke-GitChecked -Arguments @('-c','protocol.file.allow=always','-C',$workspaceRoot,'submodule','add','--quiet',$submoduleSource.Replace('\','/'),'vendor/submodule') -Label 'submodule add')
 
     $submoduleResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath $harnessPath -Arguments @{
         RepoRoot = $RepoRoot
+        SkipStatus = $true
     } -WorkingDirectory $submoduleWorking
 
     if ((Get-StatusLineValue -Output $submoduleResult.Output -Prefix 'WorkspaceRoot') -ne $workspaceRoot) {
@@ -264,7 +291,129 @@ if ($submoduleInstall.ExitCode -ne 0) {
     }
 }
 
-# Case 5: an independent nested repo (.git is a directory) under an installed workspace still bootstraps its own workspace.
+# Case 5: a linked worktree inside an installed workspace bootstraps without inheriting parent task authority.
+$caseRoot = Join-Path $scratchRoot 'linked-worktree-isolated'
+$userProfile = Join-Path $caseRoot 'user'
+$workspaceRoot = Join-Path $caseRoot 'workspace'
+$linkedWorktree = Join-Path $workspaceRoot '.worktrees\feature'
+$linkedWorking = Join-Path $linkedWorktree 'src'
+New-Item -ItemType Directory -Path $userProfile,$workspaceRoot -Force | Out-Null
+
+$worktreeInstall = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @{
+    WorkspaceRoot = $workspaceRoot
+    RepoRoot      = $RepoRoot
+}
+
+if ($worktreeInstall.ExitCode -ne 0) {
+    Add-Failure 'install.ps1 should succeed before the linked-worktree regression runs'
+} else {
+    $parentAnchor = Join-Path $workspaceRoot 'parent.txt'
+    [System.IO.File]::WriteAllText($parentAnchor,"parent`n",[System.Text.UTF8Encoding]::new($false))
+    [void](Invoke-GitChecked -Arguments @('-C',$workspaceRoot,'init','--quiet') -Label 'worktree parent init')
+    [void](Invoke-GitChecked -Arguments @('-C',$workspaceRoot,'config','user.email','harness@example.invalid') -Label 'worktree parent email config')
+    [void](Invoke-GitChecked -Arguments @('-C',$workspaceRoot,'config','user.name','Harness') -Label 'worktree parent name config')
+    [void](Invoke-GitChecked -Arguments @('-C',$workspaceRoot,'add','parent.txt') -Label 'worktree parent add')
+    [void](Invoke-GitChecked -Arguments @('-C',$workspaceRoot,'commit','--quiet','-m','parent') -Label 'worktree parent commit')
+    [void](Invoke-GitChecked -Arguments @('-C',$workspaceRoot,'worktree','add','--quiet','-b','feature',$linkedWorktree,'HEAD') -Label 'linked worktree add')
+    New-Item -ItemType Directory -Path $linkedWorking -Force | Out-Null
+
+    $parentSentinels = [ordered]@{
+        '.assistant\runtime\current.json' = '{"parent":"current"}'
+        '.assistant\runtime\tasks\parent-task\task.json' = '{"parent":"task"}'
+        '.assistant\runtime\tasks\parent-task\approvals\apr_parent.json' = '{"parent":"approval"}'
+    }
+    $parentSentinelBytes = [ordered]@{}
+    foreach ($relativePath in $parentSentinels.Keys) {
+        $target = Join-Path $workspaceRoot $relativePath
+        New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+        $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes([string]$parentSentinels[$relativePath])
+        [System.IO.File]::WriteAllBytes($target,$bytes)
+        $parentSentinelBytes[$relativePath] = $bytes
+    }
+
+    $gitEnvironmentNames = @('GIT_DIR','GIT_WORK_TREE','GIT_COMMON_DIR')
+    $savedGitEnvironment = [ordered]@{}
+    $presentGitEnvironment = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in $gitEnvironmentNames) {
+        if (Test-Path -LiteralPath "Env:$name") {
+            [void]$presentGitEnvironment.Add($name)
+            $savedGitEnvironment[$name] = (Get-Item -LiteralPath "Env:$name").Value
+        }
+    }
+    try {
+        $env:GIT_DIR = Join-Path $workspaceRoot '.git'
+        $env:GIT_WORK_TREE = $workspaceRoot
+        $env:GIT_COMMON_DIR = Join-Path $workspaceRoot '.git'
+        $worktreeResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath $harnessPath -Arguments @{
+            RepoRoot = $RepoRoot
+            SkipStatus = $true
+        } -WorkingDirectory $linkedWorking
+    } finally {
+        foreach ($name in $gitEnvironmentNames) {
+            if ($presentGitEnvironment.Contains($name)) {
+                Set-Item -LiteralPath "Env:$name" -Value ([string]$savedGitEnvironment[$name])
+            } else {
+                Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    if ((Get-StatusLineValue -Output $worktreeResult.Output -Prefix 'STATUS') -ne 'PASS' -or
+        (Get-StatusLineValue -Output $worktreeResult.Output -Prefix 'WorkspaceRoot') -ne $linkedWorktree -or
+        (Get-StatusLineValue -Output $worktreeResult.Output -Prefix 'Mode') -ne 'bootstrap-workspace') {
+        Add-Failure 'harness.ps1 should bootstrap the linked worktree as an isolated workspace'
+    } else {
+        Add-Check 'harness.ps1 bootstraps a linked worktree as an isolated workspace despite inherited Git repository variables'
+    }
+
+    $parentUnchanged = $true
+    $worktreeDidNotCopy = $true
+    foreach ($relativePath in $parentSentinels.Keys) {
+        $parentPath = Join-Path $workspaceRoot $relativePath
+        $worktreePath = Join-Path $linkedWorktree $relativePath
+        if (-not (Test-Path -LiteralPath $parentPath -PathType Leaf) -or
+            ([System.IO.File]::ReadAllBytes($parentPath) -join ',') -cne (@($parentSentinelBytes[$relativePath]) -join ',')) {
+            $parentUnchanged = $false
+        }
+        if (Test-Path -LiteralPath $worktreePath) {
+            $worktreeDidNotCopy = $false
+        }
+    }
+    if ($parentUnchanged -and $worktreeDidNotCopy) {
+        Add-Check 'linked worktree bootstrap neither changes nor copies parent current, task, or Approval state'
+    } else {
+        Add-Failure 'linked worktree bootstrap changed or copied parent current, task, or Approval state'
+    }
+}
+
+# Case 6: an invalid gitfile fails closed instead of inheriting a parent workspace.
+$caseRoot = Join-Path $scratchRoot 'invalid-gitfile-fails-closed'
+$userProfile = Join-Path $caseRoot 'user'
+$workspaceRoot = Join-Path $caseRoot 'workspace'
+$invalidRepo = Join-Path $workspaceRoot 'projects\invalid'
+$invalidWorking = Join-Path $invalidRepo 'src'
+New-Item -ItemType Directory -Path $userProfile,$invalidWorking -Force | Out-Null
+$invalidInstall = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @{
+    WorkspaceRoot = $workspaceRoot
+    RepoRoot      = $RepoRoot
+}
+if ($invalidInstall.ExitCode -ne 0) {
+    Add-Failure 'install.ps1 should succeed before the invalid-gitfile regression runs'
+} else {
+    [System.IO.File]::WriteAllText((Join-Path $invalidRepo '.git'),'gitdir: missing',[System.Text.Encoding]::ASCII)
+    $invalidResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath $harnessPath -Arguments @{
+        RepoRoot = $RepoRoot
+        SkipStatus = $true
+    } -WorkingDirectory $invalidWorking
+    if ((Get-StatusLineValue -Output $invalidResult.Output -Prefix 'STATUS') -eq 'FAIL' -and
+        ($invalidResult.Output -join "`n") -match 'Unable to classify gitfile workspace safely') {
+        Add-Check 'harness.ps1 fails closed when Git cannot classify a nested gitfile'
+    } else {
+        Add-Failure 'harness.ps1 should fail closed when Git cannot classify a nested gitfile'
+    }
+}
+
+# Case 7: an independent nested repo (.git is a directory) under an installed workspace still bootstraps its own workspace.
 $caseRoot = Join-Path $scratchRoot 'independent-nested-repo'
 $userProfile = Join-Path $caseRoot 'user'
 $workspaceRoot = Join-Path $caseRoot 'workspace'
@@ -306,7 +455,79 @@ if ($nestedInstall.ExitCode -ne 0) {
     }
 }
 
-# Case 3: running from the repo root without an explicit workspace should fail safely.
+# Case 8: an independent nested repo with a separate git directory bootstraps its own workspace.
+$caseRoot = Join-Path $scratchRoot 'separate-git-dir-isolated'
+$userProfile = Join-Path $caseRoot 'user'
+$workspaceRoot = Join-Path $caseRoot 'workspace'
+$nestedRepo = Join-Path $workspaceRoot 'projects\nested'
+$nestedWorking = Join-Path $nestedRepo 'src'
+$separateGitDirectory = Join-Path $caseRoot 'git-dirs\nested.git'
+New-Item -ItemType Directory -Path $userProfile,$workspaceRoot -Force | Out-Null
+
+$separateInstall = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @{
+    WorkspaceRoot = $workspaceRoot
+    RepoRoot      = $RepoRoot
+}
+
+if ($separateInstall.ExitCode -ne 0) {
+    Add-Failure 'install.ps1 should succeed before the separate-git-dir regression runs'
+} else {
+    $parentSentinels = [ordered]@{
+        '.assistant\runtime\current.json' = '{"parent":"current"}'
+        '.assistant\runtime\tasks\parent-task\task.json' = '{"parent":"task"}'
+        '.assistant\runtime\tasks\parent-task\approvals\apr_parent.json' = '{"parent":"approval"}'
+    }
+    $parentSentinelBytes = [ordered]@{}
+    foreach ($relativePath in $parentSentinels.Keys) {
+        $target = Join-Path $workspaceRoot $relativePath
+        New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+        $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes([string]$parentSentinels[$relativePath])
+        [System.IO.File]::WriteAllBytes($target,$bytes)
+        $parentSentinelBytes[$relativePath] = $bytes
+    }
+
+    New-Item -ItemType Directory -Path $nestedWorking,(Split-Path -Parent $separateGitDirectory) -Force | Out-Null
+    [void](Invoke-GitChecked -Arguments @('init','--quiet',("--separate-git-dir=$separateGitDirectory"),$nestedRepo) -Label 'separate-git-dir init')
+    if (-not (Test-Path -LiteralPath (Join-Path $nestedRepo '.git') -PathType Leaf)) {
+        Add-Failure 'separate-git-dir fixture should create a .git file'
+    }
+
+    $separateResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath $harnessPath -Arguments @{
+        RepoRoot = $RepoRoot
+        SkipStatus = $true
+    } -WorkingDirectory $nestedWorking
+
+    if ((Get-StatusLineValue -Output $separateResult.Output -Prefix 'STATUS') -eq 'PASS' -and
+        (Get-StatusLineValue -Output $separateResult.Output -Prefix 'WorkspaceRoot') -eq $nestedRepo -and
+        (Get-StatusLineValue -Output $separateResult.Output -Prefix 'WorkspaceRootSource') -eq 'git-ancestor' -and
+        (Get-StatusLineValue -Output $separateResult.Output -Prefix 'Mode') -eq 'bootstrap-workspace' -and
+        (Test-Path -LiteralPath (Join-Path $nestedRepo '.assistant') -PathType Container)) {
+        Add-Check 'harness.ps1 treats a separate-git-dir repository as independent, not as a submodule'
+    } else {
+        Add-Failure 'harness.ps1 should bootstrap a separate-git-dir repository as an independent workspace'
+    }
+
+    $parentUnchanged = $true
+    $nestedDidNotCopy = $true
+    foreach ($relativePath in $parentSentinels.Keys) {
+        $parentPath = Join-Path $workspaceRoot $relativePath
+        $nestedPath = Join-Path $nestedRepo $relativePath
+        if (-not (Test-Path -LiteralPath $parentPath -PathType Leaf) -or
+            ([System.IO.File]::ReadAllBytes($parentPath) -join ',') -cne (@($parentSentinelBytes[$relativePath]) -join ',')) {
+            $parentUnchanged = $false
+        }
+        if (Test-Path -LiteralPath $nestedPath) {
+            $nestedDidNotCopy = $false
+        }
+    }
+    if ($parentUnchanged -and $nestedDidNotCopy) {
+        Add-Check 'separate-git-dir bootstrap neither changes nor copies parent task authority'
+    } else {
+        Add-Failure 'separate-git-dir bootstrap changed or copied parent current, task, or Approval state'
+    }
+}
+
+# Case 9: running from the repo root without an explicit workspace should fail safely.
 $repoRootCase = Join-Path $scratchRoot 'repo-root-guard'
 $repoRootUserProfile = Join-Path $repoRootCase 'user'
 New-Item -ItemType Directory -Path $repoRootUserProfile -Force | Out-Null

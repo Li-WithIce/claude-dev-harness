@@ -2,13 +2,13 @@
 
 - Harness runtime lives under `{VAULT_PATH}`; optional Memory features are used only when installed and explicitly needed or authorized.
 - Default to Simplified Chinese for explanations and summaries; keep code identifiers in their native language and never expose secrets or private data.
-- Use `scripts\task.ps1 status` for a read-only v2 recovery view; v1 recovery files remain compatibility inputs only for existing v1 tasks.
+- Use `.assistant\entry\task.ps1 status` for a read-only v2 recovery view; v1 recovery files remain compatibility inputs only for existing v1 tasks.
 - Use `rg`, file reading, and manual inspection by default. Optional providers are never required for core routing.
 - Current requirements and business correctness take precedence over stale tests or snapshots unless historical compatibility is explicitly required.
 - The executable workspace entry shim remains `.assistant\entry\AGENTS.md`.
 
 <!-- BEGIN GENERATED ENTRY CONTRACT -->
-<!-- source-sha256: 8d3066c46c108583497b3cd8982f4db96164626697b923d0771ce1b43f3c2065 -->
+<!-- source-sha256: 61cc675cece2259b8be8d0d067317b58485d09ec5a9559f9a49cf5f7b7c40757 -->
 # Entry Contract
 
 Canonical shared routing contract. Host templates may add only host-specific overlays outside the generated markers.
@@ -19,7 +19,7 @@ Canonical shared routing contract. Host templates may add only host-specific ove
 - `stage_chain`: `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`
 
 - `HARNESS_PROTOCOL=v2`: classify inline before v1 routing; Direct loads no `entry-router`/lifecycle skill.
-- For a known task, run `scripts\task.ps1 protocol -TaskId {task_id}`: v2 `task.json` wins, then legal v1 `plan.md`; for a new task, `auto` selects v2 only with a current all-pass rollout report and otherwise returns a diagnostic v1 fallback. Conflicts fail closed, migration is explicit, and v2 never calls `advance-stage.ps1`.
+- For a known task, run `.assistant\entry\task.ps1 protocol -TaskId {task_id}`: v2 `task.json` wins, then v1 `plan.md`; for a new task, `auto` selects v2 only with a current all-pass rollout report and otherwise returns a v1 fallback. Conflicts fail closed, migration is explicit, and v2 never calls `advance-stage.ps1`.
 - Blocked, protected, expanded-scope, or non-Direct results reroute before writes.
 - Clear Direct hands off to the main Agent: `understand -> edit -> focused verification -> self-review -> report`; it does not load `entry-router`, `orchestrator`, lifecycle skills, Memory, Team, or Provider.
 - Direct writes no task/runtime/current state. `quick` aliases Direct without policy downgrade; file count alone does not escalate.

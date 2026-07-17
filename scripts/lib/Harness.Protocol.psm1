@@ -227,7 +227,32 @@ function Get-HarnessRolloutEligibility {
     try {
         $target = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $ReportPath -Label 'rollout eligibility report' -AllowMissing
         if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { return [ordered]@{status='missing';eligible=$false;reason='rollout-report-missing';report_digest=$null} }
-        try { $document = [System.IO.File]::ReadAllText($target,[System.Text.UTF8Encoding]::new($false,$true)) | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop } catch { throw 'rollout-report-invalid-json' }
+        $reportLimitBytes = 4MB
+        $reportInfo = Get-Item -LiteralPath $target -Force -ErrorAction Stop
+        if ($reportInfo.Length -gt $reportLimitBytes) { throw 'rollout-report-too-large' }
+        $stream = $null
+        try {
+            $stream = [System.IO.File]::Open($target,[System.IO.FileMode]::Open,[System.IO.FileAccess]::Read,[System.IO.FileShare]::Read)
+            $reportLength = $stream.Length
+            if ($reportLength -gt $reportLimitBytes) { throw 'rollout-report-too-large' }
+            $bytes = [byte[]]::new([int]$reportLength)
+            $offset = 0
+            while ($offset -lt $bytes.Length) {
+                $read = $stream.Read($bytes,$offset,$bytes.Length-$offset)
+                if ($read -le 0) { throw 'rollout-report-invalid' }
+                $offset += $read
+            }
+            if ($stream.ReadByte() -ne -1) { throw 'rollout-report-too-large' }
+        } finally {
+            if ($null -ne $stream) { $stream.Dispose() }
+        }
+        if ($bytes.Length -gt $reportLimitBytes) { throw 'rollout-report-too-large' }
+        try {
+            $json = [System.Text.UTF8Encoding]::new($false,$true).GetString($bytes)
+            $document = $json | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop
+        } catch {
+            throw 'rollout-report-invalid-json'
+        }
         Assert-HarnessRolloutReport -RepoRoot $RepoRoot -Document $document
         if (-not [bool]$document.eligible) {
             foreach ($name in @('behavior','v1_compatibility','direct_performance','core_install_rollback','full_install_rollback')) {

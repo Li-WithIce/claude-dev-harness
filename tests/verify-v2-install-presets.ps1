@@ -125,6 +125,112 @@ function Test-ManifestExcludesPath {
     return @($recorded | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) -and (Get-NormalizedPath -Path $_) -eq $expected }).Count -eq 0
 }
 
+function Test-ManifestIncludesPath {
+    param($Manifest,[string]$Path)
+
+    $expected = Get-NormalizedPath -Path $Path
+    return @($Manifest.managed_backup_targets | Where-Object {
+            -not [string]::IsNullOrWhiteSpace([string]$_) -and (Get-NormalizedPath -Path $_) -eq $expected
+        }).Count -eq 1
+}
+
+function Assert-InstalledTaskShim {
+    param($Fixture,$Manifest,[string]$Label)
+
+    $path = Join-Path $Fixture.Workspace '.assistant\entry\task.ps1'
+    if ((Test-Path -LiteralPath $path -PathType Leaf) -and (Test-ManifestIncludesPath -Manifest $Manifest -Path $path)) {
+        Add-Check "$Label installs and owns the workspace task shim"
+    } else {
+        Add-Failure "$Label did not install and own the workspace task shim"
+    }
+}
+
+function Assert-InstalledPowerShellEntriesParse {
+    param($Fixture,[string]$Label)
+
+    $paths = @(
+        (Join-Path $Fixture.Workspace '.assistant\entry\task.ps1'),
+        (Join-Path $Fixture.Workspace '.assistant\entry\advance-stage.ps1'),
+        (Join-Path $Fixture.Workspace '.assistant\entry\validate-lite-artifacts.ps1'),
+        (Join-Path $Fixture.User '.claude\hooks-memory\pretooluse.ps1')
+    )
+    $issues = [System.Collections.Generic.List[string]]::new()
+    foreach ($path in $paths) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            $issues.Add("missing $path")
+            continue
+        }
+        $tokens = $null
+        $errors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors) | Out-Null
+        foreach ($errorRecord in @($errors)) {
+            $issues.Add("${path}: $($errorRecord.Message)")
+        }
+    }
+    if ($issues.Count -eq 0) {
+        Add-Check "$Label renders parseable PowerShell entry assets"
+    } else {
+        Add-Failure "$Label rendered invalid PowerShell entry assets: $($issues -join '; ')"
+    }
+}
+
+function Assert-InstalledTaskProtocol {
+    param($Fixture,[string]$Label)
+
+    $taskId = 'installed-shim'
+    $planPath = Join-Path $Fixture.Workspace "docs\tasks\$taskId\plan.md"
+    New-Item -ItemType Directory -Path (Split-Path -Parent $planPath) -Force | Out-Null
+    $planContent = @(
+        '---'
+        'task_id: installed-shim'
+        'stage: PLAN'
+        'tool: codex'
+        'updated: 2026-07-16'
+        '---'
+        ''
+    ) -join "`n"
+    [System.IO.File]::WriteAllText($planPath,$planContent,[System.Text.UTF8Encoding]::new($false))
+
+    $priorProtocol = $env:HARNESS_PROTOCOL
+    $priorReport = $env:HARNESS_V2_ELIGIBILITY_REPORT
+    try {
+        $env:HARNESS_PROTOCOL = 'auto'
+        Remove-Item Env:HARNESS_V2_ELIGIBILITY_REPORT -ErrorAction SilentlyContinue
+        $result = Invoke-ChildScript -UserProfile $Fixture.User -ScriptPath (Join-Path $Fixture.Workspace '.assistant\entry\task.ps1') -Arguments @(
+            'protocol','-TaskId',$taskId,'-AsJson'
+        )
+    } finally {
+        if ($null -eq $priorProtocol) { Remove-Item Env:HARNESS_PROTOCOL -ErrorAction SilentlyContinue } else { $env:HARNESS_PROTOCOL = $priorProtocol }
+        if ($null -eq $priorReport) { Remove-Item Env:HARNESS_V2_ELIGIBILITY_REPORT -ErrorAction SilentlyContinue } else { $env:HARNESS_V2_ELIGIBILITY_REPORT = $priorReport }
+    }
+
+    $value = $null
+    if ($result.ExitCode -eq 0) {
+        try { $value = $result.Output.Trim() | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop } catch {}
+    }
+    if ($null -ne $value -and
+        [string]$value.detected_protocol -ceq 'v1' -and
+        [string]$value.selected_protocol -ceq 'v1' -and
+        [string]$value.v1_plan_path -ceq "docs/tasks/$taskId/plan.md" -and
+        [int]$value.side_effects.runtime_writes -eq 0 -and
+        [int]$value.side_effects.artifact_writes -eq 0) {
+        Add-Check "$Label executes protocol through the installed workspace-bound task shim"
+    } else {
+        Add-Failure "$Label installed task shim protocol call failed: exit=$($result.ExitCode) output=$($result.Output)"
+    }
+}
+
+function Assert-TaskShimRemoved {
+    param($Fixture,[string]$Label)
+
+    $path = Join-Path $Fixture.Workspace '.assistant\entry\task.ps1'
+    if (-not (Test-Path -LiteralPath $path)) {
+        Add-Check "$Label removes its owned workspace task shim"
+    } else {
+        Add-Failure "$Label left its owned workspace task shim behind"
+    }
+}
+
 function Assert-ManifestPreset {
     param(
         $Manifest,
@@ -207,6 +313,8 @@ try {
     if ($defaultInstall.ExitCode -eq 0) {
         $defaultManifest = Get-LatestManifest $defaultFixture
         Assert-ManifestPreset $defaultManifest 'core' 'default-core' $coreFeatures $coreSkills $coreHooks 'minimal'
+        Assert-InstalledTaskShim $defaultFixture $defaultManifest 'core install'
+        Assert-InstalledTaskProtocol $defaultFixture 'core install'
         if (([System.IO.File]::ReadAllBytes($coreRolloutSentinel) -join ',') -ceq ($coreRolloutBytes -join ',') -and (Test-ManifestExcludesPath $defaultManifest $coreRolloutSentinel)) { Add-Check 'core install preserves and does not claim the canonical rollout report' } else { Add-Failure 'core install changed or claimed the canonical rollout report' }
         $optionalPaths = @(
             (Join-Path $defaultFixture.User '.codex\skills\obsidian-memory'),
@@ -235,9 +343,12 @@ try {
         Assert-InstallExit $coreUpdate 'core update'
         if ($coreUpdate.ExitCode -eq 0) {
             $coreUpdateManifest = Get-LatestManifest $defaultFixture
+            Assert-InstalledTaskShim $defaultFixture $coreUpdateManifest 'core update'
+            Assert-InstalledTaskProtocol $defaultFixture 'core update'
             if (([System.IO.File]::ReadAllBytes($coreRolloutSentinel) -join ',') -ceq ($coreRolloutBytes -join ',') -and (Test-ManifestExcludesPath $coreUpdateManifest $coreRolloutSentinel)) { Add-Check 'core update preserves and does not claim the canonical rollout report' } else { Add-Failure 'core update changed or claimed the canonical rollout report' }
         }
         Assert-UninstallExit (Invoke-Uninstall $defaultFixture) 'fresh default'
+        Assert-TaskShimRemoved $defaultFixture 'core uninstall'
         if ((Test-Path -LiteralPath $foreignSentinel -PathType Leaf) -and [System.IO.File]::ReadAllText($foreignSentinel) -ceq 'foreign-user-asset' -and
             (Test-Path -LiteralPath $coreRolloutSentinel -PathType Leaf) -and ([System.IO.File]::ReadAllBytes($coreRolloutSentinel) -join ',') -ceq ($coreRolloutBytes -join ',')) {
             Add-Check 'core install and uninstall preserve foreign skill assets and canonical rollout evidence'
@@ -246,11 +357,34 @@ try {
         }
     }
 
+    $apostropheFixture = New-PresetFixture -Name "apostrophe'shim-{VAULT_PATH}"
+    $apostropheInstall = Invoke-Install -Fixture $apostropheFixture -ExtraArguments @('-Preset','core')
+    Assert-InstallExit $apostropheInstall 'apostrophe workspace'
+    if ($apostropheInstall.ExitCode -eq 0) {
+        $apostropheManifest = Get-LatestManifest $apostropheFixture
+        Assert-InstalledTaskShim $apostropheFixture $apostropheManifest 'apostrophe workspace'
+        Assert-InstalledPowerShellEntriesParse $apostropheFixture 'apostrophe workspace'
+        $apostropheShimPath = Join-Path $apostropheFixture.Workspace '.assistant\entry\task.ps1'
+        $apostropheShimText = [System.IO.File]::ReadAllText($apostropheShimPath,[System.Text.Encoding]::UTF8)
+        if ($apostropheShimText.Contains($apostropheFixture.Workspace.Replace("'","''")) -and
+            -not $apostropheShimText.Contains('{WORKSPACE_ROOT}')) {
+            Add-Check 'apostrophe workspace is escaped as PowerShell data without a leftover render token'
+        } else {
+            Add-Failure 'apostrophe workspace was not safely rendered into the task shim'
+        }
+        Assert-InstalledTaskProtocol $apostropheFixture 'apostrophe workspace'
+        Assert-UninstallExit (Invoke-Uninstall $apostropheFixture) 'apostrophe workspace'
+        Assert-TaskShimRemoved $apostropheFixture 'apostrophe workspace uninstall'
+    }
+
     $governedFixture = New-PresetFixture -Name 'governed'
     $governedInstall = Invoke-Install -Fixture $governedFixture -ExtraArguments @('-Preset','governed')
     Assert-InstallExit $governedInstall 'governed'
     if ($governedInstall.ExitCode -eq 0) {
-        Assert-ManifestPreset (Get-LatestManifest $governedFixture) 'governed' 'preset' $governedFeatures $governedSkills $coreHooks 'minimal'
+        $governedManifest = Get-LatestManifest $governedFixture
+        Assert-ManifestPreset $governedManifest 'governed' 'preset' $governedFeatures $governedSkills $coreHooks 'minimal'
+        Assert-InstalledTaskShim $governedFixture $governedManifest 'governed install'
+        Assert-InstalledTaskProtocol $governedFixture 'governed install'
         if ((Test-Path -LiteralPath (Join-Path $governedFixture.User '.codex\skills\planning')) -and
             (Test-Path -LiteralPath (Join-Path $governedFixture.User '.codex\skills\audit')) -and
             -not (Test-Path -LiteralPath (Join-Path $governedFixture.User '.codex\skills\obsidian-memory'))) {
@@ -258,7 +392,37 @@ try {
         } else {
             Add-Failure 'governed skill selection is incorrect'
         }
+        $governedUpdate = Invoke-Install -Fixture $governedFixture
+        Assert-InstallExit $governedUpdate 'implicit governed preservation'
+        if ($governedUpdate.ExitCode -eq 0) {
+            $governedUpdateManifest = Get-LatestManifest $governedFixture
+            Assert-ManifestPreset $governedUpdateManifest 'governed' 'manifest-preserve' $governedFeatures $governedSkills $coreHooks 'minimal'
+            Assert-InstalledTaskShim $governedFixture $governedUpdateManifest 'governed update'
+            Assert-InstalledTaskProtocol $governedFixture 'governed update'
+            if ((Test-Path -LiteralPath (Join-Path $governedFixture.User '.codex\skills\planning')) -and
+                (Test-Path -LiteralPath (Join-Path $governedFixture.User '.codex\skills\audit')) -and
+                -not (Test-Path -LiteralPath (Join-Path $governedFixture.User '.codex\skills\obsidian-memory'))) {
+                Add-Check 'implicit update preserves governed planning and audit without memory'
+            } else {
+                Add-Failure 'implicit update changed governed skill selection'
+            }
+        }
         Assert-UninstallExit (Invoke-Uninstall $governedFixture) 'governed'
+        Assert-TaskShimRemoved $governedFixture 'governed uninstall'
+    }
+
+    $governedAutoFixture = New-PresetFixture -Name 'governed-with-legacy-auto'
+    $governedAutoInstall = Invoke-Install -Fixture $governedAutoFixture -ExtraArguments @('-Preset','governed','-VaultProfile','auto')
+    Assert-InstallExit $governedAutoInstall 'governed with legacy auto'
+    if ($governedAutoInstall.ExitCode -eq 0) {
+        Assert-ManifestPreset (Get-LatestManifest $governedAutoFixture) 'governed' 'preset+vault-profile:auto' $governedFeatures $governedSkills $coreHooks 'minimal'
+        if ($governedAutoInstall.Output -match 'VaultProfile is deprecated' -and
+            $governedAutoInstall.Output -notmatch 'conflicts with VaultProfile') {
+            Add-Check 'explicit governed preset accepts legacy VaultProfile auto without downgrading to core'
+        } else {
+            Add-Failure 'explicit governed preset did not accept legacy VaultProfile auto as an unconstrained compatibility hint'
+        }
+        Assert-UninstallExit (Invoke-Uninstall $governedAutoFixture) 'governed with legacy auto'
     }
 
     $minimalFixture = New-PresetFixture -Name 'legacy-minimal'
@@ -305,15 +469,19 @@ try {
     $fullInstall = Invoke-Install -Fixture $fullFixture -ExtraArguments @('-VaultProfile','full')
     Assert-InstallExit $fullInstall 'legacy full'
     if ($fullInstall.ExitCode -eq 0) {
-        Assert-ManifestPreset (Get-LatestManifest $fullFixture) 'full' 'vault-profile:full' $fullFeatures $fullSkills $fullHooks 'full'
-        if ($fullInstall.Output -match 'VaultProfile is deprecated') { Add-Check 'legacy full emits migration warning' } else { Add-Failure 'legacy full did not emit migration warning' }
         $fullInstallManifest=Get-LatestManifest $fullFixture
+        Assert-ManifestPreset $fullInstallManifest 'full' 'vault-profile:full' $fullFeatures $fullSkills $fullHooks 'full'
+        Assert-InstalledTaskShim $fullFixture $fullInstallManifest 'full install'
+        Assert-InstalledTaskProtocol $fullFixture 'full install'
+        if ($fullInstall.Output -match 'VaultProfile is deprecated') { Add-Check 'legacy full emits migration warning' } else { Add-Failure 'legacy full did not emit migration warning' }
         if (([System.IO.File]::ReadAllBytes($fullRolloutSentinel)-join',') -ceq ($fullRolloutBytes-join',') -and (Test-ManifestExcludesPath $fullInstallManifest $fullRolloutSentinel)) { Add-Check 'full fresh install preserves and does not claim the canonical rollout report' } else { Add-Failure 'full fresh install changed or claimed the canonical rollout report' }
         $preserveInstall = Invoke-Install -Fixture $fullFixture
         Assert-InstallExit $preserveInstall 'implicit full preservation'
         if ($preserveInstall.ExitCode -eq 0) {
             $preserveManifest=Get-LatestManifest $fullFixture
             Assert-ManifestPreset $preserveManifest 'full' 'manifest-preserve' $fullFeatures $fullSkills $fullHooks 'full'
+            Assert-InstalledTaskShim $fullFixture $preserveManifest 'full update'
+            Assert-InstalledTaskProtocol $fullFixture 'full update'
             if (([System.IO.File]::ReadAllBytes($fullRolloutSentinel)-join',') -ceq ($fullRolloutBytes-join',') -and (Test-ManifestExcludesPath $preserveManifest $fullRolloutSentinel)) { Add-Check 'full update preserves and does not claim the canonical rollout report' } else { Add-Failure 'full update changed or claimed the canonical rollout report' }
             if ((Test-Path -LiteralPath (Join-Path $fullFixture.User '.codex\skills\obsidian-memory')) -and
                 (Test-Path -LiteralPath (Join-Path $fullFixture.User '.codex\skills\workflow-team')) -and
@@ -323,6 +491,7 @@ try {
                 Add-Failure 'implicit update shrank an existing full install'
             }
             Assert-UninstallExit (Invoke-Uninstall $fullFixture) 'preserved full update'
+            Assert-TaskShimRemoved $fullFixture 'full uninstall'
             if ((Test-Path -LiteralPath $fullRolloutSentinel -PathType Leaf) -and ([System.IO.File]::ReadAllBytes($fullRolloutSentinel)-join',') -ceq ($fullRolloutBytes-join',')) { Add-Check 'full uninstall preserves canonical rollout evidence' } else { Add-Failure 'full uninstall removed or changed canonical rollout evidence' }
         }
     }

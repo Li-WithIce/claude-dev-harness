@@ -26,10 +26,32 @@ function Read-HarnessApprovalJson {
 }
 
 function Test-HarnessApprovalExpiry {
-    param([System.Collections.IDictionary]$Approval)
+    param(
+        [System.Collections.IDictionary]$Approval,
+        [datetimeoffset]$AsOf = [datetimeoffset]::UtcNow
+    )
     if ($null -eq $Approval.expires_at) { return $false }
-    try { return [datetimeoffset]::Parse([string]$Approval.expires_at,[Globalization.CultureInfo]::InvariantCulture) -le [datetimeoffset]::UtcNow }
+    try { return [datetimeoffset]::Parse([string]$Approval.expires_at,[Globalization.CultureInfo]::InvariantCulture) -le $AsOf }
     catch { return $true }
+}
+
+function Resolve-HarnessApprovalInputCore {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][string]$ApprovalPath,
+        [Parameter(Mandatory)][string]$TaskId,[Parameter(Mandatory)][int]$TargetTaskVersion,[Parameter(Mandatory)][string]$ContractDigest,
+        [Parameter(Mandatory)][datetimeoffset]$AsOf
+    )
+    $loaded = Read-HarnessApprovalJson -WorkspaceRoot $WorkspaceRoot -Path $ApprovalPath -Label 'Approval input';$approval=$loaded.Document
+    Test-HarnessApprovalSchema -RepoRoot $RepoRoot -Value $approval -Label 'Approval input'
+    if ([string]$approval.task_id -cne $TaskId) { throw 'Approval task_id does not match TaskId' }
+    if ([int]$approval.task_version -ne $TargetTaskVersion) { throw "Approval task_version must bind the post-import version: expected=$TargetTaskVersion actual=$($approval.task_version)" }
+    if ([string]$approval.contract_digest -cne $ContractDigest) { throw 'Approval contract_digest is stale' }
+    if ([string]$approval.status -cne 'granted') { throw 'only a granted Approval can be imported' }
+    if (Test-HarnessApprovalExpiry -Approval $approval -AsOf $AsOf) { throw 'Approval is expired' }
+    $outputPath = ".assistant/runtime/tasks/$TaskId/approvals/$($approval.approval_id).json"
+    $content = ConvertTo-HarnessApprovalJson -Value $approval
+    return [pscustomobject]@{Document=$approval;InputPath=$loaded.Path;OutputPath=$outputPath;Content=$content;Digest=(Get-HarnessSha256Text -Content $content)}
 }
 
 function Resolve-HarnessApprovalInput {
@@ -38,16 +60,29 @@ function Resolve-HarnessApprovalInput {
         [Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][string]$ApprovalPath,
         [Parameter(Mandatory)][string]$TaskId,[Parameter(Mandatory)][int]$TargetTaskVersion,[Parameter(Mandatory)][string]$ContractDigest
     )
-    $loaded = Read-HarnessApprovalJson -WorkspaceRoot $WorkspaceRoot -Path $ApprovalPath -Label 'Approval input';$approval=$loaded.Document
-    Test-HarnessApprovalSchema -RepoRoot $RepoRoot -Value $approval -Label 'Approval input'
-    if ([string]$approval.task_id -cne $TaskId) { throw 'Approval task_id does not match TaskId' }
-    if ([int]$approval.task_version -ne $TargetTaskVersion) { throw "Approval task_version must bind the post-import version: expected=$TargetTaskVersion actual=$($approval.task_version)" }
-    if ([string]$approval.contract_digest -cne $ContractDigest) { throw 'Approval contract_digest is stale' }
-    if ([string]$approval.status -cne 'granted') { throw 'only a granted Approval can be imported' }
-    if (Test-HarnessApprovalExpiry -Approval $approval) { throw 'Approval is expired' }
-    $outputPath = ".assistant/runtime/tasks/$TaskId/approvals/$($approval.approval_id).json"
-    $content = ConvertTo-HarnessApprovalJson -Value $approval
-    return [pscustomobject]@{Document=$approval;InputPath=$loaded.Path;OutputPath=$outputPath;Content=$content;Digest=(Get-HarnessSha256Text -Content $content)}
+    return Resolve-HarnessApprovalInputCore -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -ApprovalPath $ApprovalPath -TaskId $TaskId -TargetTaskVersion $TargetTaskVersion -ContractDigest $ContractDigest -AsOf ([datetimeoffset]::UtcNow)
+}
+
+function Assert-HarnessTaskApprovalCore {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][System.Collections.IDictionary]$Task,
+        [string]$RequiredType='',[string[]]$RequiredScopes=@(),
+        [Parameter(Mandatory)][datetimeoffset]$AsOf
+    )
+    foreach ($approvalId in @($Task.approvals)) {
+        $path = ".assistant/runtime/tasks/$($Task.task_id)/approvals/$approvalId.json"
+        $loaded = Read-HarnessApprovalJson -WorkspaceRoot $WorkspaceRoot -Path $path -Label 'task Approval';$approval=$loaded.Document
+        Test-HarnessApprovalSchema -RepoRoot $RepoRoot -Value $approval -Label 'task Approval'
+        if ([string]$approval.approval_id -cne [string]$approvalId -or [string]$approval.task_id -cne [string]$Task.task_id) { throw 'task Approval identity is invalid' }
+        if ([string]$approval.status -cne 'granted' -or (Test-HarnessApprovalExpiry -Approval $approval -AsOf $AsOf)) { continue }
+        if ([int]$approval.task_version -ne [int]$Task.version -or [string]$approval.contract_digest -cne [string]$Task.contract_digest) { continue }
+        if (-not [string]::IsNullOrWhiteSpace($RequiredType) -and [string]$approval.approval_type -cne $RequiredType) { continue }
+        $scopes = @($approval.approved_scope)
+        if (@($RequiredScopes | Where-Object { $scopes -cnotcontains $_ }).Count -gt 0) { continue }
+        return [pscustomobject]@{Path=$loaded.Path;Document=$approval;Digest=(Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $loaded.Path)}
+    }
+    throw ("no current granted Approval covers the required task version, Contract, type, and scope; required_type={0}; required_scopes={1}" -f $RequiredType,($RequiredScopes -join ','))
 }
 
 function Assert-HarnessTaskApproval {
@@ -56,19 +91,7 @@ function Assert-HarnessTaskApproval {
         [Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][System.Collections.IDictionary]$Task,
         [string]$RequiredType='',[string[]]$RequiredScopes=@()
     )
-    foreach ($approvalId in @($Task.approvals)) {
-        $path = ".assistant/runtime/tasks/$($Task.task_id)/approvals/$approvalId.json"
-        $loaded = Read-HarnessApprovalJson -WorkspaceRoot $WorkspaceRoot -Path $path -Label 'task Approval';$approval=$loaded.Document
-        Test-HarnessApprovalSchema -RepoRoot $RepoRoot -Value $approval -Label 'task Approval'
-        if ([string]$approval.approval_id -cne [string]$approvalId -or [string]$approval.task_id -cne [string]$Task.task_id) { throw 'task Approval identity is invalid' }
-        if ([string]$approval.status -cne 'granted' -or (Test-HarnessApprovalExpiry -Approval $approval)) { continue }
-        if ([int]$approval.task_version -ne [int]$Task.version -or [string]$approval.contract_digest -cne [string]$Task.contract_digest) { continue }
-        if (-not [string]::IsNullOrWhiteSpace($RequiredType) -and [string]$approval.approval_type -cne $RequiredType) { continue }
-        $scopes = @($approval.approved_scope)
-        if (@($RequiredScopes | Where-Object { $scopes -cnotcontains $_ }).Count -gt 0) { continue }
-        return [pscustomobject]@{Path=$loaded.Path;Document=$approval;Digest=(Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $loaded.Path)}
-    }
-    throw ("no current granted Approval covers the required task version, Contract, type, and scope; required_type={0}; required_scopes={1}" -f $RequiredType,($RequiredScopes -join ','))
+    return Assert-HarnessTaskApprovalCore -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Task $Task -RequiredType $RequiredType -RequiredScopes $RequiredScopes -AsOf ([datetimeoffset]::UtcNow)
 }
 
 Export-ModuleMember -Function Resolve-HarnessApprovalInput,Assert-HarnessTaskApproval

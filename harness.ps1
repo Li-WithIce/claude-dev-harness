@@ -180,6 +180,77 @@ function Find-AncestorContaining {
     return $null
 }
 
+function Get-GitFileWorkspaceKind {
+    param([Parameter(Mandatory = $true)][string]$GitRoot)
+
+    $gitMarker = Join-Path $GitRoot '.git'
+    if (-not (Test-Path -LiteralPath $gitMarker -PathType Leaf)) {
+        throw "Cannot classify gitfile workspace because .git is not a file: $GitRoot"
+    }
+
+    $gitEnvironmentNames = @('GIT_DIR','GIT_WORK_TREE','GIT_COMMON_DIR')
+    $savedGitEnvironment = [ordered]@{}
+    $presentGitEnvironment = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    try {
+        foreach ($name in $gitEnvironmentNames) {
+            if (Test-Path -LiteralPath "Env:$name") {
+                [void]$presentGitEnvironment.Add($name)
+                $savedGitEnvironment[$name] = (Get-Item -LiteralPath "Env:$name").Value
+            }
+            Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+        }
+        try {
+            $metadata = @(& git -C $GitRoot rev-parse --path-format=absolute --git-dir --git-common-dir 2>$null)
+            $gitExitCode = $LASTEXITCODE
+            $superprojectMetadata = @(& git -C $GitRoot rev-parse --path-format=absolute --show-superproject-working-tree 2>$null)
+            $superprojectExitCode = $LASTEXITCODE
+        } catch {
+            throw "Unable to classify gitfile workspace safely. Pass -WorkspaceRoot explicitly. GitRoot=$GitRoot"
+        }
+    } finally {
+        foreach ($name in $gitEnvironmentNames) {
+            if ($presentGitEnvironment.Contains($name)) {
+                Set-Item -LiteralPath "Env:$name" -Value ([string]$savedGitEnvironment[$name])
+            } else {
+                Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+            }
+        }
+    }
+    if ($gitExitCode -ne 0 -or $metadata.Count -ne 2 -or
+        $superprojectExitCode -ne 0 -or $superprojectMetadata.Count -gt 1) {
+        throw "Unable to classify gitfile workspace safely. Pass -WorkspaceRoot explicitly. GitRoot=$GitRoot"
+    }
+
+    try {
+        $gitDirectory = Get-NormalizedPath -Path ([string]$metadata[0]).Trim()
+        $commonDirectory = Get-NormalizedPath -Path ([string]$metadata[1]).Trim()
+    } catch {
+        throw "Unable to classify gitfile workspace safely. Pass -WorkspaceRoot explicitly. GitRoot=$GitRoot"
+    }
+    if (-not (Test-Path -LiteralPath $gitDirectory -PathType Container) -or
+        -not (Test-Path -LiteralPath $commonDirectory -PathType Container)) {
+        throw "Unable to classify gitfile workspace safely. Pass -WorkspaceRoot explicitly. GitRoot=$GitRoot"
+    }
+
+    $superprojectRoot = if ($superprojectMetadata.Count -eq 1) { ([string]$superprojectMetadata[0]).Trim() } else { '' }
+    if (-not [string]::IsNullOrWhiteSpace($superprojectRoot)) {
+        try {
+            $superprojectRoot = Get-NormalizedPath -Path $superprojectRoot
+        } catch {
+            throw "Unable to classify gitfile workspace safely. Pass -WorkspaceRoot explicitly. GitRoot=$GitRoot"
+        }
+        if (-not (Test-Path -LiteralPath $superprojectRoot -PathType Container)) {
+            throw "Unable to classify gitfile workspace safely. Pass -WorkspaceRoot explicitly. GitRoot=$GitRoot"
+        }
+        return 'submodule'
+    }
+
+    if ($gitDirectory.Equals($commonDirectory, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return 'independent'
+    }
+    return 'linked-worktree'
+}
+
 function Resolve-WorkspaceRoot {
     param(
         [string]$ExplicitWorkspaceRoot,
@@ -208,13 +279,23 @@ function Resolve-WorkspaceRoot {
 
     # 取更近的 marker：
     # - 没有 .assistant 祖先时，git root 优先（fresh git bootstrap）。
-    # - git root 是 .assistant 祖先的真子目录（更深）时，只有「独立 repo」（.git 为目录）才优先并
-    #   bootstrap 自己的 workspace；submodule / worktree（.git 是 gitlink 文件）视为父 workspace 的内容，
-    #   留在父 workspace。要把 submodule 单独拆成 workspace，必须显式传 -WorkspaceRoot。
-    $gitRootHasGitDirectory = (-not [string]::IsNullOrWhiteSpace($gitRoot)) -and (Test-Path -LiteralPath (Join-Path $gitRoot '.git') -PathType Container)
+    # - git root 是 .assistant 祖先的真子目录（更深）时，独立 repo 和 linked worktree 各自 bootstrap；
+    #   submodule 继续属于父 workspace。gitfile 必须由 Git 的 git-dir/common-dir 成功分类，否则 fail closed。
+    $gitRootKind = $null
+    if (-not [string]::IsNullOrWhiteSpace($gitRoot)) {
+        $gitMarker = Join-Path $gitRoot '.git'
+        if (Test-Path -LiteralPath $gitMarker -PathType Container) {
+            $gitRootKind = 'independent'
+        } elseif (Test-Path -LiteralPath $gitMarker -PathType Leaf) {
+            $gitRootKind = Get-GitFileWorkspaceKind -GitRoot $gitRoot
+        } else {
+            throw "Unable to classify git workspace safely. Pass -WorkspaceRoot explicitly. GitRoot=$gitRoot"
+        }
+    }
+    $gitRootOwnsWorkspace = $gitRootKind -in @('independent','linked-worktree')
     $gitRootIsNearer = (-not [string]::IsNullOrWhiteSpace($gitRoot)) -and (
         [string]::IsNullOrWhiteSpace($assistantRoot) -or (
-            $gitRootHasGitDirectory -and
+            $gitRootOwnsWorkspace -and
             (Test-PathWithinRoot -Path $gitRoot -Root $assistantRoot) -and
             -not $gitRoot.Equals($assistantRoot, [System.StringComparison]::OrdinalIgnoreCase)
         )

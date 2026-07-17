@@ -529,7 +529,7 @@ function Assert-LegacyRebaselineManagedTarget {
             return
         }
         $relativeTarget = $target.Substring($vaultRoot.TrimEnd('\').Length).TrimStart('\')
-        $minimalTargets = @('entry\AGENTS.md','entry\advance-stage.ps1','entry\validate-lite-artifacts.ps1')
+        $minimalTargets = @('entry\AGENTS.md','entry\advance-stage.ps1','entry\task.ps1','entry\validate-lite-artifacts.ps1')
         if ([string]$Manifest['effective_vault_profile'] -eq 'minimal') {
             if ($relativeTarget -notin $minimalTargets) {
                 throw "Legacy minimal-vault target is not Harness-managed: $target"
@@ -1864,13 +1864,18 @@ function Merge-SettingsLocal {
 }
 
 function Get-RenderTokenMap {
-    param([switch]$EscapeForCode)
+    param(
+        [switch]$EscapeForCode,
+        [switch]$EscapeForPowerShellSingleQuotedLiteral
+    )
 
     $tokens = [ordered]@{}
     foreach ($key in $script:RawRenderTokens.Keys) {
         $value = $script:RawRenderTokens[$key]
         if ($EscapeForCode -and $key -ne '__RENDER_AT_INSTALL__') {
             $value = $value.Replace('\', '\\')
+        } elseif ($EscapeForPowerShellSingleQuotedLiteral) {
+            $value = $value.Replace("'", "''")
         }
         $tokens[$key] = $value
     }
@@ -1887,16 +1892,26 @@ function Render-Content {
     $extension = [System.IO.Path]::GetExtension($TargetPath).ToLowerInvariant()
     $tokens = if ($extension -in @('.json', '.js', '.mjs', '.toml')) {
         Get-RenderTokenMap -EscapeForCode
+    } elseif ($extension -in @('.ps1', '.psm1', '.psd1')) {
+        Get-RenderTokenMap -EscapeForPowerShellSingleQuotedLiteral
     } else {
         Get-RenderTokenMap
     }
 
-    $rendered = $Content
-    foreach ($key in $tokens.Keys) {
-        $rendered = $rendered.Replace($key, $tokens[$key])
+    $tokenPattern = @(
+        $tokens.Keys |
+            Sort-Object { ([string]$_).Length } -Descending |
+            ForEach-Object { [System.Text.RegularExpressions.Regex]::Escape([string]$_) }
+    ) -join '|'
+    if ([string]::IsNullOrEmpty($tokenPattern)) {
+        return $Content
     }
 
-    return $rendered
+    $evaluator = [System.Text.RegularExpressions.MatchEvaluator]{
+        param([System.Text.RegularExpressions.Match]$Match)
+        return [string]$tokens[[string]$Match.Value]
+    }
+    return [System.Text.RegularExpressions.Regex]::Replace($Content, $tokenPattern, $evaluator)
 }
 
 function Install-RenderedFile {
@@ -2537,7 +2552,7 @@ function Resolve-InstallPreset {
     } else {
         [string]$preserved.preset
     }
-    if ($PresetSpecified -and $VaultProfileSpecified -and $RequestedPreset -ne $vaultMappedPreset) {
+    if ($PresetSpecified -and $VaultProfileSpecified -and $RequestedVaultProfile -ne 'auto' -and $RequestedPreset -ne $vaultMappedPreset) {
         throw "Preset '$RequestedPreset' conflicts with VaultProfile '$RequestedVaultProfile' (maps to '$vaultMappedPreset')"
     }
     if ($PresetSpecified) {
@@ -2571,6 +2586,7 @@ function Install-MinimalVaultTemplate {
     foreach ($file in @(
             @{ Source = 'AGENTS.md.template'; Target = 'AGENTS.md' },
             @{ Source = 'advance-stage.ps1.template'; Target = 'advance-stage.ps1' },
+            @{ Source = 'task.ps1.template'; Target = 'task.ps1' },
             @{ Source = 'validate-lite-artifacts.ps1.template'; Target = 'validate-lite-artifacts.ps1' }
         )) {
         $targetPath = Join-Path $TargetRoot (Join-Path 'entry' $file.Target)

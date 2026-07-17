@@ -20,8 +20,16 @@ function Read-HarnessEvidenceJson {
 
 function Test-HarnessEvidenceExcludedPath {
     param([string]$Path,[string[]]$ExactPaths)
-    if ($Path -ceq '.assistant/runtime' -or $Path.StartsWith('.assistant/runtime/',[System.StringComparison]::Ordinal)) { return $true }
-    return $ExactPaths -ccontains $Path
+    $comparison = if ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT) {
+        [System.StringComparison]::OrdinalIgnoreCase
+    } else {
+        [System.StringComparison]::Ordinal
+    }
+    if ($Path.Equals('.assistant/runtime',$comparison) -or $Path.StartsWith('.assistant/runtime/',$comparison)) { return $true }
+    foreach ($exactPath in @($ExactPaths)) {
+        if ($Path.Equals([string]$exactPath,$comparison)) { return $true }
+    }
+    return $false
 }
 
 function Invoke-HarnessEvidenceGit {
@@ -43,7 +51,9 @@ function Get-HarnessEvidenceRevision {
     $inputRelative = Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path (Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $EvidenceInputPath -Label 'Evidence' -MustExist File)
     $outputRelative = Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path (Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $EvidenceOutputPath -Label 'evidence output' -AllowMissing)
     $evidenceFiles = [System.Collections.Generic.List[object]]::new()
-    $exactExclusions = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $runningOnWindows = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
+    $pathComparer = if ($runningOnWindows) { [System.StringComparer]::OrdinalIgnoreCase } else { [System.StringComparer]::Ordinal }
+    $exactExclusions = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
     [void]$exactExclusions.Add($inputRelative);[void]$exactExclusions.Add($outputRelative)
     if ($Evidence.Contains('task_id')) { [void]$exactExclusions.Add("docs/tasks/$([string]$Evidence.task_id)/audit.md") }
     foreach ($record in @($Evidence.records)) {
@@ -53,19 +63,36 @@ function Get-HarnessEvidenceRevision {
         $digest = Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $recordPath
         $evidenceFiles.Add([ordered]@{path=$relative;digest=$digest})
     }
-    $gitRoot = Invoke-HarnessEvidenceGit -WorkspaceRoot $WorkspaceRoot -Arguments @('rev-parse','--show-toplevel')
+    $gitToolRoot = Resolve-HarnessToolCompatibleWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
+    $gitRoot = Invoke-HarnessEvidenceGit -WorkspaceRoot $gitToolRoot -Arguments @('rev-parse','--show-toplevel')
     $head = '';$workingDiff='';$stagedDiff='';$untracked=[System.Collections.Generic.List[object]]::new();$gitUsable=$false
     if ($gitRoot.ExitCode -eq 0) {
         try { $resolvedGitRoot = (Resolve-Path -LiteralPath $gitRoot.Text).Path } catch { $resolvedGitRoot = '' }
-        if ($resolvedGitRoot -ceq $WorkspaceRoot) { $gitUsable=$true }
+        $gitUsable = if ($runningOnWindows) {
+            $resolvedGitRoot.Equals($gitToolRoot,[System.StringComparison]::OrdinalIgnoreCase)
+        } else {
+            $resolvedGitRoot -ceq $gitToolRoot
+        }
+        if (-not $gitUsable -and $runningOnWindows -and -not [string]::IsNullOrWhiteSpace($resolvedGitRoot)) {
+            try {
+                $gitUsable = (Get-HarnessPhysicalPathIdentity -Path $resolvedGitRoot) -ceq (Get-HarnessPhysicalPathIdentity -Path $gitToolRoot)
+            } catch {
+                $gitUsable = $false
+            }
+        }
     }
     if ($gitUsable) {
-        $headRun=Invoke-HarnessEvidenceGit -WorkspaceRoot $WorkspaceRoot -Arguments @('rev-parse','HEAD');if($headRun.ExitCode -eq 0){$head=$headRun.Text.Trim()}
-        $pathspec=[System.Collections.Generic.List[string]]::new();$pathspec.Add('.');$pathspec.Add(':(glob,exclude).assistant/runtime/**')
-        foreach($excluded in @($exactExclusions|Sort-Object)){$pathspec.Add(":(literal,exclude)$excluded")}
-        $working=Invoke-HarnessEvidenceGit -WorkspaceRoot $WorkspaceRoot -Arguments (@('diff','--binary','--')+@($pathspec));if($working.ExitCode -ne 0){throw 'unable to compute working diff for Evidence revision'};$workingDiff=$working.Text
-        $staged=Invoke-HarnessEvidenceGit -WorkspaceRoot $WorkspaceRoot -Arguments (@('diff','--cached','--binary','--')+@($pathspec));if($staged.ExitCode -ne 0){throw 'unable to compute staged diff for Evidence revision'};$stagedDiff=$staged.Text
-        $others=Invoke-HarnessEvidenceGit -WorkspaceRoot $WorkspaceRoot -Arguments @('ls-files','--others','--exclude-standard','--','.');if($others.ExitCode -ne 0){throw 'unable to enumerate untracked files for Evidence revision'}
+        $headRun=Invoke-HarnessEvidenceGit -WorkspaceRoot $gitToolRoot -Arguments @('rev-parse','HEAD');if($headRun.ExitCode -eq 0){$head=$headRun.Text.Trim()}
+        $indexState=Invoke-HarnessEvidenceGit -WorkspaceRoot $gitToolRoot -Arguments @('ls-files','-v','--','.')
+        if($indexState.ExitCode-ne0){throw 'unable to inspect Git index flags for Evidence revision'}
+        $unsafeIndex=@($indexState.Lines|Where-Object{[string]::IsNullOrEmpty([string]$_)-or-not([string]$_).StartsWith('H ',[StringComparison]::Ordinal)})
+        if($unsafeIndex.Count-gt0){throw 'Evidence workspace has unsafe Git index flags'}
+        $pathspec=[System.Collections.Generic.List[string]]::new();$pathspec.Add('.')
+        $pathspec.Add($(if($runningOnWindows){':(icase,glob,exclude).assistant/runtime/**'}else{':(glob,exclude).assistant/runtime/**'}))
+        foreach($excluded in @($exactExclusions|Sort-Object)){$pathspec.Add($(if($runningOnWindows){":(icase,literal,exclude)$excluded"}else{":(literal,exclude)$excluded"}))}
+        $working=Invoke-HarnessEvidenceGit -WorkspaceRoot $gitToolRoot -Arguments (@('diff','--binary','--')+@($pathspec));if($working.ExitCode -ne 0){throw 'unable to compute working diff for Evidence revision'};$workingDiff=$working.Text
+        $staged=Invoke-HarnessEvidenceGit -WorkspaceRoot $gitToolRoot -Arguments (@('diff','--cached','--binary','--')+@($pathspec));if($staged.ExitCode -ne 0){throw 'unable to compute staged diff for Evidence revision'};$stagedDiff=$staged.Text
+        $others=Invoke-HarnessEvidenceGit -WorkspaceRoot $gitToolRoot -Arguments @('ls-files','--others','--exclude-standard','--','.');if($others.ExitCode -ne 0){throw 'unable to enumerate untracked files for Evidence revision'}
         foreach($path in @($others.Lines|ForEach-Object{$_.Replace('\','/')}|Sort-Object)){
             if(Test-HarnessEvidenceExcludedPath -Path $path -ExactPaths @($exactExclusions)){continue}
             $untracked.Add([ordered]@{path=$path;digest=(Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $path)})
@@ -78,8 +105,13 @@ function Get-HarnessEvidenceRevision {
             $untracked.Add([ordered]@{path=$relative;digest=(Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $file.FullName)})
         }
     }
+    $workspaceIdentity = if ($runningOnWindows) {
+        Get-HarnessPhysicalPathIdentity -Path $WorkspaceRoot
+    } else {
+        Get-HarnessSha256Text -Content $WorkspaceRoot
+    }
     $revisionInput=[ordered]@{
-        workspace_identity=(Get-HarnessSha256Text -Content $WorkspaceRoot.ToLowerInvariant())
+        workspace_identity=$workspaceIdentity
         head=$head
         contract_digest=$ContractDigest
         working_diff=(Get-HarnessSha256Text -Content $workingDiff)
@@ -90,7 +122,7 @@ function Get-HarnessEvidenceRevision {
     return 'dirty:'+(Get-HarnessSha256Text -Content ($revisionInput|ConvertTo-Json -Depth 30 -Compress)).Substring(7)
 }
 
-function Resolve-HarnessEvidence {
+function Resolve-HarnessEvidenceCore {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$RepoRoot,
@@ -99,7 +131,8 @@ function Resolve-HarnessEvidence {
         [Parameter(Mandatory)][int]$TaskVersion,
         [Parameter(Mandatory)][string]$ContractDigest,
         [Parameter(Mandatory)][int]$RequiredAcceptanceCount,
-        [Parameter(Mandatory)][string]$EvidencePath
+        [Parameter(Mandatory)][string]$EvidencePath,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$PinnedRevision
     )
     $WorkspaceRoot=Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
     $loaded=Read-HarnessEvidenceJson -WorkspaceRoot $WorkspaceRoot -Path $EvidencePath;$document=$loaded.Document
@@ -131,12 +164,31 @@ function Resolve-HarnessEvidence {
     if(@($document.coverage.not_verified).Count-gt 0){$hasPartial=$true};if(@($document.coverage.blocked).Count-gt 0){$hasBlocked=$true}
     $derived=if($hasFail){'fail'}elseif($hasBlocked){'blocked'}elseif($hasPartial){'partial'}else{'pass'}
     if([string]$document.conclusion -cne $derived){throw "Evidence conclusion does not match records and coverage: declared=$($document.conclusion) derived=$derived"}
-    $expectedRevision=Get-HarnessEvidenceRevision -WorkspaceRoot $WorkspaceRoot -ContractDigest $ContractDigest -Evidence $document -EvidenceInputPath $loaded.Path -EvidenceOutputPath $outputRelative
     $actualRevision=[string]$document.revision
-    if($expectedRevision.StartsWith('dirty:',[StringComparison]::Ordinal)){if($actualRevision-cne$expectedRevision){throw 'Evidence dirty revision is stale'}}elseif(-not$expectedRevision.StartsWith($actualRevision,[StringComparison]::Ordinal)){throw 'Evidence commit revision is stale'}
+    if([string]::IsNullOrWhiteSpace($PinnedRevision)){
+        $expectedRevision=Get-HarnessEvidenceRevision -WorkspaceRoot $WorkspaceRoot -ContractDigest $ContractDigest -Evidence $document -EvidenceInputPath $loaded.Path -EvidenceOutputPath $outputRelative
+        if($expectedRevision.StartsWith('dirty:',[StringComparison]::Ordinal)){if($actualRevision-cne$expectedRevision){throw 'Evidence dirty revision is stale'}}elseif($actualRevision-cne$expectedRevision){throw 'Evidence commit revision is stale'}
+    }else{
+        $expectedRevision=$PinnedRevision
+        if($actualRevision-cne$expectedRevision){throw 'Evidence revision no longer matches its transaction snapshot'}
+    }
     $content=ConvertTo-HarnessEvidenceJson -Value $document
     $nextStatus=switch($derived){'pass'{'done'}'fail'{'running'}'blocked'{'paused'}default{'verifying'}}
     return [pscustomobject]@{Document=$document;InputPath=$loaded.Path;OutputPath=$outputRelative;Content=$content;Digest=(Get-HarnessSha256Text -Content $content);Conclusion=$derived;NextStatus=$nextStatus;ExpectedRevision=$expectedRevision}
+}
+
+function Resolve-HarnessEvidence {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$WorkspaceRoot,
+        [Parameter(Mandatory)][string]$TaskId,
+        [Parameter(Mandatory)][int]$TaskVersion,
+        [Parameter(Mandatory)][string]$ContractDigest,
+        [Parameter(Mandatory)][int]$RequiredAcceptanceCount,
+        [Parameter(Mandatory)][string]$EvidencePath
+    )
+    return Resolve-HarnessEvidenceCore -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -TaskVersion $TaskVersion -ContractDigest $ContractDigest -RequiredAcceptanceCount $RequiredAcceptanceCount -EvidencePath $EvidencePath -PinnedRevision ''
 }
 
 Export-ModuleMember -Function Get-HarnessEvidenceRevision,Resolve-HarnessEvidence

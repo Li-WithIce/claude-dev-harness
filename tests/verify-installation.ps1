@@ -514,6 +514,7 @@ $WorkspaceAgentsPath = Join-Path $WorkspaceRoot 'AGENTS.md'
 $WorkspaceGitIgnorePath = Join-Path $WorkspaceRoot '.gitignore'
 $WorkspaceEntryAgentsPath = Join-Path $VaultPath 'entry\AGENTS.md'
 $WorkspaceAdvanceStageShimPath = Join-Path $VaultPath 'entry\advance-stage.ps1'
+$WorkspaceTaskShimPath = Join-Path $VaultPath 'entry\task.ps1'
 $WorkspaceValidateArtifactsShimPath = Join-Path $VaultPath 'entry\validate-lite-artifacts.ps1'
 $WorkspaceRuntimeTasksPath = Join-Path $VaultPath '运行时\tasks'
 $InstallRegistryPath = Join-Path $effectiveUserProfile '.dev-harness\install-registry.json'
@@ -600,6 +601,8 @@ Assert-RenderedFile -Path $WorkspaceEntryAgentsPath -ForbiddenTokens $ForbiddenT
 Assert-TemplateFileMatches -Path $WorkspaceEntryAgentsPath -TemplatePath (Join-Path $RepoRoot 'vault-template\entry\AGENTS.md.template') -Label 'workspace entry AGENTS.md' -RolloutMarker 'shim-template-drift'
 Assert-RenderedFile -Path $WorkspaceAdvanceStageShimPath -ForbiddenTokens $ForbiddenTokens
 Assert-TemplateFileMatches -Path $WorkspaceAdvanceStageShimPath -TemplatePath (Join-Path $RepoRoot 'vault-template\entry\advance-stage.ps1.template') -Label 'workspace advance-stage shim' -RolloutMarker 'shim-template-drift'
+Assert-RenderedFile -Path $WorkspaceTaskShimPath -ForbiddenTokens $ForbiddenTokens
+Assert-TemplateFileMatches -Path $WorkspaceTaskShimPath -TemplatePath (Join-Path $RepoRoot 'vault-template\entry\task.ps1.template') -Label 'workspace task shim' -RolloutMarker 'shim-template-drift'
 Assert-RenderedFile -Path $WorkspaceValidateArtifactsShimPath -ForbiddenTokens $ForbiddenTokens
 Assert-TemplateFileMatches -Path $WorkspaceValidateArtifactsShimPath -TemplatePath (Join-Path $RepoRoot 'vault-template\entry\validate-lite-artifacts.ps1.template') -Label 'workspace validate-lite-artifacts shim'
 try {

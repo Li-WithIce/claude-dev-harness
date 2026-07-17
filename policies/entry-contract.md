@@ -8,7 +8,7 @@ Canonical shared routing contract. Host templates may add only host-specific ove
 - `stage_chain`: `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`
 
 - `HARNESS_PROTOCOL=v2`: classify inline before v1 routing; Direct loads no `entry-router`/lifecycle skill.
-- For a known task, run `scripts\task.ps1 protocol -TaskId {task_id}`: v2 `task.json` wins, then legal v1 `plan.md`; for a new task, `auto` selects v2 only with a current all-pass rollout report and otherwise returns a diagnostic v1 fallback. Conflicts fail closed, migration is explicit, and v2 never calls `advance-stage.ps1`.
+- For a known task, run `.assistant\entry\task.ps1 protocol -TaskId {task_id}`: v2 `task.json` wins, then v1 `plan.md`; for a new task, `auto` selects v2 only with a current all-pass rollout report and otherwise returns a v1 fallback. Conflicts fail closed, migration is explicit, and v2 never calls `advance-stage.ps1`.
 - Blocked, protected, expanded-scope, or non-Direct results reroute before writes.
 - Clear Direct hands off to the main Agent: `understand -> edit -> focused verification -> self-review -> report`; it does not load `entry-router`, `orchestrator`, lifecycle skills, Memory, Team, or Provider.
 - Direct writes no task/runtime/current state. `quick` aliases Direct without policy downgrade; file count alone does not escalate.

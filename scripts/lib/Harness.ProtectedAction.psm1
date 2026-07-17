@@ -104,12 +104,15 @@ function Assert-HarnessProtectedAction {
         if($rule.requires_dry_run-eq$true){[void]$scopes.Add('dry-run:true')}
     }
     if($matched.Count-eq0){return [ordered]@{allowed=$true;protected=$false;matched_rules=@();required_scopes=@();approval_id=$null}}
+    $requiredTypes=@($matched|ForEach-Object{[string]$_.requires_approval}|Where-Object{$_-cne'none'}|Sort-Object -Unique)
+    if($requiredTypes.Count-gt1){throw 'matched protected rules require conflicting Approval types'}
+    $requiredType=$(if($requiredTypes.Count-eq1){[string]$requiredTypes[0]}else{''})
     if([string]::IsNullOrWhiteSpace($TaskId)-or$null-eq$ExpectedVersion){throw 'protected write requires TaskId and ExpectedVersion'}
     $task=Read-HarnessProtectedTask -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId
     if([int]$task.version-ne[int]$ExpectedVersion){throw "protected task version is stale: expected=$ExpectedVersion actual=$($task.version)"}
     if([string]$task.requirement_state-cne'clear'){throw 'protected write requires a clear Requirement'}
-    $rank=@{governed=1;critical=2};$requiredRank=1;$requiredType=''
-    foreach($rule in $matched){$requiredRank=[math]::Max($requiredRank,[int]$rank[[string]$rule.requires_profile]);if($rule.requires_independent_review-eq$true-and-not[bool]$task.policies.independent_review_required){throw 'protected write requires independent review policy'};if($rule.requires_dry_run-eq$true-and-not$DryRun){throw 'protected write requires dry-run'};if([string]$rule.requires_approval-cne'none'){$requiredType=[string]$rule.requires_approval}}
+    $rank=@{governed=1;critical=2};$requiredRank=1
+    foreach($rule in $matched){$requiredRank=[math]::Max($requiredRank,[int]$rank[[string]$rule.requires_profile]);if($rule.requires_independent_review-eq$true-and-not[bool]$task.policies.independent_review_required){throw 'protected write requires independent review policy'};if($rule.requires_dry_run-eq$true-and-not$DryRun){throw 'protected write requires dry-run'}}
     if(-not$rank.ContainsKey([string]$task.execution_profile)-or[int]$rank[[string]$task.execution_profile]-lt$requiredRank){throw 'protected write task profile is insufficient'}
     $approval=$null;if(-not[string]::IsNullOrWhiteSpace($requiredType)){if(-not[bool]$task.policies.approval_required){throw 'protected write requires approval policy'};$approval=Assert-HarnessTaskApproval -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Task $task -RequiredType $requiredType -RequiredScopes @($scopes|Sort-Object)}
     return [ordered]@{allowed=$true;protected=$true;matched_rules=@($matched|ForEach-Object{[string]$_.id});required_scopes=@($scopes|Sort-Object);approval_id=$(if($null-ne$approval){[string]$approval.Document.approval_id}else{$null})}

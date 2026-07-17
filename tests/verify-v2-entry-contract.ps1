@@ -45,6 +45,44 @@ function Get-FileDigest {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Invoke-GitCapture {
+    param([string[]]$Arguments)
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = @(Get-Command git -CommandType Application -ErrorAction Stop)[0].Source
+    $startInfo.WorkingDirectory = $RepoRoot
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $startInfo.StandardErrorEncoding = [System.Text.UTF8Encoding]::new($false)
+    foreach ($argument in $Arguments) { [void]$startInfo.ArgumentList.Add($argument) }
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) { throw 'Git baseline process did not start' }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        return [pscustomobject]@{
+            ExitCode = $process.ExitCode
+            StdOut = $stdoutTask.GetAwaiter().GetResult()
+            StdErr = $stderrTask.GetAwaiter().GetResult()
+        }
+    } finally {
+        $process.Dispose()
+    }
+}
+
+function Get-TextLineCount {
+    param([AllowEmptyString()][string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return 0 }
+    $normalized = $Text -replace "`r`n?", "`n"
+    $count = [regex]::Matches($normalized,"`n").Count
+    if (-not $normalized.EndsWith("`n",[System.StringComparison]::Ordinal)) { $count++ }
+    return $count
+}
+
 function Get-ManagedBlock {
     param([string]$Path)
 
@@ -138,8 +176,9 @@ try {
     $invariantIds = @($invariants | ForEach-Object { [string]$_.id })
     Assert-True -Condition ([string]$fixture.baseline.commit -ceq $baselineCommit -and $invariants.Count -eq 6 -and @($invariantIds | Select-Object -Unique).Count -eq 6) -Success 'v1 fixture pins six unique behavior invariants to the immutable base commit' -Failure 'v1 baseline invariant catalog is incomplete or points at the wrong commit'
     foreach ($invariant in $invariants) {
-        $baselineText = @(& git -C $RepoRoot show ("{0}:{1}" -f $baselineCommit, [string]$invariant.source_path) 2>&1) -join "`n"
-        $baselineRead = $LASTEXITCODE -eq 0
+        $baselineResult = Invoke-GitCapture -Arguments @('-C',$RepoRoot,'show',("{0}:{1}" -f $baselineCommit, [string]$invariant.source_path))
+        $baselineText = $baselineResult.StdOut
+        $baselineRead = $baselineResult.ExitCode -eq 0
         Assert-True -Condition ($baselineRead -and $baselineText.Contains([string]$invariant.baseline_contains, [System.StringComparison]::Ordinal)) -Success ("base contains v1 behavior invariant {0}" -f $invariant.id) -Failure ("v1 invariant {0} is not independently anchored in the base commit" -f $invariant.id)
         Assert-True -Condition ($canonicalBody.Contains([string]$invariant.canonical_contains, [System.StringComparison]::Ordinal)) -Success ("canonical preserves v1 behavior invariant {0}" -f $invariant.id) -Failure ("canonical dropped v1 behavior invariant {0}" -f $invariant.id)
     }
@@ -174,11 +213,11 @@ try {
         $currentLines += $lines
         Assert-True -Condition ($lines -le 250) -Success ("{0} stays within the 250-line entry budget" -f $relativePath) -Failure ("{0} exceeds the 250-line entry budget" -f $relativePath)
 
-        $sizeText = @(& git -C $RepoRoot cat-file -s ("{0}:{1}" -f $baselineCommit, $relativePath) 2>&1)
-        $baseText = @(& git -C $RepoRoot show ("{0}:{1}" -f $baselineCommit, $relativePath) 2>&1)
-        if ($LASTEXITCODE -eq 0) {
-            $baselineBytes += [int]$sizeText[0]
-            $baselineLines += $baseText.Count
+        $sizeResult = Invoke-GitCapture -Arguments @('-C',$RepoRoot,'cat-file','-s',("{0}:{1}" -f $baselineCommit, $relativePath))
+        $baseResult = Invoke-GitCapture -Arguments @('-C',$RepoRoot,'show',("{0}:{1}" -f $baselineCommit, $relativePath))
+        if ($sizeResult.ExitCode -eq 0 -and $baseResult.ExitCode -eq 0) {
+            $baselineBytes += [int]$sizeResult.StdOut.Trim()
+            $baselineLines += Get-TextLineCount -Text $baseResult.StdOut
         } else {
             Add-Failure ("cannot read PR-00 baseline target {0}" -f $relativePath)
         }

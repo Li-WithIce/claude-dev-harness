@@ -125,6 +125,12 @@ try {
     $badProtocol = Merge-Case -Base $catalog.base -Case $catalog.cases[0]
     $badProtocol.protocol = 'V2'
     Assert-True -Condition (Test-Throws { Invoke-RouteCase -RouteInput $badProtocol }) -Success 'unknown protocol casing fails closed' -Failure 'invalid HARNESS_PROTOCOL was accepted'
+    $combinedProtected = Merge-Case -Base $catalog.base -Case $catalog.cases[0]
+    $combinedProtected.command_text = 'DELETE FROM customer'
+    $combinedProtected.environment = 'production'
+    $combinedProtected.changed_paths = @('src/auth/authorize.ps1')
+    $combinedResult = Invoke-RouteCase -RouteInput $combinedProtected
+    Assert-True -Condition ([string]$combinedResult.approval_policy -ceq 'production' -and @($combinedResult.triggers) -ccontains 'protected:production-database-destructive' -and @($combinedResult.triggers) -ccontains 'protected:authorization-path-change') -Success 'none plus one Approval type preserves the single required type' -Failure 'none plus one Approval type changed or lost the required type'
 
     $workspaceAfter = Get-TreeSnapshot -Root $scratchRoot
     Assert-True -Condition (@(Compare-Object $workspaceBefore $workspaceAfter -SyncWindow 0).Count -eq 0) -Success 'Direct policy selection creates no task/runtime/artifact content' -Failure 'Direct policy selection changed workspace content'
@@ -136,6 +142,11 @@ try {
     [System.IO.File]::WriteAllText((Join-Path $fixtureRepo 'policies\risk-rules.json'),($badPolicy|ConvertTo-Json -Depth 20),(New-Object System.Text.UTF8Encoding($false)))
     Assert-True -Condition (Test-Throws { Invoke-RouteCase -RouteInput $baseInput -PolicyRepoRoot $fixtureRepo }) -Success 'unsafe policy mutation fails closed' -Failure 'unsafe risk policy mutation was accepted'
     Copy-Item -LiteralPath (Join-Path $RepoRoot 'policies\risk-rules.json') -Destination (Join-Path $fixtureRepo 'policies\risk-rules.json') -Force
+    $conflictingProtected = Get-Content -LiteralPath (Join-Path $fixtureRepo 'policies\protected-actions.json') -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable
+    $conflictingProtected.rules[1].requires_approval = 'architecture'
+    [System.IO.File]::WriteAllText((Join-Path $fixtureRepo 'policies\protected-actions.json'),($conflictingProtected|ConvertTo-Json -Depth 20),(New-Object System.Text.UTF8Encoding($false)))
+    Assert-True -Condition (Test-Throws { Invoke-RouteCase -RouteInput $combinedProtected -PolicyRepoRoot $fixtureRepo }) -Success 'classification rejects different Approval types from matched rules' -Failure 'classification selected the last matched Approval type'
+    Copy-Item -LiteralPath (Join-Path $RepoRoot 'policies\protected-actions.json') -Destination (Join-Path $fixtureRepo 'policies\protected-actions.json') -Force
     $badProtected = Get-Content -LiteralPath (Join-Path $fixtureRepo 'policies\protected-actions.json') -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable
     $badProtected.rules[1].requires_independent_review = 'false'
     [System.IO.File]::WriteAllText((Join-Path $fixtureRepo 'policies\protected-actions.json'),($badProtected|ConvertTo-Json -Depth 20),(New-Object System.Text.UTF8Encoding($false)))

@@ -853,6 +853,7 @@ function Assert-ManagedBackupTarget {
         $minimalTargets = @(
             'entry\AGENTS.md'
             'entry\advance-stage.ps1'
+            'entry\task.ps1'
             'entry\validate-lite-artifacts.ps1'
         )
         if ([string]$Manifest['effective_vault_profile'] -eq 'minimal') {
