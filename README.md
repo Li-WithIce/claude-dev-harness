@@ -1,11 +1,6 @@
-# Dev Harness
+# Requirement-Safe Thin Harness v2
 
-Windows 优先的单仓库开发 harness。它把 `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST` 的可执行阶段、`DONE` frontmatter 终态、共享记忆 `.assistant/`、以及 `docs/tasks/{task_id}/` 产物统一到同一套协议里，当前仓库状态已经包含 Phase 1-7 与 shared-memory v2 的主线能力。
-
-## 这份 README 面向谁
-
-- 使用者：把 harness 安装到你的工作区后，按这里的“日常使用”与“阶段推进”工作。
-- 维护者：在本仓库里修改脚本、skills、模板与测试，并用这里的校验命令确认行为没有回退。
+Windows 优先的轻量工程 harness。新任务先经过 Requirement Gate，再按风险选择 Ask、Direct、Governed 或 Critical；清晰低风险工作直接修改并验证，高风险工作才按需增加持久状态、Evidence、Approval、回滚和独立审查。既有 v1 `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST` 任务继续按 artifact 自动识别、恢复和完成，不会被隐式迁移或删除。
 
 ## 快速开始
 
@@ -20,9 +15,13 @@ pwsh -File .\install.ps1 `
 
 `core` 是新工作区的最小推荐安装；`governed` 增加规划与审计能力，`full` 再加入共享记忆和 team 等可选能力。安装和更新只要求 PowerShell 与 Git，不要求 Node.js。
 
-### 2. 打开工作区并直接描述需求
+### 2. 用 Codex 桌面打开项目
 
-普通用户无需设置 `HARNESS_PROTOCOL`、指定报告路径、运行 `task.ps1` 或手工选择执行 profile。入口根据已确认需求、风险和持久化要求选择：
+用 Codex 桌面直接打开 `D:\my-project`。正常使用不需要设置 `HARNESS_PROTOCOL`、指定 rollout report、运行 `task.ps1` 或手工选择 execution profile。
+
+### 3. 直接描述需求
+
+直接说明目标、验收和必要约束；入口根据已确认需求、风险和持久化要求选择：
 
 | 结果 | 何时使用 | 最短行为 |
 |---|---|---|
@@ -35,11 +34,13 @@ pwsh -File .\install.ps1 `
 
 恢复语义保持兼容：明确“继续”或“恢复并执行”才推进；只问状态时保持只读；裸“恢复一下”/`resume` 若意图不明则 ask。
 
-### 3. 认清 Evidence 与 Approval
+## Evidence、Approval 与受保护动作
 
 Evidence 记录真实执行过的验证、覆盖与缺口，并绑定任务版本和仓库修订；没有执行的检查不能写成通过。Approval 是对确定版本、Requirement Contract 与作用域的授权，缺失、过期或作用域变化会阻断受保护动作；它不是要求澄清的 Ask。
 
-### 4. Worktree 与回滚最短路径
+Core 只内置有限的受保护动作规则：生产破坏性数据库命令，以及 `auth` / `permissions` / `rbac` 路径变更。项目特有风险必须通过严格的 `protected-actions-overlay/v1` 增加，不能靠提示词放宽 core。Codex 的“完全访问”不等于生产授权；桌面宿主无法提供不可绕过执行边界时，Critical 生产动作必须交给独立受控执行器，Codex 只生成 Plan、Dry Run、Approval Request 和 Evidence。
+
+## Worktree 与回滚最短路径
 
 - 每个 linked worktree 都要以自己的路径单独安装，例如 `-WorkspaceRoot D:\repo-worktrees\feature-a`；不要复制父工作区的 `.assistant/runtime/current.json` 或 live runtime。
 - 真正的 Git submodule 继续使用父 workspace；独立嵌套仓库即使通过 `git init --separate-git-dir` 保存 metadata，也会按自己的 worktree root 隔离安装，不继承父 current、task 或 Approval。
@@ -47,11 +48,11 @@ Evidence 记录真实执行过的验证、覆盖与缺口，并绑定任务版�
 - 新任务需要立即回到 v1 路由时，设置 `HARNESS_PROTOCOL=v1`。这不会删除或降级已有 v2 task；卸载安装器托管资产请单独运行 `uninstall.ps1`。
 - 快速上手、Requirement Gate 和持久治理分别见 [`docs/quick-start.md`](docs/quick-start.md)、[`docs/requirement-gate.md`](docs/requirement-gate.md)、[`docs/governed-work.md`](docs/governed-work.md)。
 
-### Optional Context Providers
+## Optional Context Providers
 
 Context providers 是可选辅助输入，不是 workflow 真相源。内置权威仍是 `docs/tasks/{task_id}/`、当前仓库文件和本地 `.assistant/`；CodeGraph、agentmemory、codedb-mcp 只能提供 advisory context provider 结果，且必须落回真实路径、命令、diff、review finding、Implementation Notes 或 test output。安装、更新和 validation 默认不会安装、注册或连接外部 provider；详细边界见 `docs/工作流/context-provider-boundary.md`，工具入口见 `docs/工具/context-providers.md`。
 
-最常用命令：
+## 维护者与显式持久任务命令
 
 ```powershell
 # 只读查看 v2 恢复状态或协议判定
@@ -63,9 +64,6 @@ pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <
 
 # 显式指定 profile，backend 从 profile.backend 解析
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Profile harness-default-codex
-
-# 显式指定 tool + profile + model
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Tool codex -Profile harness-default-codex -Model gpt-5.5/xhigh
 
 # 仍可显式切到其他合法 backend
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Tool claudecode
@@ -80,7 +78,9 @@ pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <
 pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId {task_id}
 ```
 
-## 真实任务流程
+## v1 兼容工作流
+
+以下内容仅适用于 artifact detector 识别为 v1 的 workflow task。v2 的唯一生命周期真相源是 `.assistant/runtime/tasks/<task-id>/task.json`；`Direct` 路径不创建持久任务状态。
 
 ### 新任务入口模式路由
 
@@ -129,9 +129,9 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId {task_id}
 
 局部 HTML 增强只允许用于卡片、对比区、流程区、信息网格；不得输出完整页面，不得把 HTML 放进代码块，不得使用 `script`、`iframe` 或外部 JS。paired reading HTML 默认不含 `doctype`、`html`、`head`、`body` 外壳；完整 HTML 页面只有用户明确要求时才生成。
 
-### 阶段与真相源
+### v1 阶段与真相源
 
-以下阶段只适用于 `mode=workflow` 的新任务，`quick` 不创建阶段状态。
+以下阶段只适用于 v1 `mode=workflow` 的任务，`quick` 不创建阶段状态。
 
 可执行阶段是：
 
@@ -143,7 +143,7 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 
 默认 descriptor 是 Codex-only：`PLAN`、`PLAN_REVIEW`、`IMPLEMENT`、`CODE_REVIEW`、`TEST` 都使用 `harness-default-codex`。`claudecode` 仍是合法 backend，但需要在任务 frontmatter 或推进命令中显式指定。
 
-唯一阶段真相源始终是 `docs/tasks/{task_id}/plan.md` frontmatter（`task_id` / `stage` / `tool` / `updated`，加可选 `tool_profile` / `model`）。字段枚举、约束和完整骨架只在 [`skills/orchestrator/references/lite-writing-guide.md`](skills/orchestrator/references/lite-writing-guide.md) 维护一份，本 README 不重复。
+在 v1 workflow 内，唯一阶段真相源是 `docs/tasks/{task_id}/plan.md` frontmatter（`task_id` / `stage` / `tool` / `updated`，加可选 `tool_profile` / `model`）。字段枚举、约束和完整骨架只在 [`skills/orchestrator/references/lite-writing-guide.md`](skills/orchestrator/references/lite-writing-guide.md) 维护一份，本 README 不重复。
 
 ### 每个阶段写什么
 
@@ -187,13 +187,13 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 - mirror 始终同步实际 stage；active advance 更新 current，background advance 不抢 current；active `DONE` 将 current 重置为 canonical idle，background `DONE` 不改 current
 - runtime ladder 任一步失败都返回非零并追加 `[writeback-fallback]`；只有明确继续 / 切换并执行 workflow 时，resume/switch 才处理 fallback 并用相同 `TaskId/ExpectedStage -SyncOnly` 幂等重放
 
-## `.assistant`、`docs/tasks`、validator、git 的职责
+## v1 的 `.assistant`、`docs/tasks`、validator、git 职责
 
 ### `docs/tasks/{task_id}/`
 
-这是任务的审阅面与阶段真相源。
+这是 v1 任务的审阅面与阶段真相源。
 
-- `plan.md` frontmatter 是唯一阶段真相源
+- 在 v1 workflow 内，`plan.md` frontmatter 是唯一阶段真相源
 - `plan.md` 的 review / implementation run 是 append-only
 - `test.md` 记录 TEST 结论
 - `spec.md` 是可选补充，不是默认入口
@@ -253,17 +253,17 @@ artifact drift 属于 advisory-first 检查，不是硬 gate：
 - `.assistant/` 里的通用协议若需要进入仓库，应先提升到 `docs/工作流/`、`skills/` 或 `vault-template/`，再由安装/更新路径渲染到目标工作区
 - 仓库历史里可能曾保留 shared-memory migration 相关 `.assistant` 文件；当前索引不再跟踪 `.assistant/` 内容
 
-## 历史 Phase 能力（已并入主线）
+## v1 历史 Phase 能力（兼容保留）
 
-当前仓库已包含 Phase 1-7 与 shared-memory v2 的主线能力。这些约束不再按 phase 单独罗列，而是并入对应单一真相源：
+当前仓库仍保留 Phase 1-7 与 shared-memory v2 能力，供已有 v1 任务兼容使用。这些约束不再按 phase 单独罗列，而是并入对应的 v1 真相源：
 
 - plan metadata（`read_first` / `convergence` / `artifacts`）与 review `-Quality` 4-dim score（`completeness` / `consistency` / `accuracy` / `depth`）：见 [`skills/orchestrator/references/lite-writing-guide.md`](skills/orchestrator/references/lite-writing-guide.md) 与 [`docs/工作流/quality-rubric.md`](docs/工作流/quality-rubric.md)
 - `PreCompact` 自检与 single-writer 写回（append 走 `append-runtime-inbox.ps1`，非 append 写回只委托 `advance-stage.ps1`）：见 [`skills/orchestrator/SKILL.md`](skills/orchestrator/SKILL.md)、[`skills/workflow-team/SKILL.md`](skills/workflow-team/SKILL.md) 与 [`docs/工作流/single-writer-precompact.md`](docs/工作流/single-writer-precompact.md)
 - team auto mode 环境变量固定为 `HARNESS_AUTO`；长会话恢复优先看已存在 runtime 指针，full vault 项目再读 `.assistant/工作流/长会话恢复.md`；`spec.md` 可选 `front_keywords`
 
-## 关键入口命令
+## v1 持久工作流与维护入口
 
-### 终端用户最常用
+### 安装、状态与 v1 阶段维护
 
 ```powershell
 # 安装 / 更新

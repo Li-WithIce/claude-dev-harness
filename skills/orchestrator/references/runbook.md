@@ -35,7 +35,7 @@
 ```powershell
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage>
 # 可选 profile/model 绑定
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Tool <codex> -Profile harness-default-codex -Model gpt-5.5/xhigh
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Tool <codex> -Profile harness-default-codex -Model <full-model-id>
 # 可选：只传 profile，backend 从 profile.backend 解析
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Profile harness-default-codex
 # 可选：显式切到其他合法 backend

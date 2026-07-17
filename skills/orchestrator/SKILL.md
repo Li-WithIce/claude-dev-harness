@@ -81,7 +81,7 @@ stage 只通过下面这条命令推进：
 # Codex-only 默认路径：ExpectedStage 必须是调用方刚读取的 frontmatter stage
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage>
 # 可选：同时绑定下一阶段 profile/model
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Tool <codex> -Profile harness-default-codex -Model gpt-5.5/xhigh
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Tool <codex> -Profile harness-default-codex -Model <full-model-id>
 # 可选：只传 profile，backend 从 profile.backend 解析
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Profile harness-default-codex
 # 可选：显式切到其他合法 backend
