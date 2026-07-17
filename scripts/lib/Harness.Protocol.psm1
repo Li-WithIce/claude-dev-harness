@@ -168,7 +168,7 @@ function Assert-HarnessRolloutReport {
     $gateCommands = [ordered]@{
         behavior = 'scripts/run-model-evals.ps1 -Model gpt-5.6-sol -Reasoning max'
         v1_compatibility = 'scripts/run-validation.ps1 -Suite all -CheckTimeoutSeconds 360 -VerboseOutput'
-        direct_performance = 'scripts/run-host-benchmark.ps1 -Trials 3 -Model gpt-5.6-sol -Reasoning max'
+        direct_performance = 'scripts/run-host-benchmark.ps1 -Groups 3 -Trials 3 -Model gpt-5.6-sol -Reasoning max'
         core_install_rollback = 'scripts/run-isolated-install-smoke.ps1 -Preset core'
         full_install_rollback = 'scripts/run-isolated-install-smoke.ps1 -Preset full'
     }

@@ -16,6 +16,10 @@ function Set-ReportDigest([Collections.IDictionary]$Document) {
     $Document.report_digest = $null
     $Document.report_digest = Get-TextDigest ($Document | ConvertTo-Json -Depth 100 -Compress)
 }
+function Set-GroupDigest([Collections.IDictionary]$Group) {
+    $Group.group_digest = $null
+    $Group.group_digest = Get-TextDigest ($Group | ConvertTo-Json -Depth 100 -Compress)
+}
 function Copy-Document([Collections.IDictionary]$Document) { return ($Document | ConvertTo-Json -Depth 100 -Compress) | ConvertFrom-Json -AsHashtable -Depth 100 }
 function Write-Document([string]$Path,[Collections.IDictionary]$Document,[switch]$Compress) {
     $json = if ($Compress) { $Document | ConvertTo-Json -Depth 100 -Compress } else { $Document | ConvertTo-Json -Depth 100 }
@@ -36,12 +40,14 @@ function New-ExpectedObservation([Collections.IDictionary]$DatasetCase) {
         lifecycle_skills_loaded=0;unauthorized_scope_change=$false;reason_code='fixture-observation'
     }
 }
-function New-HostTrial([string]$Protocol,[int]$Trial,[Collections.IDictionary]$Source) {
+function New-HostTrial([string]$Protocol,[int]$Trial,[int]$GroupIndex,[Collections.IDictionary]$Source) {
     $durationBase = if ($Protocol -ceq 'bare') { 90 } elseif ($Protocol -ceq 'v1') { 490 } else { 100 }
-    $duration = $durationBase + (10 * $Trial)
+    $duration = $durationBase + (10 * $Trial) + $GroupIndex
     $freshSessions = if ($Protocol -ceq 'v1') { 5 } else { 1 }
     $requestSends = if ($Protocol -ceq 'v1') { 10 } elseif ($Protocol -ceq 'v2') { 2 } else { 4 }
+    $trialIdentity = "fixture-group-$GroupIndex-$Protocol-$Trial"
     return [ordered]@{
+        trial_run_id=(Get-TextDigest $trialIdentity).Substring(7,32);trial_root_digest=(Get-TextDigest "fixture-trial-root-$trialIdentity")
         trial=$Trial;runner_expected_trial=$Trial;runner_evidence_passed=$true;workspace_baseline_revision=[string]$Source.revision
         status='measured';diagnostic=$null;completion_passed=$true;outcome='completed';reason_code='completed'
         source_binding=[ordered]@{status='bound';revision=[string]$Source.revision;commit_tree_oid=[string]$Source.commit_tree_oid;verification='git-head-tree-clean/v1';reason='fixture source binding'}
@@ -57,8 +63,8 @@ function New-HostTrial([string]$Protocol,[int]$Trial,[Collections.IDictionary]$S
         tokens=[ordered]@{status='measured';input=1;cached_input=0;output=1}
     }
 }
-function New-HostProtocolRecord([string]$Protocol,[Collections.IDictionary]$Source) {
-    $trials = @(1,2,3 | ForEach-Object { New-HostTrial -Protocol $Protocol -Trial $_ -Source $Source })
+function New-HostProtocolRecord([string]$Protocol,[int]$GroupIndex,[Collections.IDictionary]$Source) {
+    $trials = @(1,2,3 | ForEach-Object { New-HostTrial -Protocol $Protocol -Trial $_ -GroupIndex $GroupIndex -Source $Source })
     $durationMedian = [double]$trials[1].total_duration_ms
     $sessionMedian = [double]$trials[1].fresh_sessions
     $sendMedian = [double]$trials[1].successful_request_sends.value
@@ -67,6 +73,36 @@ function New-HostProtocolRecord([string]$Protocol,[Collections.IDictionary]$Sour
         successful_request_sends=[ordered]@{status='measured';median=$sendMedian;basis='codex-0.144.4-successful-websocket-send/v2';reason='fixture median'}
         medians=[ordered]@{total_duration_ms=$durationMedian;sum_codex_process_duration_ms=$durationMedian;first_useful_action_ms=10;fresh_sessions=$sessionMedian;host_turns=$sessionMedian;successful_request_sends=$sendMedian;tool_calls=2;skill_file_command_matches=0}
     }
+}
+function New-HostGroup([int]$Index,[Collections.IDictionary]$Source,[Collections.IDictionary]$ReportSource) {
+    $protocolNames = @('bare','v1','v2')
+    $order = [Collections.Generic.List[object]]::new()
+    $sequence = 0
+    for ($trial=1; $trial -le 3; $trial++) {
+        $rotation = (($Index - 1) + ($trial - 1)) % $protocolNames.Count
+        for ($offset=0; $offset -lt $protocolNames.Count; $offset++) {
+            $sequence++
+            $order.Add([ordered]@{sequence=$sequence;protocol=$protocolNames[($rotation + $offset) % $protocolNames.Count];trial=$trial})
+        }
+    }
+    $protocols = [ordered]@{bare=(New-HostProtocolRecord -Protocol bare -GroupIndex $Index -Source $Source);v1=(New-HostProtocolRecord -Protocol v1 -GroupIndex $Index -Source $Source);v2=(New-HostProtocolRecord -Protocol v2 -GroupIndex $Index -Source $Source)}
+    $directRatio = [math]::Round(([double]$protocols.v2.medians.total_duration_ms / [double]$protocols.bare.medians.total_duration_ms),4)
+    $group = [ordered]@{
+        group_index=$Index;group_run_id=$Index.ToString('x32');group_root_digest=(Get-TextDigest "fixture-group-root-$Index")
+        source_revision=[string]$Source.revision;source_dirty=$false;source_state_stable=$true;source=(Copy-Document $ReportSource)
+        execution=[ordered]@{
+            model='gpt-5.6-sol';reasoning='max';trials_per_protocol=3;release_trials_required=3;max_fresh_sessions=8;fresh_workspace_per_trial=$true;fresh_ephemeral_session_per_invocation=$true
+            v1_comparator='confirmed-plan-to-done-one-stage-per-host-turn';bare_and_v2_start='new-task';semantic_task='change exact private file bytes and verify';host_turn_basis='codex-jsonl-turn.started'
+            successful_request_send_measurement='codex-0.144.4-successful-websocket-send/v2';expected_codex_service_version='0.144.4';trial_order_strategy='round-interleaved-rotating-start';actual_trial_order=@($order)
+            cache_state='shared-dedicated-auth-home-and-host-cache-not-cleared-between-trials';codex_home='dedicated-config-isolated-auth-home-path-not-persisted';sandbox='danger-full-access';approval_policy='never';workspace_boundary='dedicated-ignored-nested-git-root'
+            prompt_persisted=$false;raw_command_persisted=$false;thread_id_persisted=$false;raw_trace_persisted=$false;raw_trace_cleanup_confirmed=$true;scratch_persisted=$false;install_duration_included=$false;duration_ms=1000
+        }
+        protocols=$protocols
+        performance=[ordered]@{release_trial_set=[ordered]@{status='pass';required_trials_per_protocol=3;reason='fixture'};direct_latency=[ordered]@{status='pass';ratio=$directRatio;threshold=1.25;reason='fixture'};successful_request_send_reduction=[ordered]@{status='pass';reduction=0.8;threshold=0.60;reason='fixture'};eligible=$true}
+        status='pass';group_digest=$null
+    }
+    Set-GroupDigest $group
+    return $group
 }
 
 $modulePath = Join-Path $RepoRoot 'scripts\lib\Harness.RolloutEvidence.psm1'
@@ -172,48 +208,64 @@ try {
     $hostSource.commit_tree_oid=[string]$cleanSource.commit_tree_oid; $hostSource.object_format=[string]$cleanSource.object_format
     $hostSource.start=$sourceState; $hostSource.end=(Copy-Document $sourceState)
     $hostSource.execution_mode='clean-commit-clone'
-    $protocols = [ordered]@{bare=(New-HostProtocolRecord -Protocol bare -Source $cleanSource);v1=(New-HostProtocolRecord -Protocol v1 -Source $cleanSource);v2=(New-HostProtocolRecord -Protocol v2 -Source $cleanSource)}
+    $hostGroups = @(1,2,3 | ForEach-Object { New-HostGroup -Index $_ -Source $cleanSource -ReportSource $hostSource })
     $hostReport = [ordered]@{
-        schema_version='harness-host-benchmark-report/v1';generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o');source_revision=[string]$cleanSource.revision;source_dirty=$false;source_state_stable=$true;source=$hostSource
-        execution=[ordered]@{
-            model='gpt-5.6-sol';reasoning='max';trials_per_protocol=3;release_trials_required=3;max_fresh_sessions=8;fresh_workspace_per_trial=$true;fresh_ephemeral_session_per_invocation=$true
-            v1_comparator='confirmed-plan-to-done-one-stage-per-host-turn';bare_and_v2_start='new-task';semantic_task='change exact private file bytes and verify';host_turn_basis='codex-jsonl-turn.started'
-            successful_request_send_measurement='codex-0.144.4-successful-websocket-send/v2';expected_codex_service_version='0.144.4';trial_order_strategy='round-interleaved-rotating-start'
-            actual_trial_order=@([ordered]@{sequence=1;protocol='bare';trial=1},[ordered]@{sequence=2;protocol='v1';trial=1},[ordered]@{sequence=3;protocol='v2';trial=1},[ordered]@{sequence=4;protocol='v1';trial=2},[ordered]@{sequence=5;protocol='v2';trial=2},[ordered]@{sequence=6;protocol='bare';trial=2},[ordered]@{sequence=7;protocol='v2';trial=3},[ordered]@{sequence=8;protocol='bare';trial=3},[ordered]@{sequence=9;protocol='v1';trial=3})
-            cache_state='shared-dedicated-auth-home-and-host-cache-not-cleared-between-trials';codex_home='dedicated-config-isolated-auth-home-path-not-persisted';sandbox='danger-full-access';approval_policy='never';workspace_boundary='dedicated-ignored-nested-git-root'
-            prompt_persisted=$false;raw_command_persisted=$false;thread_id_persisted=$false;raw_trace_persisted=$false;raw_trace_cleanup_confirmed=$true;scratch_persisted=$false;install_duration_included=$false;duration_ms=1000
-        }
-        protocols=$protocols
-        performance=[ordered]@{release_trial_set=[ordered]@{status='pass';required_trials_per_protocol=3;reason='fixture'};direct_latency=[ordered]@{status='pass';ratio=1.0909;threshold=1.25;reason='fixture'};successful_request_send_reduction=[ordered]@{status='pass';reduction=0.8;threshold=0.60;reason='fixture'};eligible=$true}
+        schema_version='harness-host-benchmark-report/v2';generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o');source_revision=[string]$cleanSource.revision;source_dirty=$false;source_state_stable=$true;source=$hostSource
+        execution=[ordered]@{model='gpt-5.6-sol';reasoning='max';groups=3;required_groups=3;trials_per_protocol_per_group=3;required_trials_per_protocol_per_group=3;group_order_strategy='independent-groups-round-interleaved-rotating-start';max_fresh_sessions=8;fresh_workspace_per_trial=$true;fresh_ephemeral_session_per_invocation=$true;codex_home='dedicated-config-isolated-auth-home-path-not-persisted';duration_ms=3000}
+        groups=$hostGroups
+        performance=[ordered]@{release_group_set=[ordered]@{status='pass';required_groups=3;required_trials_per_protocol_per_group=3;passed_groups=3;reason='fixture'};eligible=$true}
         status='pass';report_digest=$null
     }
     Set-ReportDigest $hostReport
     $hostPath = Join-Path $temp 'host.json'; Write-Document $hostPath $hostReport
     $hostGate = Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $hostPath -ExpectedSource $cleanSource
-    Check ([string]$hostGate.status -ceq 'pass') 'clean host 3x3 report is accepted' "clean host report was rejected: $($hostGate.reason)"
+    Check ([string]$hostGate.status -ceq 'pass') 'three independent clean host 3x3 groups are accepted' "clean host report was rejected: $($hostGate.reason)"
+    $legacyProtocols = Copy-Document $hostGroups[0].protocols
+    foreach ($protocol in @('bare','v1','v2')) { foreach ($trial in @($legacyProtocols[$protocol].trials)) { [void]$trial.Remove('trial_run_id'); [void]$trial.Remove('trial_root_digest') } }
+    $legacyHost = [ordered]@{schema_version='harness-host-benchmark-report/v1';generated_at_utc=$hostReport.generated_at_utc;source_revision=$hostGroups[0].source_revision;source_dirty=$hostGroups[0].source_dirty;source_state_stable=$hostGroups[0].source_state_stable;source=$hostGroups[0].source;execution=$hostGroups[0].execution;protocols=$legacyProtocols;performance=$hostGroups[0].performance;status=$hostGroups[0].status;report_digest=$null}
+    Set-ReportDigest $legacyHost; $path=Join-Path $temp 'host-legacy-v1.json'; Write-Document $path $legacyHost
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'unavailable') 'legacy one-group host v1 remains historical evidence only' 'legacy host v1 was allowed to become eligible'
+    $staleLegacyHost=Copy-Document $legacyHost; $staleLegacyHost.source_revision='0' * 40; Set-ReportDigest $staleLegacyHost; $path=Join-Path $temp 'host-stale-legacy-v1.json'; Write-Document $path $staleLegacyHost
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'stale legacy host v1 remains invalid rather than historical unavailable evidence' 'stale legacy host v1 was weakened to unavailable'
     $extraSourceHost = Copy-Document $hostReport; $extraSourceHost.source.unexpected='sentinel-extra-field'; Set-ReportDigest $extraSourceHost; $path=Join-Path $temp 'host-extra-source.json'; Write-Document $path $extraSourceHost
     Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'host gate rejects extra source fields' 'extra host source field was accepted'
     $extraExecutionHost = Copy-Document $hostReport; $extraExecutionHost.execution.auth_json='sentinel-extra-field'; Set-ReportDigest $extraExecutionHost; $path=Join-Path $temp 'host-extra-execution.json'; Write-Document $path $extraExecutionHost
     Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'host gate rejects extra execution fields' 'extra host execution field was accepted'
-    $extraTrialHost = Copy-Document $hostReport; $extraTrialHost.protocols.bare.trials[0].unexpected='sentinel-extra-field'; Set-ReportDigest $extraTrialHost; $path=Join-Path $temp 'host-extra-trial.json'; Write-Document $path $extraTrialHost
+    $extraTrialHost = Copy-Document $hostReport; $extraTrialHost.groups[0].protocols.bare.trials[0].unexpected='sentinel-extra-field'; Set-ReportDigest $extraTrialHost; $path=Join-Path $temp 'host-extra-trial.json'; Write-Document $path $extraTrialHost
     Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'host gate rejects extra trial fields' 'extra host trial field was accepted'
-    $extraMeasurementHost = Copy-Document $hostReport; $extraMeasurementHost.protocols.v1.trials[0].successful_request_sends.secret='sentinel-extra-field'; Set-ReportDigest $extraMeasurementHost; $path=Join-Path $temp 'host-extra-measurement.json'; Write-Document $path $extraMeasurementHost
+    $extraMeasurementHost = Copy-Document $hostReport; $extraMeasurementHost.groups[0].protocols.v1.trials[0].successful_request_sends.secret='sentinel-extra-field'; Set-ReportDigest $extraMeasurementHost; $path=Join-Path $temp 'host-extra-measurement.json'; Write-Document $path $extraMeasurementHost
     Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'host gate rejects extra measurement fields' 'extra host measurement field was accepted'
-    $shortHost = Copy-Document $hostReport; $shortHost.protocols.v2.trials=@($shortHost.protocols.v2.trials | Select-Object -First 2); Set-ReportDigest $shortHost; $path=Join-Path $temp 'host-short.json'; Write-Document $path $shortHost
-    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'non-3x3 host report fails closed' 'short host report was accepted'
-    $slowHost = Copy-Document $hostReport; $slowHost.performance.direct_latency.ratio=1.3; Set-ReportDigest $slowHost; $path=Join-Path $temp 'host-slow.json'; Write-Document $path $slowHost
+    $shortHost = Copy-Document $hostReport; $shortHost.groups=@($shortHost.groups | Select-Object -First 2); $shortHost.execution.groups=2; $shortHost.performance.release_group_set.status='fail'; $shortHost.performance.release_group_set.passed_groups=2; $shortHost.performance.eligible=$false; $shortHost.status='fail'; Set-ReportDigest $shortHost; $path=Join-Path $temp 'host-short.json'; Write-Document $path $shortHost
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'fewer than three independent groups fail closed' 'short host report was accepted'
+    $flatNineHost = Copy-Document $hostReport; $flatNineHost.groups=@($flatNineHost.groups | Select-Object -First 1); $flatNineHost.execution.groups=1; $flatNineHost.execution.trials_per_protocol_per_group=9; $flatNineHost.performance.release_group_set.status='fail'; $flatNineHost.performance.release_group_set.passed_groups=1; $flatNineHost.performance.eligible=$false; $flatNineHost.status='fail'; Set-ReportDigest $flatNineHost; $path=Join-Path $temp 'host-flat-nine.json'; Write-Document $path $flatNineHost
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'flat Trials=9 cannot substitute for three independent groups' 'flat nine-trial host report was accepted'
+    $duplicateIdHost = Copy-Document $hostReport; $duplicateIdHost.groups[1].group_run_id=$duplicateIdHost.groups[0].group_run_id; Set-GroupDigest $duplicateIdHost.groups[1]; Set-ReportDigest $duplicateIdHost; $path=Join-Path $temp 'host-duplicate-group-id.json'; Write-Document $path $duplicateIdHost
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'duplicate host group id fails closed' 'duplicate host group id was accepted'
+    $duplicateRootHost = Copy-Document $hostReport; $duplicateRootHost.groups[1].group_root_digest=$duplicateRootHost.groups[0].group_root_digest; Set-GroupDigest $duplicateRootHost.groups[1]; Set-ReportDigest $duplicateRootHost; $path=Join-Path $temp 'host-duplicate-group-root.json'; Write-Document $path $duplicateRootHost
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'duplicate host group root fails closed' 'duplicate host group root was accepted'
+    $copiedGroupHost = Copy-Document $hostReport; $replacementId=$copiedGroupHost.groups[1].group_run_id; $replacementRoot=$copiedGroupHost.groups[1].group_root_digest; $copiedGroupHost.groups[1]=(Copy-Document $copiedGroupHost.groups[0]); $copiedGroupHost.groups[1].group_index=2; $copiedGroupHost.groups[1].group_run_id=$replacementId; $copiedGroupHost.groups[1].group_root_digest=$replacementRoot
+    $identityIndex=0; foreach ($protocol in @('bare','v1','v2')) { foreach ($trial in @($copiedGroupHost.groups[1].protocols[$protocol].trials)) { $identityIndex++; $trial.trial_run_id=(Get-TextDigest "replacement-trial-$identityIndex").Substring(7,32); $trial.trial_root_digest=Get-TextDigest "replacement-trial-root-$identityIndex" } }
+    Set-GroupDigest $copiedGroupHost.groups[1]; Set-ReportDigest $copiedGroupHost; $path=Join-Path $temp 'host-copied-group-new-identity.json'; Write-Document $path $copiedGroupHost
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'copied trial payloads remain rejected after replacing group and trial identities and recomputing digests' 'copied group bypassed independence by replacing identities'
+    $reorderedNestedHost = Copy-Document $hostReport; $replacementTrial=(Copy-Document $reorderedNestedHost.groups[0].protocols.bare.trials[0]); $replacementTrial.trial_run_id=$reorderedNestedHost.groups[1].protocols.bare.trials[0].trial_run_id; $replacementTrial.trial_root_digest=$reorderedNestedHost.groups[1].protocols.bare.trials[0].trial_root_digest
+    $binding=$replacementTrial.source_binding; $replacementTrial.source_binding=[ordered]@{reason=$binding.reason;verification=$binding.verification;commit_tree_oid=$binding.commit_tree_oid;revision=$binding.revision;status=$binding.status}; $reorderedNestedHost.groups[1].protocols.bare.trials[0]=$replacementTrial
+    Set-GroupDigest $reorderedNestedHost.groups[1]; Set-ReportDigest $reorderedNestedHost; $path=Join-Path $temp 'host-reordered-nested-copy.json'; Write-Document $path $reorderedNestedHost
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'copied trial payload remains rejected after nested dictionary key reordering' 'nested dictionary key order bypassed canonical trial duplicate detection'
+    $duplicateTrialHost = Copy-Document $hostReport; $duplicateTrialHost.groups[0].protocols.bare.trials[1]=(Copy-Document $duplicateTrialHost.groups[0].protocols.bare.trials[0]); Set-GroupDigest $duplicateTrialHost.groups[0]; Set-ReportDigest $duplicateTrialHost; $path=Join-Path $temp 'host-duplicate-trial.json'; Write-Document $path $duplicateTrialHost
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'duplicate canonical trial payload fails closed' 'duplicate host trial payload was accepted'
+    $slowHost = Copy-Document $hostReport; $slowHost.groups[0].performance.direct_latency.ratio=1.3; Set-GroupDigest $slowHost.groups[0]; Set-ReportDigest $slowHost; $path=Join-Path $temp 'host-slow.json'; Write-Document $path $slowHost
     Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'host threshold contradiction fails closed' 'host threshold contradiction was accepted'
-    $forgedHost = Copy-Document $hostReport; $forgedHost.protocols.v2.trials[1].total_duration_ms=1000; Set-ReportDigest $forgedHost; $path=Join-Path $temp 'host-forged-median.json'; Write-Document $path $forgedHost
-    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'host performance medians are recomputed from the exact 3x3 trials' 'forged host aggregate was accepted'
-    $unboundHost = Copy-Document $hostReport; $unboundHost.protocols.bare.trials[0].source_binding.revision='0' * 40; Set-ReportDigest $unboundHost; $path=Join-Path $temp 'host-unbound.json'; Write-Document $path $unboundHost
+    $forgedHost = Copy-Document $hostReport; $forgedHost.groups[0].protocols.v2.trials[1].total_duration_ms=1000; Set-GroupDigest $forgedHost.groups[0]; Set-ReportDigest $forgedHost; $path=Join-Path $temp 'host-forged-median.json'; Write-Document $path $forgedHost
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'each group performance median is recomputed from its own exact 3x3 trials' 'forged host aggregate was accepted'
+    $unboundHost = Copy-Document $hostReport; $unboundHost.groups[0].protocols.bare.trials[0].source_binding.revision='0' * 40; Set-GroupDigest $unboundHost.groups[0]; Set-ReportDigest $unboundHost; $path=Join-Path $temp 'host-unbound.json'; Write-Document $path $unboundHost
     Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'every host trial is independently bound to the qualified source' 'unbound host trial was accepted'
     $forgedHostSource = Copy-Document $hostReport; $forgedHostSource.source.start.status_digest='sha256:' + ('f' * 64); $forgedHostSource.source.end.status_digest='sha256:' + ('f' * 64); Set-ReportDigest $forgedHostSource; $path=Join-Path $temp 'host-forged-source.json'; Write-Document $path $forgedHostSource
     Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'host source snapshots bind the exact qualified status digest' 'forged host source snapshot was accepted'
-    $typedHost = Copy-Document $hostReport; $typedHost.execution.fresh_workspace_per_trial='false'; $typedHost.protocols.v2.trials[0].runner_evidence_passed='false'; $typedHost.performance.direct_latency.ratio='NaN'; Set-ReportDigest $typedHost; $path=Join-Path $temp 'host-type-forgery.json'; Write-Document $path $typedHost
+    $typedHost = Copy-Document $hostReport; $typedHost.execution.fresh_workspace_per_trial='false'; $typedHost.groups[0].protocols.v2.trials[0].runner_evidence_passed='false'; $typedHost.groups[0].performance.direct_latency.ratio='NaN'; Set-ReportDigest $typedHost; $path=Join-Path $temp 'host-type-forgery.json'; Write-Document $path $typedHost
     Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'host gate rejects string-forged booleans and non-finite performance values' 'host type forgery was accepted'
-    $unavailableHost = Copy-Document $hostReport; $unavailableHost.status='unavailable'; $unavailableHost.performance.eligible=$false; Set-ReportDigest $unavailableHost; $path=Join-Path $temp 'host-unavailable.json'; Write-Document $path $unavailableHost
+    $unavailableHost = Copy-Document $hostReport; $unavailableHost.groups[0].status='unavailable'; $unavailableHost.groups[0].performance.eligible=$false; Set-GroupDigest $unavailableHost.groups[0]; $unavailableHost.status='unavailable'; $unavailableHost.performance.release_group_set.status='unavailable'; $unavailableHost.performance.release_group_set.passed_groups=2; $unavailableHost.performance.eligible=$false; Set-ReportDigest $unavailableHost; $path=Join-Path $temp 'host-unavailable.json'; Write-Document $path $unavailableHost
     Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'unavailable') 'host measurement unavailability remains unavailable' 'host measurement unavailability was misclassified'
-    $extraUnavailableHost = Copy-Document $unavailableHost; $extraUnavailableHost.protocols.v2.trials[0].source_binding.secret='sentinel-extra-field'; Set-ReportDigest $extraUnavailableHost; $path=Join-Path $temp 'host-unavailable-extra.json'; Write-Document $path $extraUnavailableHost
+    $extraUnavailableHost = Copy-Document $unavailableHost; $extraUnavailableHost.groups[0].protocols.v2.trials[0].source_binding.secret='sentinel-extra-field'; Set-ReportDigest $extraUnavailableHost; $path=Join-Path $temp 'host-unavailable-extra.json'; Write-Document $path $extraUnavailableHost
     Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'unavailable host reports still reject extra nested fields' 'unavailable host report accepted an extra nested field'
     $dirtyExpected = Copy-Document $cleanSource; $dirtyExpected.dirty=$true
     Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $hostPath -ExpectedSource $dirtyExpected).status -ceq 'fail') 'dirty generator source rejects otherwise passing evidence' 'dirty generator source accepted release evidence'

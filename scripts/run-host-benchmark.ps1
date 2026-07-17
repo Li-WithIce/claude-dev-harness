@@ -5,6 +5,7 @@ param(
     [string]$RepoRoot = '',
     [string]$OutputPath = '',
     [string]$CodexHome = '',
+    [ValidateRange(1,10)][int]$Groups = 1,
     [ValidateRange(1,10)][int]$Trials = 3,
     [ValidateRange(1,12)][int]$MaxRoundTrips = 8,
     [string]$Model = 'gpt-5.6-sol',
@@ -311,73 +312,123 @@ $sourceInputs = [ordered]@{
 $sourceMode = if ([bool]$sourceStart.dirty -or -not $sourceInputHeadBoundStart) { 'live-dirty-diagnostic' } else { 'clean-commit-clone' }
 $scratchBase = New-HarnessContainedDirectory -WorkspaceRoot $RepoRoot -Path '.assistant\运行时\release-qualification' -Label 'host benchmark scratch base'
 $scratchRoot = New-HarnessContainedDirectory -WorkspaceRoot $scratchBase -Path ('thin-v2-host-benchmark-' + [guid]::NewGuid().ToString('N')) -Label 'host benchmark scratch root'
-$records = [ordered]@{}
-$trialRecordsByProtocol = [ordered]@{bare=[Collections.Generic.List[object]]::new();v1=[Collections.Generic.List[object]]::new();v2=[Collections.Generic.List[object]]::new()}
-$executionOrder = [Collections.Generic.List[object]]::new()
+$benchmarkGroups = [Collections.Generic.List[object]]::new()
 $protocolNames = @('bare','v1','v2')
 $timer = [Diagnostics.Stopwatch]::StartNew()
 try {
-    $sequence = 0
-    for ($trial=1; $trial -le $Trials; $trial++) {
-        $rotation = ($trial - 1) % $protocolNames.Count
-        for ($offset=0; $offset -lt $protocolNames.Count; $offset++) {
-            $protocol = $protocolNames[($rotation + $offset) % $protocolNames.Count]
-            $sequence++
-            $executionOrder.Add([ordered]@{sequence=$sequence;protocol=$protocol;trial=$trial})
-            Write-Output ("[HOST] protocol={0} trial={1}/{2}" -f $protocol,$trial,$Trials)
-            try {
-                $record = Invoke-HostTrial -Protocol $protocol -Trial $trial -ScratchRoot $scratchRoot -RepoRoot $RepoRoot -WrapperPath $wrapperPath -SchemaPath $schemaPath -CollectorPath $collectorPath -CodexHome $CodexHome -Model $Model -Reasoning $Reasoning -MaxRoundTrips $MaxRoundTrips -TimeoutSeconds $TimeoutSeconds -ExpectedCodexVersion $expectedCodexVersion -SourceBindingRequired (-not [bool]$sourceStart.dirty -and $sourceInputHeadBoundStart) -SourceRevision ([string]$sourceStart.revision) -SourceCommitTree ([string]$sourceStart.commit_tree_oid)
-            } catch {
-                $diagnostic = Get-SanitizedHostTrialDiagnostic -ErrorRecord $_
-                $preTraceFailure = $diagnostic -cin @('isolated-auth-home-unavailable','source-binding-unavailable')
-                $record = New-HostUnavailableTrial -Trial $trial -Diagnostic $diagnostic -SourceRevision ([string]$sourceStart.revision) -SourceCommitTree ([string]$sourceStart.commit_tree_oid) -RawTraceDeleted $preTraceFailure
-            }
-            $trialRoot = Join-Path $scratchRoot ("$protocol-$trial")
-            $runnerEvidencePassed = Test-HostRunnerTrialEvidence -Protocol $protocol -TrialRoot $trialRoot -Record $record -SourceRevision ([string]$sourceStart.revision) -SourceCommitTree ([string]$sourceStart.commit_tree_oid) -RequireSourceBinding:(-not [bool]$sourceStart.dirty)
-            if ($record -is [Collections.IDictionary]) {
-                $record['runner_expected_trial'] = $trial
-                $record['runner_evidence_passed'] = $runnerEvidencePassed
-            } else {
-                $record | Add-Member -NotePropertyName runner_expected_trial -NotePropertyValue $trial -Force
-                $record | Add-Member -NotePropertyName runner_evidence_passed -NotePropertyValue $runnerEvidencePassed -Force
-            }
-            $trialRecordsByProtocol[$protocol].Add($record)
-        }
-    }
-    $pendingCleanupFailures = @($script:HostPendingOtlpCollectors | Where-Object { -not (Complete-HostPendingOtlpCleanup -Pending $_) }).Count
-    if ($pendingCleanupFailures -gt 0) { throw 'OTLP collector or raw trace cleanup remained pending before protocol aggregation.' }
-    foreach ($protocol in $protocolNames) {
-        $all = @($trialRecordsByProtocol[$protocol])
-        $unavailableCount = @($all | Where-Object { [string]$_.status -ceq 'unavailable' -or [string]$_.successful_request_sends.status -ceq 'unavailable' }).Count
-        $invalidCount = @($all | Where-Object {
-            if ([string]$_.status -ceq 'fail') { return $true }
-            if ([string]$_.status -ceq 'unavailable') {
-                if ([string]$_.outcome -cne 'completed' -or [string]$_.reason_code -cne 'completed') { return $false }
-                return -not (Test-HostTrialContract -Protocol $protocol -Record $_ -ExpectedTrial ([int]$_.runner_expected_trial) -SourceRevision ([string]$sourceStart.revision) -SourceCommitTree ([string]$sourceStart.commit_tree_oid) -AllowUnavailableRequestMeasurement -AllowUnavailableRecord -RequireSourceBinding:(-not [bool]$sourceStart.dirty -and $sourceInputHeadBoundStart))
-            }
-            if (-not (Test-HostTrialContract -Protocol $protocol -Record $_ -ExpectedTrial ([int]$_.runner_expected_trial) -SourceRevision ([string]$sourceStart.revision) -SourceCommitTree ([string]$sourceStart.commit_tree_oid) -AllowUnavailableRequestMeasurement -RequireSourceBinding:(-not [bool]$sourceStart.dirty -and $sourceInputHeadBoundStart))) { return $true }
-            if ([string]$_.successful_request_sends.status -ceq 'unavailable') { return $false }
-            return -not (Test-HostTrialContract -Protocol $protocol -Record $_ -ExpectedTrial ([int]$_.runner_expected_trial) -SourceRevision ([string]$sourceStart.revision) -SourceCommitTree ([string]$sourceStart.commit_tree_oid) -RequireSourceBinding:(-not [bool]$sourceStart.dirty -and $sourceInputHeadBoundStart))
-        }).Count
-        $protocolStatus = if ($invalidCount -gt 0 -or $all.Count -ne $Trials) { 'fail' } elseif ($unavailableCount -gt 0) { 'unavailable' } else { 'measured' }
-        $sendStatus = if (@($all | Where-Object { [string]$_.successful_request_sends.status -cne 'measured' }).Count -eq 0 -and $all.Count -eq $Trials) { 'measured' } else { 'unavailable' }
-        $sendMedian = if ($sendStatus -ceq 'measured') { [math]::Round((Get-HostMedian -Values @($all | ForEach-Object { [double]$_.successful_request_sends.value })),2) } else { $null }
-        $records[$protocol] = [ordered]@{
-            status=$protocolStatus
-            runner_contract_failures=$invalidCount
-            trials=$all
-            successful_request_sends=[ordered]@{status=$sendStatus;median=$sendMedian;basis='codex-0.144.4-successful-websocket-send/v2';reason=$(if($sendStatus-ceq'measured'){'Median count of version-bound successful non-warmup Responses WebSocket sends.'}else{'One or more trials lacked a valid runner-rechecked successful-send contract.'})}
-            medians=[ordered]@{
-                total_duration_ms=$(if($protocolStatus-ceq'measured'){[math]::Round((Get-HostMedian -Values @($all | ForEach-Object {[double]$_.total_duration_ms})),2)}else{$null})
-                sum_codex_process_duration_ms=$(if($protocolStatus-ceq'measured'){[math]::Round((Get-HostMedian -Values @($all | ForEach-Object {[double]$_.sum_codex_process_duration_ms})),2)}else{$null})
-                first_useful_action_ms=$(if($protocolStatus-ceq'measured' -and @($all.first_useful_action_ms | Where-Object {$null-ne$_}).Count-eq$Trials){[math]::Round((Get-HostMedian -Values @($all | ForEach-Object {[double]$_.first_useful_action_ms})),2)}else{$null})
-                fresh_sessions=$(if($protocolStatus-ceq'measured'){[math]::Round((Get-HostMedian -Values @($all | ForEach-Object {[double]$_.fresh_sessions})),2)}else{$null})
-                host_turns=$(if($protocolStatus-ceq'measured'){[math]::Round((Get-HostMedian -Values @($all | ForEach-Object { [double]$_.host_turns.value })),2)}else{$null})
-                successful_request_sends=$sendMedian
-                tool_calls=$(if($protocolStatus-ceq'measured'){[math]::Round((Get-HostMedian -Values @($all | ForEach-Object {[double]$_.tool_calls.total})),2)}else{$null})
-                skill_file_command_matches=$(if($protocolStatus-ceq'measured'){[math]::Round((Get-HostMedian -Values @($all | ForEach-Object { [double]$_.skill_file_command_matches.value })),2)}else{$null})
+    for ($groupIndex=1; $groupIndex -le $Groups; $groupIndex++) {
+        $groupTimer = [Diagnostics.Stopwatch]::StartNew()
+        $groupRunId = [guid]::NewGuid().ToString('N')
+        $groupRoot = New-HarnessContainedDirectory -WorkspaceRoot $scratchRoot -Path ("group-$groupIndex-$groupRunId") -Label 'host benchmark group root'
+        $groupRootDigest = Get-HarnessSha256Text -Content ("host-benchmark-group-root/v1`n" + [IO.Path]::GetFullPath($groupRoot))
+        $groupSourceStart = Get-HostGitState -Root $RepoRoot
+        $groupInputHeadBoundStart = @($sourceInputPaths | Where-Object { -not (Test-HostGitFileMatchesRevision -Root $RepoRoot -Path $_ -Revision ([string]$groupSourceStart.revision)) }).Count -eq 0
+        $groupRecords = [ordered]@{}
+        $trialRecordsByProtocol = [ordered]@{bare=[Collections.Generic.List[object]]::new();v1=[Collections.Generic.List[object]]::new();v2=[Collections.Generic.List[object]]::new()}
+        $executionOrder = [Collections.Generic.List[object]]::new()
+        $sequence = 0
+        for ($trial=1; $trial -le $Trials; $trial++) {
+            $rotation = (($groupIndex - 1) + ($trial - 1)) % $protocolNames.Count
+            for ($offset=0; $offset -lt $protocolNames.Count; $offset++) {
+                $protocol = $protocolNames[($rotation + $offset) % $protocolNames.Count]
+                $sequence++
+                $executionOrder.Add([ordered]@{sequence=$sequence;protocol=$protocol;trial=$trial})
+                Write-Output ("[HOST] group={0}/{1} protocol={2} trial={3}/{4}" -f $groupIndex,$Groups,$protocol,$trial,$Trials)
+                $trialRunId = [guid]::NewGuid().ToString('N')
+                $trialRoot = Join-Path $groupRoot ("$protocol-$trial")
+                $trialRootDigest = Get-HarnessSha256Text -Content ("host-benchmark-trial-root/v1`n" + [IO.Path]::GetFullPath($trialRoot))
+                try {
+                    $record = Invoke-HostTrial -Protocol $protocol -Trial $trial -ScratchRoot $groupRoot -RepoRoot $RepoRoot -WrapperPath $wrapperPath -SchemaPath $schemaPath -CollectorPath $collectorPath -CodexHome $CodexHome -Model $Model -Reasoning $Reasoning -MaxRoundTrips $MaxRoundTrips -TimeoutSeconds $TimeoutSeconds -ExpectedCodexVersion $expectedCodexVersion -SourceBindingRequired (-not [bool]$groupSourceStart.dirty -and $groupInputHeadBoundStart) -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid)
+                } catch {
+                    $diagnostic = Get-SanitizedHostTrialDiagnostic -ErrorRecord $_
+                    $preTraceFailure = $diagnostic -cin @('isolated-auth-home-unavailable','source-binding-unavailable')
+                    $record = New-HostUnavailableTrial -Trial $trial -Diagnostic $diagnostic -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -RawTraceDeleted $preTraceFailure
+                }
+                $runnerEvidencePassed = Test-HostRunnerTrialEvidence -Protocol $protocol -TrialRoot $trialRoot -Record $record -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -RequireSourceBinding:(-not [bool]$groupSourceStart.dirty)
+                if ($record -is [Collections.IDictionary]) {
+                    $record['trial_run_id'] = $trialRunId
+                    $record['trial_root_digest'] = $trialRootDigest
+                    $record['runner_expected_trial'] = $trial
+                    $record['runner_evidence_passed'] = $runnerEvidencePassed
+                } else {
+                    $record | Add-Member -NotePropertyName trial_run_id -NotePropertyValue $trialRunId -Force
+                    $record | Add-Member -NotePropertyName trial_root_digest -NotePropertyValue $trialRootDigest -Force
+                    $record | Add-Member -NotePropertyName runner_expected_trial -NotePropertyValue $trial -Force
+                    $record | Add-Member -NotePropertyName runner_evidence_passed -NotePropertyValue $runnerEvidencePassed -Force
+                }
+                $trialRecordsByProtocol[$protocol].Add($record)
             }
         }
+        $pendingCleanupFailures = @($script:HostPendingOtlpCollectors | Where-Object { -not (Complete-HostPendingOtlpCleanup -Pending $_) }).Count
+        if ($pendingCleanupFailures -gt 0) { throw 'OTLP collector or raw trace cleanup remained pending before group aggregation.' }
+        foreach ($protocol in $protocolNames) {
+            $all = @($trialRecordsByProtocol[$protocol])
+            $unavailableCount = @($all | Where-Object { [string]$_.status -ceq 'unavailable' -or [string]$_.successful_request_sends.status -ceq 'unavailable' }).Count
+            $invalidCount = @($all | Where-Object {
+                if ([string]$_.status -ceq 'fail') { return $true }
+                if ([string]$_.status -ceq 'unavailable') {
+                    if ([string]$_.outcome -cne 'completed' -or [string]$_.reason_code -cne 'completed') { return $false }
+                    return -not (Test-HostTrialContract -Protocol $protocol -Record $_ -ExpectedTrial ([int]$_.runner_expected_trial) -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -AllowUnavailableRequestMeasurement -AllowUnavailableRecord -RequireSourceBinding:(-not [bool]$groupSourceStart.dirty -and $groupInputHeadBoundStart))
+                }
+                if (-not (Test-HostTrialContract -Protocol $protocol -Record $_ -ExpectedTrial ([int]$_.runner_expected_trial) -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -AllowUnavailableRequestMeasurement -RequireSourceBinding:(-not [bool]$groupSourceStart.dirty -and $groupInputHeadBoundStart))) { return $true }
+                if ([string]$_.successful_request_sends.status -ceq 'unavailable') { return $false }
+                return -not (Test-HostTrialContract -Protocol $protocol -Record $_ -ExpectedTrial ([int]$_.runner_expected_trial) -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -RequireSourceBinding:(-not [bool]$groupSourceStart.dirty -and $groupInputHeadBoundStart))
+            }).Count
+            $protocolStatus = if ($invalidCount -gt 0 -or $all.Count -ne $Trials) { 'fail' } elseif ($unavailableCount -gt 0) { 'unavailable' } else { 'measured' }
+            $sendStatus = if (@($all | Where-Object { [string]$_.successful_request_sends.status -cne 'measured' }).Count -eq 0 -and $all.Count -eq $Trials) { 'measured' } else { 'unavailable' }
+            $sendMedian = if ($sendStatus -ceq 'measured') { [math]::Round((Get-HostMedian -Values @($all | ForEach-Object { [double]$_.successful_request_sends.value })),2) } else { $null }
+            $groupRecords[$protocol] = [ordered]@{
+                status=$protocolStatus;runner_contract_failures=$invalidCount;trials=$all
+                successful_request_sends=[ordered]@{status=$sendStatus;median=$sendMedian;basis='codex-0.144.4-successful-websocket-send/v2';reason=$(if($sendStatus-ceq'measured'){'Median count of version-bound successful non-warmup Responses WebSocket sends.'}else{'One or more trials lacked a valid runner-rechecked successful-send contract.'})}
+                medians=[ordered]@{
+                    total_duration_ms=$(if($protocolStatus-ceq'measured'){[math]::Round((Get-HostMedian -Values @($all | ForEach-Object {[double]$_.total_duration_ms})),2)}else{$null})
+                    sum_codex_process_duration_ms=$(if($protocolStatus-ceq'measured'){[math]::Round((Get-HostMedian -Values @($all | ForEach-Object {[double]$_.sum_codex_process_duration_ms})),2)}else{$null})
+                    first_useful_action_ms=$(if($protocolStatus-ceq'measured' -and @($all.first_useful_action_ms | Where-Object {$null-ne$_}).Count-eq$Trials){[math]::Round((Get-HostMedian -Values @($all | ForEach-Object {[double]$_.first_useful_action_ms})),2)}else{$null})
+                    fresh_sessions=$(if($protocolStatus-ceq'measured'){[math]::Round((Get-HostMedian -Values @($all | ForEach-Object {[double]$_.fresh_sessions})),2)}else{$null})
+                    host_turns=$(if($protocolStatus-ceq'measured'){[math]::Round((Get-HostMedian -Values @($all | ForEach-Object {[double]$_.host_turns.value})),2)}else{$null})
+                    successful_request_sends=$sendMedian
+                    tool_calls=$(if($protocolStatus-ceq'measured'){[math]::Round((Get-HostMedian -Values @($all | ForEach-Object {[double]$_.tool_calls.total})),2)}else{$null})
+                    skill_file_command_matches=$(if($protocolStatus-ceq'measured'){[math]::Round((Get-HostMedian -Values @($all | ForEach-Object {[double]$_.skill_file_command_matches.value})),2)}else{$null})
+                }
+            }
+        }
+
+        $groupSourceEnd = Get-HostGitState -Root $RepoRoot
+        $groupInputHeadBoundEnd = @($sourceInputPaths | Where-Object { -not (Test-HostGitFileMatchesRevision -Root $RepoRoot -Path $_ -Revision ([string]$groupSourceEnd.revision)) }).Count -eq 0
+        $groupSourceDirty = [bool]$groupSourceStart.dirty -or [bool]$groupSourceEnd.dirty -or -not $groupInputHeadBoundStart -or -not $groupInputHeadBoundEnd
+        $groupSourceStable = -not $groupSourceDirty -and [string]$groupSourceStart.revision -ceq [string]$groupSourceEnd.revision -and [string]$groupSourceStart.commit_tree_oid -ceq [string]$groupSourceEnd.commit_tree_oid -and [string]$groupSourceStart.state_digest -ceq [string]$groupSourceEnd.state_digest
+        $direct = [ordered]@{status='unavailable';ratio=$null;threshold=1.25;reason='Measured complete bare and v2 host trials are required.'}
+        $requestSend = [ordered]@{status='unavailable';reduction=$null;threshold=0.60;reason='Measured successful request sends are required for complete v1 and v2 host trials.'}
+        if ([string]$groupRecords.bare.status -ceq 'measured' -and [string]$groupRecords.v2.status -ceq 'measured' -and [double]$groupRecords.bare.medians.total_duration_ms -gt 0) {
+            $ratio = [math]::Round(([double]$groupRecords.v2.medians.total_duration_ms / [double]$groupRecords.bare.medians.total_duration_ms),4)
+            $direct = [ordered]@{status=$(if($ratio-le1.25){'pass'}else{'fail'});ratio=$ratio;threshold=1.25;reason='Ratio of this group measured median complete-task v2 and bare host duration.'}
+        }
+        if ([string]$groupRecords.v1.status -ceq 'measured' -and [string]$groupRecords.v2.status -ceq 'measured' -and [string]$groupRecords.v1.successful_request_sends.status -ceq 'measured' -and [string]$groupRecords.v2.successful_request_sends.status -ceq 'measured' -and [double]$groupRecords.v1.successful_request_sends.median -gt 0) {
+            $reduction = [math]::Round((([double]$groupRecords.v1.successful_request_sends.median-[double]$groupRecords.v2.successful_request_sends.median)/[double]$groupRecords.v1.successful_request_sends.median),4)
+            $requestSend = [ordered]@{status=$(if($reduction-ge0.60){'pass'}else{'fail'});reduction=$reduction;threshold=0.60;reason='This group reduction in median version-bound successful non-warmup Responses WebSocket sends from v1 to v2.'}
+        }
+        $protocolUnavailable = @($groupRecords.Values | Where-Object { [string]$_.status -ceq 'unavailable' }).Count -gt 0
+        $protocolFailed = @($groupRecords.Values | Where-Object { [string]$_.status -ceq 'fail' }).Count -gt 0
+        $gateUnavailable = [string]$direct.status -ceq 'unavailable' -or [string]$requestSend.status -ceq 'unavailable'
+        $releaseTrialSetPassed = -not $groupSourceDirty -and (Test-ReleaseHostTrialSet -Records $groupRecords -RequiredTrials 3 -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid))
+        $releaseTrialSet = [ordered]@{status=$(if($releaseTrialSetPassed){'pass'}else{'fail'});required_trials_per_protocol=3;reason=$(if($releaseTrialSetPassed){'Each protocol in this group has exactly three runner-rechecked, source-bound trials.'}else{'Each release group requires clean source and exactly three runner-rechecked, source-bound trials for every protocol.'})}
+        $groupEligible = $groupSourceStable -and -not $groupSourceDirty -and $releaseTrialSetPassed -and -not $protocolFailed -and [string]$direct.status -ceq 'pass' -and [string]$requestSend.status -ceq 'pass'
+        $groupConfigurationFailure = $Trials -ne 3
+        $groupPerformanceFailure = $groupSourceStable -and -not $groupSourceDirty -and $releaseTrialSetPassed -and ([string]$direct.status -ceq 'fail' -or [string]$requestSend.status -ceq 'fail')
+        $groupKnownFailure = $protocolFailed -or $groupConfigurationFailure -or $groupPerformanceFailure
+        $groupStatus = if ($groupKnownFailure) { 'fail' } elseif ($protocolUnavailable -or -not $groupSourceStable -or $gateUnavailable) { 'unavailable' } elseif ($groupSourceDirty -or -not $releaseTrialSetPassed) { 'fail' } elseif ($groupEligible) { 'pass' } else { 'fail' }
+        $groupTimer.Stop()
+        $groupRawTraceCleanupConfirmed = @($groupRecords.Values | ForEach-Object { @($_.trials) } | Where-Object { -not [bool]$_.raw_trace_deleted }).Count -eq 0
+        $groupSourceMode = if ($groupSourceDirty) { 'live-dirty-diagnostic' } else { 'clean-commit-clone' }
+        $group = [ordered]@{
+            group_index=$groupIndex;group_run_id=$groupRunId;group_root_digest=$groupRootDigest
+            source_revision=$groupSourceStart.revision;source_dirty=$groupSourceDirty;source_state_stable=$groupSourceStable
+            source=[ordered]@{runner_digest=$sourceInputs.runner_digest;wrapper_digest=$sourceInputs.wrapper_digest;observation_schema_digest=$sourceInputs.observation_schema_digest;otlp_collector_digest=$sourceInputs.otlp_collector_digest;atomic_write_module_digest=$sourceInputs.atomic_write_module_digest;path_module_digest=$sourceInputs.path_module_digest;otel_contract_digest=$sourceInputs.otel_contract_digest;trial_helper_digest=$sourceInputs.trial_helper_digest;input_head_binding=[ordered]@{start=$groupInputHeadBoundStart;end=$groupInputHeadBoundEnd;basis='git-hash-object-equals-revision-blob/v1'};execution_mode=$groupSourceMode;commit_tree_oid=$groupSourceStart.commit_tree_oid;object_format=$groupSourceStart.object_format;start=$groupSourceStart;end=$groupSourceEnd}
+            execution=[ordered]@{model=$Model;reasoning=$Reasoning;trials_per_protocol=$Trials;release_trials_required=3;max_fresh_sessions=$MaxRoundTrips;fresh_workspace_per_trial=$true;fresh_ephemeral_session_per_invocation=$true;v1_comparator='confirmed-plan-to-done-one-stage-per-host-turn';bare_and_v2_start='new-task';semantic_task='change exact private file bytes and verify';host_turn_basis='codex-jsonl-turn.started';successful_request_send_measurement='codex-0.144.4-successful-websocket-send/v2';expected_codex_service_version=$expectedCodexVersion;trial_order_strategy='round-interleaved-rotating-start';actual_trial_order=@($executionOrder);cache_state='shared-dedicated-auth-home-and-host-cache-not-cleared-between-trials';codex_home='dedicated-config-isolated-auth-home-path-not-persisted';sandbox='danger-full-access';approval_policy='never';workspace_boundary='dedicated-ignored-nested-git-root';prompt_persisted=$false;raw_command_persisted=$false;thread_id_persisted=$false;raw_trace_persisted=$(if($groupRawTraceCleanupConfirmed){$false}else{$null});raw_trace_cleanup_confirmed=$groupRawTraceCleanupConfirmed;scratch_persisted=[bool]$KeepScratch;install_duration_included=$false;duration_ms=[math]::Round($groupTimer.Elapsed.TotalMilliseconds,2)}
+            protocols=$groupRecords;performance=[ordered]@{release_trial_set=$releaseTrialSet;direct_latency=$direct;successful_request_send_reduction=$requestSend;eligible=$groupEligible};status=$groupStatus;group_digest=$null
+        }
+        $group.group_digest = Get-HarnessSha256Text -Content ($group | ConvertTo-Json -Depth 100 -Compress)
+        $benchmarkGroups.Add($group)
     }
 } finally {
     $timer.Stop()
@@ -390,46 +441,30 @@ try {
     }
 }
 
-$rawTraceCleanupConfirmed = @($records.Values | ForEach-Object { @($_.trials) } | Where-Object { -not [bool]$_.raw_trace_deleted }).Count -eq 0
-$rawTracePersisted = if ($rawTraceCleanupConfirmed) { $false } else { $null }
-$direct = [ordered]@{status='unavailable';ratio=$null;threshold=1.25;reason='Measured complete bare and v2 host trials are required.'}
-$requestSend = [ordered]@{status='unavailable';reduction=$null;threshold=0.60;reason='Measured successful request sends are required for complete v1 and v2 host trials.'}
-if ([string]$records.bare.status -ceq 'measured' -and [string]$records.v2.status -ceq 'measured' -and [double]$records.bare.medians.total_duration_ms -gt 0) {
-    $ratio = [math]::Round(([double]$records.v2.medians.total_duration_ms / [double]$records.bare.medians.total_duration_ms),4)
-    $direct = [ordered]@{status=$(if($ratio-le1.25){'pass'}else{'fail'});ratio=$ratio;threshold=1.25;reason='Ratio of measured median complete-task v2 and bare host duration.'}
-}
-if ([string]$records.v1.status -ceq 'measured' -and [string]$records.v2.status -ceq 'measured' -and [string]$records.v1.successful_request_sends.status -ceq 'measured' -and [string]$records.v2.successful_request_sends.status -ceq 'measured' -and [double]$records.v1.successful_request_sends.median -gt 0) {
-    $reduction = [math]::Round((([double]$records.v1.successful_request_sends.median-[double]$records.v2.successful_request_sends.median)/[double]$records.v1.successful_request_sends.median),4)
-    $requestSend = [ordered]@{status=$(if($reduction-ge0.60){'pass'}else{'fail'});reduction=$reduction;threshold=0.60;reason='Reduction in median version-bound successful non-warmup Responses WebSocket sends from the stage-bounded v1 workflow to v2 Direct.'}
-}
 $sourceEnd = Get-HostGitState -Root $RepoRoot
 $sourceInputHeadBoundEnd = @($sourceInputPaths | Where-Object { -not (Test-HostGitFileMatchesRevision -Root $RepoRoot -Path $_ -Revision ([string]$sourceEnd.revision)) }).Count -eq 0
 $sourceDirty = [bool]$sourceStart.dirty -or [bool]$sourceEnd.dirty -or -not $sourceInputHeadBoundStart -or -not $sourceInputHeadBoundEnd
 $sourceStable = -not $sourceDirty -and [string]$sourceStart.revision -ceq [string]$sourceEnd.revision -and [string]$sourceStart.commit_tree_oid -ceq [string]$sourceEnd.commit_tree_oid -and [string]$sourceStart.state_digest -ceq [string]$sourceEnd.state_digest
-$protocolUnavailable = @($records.Values | Where-Object { [string]$_.status -ceq 'unavailable' }).Count -gt 0
-$protocolFailed = @($records.Values | Where-Object { [string]$_.status -ceq 'fail' }).Count -gt 0
-$gateUnavailable = [string]$direct.status -ceq 'unavailable' -or [string]$requestSend.status -ceq 'unavailable'
-$releaseTrialSetPassed = -not $sourceDirty -and (Test-ReleaseHostTrialSet -Records $records -RequiredTrials 3 -SourceRevision ([string]$sourceStart.revision) -SourceCommitTree ([string]$sourceStart.commit_tree_oid))
-$releaseTrialSet = [ordered]@{status=$(if($releaseTrialSetPassed){'pass'}else{'fail'});required_trials_per_protocol=3;reason=$(if($releaseTrialSetPassed){'Each protocol has exactly three runner-rechecked, source-bound trials numbered 1 through 3.'}else{'Release eligibility requires clean source and exactly three runner-rechecked, source-bound trials numbered 1 through 3 for every protocol.'})}
-$eligible = $sourceStable -and -not $sourceDirty -and $releaseTrialSetPassed -and -not $protocolFailed -and [string]$direct.status -ceq 'pass' -and [string]$requestSend.status -ceq 'pass'
-$releaseConfigurationFailure = $Trials -ne 3
-$performanceFailure = $sourceStable -and -not $sourceDirty -and $releaseTrialSetPassed -and ([string]$direct.status -ceq 'fail' -or [string]$requestSend.status -ceq 'fail')
-$knownContractFailure = $protocolFailed -or $releaseConfigurationFailure -or $performanceFailure
-$reportStatus = if ($knownContractFailure) { 'fail' } elseif ($protocolUnavailable -or -not $sourceStable -or $gateUnavailable) { 'unavailable' } elseif ($sourceDirty -or -not $releaseTrialSetPassed) { 'fail' } elseif ($eligible) { 'pass' } else { 'fail' }
+$passedGroups = @($benchmarkGroups | Where-Object { [string]$_.status -ceq 'pass' -and [bool]$_.performance.eligible }).Count
+$failedGroups = @($benchmarkGroups | Where-Object { [string]$_.status -ceq 'fail' }).Count
+$unavailableGroups = @($benchmarkGroups | Where-Object { [string]$_.status -ceq 'unavailable' }).Count
+$releaseConfigurationFailure = $Groups -ne 3 -or $Trials -ne 3
+$eligible = $sourceStable -and -not $sourceDirty -and -not $releaseConfigurationFailure -and $benchmarkGroups.Count -eq 3 -and $passedGroups -eq 3
+$reportStatus = if ($releaseConfigurationFailure -or $failedGroups -gt 0 -or $sourceDirty) { 'fail' } elseif ($unavailableGroups -gt 0 -or -not $sourceStable) { 'unavailable' } elseif ($eligible) { 'pass' } else { 'fail' }
+$releaseGroupSet = [ordered]@{status=$(if($eligible){'pass'}else{$reportStatus});required_groups=3;required_trials_per_protocol_per_group=3;passed_groups=$passedGroups;reason=$(if($eligible){'All three independent clean 3x3 groups passed their own latency and request-reduction gates.'}else{'Release eligibility requires three independent clean groups, each with bare/v1/v2 3x3 evidence and independently passing thresholds.'})}
 $report = [ordered]@{
-    schema_version='harness-host-benchmark-report/v1';generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o')
+    schema_version='harness-host-benchmark-report/v2';generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o')
     source_revision=$sourceStart.revision;source_dirty=$sourceDirty;source_state_stable=$sourceStable
     source=[ordered]@{runner_digest=$sourceInputs.runner_digest;wrapper_digest=$sourceInputs.wrapper_digest;observation_schema_digest=$sourceInputs.observation_schema_digest;otlp_collector_digest=$sourceInputs.otlp_collector_digest;atomic_write_module_digest=$sourceInputs.atomic_write_module_digest;path_module_digest=$sourceInputs.path_module_digest;otel_contract_digest=$sourceInputs.otel_contract_digest;trial_helper_digest=$sourceInputs.trial_helper_digest;input_head_binding=[ordered]@{start=$sourceInputHeadBoundStart;end=$sourceInputHeadBoundEnd;basis='git-hash-object-equals-revision-blob/v1'};execution_mode=$sourceMode;commit_tree_oid=$sourceStart.commit_tree_oid;object_format=$sourceStart.object_format;start=$sourceStart;end=$sourceEnd}
-    execution=[ordered]@{model=$Model;reasoning=$Reasoning;trials_per_protocol=$Trials;release_trials_required=3;max_fresh_sessions=$MaxRoundTrips;fresh_workspace_per_trial=$true;fresh_ephemeral_session_per_invocation=$true;v1_comparator='confirmed-plan-to-done-one-stage-per-host-turn';bare_and_v2_start='new-task';semantic_task='change exact private file bytes and verify';host_turn_basis='codex-jsonl-turn.started';successful_request_send_measurement='codex-0.144.4-successful-websocket-send/v2';expected_codex_service_version=$expectedCodexVersion;trial_order_strategy='round-interleaved-rotating-start';actual_trial_order=@($executionOrder);cache_state='shared-dedicated-auth-home-and-host-cache-not-cleared-between-trials';codex_home='dedicated-config-isolated-auth-home-path-not-persisted';sandbox='danger-full-access';approval_policy='never';workspace_boundary='dedicated-ignored-nested-git-root';prompt_persisted=$false;raw_command_persisted=$false;thread_id_persisted=$false;raw_trace_persisted=$rawTracePersisted;raw_trace_cleanup_confirmed=$rawTraceCleanupConfirmed;scratch_persisted=[bool]$KeepScratch;install_duration_included=$false;duration_ms=[math]::Round($timer.Elapsed.TotalMilliseconds,2)}
-    protocols=$records;performance=[ordered]@{release_trial_set=$releaseTrialSet;direct_latency=$direct;successful_request_send_reduction=$requestSend;eligible=$eligible};status=$reportStatus;report_digest=$null
+    execution=[ordered]@{model=$Model;reasoning=$Reasoning;groups=$Groups;required_groups=3;trials_per_protocol_per_group=$Trials;required_trials_per_protocol_per_group=3;group_order_strategy='independent-groups-round-interleaved-rotating-start';max_fresh_sessions=$MaxRoundTrips;fresh_workspace_per_trial=$true;fresh_ephemeral_session_per_invocation=$true;codex_home='dedicated-config-isolated-auth-home-path-not-persisted';duration_ms=[math]::Round($timer.Elapsed.TotalMilliseconds,2)}
+    groups=@($benchmarkGroups);performance=[ordered]@{release_group_set=$releaseGroupSet;eligible=$eligible};status=$reportStatus;report_digest=$null
 }
 $report.report_digest = Get-HarnessSha256Text -Content ($report | ConvertTo-Json -Depth 100 -Compress)
 $outputParent = [IO.Path]::GetDirectoryName($OutputPath)
 [void][IO.Directory]::CreateDirectory($outputParent)
 [void](Write-HarnessAtomicText -WorkspaceRoot $outputParent -Path $OutputPath -Content (($report | ConvertTo-Json -Depth 100) + "`n"))
 Write-Output "HOST_BENCHMARK_STATUS=$($report.status)"
-Write-Output "HOST_BENCHMARK_DIRECT_RATIO=$($direct.ratio)"
-Write-Output "HOST_BENCHMARK_REQUEST_SEND_REDUCTION=$($requestSend.reduction)"
+Write-Output "HOST_BENCHMARK_GROUPS_PASSED=$passedGroups/$Groups"
 Write-Output "HOST_BENCHMARK_REPORT=$OutputPath"
 if ([string]$report.status -ceq 'unavailable') { Write-Output '[UNAVAILABLE] one or more real host measurements were unavailable'; exit 2 }
 if (-not $eligible) { exit 1 }

@@ -55,7 +55,10 @@ jobs:
 
   release-model:
     if: ${{ !cancelled() && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/harness-distribution' || github.ref == 'refs/heads/codex/thin-harness-v2-refactor') }}
-    runs-on: ${{ vars.THIN_V2_RELEASE_RUNNER || 'windows-latest' }}
+    runs-on:
+      - self-hosted
+      - Windows
+      - ${{ vars.THIN_V2_RELEASE_RUNNER }}
     timeout-minutes: 120
     environment: thin-v2-release
     env:
@@ -93,7 +96,10 @@ jobs:
   release-host:
     needs: release-model
     if: ${{ !cancelled() && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/harness-distribution' || github.ref == 'refs/heads/codex/thin-harness-v2-refactor') }}
-    runs-on: ${{ vars.THIN_V2_RELEASE_RUNNER || 'windows-latest' }}
+    runs-on:
+      - self-hosted
+      - Windows
+      - ${{ vars.THIN_V2_RELEASE_RUNNER }}
     timeout-minutes: 180
     environment: thin-v2-release
     env:
@@ -117,7 +123,7 @@ jobs:
       - name: Real bare v1 v2 host benchmark
         shell: pwsh
         run: |
-          pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-host-benchmark.ps1 -RepoRoot $PWD -Model gpt-5.6-sol -Reasoning max -TimeoutSeconds 900 -CodexHome $env:HOST_BENCHMARK_CODEX_HOME -Trials 3 -OutputPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'host-benchmark.json')
+          pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-host-benchmark.ps1 -RepoRoot $PWD -Model gpt-5.6-sol -Reasoning max -TimeoutSeconds 900 -CodexHome $env:HOST_BENCHMARK_CODEX_HOME -Groups 3 -Trials 3 -OutputPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'host-benchmark.json')
           exit $LASTEXITCODE
 
       - name: Upload host evidence
@@ -133,7 +139,11 @@ jobs:
     needs:
       - release-model
       - release-host
-    runs-on: windows-latest
+    runs-on:
+      - self-hosted
+      - Windows
+      - ${{ vars.THIN_V2_RELEASE_AGGREGATOR_RUNNER }}
+    environment: thin-v2-release
     timeout-minutes: 120
     steps:
       - name: Check out repository

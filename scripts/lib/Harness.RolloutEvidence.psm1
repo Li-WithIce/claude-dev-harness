@@ -494,11 +494,12 @@ function Assert-ModelEvalReport {
 }
 
 function Assert-HostBenchmarkReportShape {
-    param([Parameter(Mandatory)][System.Collections.IDictionary]$Document)
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Document,[switch]$V2TrialIdentity)
 
     $sourceKeys = @('runner_digest','wrapper_digest','observation_schema_digest','otlp_collector_digest','atomic_write_module_digest','path_module_digest','otel_contract_digest','trial_helper_digest','input_head_binding','execution_mode','commit_tree_oid','object_format','start','end')
     $executionKeys = @('model','reasoning','trials_per_protocol','release_trials_required','max_fresh_sessions','fresh_workspace_per_trial','fresh_ephemeral_session_per_invocation','v1_comparator','bare_and_v2_start','semantic_task','host_turn_basis','successful_request_send_measurement','expected_codex_service_version','trial_order_strategy','actual_trial_order','cache_state','codex_home','sandbox','approval_policy','workspace_boundary','prompt_persisted','raw_command_persisted','thread_id_persisted','raw_trace_persisted','raw_trace_cleanup_confirmed','scratch_persisted','install_duration_included','duration_ms')
     $trialKeys = @('trial','runner_expected_trial','runner_evidence_passed','workspace_baseline_revision','status','diagnostic','completion_passed','outcome','reason_code','source_binding','workflow_contract','workflow_completed','v1_stage_journal','v1_target_journal','v1_validator_passed','fresh_sessions','host_turns','successful_request_sends','completed_agent_messages','total_duration_ms','sum_codex_process_duration_ms','first_useful_action_ms','tool_calls','loaded_skills','skill_file_command_matches','loaded_files','artifact_writes','runtime_writes','unexpected_writes','raw_trace_deleted','post_trial_diagnostics','tokens')
+    if ($V2TrialIdentity) { $trialKeys = @('trial_run_id','trial_root_digest') + $trialKeys }
 
     Assert-ReleaseKeys -Value $Document.source -Expected $sourceKeys -Label 'host report source'
     Assert-ReleaseKeys -Value $Document.source.input_head_binding -Expected @('start','end','basis') -Label 'host report input binding'
@@ -541,7 +542,9 @@ function Assert-HostBenchmarkReport {
     param(
         [Parameter(Mandatory)][string]$RepoRoot,
         [Parameter(Mandatory)][System.Collections.IDictionary]$Document,
-        [Parameter(Mandatory)][System.Collections.IDictionary]$ExpectedSource
+        [Parameter(Mandatory)][System.Collections.IDictionary]$ExpectedSource,
+        [ValidateRange(0,2)][int]$ExpectedOrderOffset = 0,
+        [switch]$V2TrialIdentity
     )
     Assert-ReleaseKeys -Value $Document -Expected @('schema_version','generated_at_utc','source_revision','source_dirty','source_state_stable','source','execution','protocols','performance','status','report_digest') -Label 'host report'
     if ([string]$Document.schema_version -cne 'harness-host-benchmark-report/v1') { throw 'host report schema is invalid' }
@@ -549,7 +552,7 @@ function Assert-HostBenchmarkReport {
     Assert-ReleaseReportDigest -Document $Document
     if ([string]$Document.source_revision -cne [string]$ExpectedSource.revision) { throw 'host report revision is stale' }
     if ($Document.source_dirty -isnot [bool] -or $Document.source_state_stable -isnot [bool] -or [string]$Document.status -cnotin @('pass','fail','unavailable')) { throw 'host report status fields are invalid' }
-    Assert-HostBenchmarkReportShape -Document $Document
+    Assert-HostBenchmarkReportShape -Document $Document -V2TrialIdentity:$V2TrialIdentity
     if ($Document.performance.eligible -isnot [bool]) { throw 'host report eligibility is invalid' }
 
     $sourceDigestMap = [ordered]@{
@@ -594,7 +597,16 @@ function Assert-HostBenchmarkReport {
             [string]$Document.execution.workspace_boundary -cne 'dedicated-ignored-nested-git-root' -or [bool]$Document.execution.prompt_persisted -or [bool]$Document.execution.raw_command_persisted -or [bool]$Document.execution.thread_id_persisted -or
             [bool]$Document.execution.raw_trace_persisted -or -not [bool]$Document.execution.raw_trace_cleanup_confirmed -or [bool]$Document.execution.scratch_persisted -or [bool]$Document.execution.install_duration_included) { throw 'passing host report execution identity is invalid' }
         [void](Assert-ReleaseNumber -Value $Document.execution.duration_ms -Label 'passing host report duration' -Positive)
-        $expectedOrder = @('1:bare:1','2:v1:1','3:v2:1','4:v1:2','5:v2:2','6:bare:2','7:v2:3','8:bare:3','9:v1:3')
+        $protocolNames = @('bare','v1','v2')
+        $expectedOrder = [Collections.Generic.List[string]]::new()
+        $sequence = 0
+        for ($trial=1; $trial -le 3; $trial++) {
+            $rotation = ($ExpectedOrderOffset + $trial - 1) % $protocolNames.Count
+            for ($offset=0; $offset -lt $protocolNames.Count; $offset++) {
+                $sequence++
+                $expectedOrder.Add(('{0}:{1}:{2}' -f $sequence,$protocolNames[($rotation + $offset) % $protocolNames.Count],$trial))
+            }
+        }
         $actualOrder = @($Document.execution.actual_trial_order | ForEach-Object {
             Assert-ReleaseKeys -Value $_ -Expected @('sequence','protocol','trial') -Label 'passing host report trial order entry'
             [void](Assert-ReleaseInteger -Value $_.sequence -Label 'passing host report trial order sequence' -Positive)
@@ -614,6 +626,7 @@ function Assert-HostBenchmarkReport {
             $freshSessions = [Collections.Generic.List[double]]::new(); $hostTurns = [Collections.Generic.List[double]]::new(); $requestSends = [Collections.Generic.List[double]]::new(); $toolCalls = [Collections.Generic.List[double]]::new(); $skillMatches = [Collections.Generic.List[double]]::new()
             foreach ($trial in $trials) {
                 $trialKeys = @('trial','runner_expected_trial','runner_evidence_passed','workspace_baseline_revision','status','diagnostic','completion_passed','outcome','reason_code','source_binding','workflow_contract','workflow_completed','v1_stage_journal','v1_target_journal','v1_validator_passed','fresh_sessions','host_turns','successful_request_sends','completed_agent_messages','total_duration_ms','sum_codex_process_duration_ms','first_useful_action_ms','tool_calls','loaded_skills','skill_file_command_matches','loaded_files','artifact_writes','runtime_writes','unexpected_writes','raw_trace_deleted','post_trial_diagnostics','tokens')
+                if ($V2TrialIdentity) { $trialKeys = @('trial_run_id','trial_root_digest') + $trialKeys }
                 Assert-ReleaseKeys -Value $trial -Expected $trialKeys -Label "passing host report $protocol trial"
                 foreach ($name in @('runner_evidence_passed','completion_passed','workflow_completed','v1_validator_passed','raw_trace_deleted')) { Assert-ReleaseBoolean -Value $trial[$name] -Label "passing host report $protocol trial $name" }
                 foreach ($name in @('trial','runner_expected_trial','fresh_sessions','completed_agent_messages','artifact_writes','runtime_writes','unexpected_writes')) { [void](Assert-ReleaseInteger -Value $trial[$name] -Label "passing host report $protocol trial $name" -NonNegative) }
@@ -695,6 +708,139 @@ function Assert-HostBenchmarkReport {
     }
 }
 
+function Assert-HostBenchmarkGroupDigest {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Group)
+    Assert-ReleaseDigestValue -Value $Group.group_digest -Label 'host benchmark group'
+    $saved = $Group.group_digest
+    try {
+        $Group.group_digest = $null
+        $actual = Get-ReleaseSha256Text -Text ($Group | ConvertTo-Json -Depth 100 -Compress)
+    } finally {
+        $Group.group_digest = $saved
+    }
+    if ([string]$saved -cne [string]$actual) { throw 'host benchmark group digest mismatch' }
+}
+
+function ConvertTo-ReleaseCanonicalJson {
+    param([AllowNull()][object]$Value)
+    if ($null -eq $Value) { return 'null' }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $parts = [Collections.Generic.List[string]]::new()
+        [string[]]$keys = @($Value.Keys | ForEach-Object { [string]$_ })
+        [Array]::Sort($keys,[StringComparer]::Ordinal)
+        foreach ($key in $keys) {
+            $keyJson = ConvertTo-Json -InputObject $key -Compress
+            $parts.Add(('{0}:{1}' -f $keyJson,(ConvertTo-ReleaseCanonicalJson -Value $Value[$key])))
+        }
+        return '{' + ($parts -join ',') + '}'
+    }
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        $parts = [Collections.Generic.List[string]]::new()
+        foreach ($item in $Value) { $parts.Add((ConvertTo-ReleaseCanonicalJson -Value $item)) }
+        return '[' + ($parts -join ',') + ']'
+    }
+    return ConvertTo-Json -InputObject $Value -Compress
+}
+
+function Get-HostBenchmarkTrialPayloadDigest {
+    param(
+        [Parameter(Mandatory)][ValidateSet('bare','v1','v2')][string]$Protocol,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Trial
+    )
+    $payloadKeys = @('trial','runner_expected_trial','runner_evidence_passed','workspace_baseline_revision','status','diagnostic','completion_passed','outcome','reason_code','source_binding','workflow_contract','workflow_completed','v1_stage_journal','v1_target_journal','v1_validator_passed','fresh_sessions','host_turns','successful_request_sends','completed_agent_messages','total_duration_ms','sum_codex_process_duration_ms','first_useful_action_ms','tool_calls','loaded_skills','skill_file_command_matches','loaded_files','artifact_writes','runtime_writes','unexpected_writes','raw_trace_deleted','post_trial_diagnostics','tokens')
+    Assert-ReleaseKeys -Value $Trial -Expected (@('trial_run_id','trial_root_digest') + $payloadKeys) -Label 'host benchmark v2 trial'
+    $payload = [ordered]@{}
+    foreach ($key in $payloadKeys) { $payload[$key] = $Trial[$key] }
+    $canonical = ConvertTo-ReleaseCanonicalJson -Value $payload
+    return Get-ReleaseSha256Text -Text ("{0}`n{1}" -f $Protocol,$canonical)
+}
+
+function Assert-HostBenchmarkReportV2 {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Document,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$ExpectedSource
+    )
+    Assert-ReleaseKeys -Value $Document -Expected @('schema_version','generated_at_utc','source_revision','source_dirty','source_state_stable','source','execution','groups','performance','status','report_digest') -Label 'host report v2'
+    if ([string]$Document.schema_version -cne 'harness-host-benchmark-report/v2') { throw 'host report schema is invalid' }
+    Assert-ReleaseDate -Value $Document.generated_at_utc -Label 'host report v2'
+    Assert-ReleaseReportDigest -Document $Document
+    if ([string]$Document.source_revision -cne [string]$ExpectedSource.revision) { throw 'host report revision is stale' }
+    if ($Document.source_dirty -isnot [bool] -or $Document.source_state_stable -isnot [bool] -or $Document.performance.eligible -isnot [bool] -or [string]$Document.status -cnotin @('pass','fail','unavailable')) { throw 'host report v2 status fields are invalid' }
+
+    $sourceKeys = @('runner_digest','wrapper_digest','observation_schema_digest','otlp_collector_digest','atomic_write_module_digest','path_module_digest','otel_contract_digest','trial_helper_digest','input_head_binding','execution_mode','commit_tree_oid','object_format','start','end')
+    Assert-ReleaseKeys -Value $Document.source -Expected $sourceKeys -Label 'host report v2 source'
+    Assert-ReleaseKeys -Value $Document.source.input_head_binding -Expected @('start','end','basis') -Label 'host report v2 input binding'
+    $sourceDigestMap = [ordered]@{
+        runner_digest='scripts/run-host-benchmark.ps1';wrapper_digest='skills/codex/scripts/invoke_codex.ps1';observation_schema_digest='schemas/host-benchmark/observation.schema.json'
+        otlp_collector_digest='scripts/receive-otlp-http.ps1';atomic_write_module_digest='scripts/lib/Harness.AtomicWrite.psm1';path_module_digest='scripts/lib/Harness.Path.psm1'
+        otel_contract_digest='scripts/host-benchmark/HostBenchmark.Otel.ps1';trial_helper_digest='scripts/host-benchmark/HostBenchmark.Trial.ps1'
+    }
+    foreach ($entry in $sourceDigestMap.GetEnumerator()) { Assert-ReleaseCurrentFileDigest -RepoRoot $RepoRoot -Value $Document.source[$entry.Key] -RelativePath ([string]$entry.Value) -Label ("host v2 {0}" -f $entry.Key) }
+    if ([string]$Document.source.commit_tree_oid -cne [string]$ExpectedSource.commit_tree_oid -or [string]$Document.source.object_format -cne [string]$ExpectedSource.object_format) { throw 'host report v2 source tree is stale' }
+    if ($Document.source.input_head_binding.start -isnot [bool] -or $Document.source.input_head_binding.end -isnot [bool] -or [string]$Document.source.input_head_binding.basis -cne 'git-hash-object-equals-revision-blob/v1') { throw 'host report v2 input binding is invalid' }
+    Assert-ReleaseSourceStateMatchesExpected -Value $Document.source.start -Expected $ExpectedSource -Label 'host report v2 source start'
+    Assert-ReleaseSourceStateMatchesExpected -Value $Document.source.end -Expected $ExpectedSource -Label 'host report v2 source end'
+
+    $executionKeys = @('model','reasoning','groups','required_groups','trials_per_protocol_per_group','required_trials_per_protocol_per_group','group_order_strategy','max_fresh_sessions','fresh_workspace_per_trial','fresh_ephemeral_session_per_invocation','codex_home','duration_ms')
+    Assert-ReleaseKeys -Value $Document.execution -Expected $executionKeys -Label 'host report v2 execution'
+    foreach ($name in @('groups','required_groups','trials_per_protocol_per_group','required_trials_per_protocol_per_group','max_fresh_sessions')) { [void](Assert-ReleaseInteger -Value $Document.execution[$name] -Label "host report v2 execution $name" -Positive) }
+    foreach ($name in @('fresh_workspace_per_trial','fresh_ephemeral_session_per_invocation')) { Assert-ReleaseBoolean -Value $Document.execution[$name] -Label "host report v2 execution $name" }
+    [void](Assert-ReleaseNumber -Value $Document.execution.duration_ms -Label 'host report v2 duration' -Positive)
+    if ([string]$Document.execution.model -cne 'gpt-5.6-sol' -or [string]$Document.execution.reasoning -cne 'max' -or [int]$Document.execution.required_groups -ne 3 -or
+        [int]$Document.execution.required_trials_per_protocol_per_group -ne 3 -or [int]$Document.execution.max_fresh_sessions -ne 8 -or
+        [string]$Document.execution.group_order_strategy -cne 'independent-groups-round-interleaved-rotating-start' -or
+        -not [bool]$Document.execution.fresh_workspace_per_trial -or -not [bool]$Document.execution.fresh_ephemeral_session_per_invocation -or
+        [string]$Document.execution.codex_home -cne 'dedicated-config-isolated-auth-home-path-not-persisted') { throw 'host report v2 execution identity is invalid' }
+
+    $groups = @($Document.groups)
+    if ($groups.Count -ne [int]$Document.execution.groups) { throw 'host report v2 group count is inconsistent' }
+    $groupIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $groupRoots = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $trialIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $trialRoots = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $trialPayloads = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $passedGroups = 0; $failedGroups = 0; $unavailableGroups = 0
+    for ($index=0; $index -lt $groups.Count; $index++) {
+        $group = $groups[$index]
+        Assert-ReleaseKeys -Value $group -Expected @('group_index','group_run_id','group_root_digest','source_revision','source_dirty','source_state_stable','source','execution','protocols','performance','status','group_digest') -Label 'host benchmark group'
+        [void](Assert-ReleaseInteger -Value $group.group_index -Label 'host benchmark group index' -Positive)
+        if ([int]$group.group_index -ne ($index + 1) -or [string]$group.group_run_id -cnotmatch '^[0-9a-f]{32}$') { throw 'host benchmark group identity is invalid' }
+        Assert-ReleaseDigestValue -Value $group.group_root_digest -Label 'host benchmark group root'
+        if (-not $groupIds.Add([string]$group.group_run_id) -or -not $groupRoots.Add([string]$group.group_root_digest)) { throw 'host benchmark groups are not independent' }
+        Assert-HostBenchmarkGroupDigest -Group $group
+        foreach ($protocol in @('bare','v1','v2')) {
+            foreach ($trial in @($group.protocols[$protocol].trials)) {
+                if ([string]$trial.trial_run_id -cnotmatch '^[0-9a-f]{32}$') { throw 'host benchmark trial run id is invalid' }
+                Assert-ReleaseDigestValue -Value $trial.trial_root_digest -Label 'host benchmark trial root'
+                if (-not $trialIds.Add([string]$trial.trial_run_id) -or -not $trialRoots.Add([string]$trial.trial_root_digest)) { throw 'host benchmark trial identity was reused' }
+                $payloadDigest = Get-HostBenchmarkTrialPayloadDigest -Protocol $protocol -Trial $trial
+                if (-not $trialPayloads.Add($payloadDigest)) { throw 'host benchmark trial normalized payload was reused' }
+            }
+        }
+        $legacy = [ordered]@{
+            schema_version='harness-host-benchmark-report/v1';generated_at_utc=$Document.generated_at_utc
+            source_revision=$group.source_revision;source_dirty=$group.source_dirty;source_state_stable=$group.source_state_stable;source=$group.source
+            execution=$group.execution;protocols=$group.protocols;performance=$group.performance;status=$group.status;report_digest=$null
+        }
+        $legacy.report_digest = Get-ReleaseSha256Text -Text ($legacy | ConvertTo-Json -Depth 100 -Compress)
+        Assert-HostBenchmarkReport -RepoRoot $RepoRoot -Document $legacy -ExpectedSource $ExpectedSource -ExpectedOrderOffset $index -V2TrialIdentity
+        if ([string]$group.source_revision -cne [string]$Document.source_revision) { throw 'host benchmark group source revision is inconsistent' }
+        switch ([string]$group.status) { 'pass' { $passedGroups++ } 'fail' { $failedGroups++ } 'unavailable' { $unavailableGroups++ } default { throw 'host benchmark group status is invalid' } }
+    }
+
+    Assert-ReleaseKeys -Value $Document.performance -Expected @('release_group_set','eligible') -Label 'host report v2 performance'
+    Assert-ReleaseKeys -Value $Document.performance.release_group_set -Expected @('status','required_groups','required_trials_per_protocol_per_group','passed_groups','reason') -Label 'host report v2 group gate'
+    foreach ($name in @('required_groups','required_trials_per_protocol_per_group','passed_groups')) { [void](Assert-ReleaseInteger -Value $Document.performance.release_group_set[$name] -Label "host report v2 group gate $name" -NonNegative) }
+    $configurationFailure = [int]$Document.execution.groups -ne 3 -or [int]$Document.execution.trials_per_protocol_per_group -ne 3
+    $computedEligible = -not [bool]$Document.source_dirty -and [bool]$Document.source_state_stable -and -not $configurationFailure -and $groups.Count -eq 3 -and $passedGroups -eq 3
+    $computedStatus = if ($configurationFailure -or $failedGroups -gt 0 -or [bool]$Document.source_dirty) { 'fail' } elseif ($unavailableGroups -gt 0 -or -not [bool]$Document.source_state_stable) { 'unavailable' } elseif ($computedEligible) { 'pass' } else { 'fail' }
+    if ([int]$Document.performance.release_group_set.required_groups -ne 3 -or [int]$Document.performance.release_group_set.required_trials_per_protocol_per_group -ne 3 -or
+        [int]$Document.performance.release_group_set.passed_groups -ne $passedGroups -or [string]$Document.performance.release_group_set.status -cne $(if($computedEligible){'pass'}else{$computedStatus}) -or
+        [bool]$Document.performance.eligible -ne $computedEligible -or [string]$Document.status -cne $computedStatus) { throw 'host report v2 aggregate group gate is inconsistent' }
+    if ($computedEligible -and ([bool]$Document.source_dirty -or -not [bool]$Document.source_state_stable -or -not [bool]$Document.source.input_head_binding.start -or -not [bool]$Document.source.input_head_binding.end -or [string]$Document.source.execution_mode -cne 'clean-commit-clone')) { throw 'passing host report v2 is not clean and source-stable' }
+}
+
 function Get-HarnessReleaseEvidenceGate {
     [CmdletBinding()]
     param(
@@ -706,7 +852,7 @@ function Get-HarnessReleaseEvidenceGate {
     $command = if ($Kind -ceq 'model') {
         'scripts/run-model-evals.ps1 -Model gpt-5.6-sol -Reasoning max'
     } else {
-        'scripts/run-host-benchmark.ps1 -Trials 3 -Model gpt-5.6-sol -Reasoning max'
+        'scripts/run-host-benchmark.ps1 -Groups 3 -Trials 3 -Model gpt-5.6-sol -Reasoning max'
     }
     $input = Read-ReleaseEvidenceReport -Path $ReportPath -Kind $Kind
     if (-not [bool]$input.exists) {
@@ -718,7 +864,13 @@ function Get-HarnessReleaseEvidenceGate {
     try {
         if ([bool]$ExpectedSource.dirty) { throw 'release qualification source is dirty' }
         if ($Kind -ceq 'model') { Assert-ModelEvalReport -RepoRoot $RepoRoot -Document $input.document -ExpectedSource $ExpectedSource }
-        else { Assert-HostBenchmarkReport -RepoRoot $RepoRoot -Document $input.document -ExpectedSource $ExpectedSource }
+        else {
+            if ([string]$input.document.schema_version -ceq 'harness-host-benchmark-report/v1') {
+                Assert-HostBenchmarkReport -RepoRoot $RepoRoot -Document $input.document -ExpectedSource $ExpectedSource
+                return [ordered]@{status='unavailable';evidence_digest=[string]$input.evidence_digest;command=$command;reason='host-report-insufficient-independent-groups'}
+            }
+            Assert-HostBenchmarkReportV2 -RepoRoot $RepoRoot -Document $input.document -ExpectedSource $ExpectedSource
+        }
         $status = [string]$input.document.status
         return [ordered]@{status=$status;evidence_digest=[string]$input.evidence_digest;command=$command;reason=("$Kind-report-$status")}
     } catch {

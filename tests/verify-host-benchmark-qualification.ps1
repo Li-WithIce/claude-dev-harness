@@ -48,9 +48,9 @@ function Commit-GitFixture {
     [void](Invoke-Git $Root @('-c','user.name=Harness Test','-c','user.email=harness@example.invalid','commit','--quiet','--no-gpg-sign','-m','fixture'))
 }
 function Invoke-FixtureRunner {
-    param([string]$Fixture,[string]$OutputRoot,[string]$Mode,[int]$Trials)
-    $outputPath = Join-Path $OutputRoot ("report-$Mode-$Trials.json")
-    $logPath = Join-Path $OutputRoot ("order-$Mode-$Trials.txt")
+    param([string]$Fixture,[string]$OutputRoot,[string]$Mode,[int]$Trials,[int]$Groups = 1)
+    $outputPath = Join-Path $OutputRoot ("report-$Mode-$Groups-$Trials.json")
+    $logPath = Join-Path $OutputRoot ("order-$Mode-$Groups-$Trials.txt")
     $oldMode = $env:HOST_BENCHMARK_TEST_MODE
     $oldLog = $env:HOST_BENCHMARK_TEST_LOG
     $oldTemplate = $env:HOST_BENCHMARK_TEST_TEMPLATE_ROOT
@@ -59,7 +59,7 @@ function Invoke-FixtureRunner {
         $env:HOST_BENCHMARK_TEST_MODE = $Mode
         $env:HOST_BENCHMARK_TEST_LOG = $logPath
         $env:HOST_BENCHMARK_TEST_TEMPLATE_ROOT = $script:hostBenchmarkTemplateRoot
-        $lines = @(& pwsh -NoLogo -NoProfile -NonInteractive -File (Join-Path $Fixture 'scripts\run-host-benchmark.ps1') -RepoRoot $Fixture -OutputPath $outputPath -Trials $Trials -MaxRoundTrips 1 -TimeoutSeconds 30 2>&1 | ForEach-Object { [string]$_ })
+        $lines = @(& pwsh -NoLogo -NoProfile -NonInteractive -File (Join-Path $Fixture 'scripts\run-host-benchmark.ps1') -RepoRoot $Fixture -OutputPath $outputPath -Groups $Groups -Trials $Trials -MaxRoundTrips 1 -TimeoutSeconds 30 2>&1 | ForEach-Object { [string]$_ })
         $exitCode = $LASTEXITCODE
     } finally {
         if ($null -eq $oldMode) { Remove-Item Env:HOST_BENCHMARK_TEST_MODE -ErrorAction Ignore } else { $env:HOST_BENCHMARK_TEST_MODE = $oldMode }
@@ -473,12 +473,18 @@ function Invoke-HostTrial {
         Remove-Item -LiteralPath $scratchJunction -Force
     }
 
-    $pass = Invoke-FixtureRunner $fixture $scratch 'pass' 3
-    $expectedOrder = @('bare1','v11','v21','v12','v22','bare2','v23','bare3','v13')
+    $pass = Invoke-FixtureRunner $fixture $scratch 'pass' 3 3
+    $expectedOrder = @(
+        'bare1','v11','v21','v12','v22','bare2','v23','bare3','v13',
+        'v11','v21','bare1','v22','bare2','v12','bare3','v13','v23',
+        'v21','bare1','v11','bare2','v12','v22','v13','v23','bare3'
+    )
     $passQualified = $pass.ExitCode -eq 0 -and $null -ne $pass.Report -and [bool]$pass.Report.performance.eligible
-    Check $passQualified 'clean 3x3 fixture did not qualify'
-    Check (@(Compare-Object $expectedOrder $pass.Order -SyncWindow 0).Count -eq 0) '3x3 rotating execution order changed'
-    Check (@($pass.Report.execution.actual_trial_order).Count -eq 9) '3x3 report omitted execution-order records'
+    Check $passQualified 'three independent clean 3x3 groups did not qualify'
+    Check (@(Compare-Object $expectedOrder $pass.Order -SyncWindow 0).Count -eq 0) 'independent-group rotating execution order changed'
+    Check (@($pass.Report.groups).Count -eq 3 -and @($pass.Report.groups | Where-Object { @($_.execution.actual_trial_order).Count -eq 9 }).Count -eq 3) 'grouped 3x3 report omitted group or execution-order records'
+    Check (@($pass.Report.groups.group_run_id | Sort-Object -Unique).Count -eq 3 -and @($pass.Report.groups.group_root_digest | Sort-Object -Unique).Count -eq 3) 'grouped 3x3 report reused a group id or namespace root'
+    Check (@($pass.Report.groups | Where-Object { [bool]$_.source_state_stable -and [bool]$_.source.input_head_binding.start -and [bool]$_.source.input_head_binding.end }).Count -eq 3) 'grouped 3x3 report omitted independent clean source start/end bindings'
     Check ([string]$pass.Report.source.execution_mode -ceq 'clean-commit-clone' -and [string]$pass.Report.source.commit_tree_oid -match '^[0-9a-f]{40,64}$') 'clean report omitted native commit source identity'
     Check ([bool]$pass.Report.source.input_head_binding.start -and [bool]$pass.Report.source.input_head_binding.end) 'clean report did not bind live execution inputs to HEAD blobs'
 
@@ -491,7 +497,7 @@ function Invoke-HostTrial {
         [pscustomobject]@{Mode='hidden-index-flag';Message='Runner accepted a write hidden by an unsafe Git index flag'}
     )) {
         $result = Invoke-FixtureRunner $fixture $scratch $case.Mode 1
-        $v2Trial = if ($null -eq $result.Report) { $null } else { @($result.Report.protocols.v2.trials)[0] }
+        $v2Trial = if ($null -eq $result.Report) { $null } else { @($result.Report.groups[0].protocols.v2.trials)[0] }
         Check ($result.ExitCode -eq 1 -and $null -ne $v2Trial -and -not [bool]$v2Trial.runner_evidence_passed) $case.Message
     }
 
@@ -511,14 +517,14 @@ function Invoke-HostTrial {
         [pscustomobject]@{Mode='wrong-trial-number';Protocol='v2';Message='trial record number was not bound to the outer trial'}
     )) {
         $result = Invoke-FixtureRunner $fixture $scratch $case.Mode 1
-        $protocolRecord = if ($null -eq $result.Report) { $null } else { $result.Report.protocols.([string]$case.Protocol) }
+        $protocolRecord = if ($null -eq $result.Report) { $null } else { $result.Report.groups[0].protocols.([string]$case.Protocol) }
         Check ($result.ExitCode -eq 1 -and $null -ne $protocolRecord -and [int]$protocolRecord.runner_contract_failures -gt 0 -and -not [bool]$result.Report.performance.eligible) $case.Message
     }
 
-    $unavailable = Invoke-FixtureRunner $fixture $scratch 'unavailable' 3
+    $unavailable = Invoke-FixtureRunner $fixture $scratch 'unavailable' 3 3
     Check ($unavailable.ExitCode -eq 2 -and $null -ne $unavailable.Report -and -not [bool]$unavailable.Report.performance.eligible -and [string]$unavailable.Report.status -ceq 'unavailable') 'request measurement unavailable did not deterministically exit 2'
     $sendUnavailable = Invoke-FixtureRunner $fixture $scratch 'send-unavailable' 3
-    Check ($sendUnavailable.ExitCode -eq 2 -and $null -ne $sendUnavailable.Report -and [string]$sendUnavailable.Report.status -ceq 'unavailable') 'mislabeled request-send unavailability was not promoted to exit 2'
+    Check ($sendUnavailable.ExitCode -eq 1 -and $null -ne $sendUnavailable.Report -and [string]$sendUnavailable.Report.groups[0].status -ceq 'unavailable' -and [string]$sendUnavailable.Report.status -ceq 'fail') 'single diagnostic group did not retain request-send unavailability under the release group-count failure'
     $mixedFailure = Invoke-FixtureRunner $fixture $scratch 'mixed-fail-unavailable' 3
     Check ($mixedFailure.ExitCode -eq 1 -and $null -ne $mixedFailure.Report -and [string]$mixedFailure.Report.status -ceq 'fail') 'known contract failure was masked by an unavailable measurement'
     $sameProtocolFailure = Invoke-FixtureRunner $fixture $scratch 'same-protocol-mixed' 3
@@ -528,22 +534,22 @@ function Invoke-HostTrial {
     $unavailableCompletedFailure = Invoke-FixtureRunner $fixture $scratch 'unavailable-completed-violation' 3
     Check ($unavailableCompletedFailure.ExitCode -eq 1 -and $null -ne $unavailableCompletedFailure.Report -and [string]$unavailableCompletedFailure.Report.status -ceq 'fail') 'completed contract violation was masked by unavailable request measurement status'
     $unavailableDirectFailure = Invoke-FixtureRunner $fixture $scratch 'unavailable-direct-sessions' 3
-    Check ($unavailableDirectFailure.ExitCode -eq 1 -and $null -ne $unavailableDirectFailure.Report -and [string]$unavailableDirectFailure.Report.status -ceq 'fail' -and [bool]$unavailableDirectFailure.Report.protocols.v2.trials[0].runner_evidence_passed -and [int]$unavailableDirectFailure.Report.protocols.v2.trials[0].fresh_sessions -eq 2 -and -not [bool]$unavailableDirectFailure.Report.protocols.v2.trials[0].completion_passed) 'Direct session overrun with valid disk evidence was masked by unavailable request measurement status'
+    Check ($unavailableDirectFailure.ExitCode -eq 1 -and $null -ne $unavailableDirectFailure.Report -and [string]$unavailableDirectFailure.Report.status -ceq 'fail' -and [bool]$unavailableDirectFailure.Report.groups[0].protocols.v2.trials[0].runner_evidence_passed -and [int]$unavailableDirectFailure.Report.groups[0].protocols.v2.trials[0].fresh_sessions -eq 2 -and -not [bool]$unavailableDirectFailure.Report.groups[0].protocols.v2.trials[0].completion_passed) 'Direct session overrun with valid disk evidence was masked by unavailable request measurement status'
 
     $exception = Invoke-FixtureRunner $fixture $scratch 'exception' 3
-    Check ($exception.ExitCode -eq 2 -and $null -ne $exception.Report -and [string]$exception.Report.status -ceq 'unavailable' -and (@($exception.Report.protocols.v2.trials | Where-Object {$_.diagnostic -ceq 'isolated-auth-home-unavailable'}).Count -eq 1)) 'trial exception did not produce a sanitized unavailable report'
+    Check ($exception.ExitCode -eq 1 -and $null -ne $exception.Report -and [string]$exception.Report.groups[0].status -ceq 'unavailable' -and (@($exception.Report.groups[0].protocols.v2.trials | Where-Object {$_.diagnostic -ceq 'isolated-auth-home-unavailable'}).Count -eq 1)) 'trial exception did not produce a sanitized unavailable group'
 
     $dirtyPath = Join-Path $fixture '目录\未跟踪.txt'
     Write-Utf8 $dirtyPath '诊断'
     $dirty = Invoke-FixtureRunner $fixture $scratch 'latency-fail' 3
-    Check ($dirty.ExitCode -eq 2 -and $null -ne $dirty.Report -and [bool]$dirty.Report.source_dirty -and -not [bool]$dirty.Report.source_state_stable -and -not [bool]$dirty.Report.performance.eligible -and [string]$dirty.Report.status -ceq 'unavailable' -and [string]$dirty.Report.performance.direct_latency.status -ceq 'fail' -and [string]$dirty.Report.source.execution_mode -ceq 'live-dirty-diagnostic') 'dirty source with a diagnostic latency failure was not kept unavailable'
+    Check ($dirty.ExitCode -eq 1 -and $null -ne $dirty.Report -and [bool]$dirty.Report.source_dirty -and -not [bool]$dirty.Report.source_state_stable -and -not [bool]$dirty.Report.performance.eligible -and [string]$dirty.Report.status -ceq 'fail' -and [string]$dirty.Report.groups[0].performance.direct_latency.status -ceq 'fail' -and [string]$dirty.Report.source.execution_mode -ceq 'live-dirty-diagnostic') 'dirty source with a diagnostic latency failure did not fail closed'
     Remove-Item -LiteralPath (Join-Path $fixture '目录') -Recurse -Force
 
     $hiddenInput = Join-Path $fixture 'scripts\host-benchmark\HostBenchmark.Otel.ps1'
     [void](Invoke-Git $fixture @('update-index','--assume-unchanged','scripts/host-benchmark/HostBenchmark.Otel.ps1'))
     [IO.File]::AppendAllText($hiddenInput,"`n# hidden execution-input tamper`n",[Text.UTF8Encoding]::new($false))
     $hiddenSource = Invoke-FixtureRunner $fixture $scratch 'pass' 3
-    Check ($hiddenSource.ExitCode -eq 2 -and $null -ne $hiddenSource.Report -and [bool]$hiddenSource.Report.source_dirty -and -not [bool]$hiddenSource.Report.source.input_head_binding.start -and [string]$hiddenSource.Report.status -ceq 'unavailable') 'assume-unchanged live execution input was not detected independently from Git status'
+    Check ($hiddenSource.ExitCode -eq 1 -and $null -ne $hiddenSource.Report -and [bool]$hiddenSource.Report.source_dirty -and -not [bool]$hiddenSource.Report.source.input_head_binding.start -and [string]$hiddenSource.Report.status -ceq 'fail') 'assume-unchanged live execution input was not detected independently from Git status'
     Check ((Get-DirectoryContentDigest -Root $templateRoot) -ceq $templateDigestBefore) 'shared qualification templates changed during trial execution'
 } finally {
     if (Test-Path -LiteralPath $scratch -PathType Container) { Remove-Item -LiteralPath $scratch -Recurse -Force }

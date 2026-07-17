@@ -525,6 +525,8 @@ $rolloutGenerator = Get-Content -LiteralPath (Join-Path $RepoRoot 'scripts\gener
 $releaseModelJob = [regex]::Match($workflow,'(?ms)^  release-model:\s*$.*?(?=^  release-host:\s*$)').Value
 $releaseHostJob = [regex]::Match($workflow,'(?ms)^  release-host:\s*$.*?(?=^  release-full:\s*$)').Value
 $releaseJob = [regex]::Match($workflow,'(?ms)^  release-full:\s*$.*\z').Value
+$producerRunnerPattern = '(?ms)^\s*runs-on:\s*\r?\n\s*-\s*self-hosted\s*\r?\n\s*-\s*Windows\s*\r?\n\s*-\s*\$\{\{\s*vars\.THIN_V2_RELEASE_RUNNER\s*\}\}\s*$'
+$aggregatorRunnerPattern = '(?ms)^\s*runs-on:\s*\r?\n\s*-\s*self-hosted\s*\r?\n\s*-\s*Windows\s*\r?\n\s*-\s*\$\{\{\s*vars\.THIN_V2_RELEASE_AGGREGATOR_RUNNER\s*\}\}\s*$'
 $modelUpload = [regex]::Match($releaseModelJob,'(?ms)^      - name: Upload model evidence\s*$.*\z').Value
 $hostUpload = [regex]::Match($releaseHostJob,'(?ms)^      - name: Upload host evidence\s*$.*\z').Value
 $releaseUpload = [regex]::Match($releaseJob,'(?ms)^      - name: Upload rollout evidence\s*$.*\z').Value
@@ -724,17 +726,17 @@ if ($runner -match '(?m)^\s*\[int\]\$CheckTimeoutSeconds = 360\s*$' -and
 }
 
 if ($releaseModelJob -match 'run-model-evals\.ps1[^\r\n]+-TimeoutSeconds 120[^\r\n]+-CodexHome \$env:HOST_BENCHMARK_CODEX_HOME[^\r\n]+model-eval\.json' -and
-    $releaseHostJob -match 'run-host-benchmark\.ps1[^\r\n]+-TimeoutSeconds 900[^\r\n]+-CodexHome \$env:HOST_BENCHMARK_CODEX_HOME[^\r\n]+-Trials 3[^\r\n]+host-benchmark\.json' -and
+    $releaseHostJob -match 'run-host-benchmark\.ps1[^\r\n]+-TimeoutSeconds 900[^\r\n]+-CodexHome \$env:HOST_BENCHMARK_CODEX_HOME[^\r\n]+-Groups 3[^\r\n]+-Trials 3[^\r\n]+host-benchmark\.json' -and
     $releaseHostJob -match '(?m)^\s*needs:\s*release-model\s*$' -and
     $releaseModelJob -notmatch '(?m)^\s*continue-on-error:' -and $releaseHostJob -notmatch '(?m)^\s*continue-on-error:') {
-    Add-Check 'release CI serializes and bounds real model and three-trial host evidence without masking failures'
+    Add-Check 'release CI serializes and bounds real model and three-group host evidence without masking failures'
 } else {
     Add-Failure 'release CI must run both real qualification reports before rollout generation'
 }
 
-if (@($releaseModelJob,$releaseHostJob | Where-Object { $_ -match '(?m)^\s*runs-on:\s*\$\{\{\s*vars\.THIN_V2_RELEASE_RUNNER\s*\|\|\s*''windows-latest''\s*\}\}\s*$' -and $_ -match '(?m)^\s*HOST_BENCHMARK_CODEX_HOME:\s*\$\{\{\s*vars\.HOST_BENCHMARK_CODEX_HOME\s*\}\}\s*$' -and $_ -match '(?m)^\s*environment:\s*thin-v2-release\s*$' -and $_ -match '(?m)^\s*persist-credentials:\s*false\s*$' -and $_ -match 'refs/heads/codex/thin-harness-v2-refactor' -and $_ -notmatch '(?i)secrets\.' }).Count -eq 2 -and
-    $releaseJob -match '(?m)^\s*runs-on:\s*windows-latest\s*$' -and $releaseJob -match '(?m)^\s*persist-credentials:\s*false\s*$' -and $releaseJob -notmatch 'HOST_BENCHMARK_CODEX_HOME') {
-    Add-Check 'credentialed producers are trusted-ref/environment bound and release checkouts do not persist GitHub credentials'
+if (@($releaseModelJob,$releaseHostJob | Where-Object { $_ -match $producerRunnerPattern -and $_ -match '(?m)^\s*HOST_BENCHMARK_CODEX_HOME:\s*\$\{\{\s*vars\.HOST_BENCHMARK_CODEX_HOME\s*\}\}\s*$' -and $_ -match '(?m)^\s*environment:\s*thin-v2-release\s*$' -and $_ -match '(?m)^\s*persist-credentials:\s*false\s*$' -and $_ -match 'refs/heads/codex/thin-harness-v2-refactor' -and $_ -notmatch '(?i)secrets\.' }).Count -eq 2 -and
+    $releaseJob -match $aggregatorRunnerPattern -and $releaseJob -notmatch [regex]::Escape('${{ vars.THIN_V2_RELEASE_RUNNER }}') -and $releaseJob -match '(?m)^\s*environment:\s*thin-v2-release\s*$' -and $releaseJob -match '(?m)^\s*persist-credentials:\s*false\s*$' -and $releaseJob -notmatch 'HOST_BENCHMARK_CODEX_HOME' -and $releaseJob -notmatch '(?i)secrets\.') {
+    Add-Check 'credentialed producers and the credential-blind aggregator use separate dedicated runner labels'
 } else {
     Add-Failure 'release CI must map the approved runner and Codex-home repository variables without credential transport'
 }
