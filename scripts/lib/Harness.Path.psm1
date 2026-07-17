@@ -81,21 +81,11 @@ function Get-HarnessPhysicalPathIdentity {
     if ($root -match '^\\\\\?\\Volume\{[0-9a-f-]{36}\}\\$') {
         $volume = $root
     } else {
-        $candidate = [System.IO.Path]::GetFullPath($physical)
-        while (-not [string]::IsNullOrWhiteSpace($candidate)) {
-            $mountPoint = $candidate.TrimEnd([System.IO.Path]::DirectorySeparatorChar,[System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
-            $volumeOutput = @(& mountvol.exe $mountPoint /L 2>&1 | ForEach-Object { [string]$_ })
-            if ($LASTEXITCODE -eq 0) {
-                $volumeMatch = [regex]::Match(($volumeOutput -join "`n"),'(?i)\\\\\?\\Volume\{[0-9a-f-]{36}\}\\')
-                if (-not $volumeMatch.Success) { throw 'WorkspaceRoot physical identity is unavailable' }
-                $volume = $volumeMatch.Value
-                break
-            }
-            $parent = [System.IO.Path]::GetDirectoryName($candidate.TrimEnd([System.IO.Path]::DirectorySeparatorChar,[System.IO.Path]::AltDirectorySeparatorChar))
-            if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $candidate) { break }
-            $candidate = $parent
-        }
-        if ([string]::IsNullOrWhiteSpace($volume)) { throw 'WorkspaceRoot physical identity is unavailable' }
+        $volumeOutput = @(& mountvol.exe $root /L 2>&1 | ForEach-Object { [string]$_ })
+        if ($LASTEXITCODE -ne 0) { throw 'WorkspaceRoot physical identity is unavailable' }
+        $volumeMatch = [regex]::Match(($volumeOutput -join "`n"),'(?i)\\\\\?\\Volume\{[0-9a-f-]{36}\}\\')
+        if (-not $volumeMatch.Success) { throw 'WorkspaceRoot physical identity is unavailable' }
+        $volume = $volumeMatch.Value
     }
     return ('volume:{0}|file:{1}' -f $volume.ToLowerInvariant(),$fileIdMatch.Value.ToLowerInvariant())
 }
