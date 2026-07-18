@@ -319,11 +319,28 @@ try {
         )
     } + [pscustomobject]@{ matcher = 'Empty user section'; hooks = @() })
     [System.IO.File]::WriteAllText($mergeSettingsPath, ($mergeCurrentSettings | ConvertTo-Json -Depth 30), (New-Object System.Text.UTF8Encoding($false)))
-    $mergeUninstall = Invoke-RepoScript -UserProfile $mergeUserProfile -ScriptPath (Join-Path $RepoRoot 'uninstall.ps1') -Arguments @{
-        WorkspaceRoot = $mergeWorkspace
-        RepoRoot = $RepoRoot
+    $mergeCodexHooksPath = Join-Path $mergeUserProfile '.codex\hooks.json'
+    $mergeCurrentCodexHooks = Read-JsonFile -Path $mergeCodexHooksPath
+    $mergeCurrentCodexHooks.hooks | Add-Member -NotePropertyName 'PostToolUse' -NotePropertyValue @([pscustomobject]@{
+        matcher = '^PostInstallThirdParty$'
+        hooks = @([pscustomobject]@{ type = 'command'; command = 'codex-post-install-third-party.cmd'; timeout = 9 })
+    }) -Force
+    [System.IO.File]::WriteAllText($mergeCodexHooksPath, ($mergeCurrentCodexHooks | ConvertTo-Json -Depth 30), (New-Object System.Text.UTF8Encoding($false)))
+    $mergeRegistryPath = Join-Path $mergeUserProfile '.dev-harness\install-registry.json'
+    $mergeRegistryCommitLock = [System.IO.File]::Open($mergeRegistryPath, 'Open', 'Read', 'ReadWrite')
+    try {
+        $mergeInterruptedUninstall = Invoke-RepoScript -UserProfile $mergeUserProfile -ScriptPath (Join-Path $RepoRoot 'uninstall.ps1') -Arguments @{
+            WorkspaceRoot = $mergeWorkspace
+            RepoRoot = $RepoRoot
+        }
+    } finally {
+        $mergeRegistryCommitLock.Dispose()
     }
+    $mergeUninstallJournalPath = Join-Path $mergeUserProfile '.dev-harness\uninstall-transaction.json'
+    $mergeJournalPersisted = Test-Path -LiteralPath $mergeUninstallJournalPath -PathType Leaf
+    $mergeUninstall = Invoke-RepoScript -UserProfile $mergeUserProfile -ScriptPath (Join-Path $RepoRoot 'uninstall.ps1') -Arguments @{ RepoRoot = $RepoRoot }
     $results.Add($mergeInstall) | Out-Null
+    $results.Add($mergeInterruptedUninstall) | Out-Null
     $results.Add($mergeUninstall) | Out-Null
     $mergeFinalGitIgnore = Get-Content -LiteralPath $mergeGitIgnorePath -Raw -Encoding utf8
     $mergeFinalSettings = Read-JsonFile -Path $mergeSettingsPath
@@ -337,8 +354,23 @@ try {
         $matcherProperty = $_.PSObject.Properties['matcher']
         $null -ne $matcherProperty -and $matcherProperty.Value -eq 'Empty user section' -and @($_.hooks).Count -eq 0
     })
+    $mergeFinalCodexHooks = Read-JsonFile -Path $mergeCodexHooksPath
+    $mergeFinalCodexCommands = Get-HookCommands -Settings $mergeFinalCodexHooks
+    $mergeFinalCodexThirdPartyHooks = @(
+        foreach ($section in @($mergeFinalCodexHooks.hooks.PostToolUse)) {
+            foreach ($hook in @($section.hooks)) {
+                if ([string]$section.matcher -ceq '^PostInstallThirdParty$' -and
+                    [string]$hook.type -ceq 'command' -and
+                    [string]$hook.command -ceq 'codex-post-install-third-party.cmd' -and
+                    [int]$hook.timeout -eq 9) { $hook }
+            }
+        }
+    )
     if ($mergeInstall.ExitCode -eq 0 -and
+        $mergeInterruptedUninstall.ExitCode -ne 0 -and
+        $mergeJournalPersisted -and
         $mergeUninstall.ExitCode -eq 0 -and
+        -not (Test-Path -LiteralPath $mergeUninstallJournalPath) -and
         $mergeFinalGitLines -contains 'existing-rule/' -and
         $mergeFinalGitLines -contains 'post-install-user-rule/' -and
         @($mergeFinalGitLines | Where-Object { $_ -eq '.assistant/' }).Count -eq 0 -and
@@ -349,11 +381,65 @@ try {
         @($mergeFinalCommands | Where-Object { $_ -eq 'post-install-third-party.cmd' }).Count -eq 1 -and
         @($mergeFinalCommands | Where-Object { $_ -eq 'node "C:\third-party\hooks-memory\stop.js"' }).Count -eq 1 -and
         $emptyUserSections.Count -eq 1 -and
-        @($mergeFinalCommands | Where-Object { $_ -match [regex]::Escape((Join-Path $mergeUserProfile '.claude\hooks-memory')) }).Count -eq 0) {
-        Add-Check 'semantic uninstall preserves post-install gitignore entries, settings fields, and third-party hooks while removing Harness entries'
+        @($mergeFinalCommands | Where-Object { $_ -match [regex]::Escape((Join-Path $mergeUserProfile '.claude\hooks-memory')) }).Count -eq 0 -and
+        $mergeFinalCodexThirdPartyHooks.Count -eq 1 -and
+        @($mergeFinalCodexCommands | Where-Object { $_ -match [regex]::Escape((Join-Path $mergeUserProfile '.claude\hooks-memory')) }).Count -eq 0) {
+        Add-Check 'semantic uninstall resumes after a pre-commit crash while preserving gitignore, settings, and Codex hook user increments'
     } else {
-        Add-Failure ("semantic uninstall should preserve user edits and remove only Harness-managed gitignore lines and hooks; install={0}, uninstall={1}, harness_lines={2}, model={3}, user_added={4}, commands={5}, gitignore={6}" -f `
-            $mergeInstall.ExitCode,$mergeUninstall.ExitCode,(@($remainingHarnessLines) -join ','),$mergeFinalSettings.model,$mergeFinalSettings.userAdded,(@($mergeFinalCommands) -join ','),($mergeFinalGitIgnore -replace "`r?`n",'<NL>'))
+        Add-Failure ("semantic uninstall crash-resume should preserve user edits and remove only Harness-managed gitignore lines and hooks; install={0}, interrupted={1}, journal={2}, resume={3}, harness_lines={4}, model={5}, user_added={6}, commands={7}, codex_commands={8}, gitignore={9}" -f `
+            $mergeInstall.ExitCode,$mergeInterruptedUninstall.ExitCode,$mergeJournalPersisted,$mergeUninstall.ExitCode,(@($remainingHarnessLines) -join ','),$mergeFinalSettings.model,$mergeFinalSettings.userAdded,(@($mergeFinalCommands) -join ','),(@($mergeFinalCodexCommands) -join ','),($mergeFinalGitIgnore -replace "`r?`n",'<NL>'))
+    }
+
+    $bomUserProfile = Join-Path $scratchRoot 'semantic-bom-user'
+    $bomWorkspace = Join-Path $scratchRoot 'semantic-bom-workspace'
+    $bomCodexHooksPath = Join-Path $bomUserProfile '.codex\hooks.json'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $bomCodexHooksPath),$bomWorkspace -Force | Out-Null
+    $bomBaselineHooks = [ordered]@{
+        description = 'bom baseline'
+        hooks = [ordered]@{
+            Stop = @([ordered]@{
+                matcher = '^Baseline$'
+                hooks = @([ordered]@{ type='command';command='bom-baseline-third-party.cmd';timeout=7 })
+            })
+        }
+    } | ConvertTo-Json -Depth 20
+    [System.IO.File]::WriteAllText($bomCodexHooksPath,$bomBaselineHooks,[System.Text.UTF8Encoding]::new($true))
+    $bomBaselineBytes = [System.IO.File]::ReadAllBytes($bomCodexHooksPath)
+    $bomInstall = Invoke-RepoScript -UserProfile $bomUserProfile -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @{
+        WorkspaceRoot = $bomWorkspace
+        RepoRoot = $RepoRoot
+    }
+    $results.Add($bomInstall) | Out-Null
+    if ($bomInstall.ExitCode -eq 0) {
+        $bomRegistryPath = Join-Path $bomUserProfile '.dev-harness\install-registry.json'
+        $bomRegistryCommitLock = [System.IO.File]::Open($bomRegistryPath,'Open','Read','ReadWrite')
+        try {
+            $bomInterruptedUninstall = Invoke-RepoScript -UserProfile $bomUserProfile -ScriptPath (Join-Path $RepoRoot 'uninstall.ps1') -Arguments @{
+                WorkspaceRoot = $bomWorkspace
+                RepoRoot = $RepoRoot
+            }
+        } finally {
+            $bomRegistryCommitLock.Dispose()
+        }
+        $bomJournalPath = Join-Path $bomUserProfile '.dev-harness\uninstall-transaction.json'
+        $bomJournalPersisted = Test-Path -LiteralPath $bomJournalPath -PathType Leaf
+        $bomResume = Invoke-RepoScript -UserProfile $bomUserProfile -ScriptPath (Join-Path $RepoRoot 'uninstall.ps1') -Arguments @{ RepoRoot = $RepoRoot }
+        $results.Add($bomInterruptedUninstall) | Out-Null
+        $results.Add($bomResume) | Out-Null
+        $bomFinalBytes = if (Test-Path -LiteralPath $bomCodexHooksPath -PathType Leaf) { [System.IO.File]::ReadAllBytes($bomCodexHooksPath) } else { [byte[]]@() }
+        if ($bomInterruptedUninstall.ExitCode -ne 0 -and
+            $bomJournalPersisted -and
+            $bomResume.ExitCode -eq 0 -and
+            -not (Test-Path -LiteralPath $bomJournalPath) -and
+            $bomFinalBytes.Length -ge 3 -and
+            $bomFinalBytes[0] -eq 0xef -and $bomFinalBytes[1] -eq 0xbb -and $bomFinalBytes[2] -eq 0xbf -and
+            ($bomFinalBytes -join ',') -ceq ($bomBaselineBytes -join ',')) {
+            Add-Check 'semantic uninstall crash-resume restores a UTF-8 BOM hook baseline byte-for-byte'
+        } else {
+            Add-Failure "semantic uninstall crash-resume did not preserve the BOM baseline: install=$($bomInstall.ExitCode) interrupted=$($bomInterruptedUninstall.ExitCode) journal=$bomJournalPersisted resume=$($bomResume.ExitCode)"
+        }
+    } else {
+        Add-Failure 'semantic BOM baseline fixture install failed'
     }
 
     $semanticBarrierRoot = Join-Path $scratchRoot 'semantic-uninstall-snapshot-barrier'
@@ -376,7 +462,7 @@ try {
                         }
                     } | ConvertTo-Json -Depth 20 }
                 Drift = '{"external":"B-claude-write"}'
-                Anchor = '    $result = Add-BaselineHarnessHooks -Settings $result -Baseline $baseline -ClaudeHome $Manifest[''claude_home'']'
+                Anchor = '    $currentRaw = $currentSnapshot.Content'
             }
             [pscustomobject]@{
                 Name = 'gitignore-delete'
@@ -415,9 +501,27 @@ try {
                 link_type = $null
                 link_target = $null
             }
+            if ($case.Name -eq 'claude-write') {
+                $record['expected_postimage'] = [ordered]@{
+                    mode = 'semantic'
+                    contract = 'claude-settings/v1'
+                    managed_hooks = @([ordered]@{
+                        event = 'Stop'
+                        path = 'hooks.Stop'
+                        section = [ordered]@{}
+                        hook = [ordered]@{
+                            type = 'command'
+                            command = ('node "{0}"' -f (Join-Path $claudeHome 'hooks-memory\stop.js'))
+                            timeout = 10
+                        }
+                        multiplicity = 1
+                    })
+                }
+            }
             $manifest = [ordered]@{
                 workspace_root = $workspaceRoot
                 claude_home = $claudeHome
+                codex_home = (Join-Path $caseRoot 'user\.codex')
             }
             $rejected = & {
                 param($FunctionsPath, $RepoPath, $BackupRecord, $InstallManifest)

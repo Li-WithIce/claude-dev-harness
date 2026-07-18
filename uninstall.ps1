@@ -19,7 +19,7 @@ function Read-JsonObject {
         return $null
     }
 
-    return ConvertTo-NormalizedObject -Value ($raw | ConvertFrom-Json)
+    return ConvertFrom-InstallJson -Json $raw
 }
 
 function Write-InstallRegistry {
@@ -55,14 +55,29 @@ function Get-BackupRecordScope {
 function Test-IsHarnessHookCommand {
     param(
         [string]$Command,
-        [string]$ClaudeHome
+        [string]$ClaudeHome,
+        [System.Collections.Generic.HashSet[string]]$ManagedCommands
     )
 
     if ([string]::IsNullOrWhiteSpace($Command) -or [string]::IsNullOrWhiteSpace($ClaudeHome)) {
         return $false
     }
-    $preToolCommand = 'pwsh -NoProfile -NonInteractive -File "{0}"' -f (Join-Path $ClaudeHome 'hooks-memory\pretooluse.ps1')
-    if ($Command.Trim().Equals($preToolCommand, [System.StringComparison]::OrdinalIgnoreCase)) {
+    if ($null -ne $ManagedCommands -and $ManagedCommands.Contains($Command.Trim())) {
+        return $true
+    }
+    $preToolPath = Join-Path $ClaudeHome 'hooks-memory\pretooluse.ps1'
+    $preToolCommand = 'pwsh -NoProfile -NonInteractive -File "{0}"' -f $preToolPath
+    $quotedPreToolCommand = "pwsh -NoProfile -NonInteractive -File '{0}'" -f $preToolPath.Replace("'", "''")
+    $windowsPowerShell = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::System)) 'WindowsPowerShell\v1.0\powershell.exe'
+    $codexLauncherPath = Join-Path $ClaudeHome 'hooks-memory\codex-pretooluse-launcher.ps1'
+    $codexLauncherCommand = '{0} -NoLogo -NoProfile -NonInteractive -Command . ''{1}''' -f $windowsPowerShell,$codexLauncherPath.Replace("'", "''")
+    $pipelineCodexLauncherCommand = '{0} -NoLogo -NoProfile -NonInteractive -Command . ''{1}'' -PipelineInput $input' -f $windowsPowerShell,$codexLauncherPath.Replace("'", "''")
+    $legacyCodexLauncherCommand = '{0} -NoLogo -NoProfile -NonInteractive -File "{1}"' -f $windowsPowerShell,$codexLauncherPath
+    if ($Command.Trim().Equals($preToolCommand, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $Command.Trim().Equals($quotedPreToolCommand, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $Command.Trim().Equals($codexLauncherCommand, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $Command.Trim().Equals($pipelineCodexLauncherCommand, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $Command.Trim().Equals($legacyCodexLauncherCommand, [System.StringComparison]::OrdinalIgnoreCase)) {
         return $true
     }
     foreach ($hookName in @('userpromptsubmit.js','stop.js','posttooluse.js')) {
@@ -74,10 +89,29 @@ function Test-IsHarnessHookCommand {
     return $false
 }
 
+function Get-SemanticManagedHookCommands {
+    param([Parameter(Mandatory = $true)]$Identity)
+
+    $commands = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $ownedHooks = @($Identity['managed_hooks'])
+    if ($Identity.Contains('preimage_managed_hooks')) {
+        $ownedHooks += @($Identity['preimage_managed_hooks'])
+    }
+    foreach ($ownedHook in $ownedHooks) {
+        $command = [string]$ownedHook['hook']['command']
+        if ([string]::IsNullOrWhiteSpace($command)) {
+            throw 'Semantic hook identity contains an empty managed command'
+        }
+        [void]$commands.Add($command.Trim())
+    }
+    return ,$commands
+}
+
 function Remove-HarnessHooksFromSettings {
     param(
         $Settings,
-        [string]$ClaudeHome
+        [string]$ClaudeHome,
+        [System.Collections.Generic.HashSet[string]]$ManagedCommands
     )
 
     $result = if ($null -eq $Settings) { [ordered]@{} } else { ConvertTo-NormalizedObject -Value $Settings }
@@ -101,7 +135,7 @@ function Remove-HarnessHooksFromSettings {
             $removedManagedHook = $false
             foreach ($hook in @($section['hooks'])) {
                 $command = if ($hook -is [System.Collections.IDictionary] -and $hook.Contains('command')) { [string]$hook['command'] } else { '' }
-                if (Test-IsHarnessHookCommand -Command $command -ClaudeHome $ClaudeHome) {
+                if (Test-IsHarnessHookCommand -Command $command -ClaudeHome $ClaudeHome -ManagedCommands $ManagedCommands) {
                     $removedManagedHook = $true
                 } else {
                     [void]$preservedHooks.Add((ConvertTo-NormalizedObject -Value $hook))
@@ -134,7 +168,8 @@ function Add-BaselineHarnessHooks {
     param(
         $Settings,
         $Baseline,
-        [string]$ClaudeHome
+        [string]$ClaudeHome,
+        [System.Collections.Generic.HashSet[string]]$ManagedCommands
     )
 
     if ($null -eq $Baseline -or -not $Baseline.Contains('hooks') -or -not ($Baseline['hooks'] -is [System.Collections.IDictionary])) {
@@ -159,7 +194,7 @@ function Add-BaselineHarnessHooks {
             $managedHooks = New-Object System.Collections.ArrayList
             foreach ($hook in @($baselineSection['hooks'])) {
                 $command = if ($hook -is [System.Collections.IDictionary] -and $hook.Contains('command')) { [string]$hook['command'] } else { '' }
-                if (Test-IsHarnessHookCommand -Command $command -ClaudeHome $ClaudeHome) {
+                if (Test-IsHarnessHookCommand -Command $command -ClaudeHome $ClaudeHome -ManagedCommands $ManagedCommands) {
                     [void]$managedHooks.Add((ConvertTo-NormalizedObject -Value $hook))
                 }
             }
@@ -192,13 +227,17 @@ function Restore-ClaudeSettingsSemantic {
     }
 
     $baseline = if ([bool]$Record['existed']) { Read-JsonObject -Path $Record['backup_path'] } else { $null }
-    $current = ConvertTo-NormalizedObject -Value ($currentRaw | ConvertFrom-Json)
-    $result = Remove-HarnessHooksFromSettings -Settings $current -ClaudeHome $Manifest['claude_home']
-    $result = Add-BaselineHarnessHooks -Settings $result -Baseline $baseline -ClaudeHome $Manifest['claude_home']
+    $current = ConvertFrom-InstallJson -Json $currentRaw
+    $managedCommands = Get-SemanticManagedHookCommands -Identity $Record['expected_postimage']
+    $result = Remove-HarnessHooksFromSettings -Settings $current -ClaudeHome $Manifest['claude_home'] -ManagedCommands $managedCommands
+    $result = Add-BaselineHarnessHooks -Settings $result -Baseline $baseline -ClaudeHome $Manifest['claude_home'] -ManagedCommands $managedCommands
     if ([bool]$Record['existed'] -and $null -ne $baseline -and
-        (ConvertTo-Json -InputObject $result -Depth 100 -Compress) -eq (ConvertTo-Json -InputObject $baseline -Depth 100 -Compress)) {
-        $baselineRaw = Read-FileUtf8 -Path $Record['backup_path']
-        Write-InstallStateTextAtomic -Path $Record['path'] -Content $baselineRaw -ExpectedCurrentDigest ([string]$currentSnapshot.Identity['sha256'])
+        (ConvertTo-InstallJson -Value $result -Depth 100 -Compress) -eq (ConvertTo-InstallJson -Value $baseline -Depth 100 -Compress)) {
+        Copy-InstallStateFileAtomic `
+            -SourcePath $Record['backup_path'] `
+            -Path $Record['path'] `
+            -ExpectedCurrentIdentity $currentSnapshot.Identity `
+            -ExpectedDesiredIdentity (Get-InstallBackupRecordPreimageIdentity -Record $Record)
         return $true
     }
     if ($result.Count -eq 0 -and -not [bool]$Record['existed']) {
@@ -206,23 +245,57 @@ function Restore-ClaudeSettingsSemantic {
         return $false
     }
 
-    Write-InstallStateTextAtomic -Path $Record['path'] -Content (ConvertTo-Json -InputObject $result -Depth 100) -ExpectedCurrentDigest ([string]$currentSnapshot.Identity['sha256'])
+    Write-InstallStateTextAtomic -Path $Record['path'] -Content (ConvertTo-InstallJson -Value $result -Depth 100) -ExpectedCurrentDigest ([string]$currentSnapshot.Identity['sha256'])
     return $true
 }
 
-function Restore-WorkspaceGitIgnoreSemantic {
-    param($Record)
+function Test-ClaudeSettingsSemanticRestoreComplete {
+    param(
+        $Record,
+        $Manifest
+    )
+
+    try {
+        $currentSnapshot = Read-InstallTextSnapshot -Path $Record['path']
+        if ([string]$currentSnapshot.Identity['item_type'] -eq 'missing') {
+            return -not [bool]$Record['existed']
+        }
+        if ([string]::IsNullOrWhiteSpace($currentSnapshot.Content)) {
+            return $false
+        }
+
+        $baseline = if ([bool]$Record['existed']) { Read-JsonObject -Path $Record['backup_path'] } else { $null }
+        $current = ConvertFrom-InstallJson -Json $currentSnapshot.Content
+        $managedCommands = Get-SemanticManagedHookCommands -Identity $Record['expected_postimage']
+        $result = Remove-HarnessHooksFromSettings -Settings $current -ClaudeHome $Manifest['claude_home'] -ManagedCommands $managedCommands
+        $result = Add-BaselineHarnessHooks -Settings $result -Baseline $baseline -ClaudeHome $Manifest['claude_home'] -ManagedCommands $managedCommands
+        $resultJson = ConvertTo-InstallJson -Value $result -Depth 100 -Compress
+
+        if ([bool]$Record['existed'] -and $null -ne $baseline -and
+            $resultJson -eq (ConvertTo-InstallJson -Value $baseline -Depth 100 -Compress)) {
+            return Test-InstallExactIdentityEqual `
+                -Left $currentSnapshot.Identity `
+                -Right (Get-InstallBackupRecordPreimageIdentity -Record $Record)
+        }
+        if ($result.Count -eq 0 -and -not [bool]$Record['existed']) {
+            return $false
+        }
+        return $resultJson -eq (ConvertTo-InstallJson -Value $current -Depth 100 -Compress)
+    } catch {
+        return $false
+    }
+}
+
+function Get-WorkspaceGitIgnoreRestoreProjection {
+    param(
+        $Record,
+        [string]$CurrentRaw
+    )
 
     $managedComment = '# dev-harness workspace artifacts'
     $legacyManagedComment = '# claude-dev-harness workspace artifacts'
     $requiredEntries = @('.assistant/','AGENTS.md','.claude')
     $baselineRaw = if ([bool]$Record['existed']) { Read-FileUtf8 -Path $Record['backup_path'] } else { $null }
-    $currentSnapshot = Read-InstallTextSnapshot -Path $Record['path']
-    if ([string]$currentSnapshot.Identity['item_type'] -eq 'missing') {
-        return $false
-    }
-    $currentRaw = $currentSnapshot.Content
-
     $baselineLines = if ($null -eq $baselineRaw) { @() } else { @([regex]::Split($baselineRaw, '\r?\n')) }
     $baselineTokens = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($line in $baselineLines) {
@@ -275,16 +348,45 @@ function Restore-WorkspaceGitIgnoreSemantic {
     $resultRaw = ($resultLines -join $newline).TrimEnd([char[]]@("`r", "`n"))
     if ([bool]$Record['existed'] -and
         $resultRaw -eq $baselineRaw.TrimEnd([char[]]@("`r", "`n"))) {
-        Write-InstallStateTextAtomic -Path $Record['path'] -Content $baselineRaw -ExpectedCurrentDigest ([string]$currentSnapshot.Identity['sha256'])
-        return $true
+        return [pscustomobject]@{ ItemType = 'file'; Content = $baselineRaw }
     }
     if ([string]::IsNullOrWhiteSpace($resultRaw) -and -not [bool]$Record['existed']) {
+        return [pscustomobject]@{ ItemType = 'missing'; Content = $null }
+    }
+
+    return [pscustomobject]@{ ItemType = 'file'; Content = ($resultRaw + $newline) }
+}
+
+function Restore-WorkspaceGitIgnoreSemantic {
+    param($Record)
+
+    $currentSnapshot = Read-InstallTextSnapshot -Path $Record['path']
+    if ([string]$currentSnapshot.Identity['item_type'] -eq 'missing') {
+        return $false
+    }
+    $projection = Get-WorkspaceGitIgnoreRestoreProjection -Record $Record -CurrentRaw $currentSnapshot.Content
+    if ([string]$projection.ItemType -eq 'missing') {
         [void](Invoke-InstallExactPathTransition -Path $Record['path'] -SourceIdentity $currentSnapshot.Identity -DesiredIdentity (New-InstallExactMissingIdentity))
         return $false
     }
 
-    Write-InstallStateTextAtomic -Path $Record['path'] -Content ($resultRaw + $newline) -ExpectedCurrentDigest ([string]$currentSnapshot.Identity['sha256'])
+    Write-InstallStateTextAtomic -Path $Record['path'] -Content $projection.Content -ExpectedCurrentDigest ([string]$currentSnapshot.Identity['sha256'])
     return $true
+}
+
+function Test-WorkspaceGitIgnoreSemanticRestoreComplete {
+    param($Record)
+
+    try {
+        $currentSnapshot = Read-InstallTextSnapshot -Path $Record['path']
+        if ([string]$currentSnapshot.Identity['item_type'] -eq 'missing') {
+            return -not [bool]$Record['existed']
+        }
+        $projection = Get-WorkspaceGitIgnoreRestoreProjection -Record $Record -CurrentRaw $currentSnapshot.Content
+        return [string]$projection.ItemType -eq 'file' -and $currentSnapshot.Content -ceq [string]$projection.Content
+    } catch {
+        return $false
+    }
 }
 
 function Test-InstallJsonValueEqual {
@@ -297,9 +399,11 @@ function Test-InstallJsonValueEqual {
         if (-not ($Left -is [System.Collections.IDictionary]) -or -not ($Right -is [System.Collections.IDictionary])) {
             return $false
         }
-        $leftKeys = @($Left.Keys | ForEach-Object { [string]$_ } | Sort-Object)
-        $rightKeys = @($Right.Keys | ForEach-Object { [string]$_ } | Sort-Object)
-        if (($leftKeys -join "`n") -ne ($rightKeys -join "`n")) {
+        [string[]]$leftKeys = @($Left.Keys | ForEach-Object { [string]$_ })
+        [string[]]$rightKeys = @($Right.Keys | ForEach-Object { [string]$_ })
+        [array]::Sort($leftKeys,[System.StringComparer]::Ordinal)
+        [array]::Sort($rightKeys,[System.StringComparer]::Ordinal)
+        if (($leftKeys -join "`n") -cne ($rightKeys -join "`n")) {
             return $false
         }
         foreach ($key in $leftKeys) {
@@ -476,7 +580,8 @@ function Get-InstallRestorePlan {
         [string[]]$WorkspaceManifestPaths,
         [string[]]$GlobalManifestPaths,
         [bool]$RestoreUserGlobal,
-        $ManifestCache
+        $ManifestCache,
+        $ReleasedTargetHistory = @{}
     )
 
     $plan = New-Object System.Collections.Generic.List[object]
@@ -498,7 +603,12 @@ function Get-InstallRestorePlan {
             $records = @($manifest['backups'])
             [array]::Reverse($records)
             foreach ($record in $records) {
-                if ((Get-BackupRecordScope -Record $record -Manifest $manifest) -eq 'user-global') {
+                $targetPath = Get-NormalizedPath -Path $record['path']
+                $isReleasedHistory = $ReleasedTargetHistory -is [System.Collections.IDictionary] -and
+                    $ReleasedTargetHistory.Contains($targetPath) -and
+                    @($ReleasedTargetHistory[$targetPath]) -contains $manifestPath
+                if (-not $isReleasedHistory -and
+                    (Get-BackupRecordScope -Record $record -Manifest $manifest) -eq 'user-global') {
                     $plan.Add([pscustomobject]@{ Record = $record; Manifest = $manifest; Scope = 'user-global' }) | Out-Null
                 }
             }
@@ -574,8 +684,26 @@ function Get-InstallRestorePlanPrefix {
                 } else {
                     Get-InstallManagedPathIdentity -Path $targetPath
                 }
-                $finalPreimage = Get-InstallBackupRecordPreimageIdentity -Record $lastAppliedEntry.Record
-                if (-not (Test-InstallExactIdentityEqual -Left $currentIdentity -Right $finalPreimage)) {
+                $lastPostimage = $lastAppliedEntry.Record['expected_postimage']
+                $matchesCompletedRestore = if ([string]$lastPostimage['mode'] -eq 'semantic') {
+                    if ($hasProjectedIdentity) {
+                        $false
+                    } else {
+                        switch ([string]$lastPostimage['contract']) {
+                            'claude-settings/v1' {
+                                Test-ClaudeSettingsSemanticRestoreComplete -Record $lastAppliedEntry.Record -Manifest $lastAppliedEntry.Manifest
+                            }
+                            'workspace-gitignore/v1' {
+                                Test-WorkspaceGitIgnoreSemanticRestoreComplete -Record $lastAppliedEntry.Record
+                            }
+                            default { $false }
+                        }
+                    }
+                } else {
+                    $finalPreimage = Get-InstallBackupRecordPreimageIdentity -Record $lastAppliedEntry.Record
+                    Test-InstallExactIdentityEqual -Left $currentIdentity -Right $finalPreimage
+                }
+                if (-not $matchesCompletedRestore) {
                     $matches = $false
                     break
                 }
@@ -642,7 +770,15 @@ function Restore-BackupRecord {
     if ((Get-NormalizedPath -Path $targetPath) -eq (Get-NormalizedPath -Path (Join-Path $Manifest['workspace_root'] '.gitignore'))) {
         return Restore-WorkspaceGitIgnoreSemantic -Record $Record
     }
-    if ((Get-NormalizedPath -Path $targetPath) -eq (Get-NormalizedPath -Path (Join-Path $Manifest['claude_home'] 'settings.json'))) {
+    if ([string]$Record['expected_postimage']['mode'] -eq 'semantic' -and
+        [string]$Record['expected_postimage']['contract'] -eq 'claude-settings/v1') {
+        $hookSettingsTargets = @(
+            Get-NormalizedPath -Path (Join-Path $Manifest['claude_home'] 'settings.json')
+            Get-NormalizedPath -Path (Join-Path $Manifest['codex_home'] 'hooks.json')
+        )
+        if ((Get-NormalizedPath -Path $targetPath) -notin $hookSettingsTargets) {
+            throw "Hook settings semantic contract is bound to an invalid restore target: $targetPath"
+        }
         return Restore-ClaudeSettingsSemantic -Record $Record -Manifest $Manifest
     }
 
@@ -703,7 +839,7 @@ function Set-ManifestTransactionStatusBatch {
         foreach ($manifestPath in @($ManifestPaths | Select-Object -Unique)) {
             $normalizedPath = Get-NormalizedPath -Path $manifestPath
             $raw = Read-FileUtf8 -Path $normalizedPath
-            $manifest = ConvertTo-NormalizedObject -Value ($raw | ConvertFrom-Json)
+            $manifest = ConvertFrom-InstallJson -Json $raw
             [void]$snapshots.Add([pscustomobject]@{ Path = $normalizedPath; Raw = $raw })
             $manifest['transaction_status'] = $Status
             $manifest[($Status + '_at')] = Get-Date -Format 's'
@@ -886,6 +1022,7 @@ function Assert-ManagedBackupTarget {
         Join-Path $claudeHome 'hooks-memory'
         Join-Path $codexHome 'AGENTS.md'
         Join-Path $codexHome 'managed_config.toml'
+        Join-Path $codexHome 'hooks.json'
         Join-Path $codexHome '.claude\settings.local.json'
     ) | ForEach-Object { Get-NormalizedPath -Path $_ }
     if ($target -in $exactTargets) {
@@ -968,6 +1105,16 @@ function Assert-ManifestBackupBoundaries {
         }
         $scope = Get-BackupRecordScope -Record $record -Manifest $Manifest
         $targetPath = Get-NormalizedPath -Path $record['path']
+        if ([string]$record['expected_postimage']['mode'] -eq 'semantic' -and
+            [string]$record['expected_postimage']['contract'] -eq 'claude-settings/v1') {
+            $hookSettingsTargets = @(
+                Get-NormalizedPath -Path (Join-Path $Manifest['claude_home'] 'settings.json')
+                Get-NormalizedPath -Path (Join-Path $Manifest['codex_home'] 'hooks.json')
+            )
+            if ($targetPath -notin $hookSettingsTargets) {
+                throw "Hook settings semantic contract is bound to an invalid backup target: $targetPath"
+            }
+        }
         if ($scope -eq 'workspace') {
             [void](Assert-InstallStatePathHasNoReparsePoint -Path $targetPath -Label 'Workspace restore target')
         }
@@ -1122,6 +1269,7 @@ function Assert-WorkspaceManifestIdentity {
     if ((Get-NormalizedPath -Path $Manifest['vault_path']) -ne (Get-NormalizedPath -Path (Join-Path $ExpectedWorkspaceRoot '.assistant'))) {
         throw "Install manifest vault path does not match workspace: $ManifestPath"
     }
+    [void](Get-InstallReleasedBackupTargetPaths -Manifest $Manifest)
 }
 
 function Assert-NormalInstallManifestStatus {
@@ -1234,19 +1382,6 @@ function Get-RegisteredManifestOwner {
         WorkspaceRoot = $workspaceRoot
         RepoRoot = (Get-NormalizedPath -Path $entry['repo_root'])
     }
-}
-
-function Get-InstallManifestPlanDigest {
-    param($Manifest)
-
-    $stableManifest = ConvertTo-NormalizedObject -Value $Manifest
-    foreach ($mutableField in @('transaction_status','uninstalled_at','recovered_at')) {
-        if ($stableManifest.Contains($mutableField)) {
-            [void]$stableManifest.Remove($mutableField)
-        }
-    }
-    $stableJson = ConvertTo-Json -InputObject $stableManifest -Depth 100 -Compress
-    return Get-InstallStateIdentityHash -Value $stableJson
 }
 
 function Refresh-InstallRegistryManifestDigests {
@@ -1512,14 +1647,26 @@ function Assert-UninstallJournalDerivedState {
     if (-not ($Journal['restore_user_global'] -is [bool])) {
         throw 'Uninstall journal restore_user_global must be a boolean'
     }
+    [object[]]$journalReleasedTargetHistory = @()
+    if ($Journal.Contains('released_target_history')) {
+        $journalReleasedTargetHistory = @($Journal['released_target_history'])
+    }
+    if (-not ($journalReleasedTargetHistory -is [System.Collections.IList])) {
+        throw 'Uninstall journal released_target_history must be an array'
+    }
 
     $workspaces = [ordered]@{}
     $globalHistory = @()
     $retiredManifestHistory = @()
+    [object[]]$registryReleasedTargetHistory = @()
     if ($null -ne $Registry) {
         if ([string]$Registry['schema_version'] -ne 'install-registry/v1.1' -or
             -not ($Registry['workspaces'] -is [System.Collections.IDictionary])) {
             throw "Uninstall journal registry preimage is invalid: $RegistryPath"
+        }
+        [void](Get-InstallRegistryReleasedTargetHistoryMap -Registry $Registry -ExpectedUserProfile $env:USERPROFILE)
+        if ($Registry.Contains('released_target_history')) {
+            $registryReleasedTargetHistory = @($Registry['released_target_history'])
         }
         $workspaces = $Registry['workspaces']
         if ($null -ne $Registry['global_manifest_history'] -and
@@ -1527,6 +1674,10 @@ function Assert-UninstallJournalDerivedState {
             throw "Uninstall journal registry global history is invalid: $RegistryPath"
         }
         $globalHistory = @($Registry['global_manifest_history'] | ForEach-Object { Get-NormalizedPath -Path $_ })
+        Assert-InstallRegistryReleaseMarkerCoverage `
+            -Registry $Registry `
+            -ExpectedUserProfile $env:USERPROFILE `
+            -ManifestPaths $globalHistory
 
         $historyOwnershipContract = [string]$Registry['history_ownership_contract']
         if ($historyOwnershipContract -ne 'v1') {
@@ -1537,6 +1688,9 @@ function Assert-UninstallJournalDerivedState {
         } else {
             $retiredManifestHistory = @($Registry['retired_manifest_history'] | ForEach-Object { Get-NormalizedPath -Path $_ })
         }
+    }
+    if (-not (Test-InstallJsonValueEqual -Left $journalReleasedTargetHistory -Right $registryReleasedTargetHistory)) {
+        throw 'Uninstall journal released target history does not match the registry preimage'
     }
 
     $workspaceKey = [string]$Journal['workspace_key']
@@ -1804,6 +1958,13 @@ function Test-UninstallJournalRegistryCommitted {
         -not ($Journal['registry_owned_manifest_plan_digests'] -is [System.Collections.IDictionary])) {
         return $false
     }
+    [object[]]$journalReleasedTargetHistory = @()
+    if ($Journal.Contains('released_target_history')) {
+        $journalReleasedTargetHistory = @($Journal['released_target_history'])
+    }
+    if (-not ($journalReleasedTargetHistory -is [System.Collections.IList])) {
+        return $false
+    }
     $fullyConsumedManifestPaths = @($Journal['fully_consumed_manifest_paths'] | ForEach-Object { Get-NormalizedPath -Path $_ })
     if ($fullyConsumedManifestPaths.Count -eq 0 -and $action -ne 'write') {
         return $false
@@ -1842,6 +2003,20 @@ function Test-UninstallJournalRegistryCommitted {
             return $false
         }
     }
+    $journalReleaseRegistry = [ordered]@{
+        released_target_history = @($journalReleasedTargetHistory)
+    }
+    try {
+        [void](Get-InstallRegistryReleasedTargetHistoryMap `
+            -Registry $journalReleaseRegistry `
+            -ExpectedUserProfile $env:USERPROFILE)
+        Assert-InstallRegistryReleaseMarkerCoverage `
+            -Registry $journalReleaseRegistry `
+            -ExpectedUserProfile $env:USERPROFILE `
+            -ManifestPaths $preimageOwnedManifestPaths
+    } catch {
+        return $false
+    }
     if ($action -eq 'delete') {
         return -not (Test-Path -LiteralPath $RegistryPath)
     }
@@ -1864,6 +2039,18 @@ function Test-UninstallJournalRegistryCommitted {
         -not ($currentRegistry['manifest_digests'] -is [System.Collections.IDictionary]) -or
         -not ($currentRegistry['global_manifest_history'] -is [System.Collections.IList]) -or
         -not ($currentRegistry['retired_manifest_history'] -is [System.Collections.IList])) {
+        return $false
+    }
+    [void](Get-InstallRegistryReleasedTargetHistoryMap -Registry $currentRegistry -ExpectedUserProfile $env:USERPROFILE)
+    Assert-InstallRegistryReleaseMarkerCoverage `
+        -Registry $currentRegistry `
+        -ExpectedUserProfile $env:USERPROFILE `
+        -ManifestPaths @($currentRegistry['global_manifest_history'])
+    [object[]]$currentReleasedTargetHistory = @()
+    if ($currentRegistry.Contains('released_target_history')) {
+        $currentReleasedTargetHistory = @($currentRegistry['released_target_history'])
+    }
+    if (-not (Test-InstallJsonValueEqual -Left $journalReleasedTargetHistory -Right $currentReleasedTargetHistory)) {
         return $false
     }
     $expectedCurrentDigestKeys = @($currentRegistry['global_manifest_history'] | ForEach-Object { Get-InstallManifestDigestRegistryKey -ManifestPath $_ })
@@ -2013,7 +2200,8 @@ function Resume-UninstallTransaction {
         -WorkspaceManifestPaths $workspaceManifestPaths `
         -GlobalManifestPaths $globalManifestPaths `
         -RestoreUserGlobal $restoreUserGlobal `
-        -ManifestCache $manifestCache)
+        -ManifestCache $manifestCache `
+        -ReleasedTargetHistory (Get-InstallRegistryReleasedTargetHistoryMap -Registry $resumeRegistry -ExpectedUserProfile $env:USERPROFILE))
     $resumeProjectionValidator = { param($Projected, $ProjectedPlan) [void](Get-InstallRestorePlanPrefix -Plan $ProjectedPlan -ProjectedExactIdentities $Projected) }
     Repair-InstallRestorePlanTransitions -Plan $restorePlan -ValidateProjectedPlan $resumeProjectionValidator
     $restorePrefix = Get-InstallRestorePlanPrefix -Plan $restorePlan
@@ -2244,6 +2432,7 @@ if (Test-Path -LiteralPath $pendingInstallJournalPath -PathType Leaf) {
 }
 $registry = Read-JsonObject -Path $registryPath
 $retiredManifestHistory = @()
+$releasedTargetHistory = @{}
 if ($null -ne $registry) {
     $schemaVersion = [string]$registry['schema_version']
     if ($schemaVersion -notin @('install-registry/v1.0','install-registry/v1.1') -or
@@ -2286,6 +2475,11 @@ if ($null -ne $registry) {
         throw "Modern install registry contract is invalid: $registryPath"
     }
     $retiredManifestHistory = @($registry['retired_manifest_history'] | ForEach-Object { Get-NormalizedPath -Path $_ })
+    $releasedTargetHistory = Get-InstallRegistryReleasedTargetHistoryMap -Registry $registry -ExpectedUserProfile $env:USERPROFILE
+    Assert-InstallRegistryReleaseMarkerCoverage `
+        -Registry $registry `
+        -ExpectedUserProfile $env:USERPROFILE `
+        -ManifestPaths @($registry['global_manifest_history'])
 }
 $workspaces = if ($null -ne $registry) { $registry['workspaces'] } else { [ordered]@{} }
 $manifestIntegrityRequired = $null -ne $registry
@@ -2308,7 +2502,8 @@ if (-not [string]::IsNullOrWhiteSpace($RecoveryManifestPath)) {
         -WorkspaceManifestPaths @($RecoveryManifestPath) `
         -GlobalManifestPaths @($RecoveryManifestPath) `
         -RestoreUserGlobal $true `
-        -ManifestCache $recoveryManifestCache)
+        -ManifestCache $recoveryManifestCache `
+        -ReleasedTargetHistory $releasedTargetHistory)
     if ($null -ne $pendingInstallJournal) {
         Assert-InstallStateTextTargetWritable -Path $pendingInstallJournalPath
     }
@@ -2396,6 +2591,9 @@ if ($registered) {
         -RegistryPath $registryPath
     if ((Get-NormalizedPath -Path $selectedManifest['repo_root']) -ne (Get-NormalizedPath -Path $RepoRoot)) {
         throw "Unregistered install manifest repo owner does not match invoking repo: $ManifestPath"
+    }
+    if (@(Get-InstallReleasedBackupTargetPaths -Manifest $selectedManifest).Count -gt 0) {
+        throw "Unregistered release manifest requires install registry evidence: $ManifestPath"
     }
 }
 
@@ -2508,7 +2706,8 @@ $restorePlan = @(Get-InstallRestorePlan `
     -WorkspaceManifestPaths $workspaceManifestPaths `
     -GlobalManifestPaths $globalManifestPaths `
     -RestoreUserGlobal $restoreUserGlobal `
-    -ManifestCache $manifestCache)
+    -ManifestCache $manifestCache `
+    -ReleasedTargetHistory $releasedTargetHistory)
 [void](Get-InstallRestorePlanPrefix -Plan $restorePlan -RequireInitial)
 
 $legacyActiveInstallPath = Join-Path $RepoRoot 'backups\active-install.json'
@@ -2562,6 +2761,7 @@ $uninstallJournal = [ordered]@{
     restore_user_global = [bool]$restoreUserGlobal
     updated_global_history = @($updatedGlobalHistory)
     updated_retired_manifest_history = @($updatedRetiredManifestHistory)
+    released_target_history = @($(if ($null -ne $registry -and $registry.Contains('released_target_history')) { $registry['released_target_history'] } else { @() }))
     legacy_pointer_path = $legacyActiveInstallPath
 }
 Write-InstallStateTextAtomic `

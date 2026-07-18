@@ -38,7 +38,9 @@ pwsh -File .\install.ps1 `
 
 Evidence 记录真实执行过的验证、覆盖与缺口，并绑定任务版本和仓库修订；没有执行的检查不能写成通过。Approval 是对确定版本、Requirement Contract 与作用域的授权，缺失、过期或作用域变化会阻断受保护动作；它不是要求澄清的 Ask。
 
-Core 只内置有限的受保护动作规则：生产破坏性数据库命令，以及 `auth` / `permissions` / `rbac` 路径变更。项目特有风险必须通过严格的 `protected-actions-overlay/v1` 增加，不能靠提示词放宽 core。Codex 的“完全访问”不等于生产授权；桌面宿主无法提供不可绕过执行边界时，Critical 生产动作必须交给独立受控执行器，Codex 只生成 Plan、Dry Run、Approval Request 和 Evidence。
+Core 只内置有限的受保护动作规则：生产破坏性数据库命令，以及 `auth` / `permissions` / `rbac` 路径变更。项目特有风险必须通过严格的 `protected-actions-overlay/v1` 增加，不能靠提示词放宽 core。安装器把 Codex `PreToolUse` 合并到普通用户 `hooks.json`，不写信任记录，也不覆盖企业 `hooks=false` / managed-only 策略；经用户正常信任并启用后，`Bash` 只把 command text 送入 core policy。Codex 0.144.4 的 Hook payload 不绑定工具实际采用的 environment identity/cwd，remote primary 还可能把 Hook `cwd` 回退为本机旧 cwd；因此 Bash 中的 `apply_patch` / `applypatch` 和所有 direct `apply_patch` 都在 adapter 层 fail closed，不能用一个看似本地的 `cwd` 冒充执行环境。只有宿主以后提供可信的实际 environment identity/cwd 后，才能恢复按 patch 路径做细粒度放行。该版本真实 `permission_mode` 只有 `default` / `bypassPermissions`，不代表 Plan 协作模式；adapter 不从它臆造只读保证。
+
+Windows 启动链兼容 Codex 0.144.4 传入的本地环境 shell，并使用绝对 System32 Windows PowerShell 与安装时固化的绝对 PowerShell 7.3+ 路径；用户 JSON 用显式 writer 精确保留 `BigInteger` 与 decimal，不依赖 PowerShell 7.5 才具备的 `ConvertTo-Json` 行为。命令、参数和脚本文件均保持明文，不使用 `EncodedCommand`、隐藏窗口、动态求值、改写信任或安全产品绕过。用户目录若包含无法同时由 cmd 与 PowerShell 安全表示的 `` ` $ % ! ^ & | < > ( ) `` 字符，安装会在写入前拒绝。`tests/verify-v2-install-presets.ps1` 只证明安装后的原样命令可经 `cmd.exe /C`、PowerShell 7 和 Windows PowerShell 解析并产生预期 allow/deny JSON，不证明 Codex 已信任或启用 Hook，也不证明飞连/其他企业端点产品已放行。若企业策略、Hook trust 或端点隔离阻止脚本，Hook 状态就是 unavailable；不得改名、混淆或换载体绕过。宿主 Hook 只是已知工具面的 guardrail，不是完整执行边界。Codex 的“完全访问”不等于生产授权；桌面宿主无法提供不可绕过执行边界时，Critical 生产动作必须交给独立受控执行器，Codex 只生成 Plan、Dry Run、Approval Request 和 Evidence。Hook request 与 remote-primary 回退的固定版本实现见 [hook runtime](https://github.com/openai/codex/blob/rust-v0.144.4/codex-rs/core/src/hook_runtime.rs) 和 [turn context](https://github.com/openai/codex/blob/rust-v0.144.4/codex-rs/core/src/session/turn_context.rs)。
 
 ## Worktree 与回滚最短路径
 

@@ -48,27 +48,17 @@ function Reject-Regex {
     }
 }
 
-$codexConfigPath = 'agent-configs/codex/config.shared.toml.template'
-$codexConfig = Read-RepoFile -Path $codexConfigPath
-
-foreach ($skill in @('entry-router', 'orchestrator', 'plan', 'implement', 'review', 'test')) {
-    $blockPattern = ('(?ms)\[\[skills\.config\]\]\s*path\s*=\s*"\{{CODEX_HOME\}}\\\\skills\\\\{0}\\\\SKILL\.md"\s*enabled\s*=\s*true' -f [regex]::Escape($skill))
-    if (-not [regex]::IsMatch($codexConfig, $blockPattern)) {
-        $failures.Add("$codexConfigPath should enable core harness skill: $skill") | Out-Null
-    }
-
-    $disabledPattern = ('(?ms)\[\[skills\.config\]\]\s*path\s*=\s*"\{{CODEX_HOME\}}\\\\skills\\\\{0}\\\\SKILL\.md"\s*enabled\s*=\s*false' -f [regex]::Escape($skill))
-    if ([regex]::IsMatch($codexConfig, $disabledPattern)) {
-        $failures.Add("$codexConfigPath should not disable core harness skill: $skill") | Out-Null
-    }
-}
-
-foreach ($skill in @('workflow-team', 'codegraph', 'agentmemory', 'codedb-mcp', 'memory-provider', 'code-intel', 'using-superpowers')) {
-    $enabledPattern = ('(?ms)\[\[skills\.config\]\]\s*path\s*=\s*"[^"]*\\\\{0}\\\\SKILL\.md"\s*enabled\s*=\s*true' -f [regex]::Escape($skill))
-    if ([regex]::IsMatch($codexConfig, $enabledPattern)) {
-        $failures.Add("$codexConfigPath should not default-enable optional/provider/team skill: $skill") | Out-Null
-    }
-}
+$codexHooksPath = 'agent-configs/codex/hooks.shared.json.template'
+Need-Text $codexHooksPath '"matcher": "^(Bash|apply_patch)$"'
+Need-Text $codexHooksPath '"command": "{WINDOWS_POWERSHELL_EXE} -NoLogo -NoProfile -NonInteractive -Command . ''{CODEX_PRETOOLUSE_LAUNCHER_PS_LITERAL}''"'
+Need-Text $codexHooksPath '"timeout": 15'
+Need-Text 'runtime-hooks/claude/codex-pretooluse-launcher.ps1' "if (`$stdout.Trim() -cne '{}')"
+Need-Text 'runtime-hooks/claude/codex-pretooluse-launcher.ps1' "permissionDecision = 'deny'"
+Reject-Regex $codexHooksPath '(?i)\b(?:EncodedCommand|ExecutionPolicy|WindowStyle)\b' 'Codex Hook command must remain a transparent, unencoded launcher invocation'
+Reject-Regex 'runtime-hooks/claude/codex-pretooluse-launcher.ps1' '(?i)\b(?:EncodedCommand|Invoke-Expression|FromBase64String|CreateNoWindow|WindowStyle)\b|ScriptBlock\s*\]\s*::\s*Create' 'Codex Hook launcher must not hide or dynamically evaluate its payload'
+Need-Text 'README.md' '不证明 Codex 已信任或启用 Hook，也不证明飞连/其他企业端点产品已放行'
+Need-Text 'agent-configs/codex/README.md' 'Bash shell-form 和所有 direct `apply_patch` 都 fail closed'
+Need-Text 'docs/architecture/policy-engine.md' 'it does not mark Codex trust, Hook activation, or Flylink/endpoint policy as passed'
 
 $entryContractPath = 'policies/entry-contract.md'
 Need-Text $entryContractPath '`protocol_default`: `auto`'
@@ -124,6 +114,7 @@ foreach ($path in @(
         'vault-template/工作流/任务识别协议.md',
         'agent-configs/workspace/AGENTS.md.template',
         'agent-configs/codex/AGENTS.md.template',
+        'agent-configs/codex/hooks.shared.json.template',
         'agent-configs/claude/CLAUDE.md.template',
         'README.md'
     )) {

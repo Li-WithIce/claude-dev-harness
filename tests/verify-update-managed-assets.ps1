@@ -604,8 +604,8 @@ exit 0
             (New-Object System.Text.UTF8Encoding($false))
         )
         $currentInstallRaw = Get-Content -LiteralPath $fixtureInstallPath -Raw -Encoding utf8
-        $currentFullHooks = "hooks = @('pretooluse.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js')"
-        $legacyFullHooks = "hooks = @('pretooluse.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js','posttooluse.js')"
+        $currentFullHooks = "hooks = @('pretooluse.ps1','codex-pretooluse-launcher.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js')"
+        $legacyFullHooks = "hooks = @('pretooluse.ps1','codex-pretooluse-launcher.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js','posttooluse.js')"
         $legacyInstallRaw = $currentInstallRaw.Replace($currentFullHooks,$legacyFullHooks)
         if ($legacyInstallRaw -ceq $currentInstallRaw) {
             throw 'fixture could not enable the formerly managed PostToolUse hook'
@@ -813,8 +813,9 @@ exit 0
             Assert-CodexConfigContentEquals -UserProfile $UserProfile -ExpectedContent $expectedConfig
 
             $codexManagedConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'managed_config.toml'
-            Assert-ManagedTextContains -Path $codexManagedConfigPath -Needle 'skills\\entry-router\\SKILL.md'
-            Assert-ManagedTextNotContains -Path $codexManagedConfigPath -Needle 'skills\\using-superpowers\\SKILL.md'
+            if (Test-Path -LiteralPath $codexManagedConfigPath) {
+                throw 'install/update-managed-assets should not create Codex administrator policy'
+            }
 
             $codexAgentsPath = Join-Path (Join-Path $UserProfile '.codex') 'AGENTS.md'
             Assert-ManagedTextContains -Path $codexAgentsPath -Needle 'entry-router'
@@ -892,8 +893,9 @@ exit 0
             Assert-CodexConfigBytesEqual -UserProfile $UserProfile -ExpectedBytes $expectedBytes
 
             $codexManagedConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'managed_config.toml'
-            Assert-ManagedTextContains -Path $codexManagedConfigPath -Needle '[[skills.config]]'
-            Assert-ManagedTextContains -Path $codexManagedConfigPath -Needle 'skills\\entry-router\\SKILL.md'
+            if (Test-Path -LiteralPath $codexManagedConfigPath) {
+                throw 'legacy user config migration should not create Codex administrator policy'
+            }
         }
 
     Invoke-ManagedAssetsCase `
@@ -932,10 +934,6 @@ exit 0
                 $content = Get-Content -LiteralPath $path -Raw -Encoding utf8
                 [System.IO.File]::WriteAllText($path, ($content -replace 'entry-router', 'using-superpowers'), (New-Object System.Text.UTF8Encoding($false)))
             }
-
-            $codexManagedConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'managed_config.toml'
-            $codexManagedConfig = Get-Content -LiteralPath $codexManagedConfigPath -Raw -Encoding utf8
-            [System.IO.File]::WriteAllText($codexManagedConfigPath, ($codexManagedConfig -replace 'entry-router', 'using-superpowers'), (New-Object System.Text.UTF8Encoding($false)))
 
             $codexConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'config.toml'
             $codexConfig = if (Test-Path -LiteralPath $codexConfigPath -PathType Leaf) {
@@ -977,12 +975,8 @@ enabled = true
             }
 
             $codexManagedConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'managed_config.toml'
-            $codexManagedConfig = Get-Content -LiteralPath $codexManagedConfigPath -Raw -Encoding utf8
-            if (-not $codexManagedConfig.Contains('skills\\entry-router\\SKILL.md')) {
-                throw 'Codex managed_config.toml should include entry-router skill path after update'
-            }
-            if ($codexManagedConfig.Contains('skills\\using-superpowers\\SKILL.md')) {
-                throw 'Codex managed_config.toml should remove the legacy using-superpowers skill path after update'
+            if (Test-Path -LiteralPath $codexManagedConfigPath) {
+                throw 'entry-router update should not create Codex administrator policy'
             }
 
             $codexConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'config.toml'
@@ -1014,7 +1008,9 @@ enabled = true
             }
 
             $codexManagedConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'managed_config.toml'
-            Assert-ManagedTextContains -Path $codexManagedConfigPath -Needle 'skills\\entry-router\\SKILL.md'
+            if (Test-Path -LiteralPath $codexManagedConfigPath) {
+                throw 'install/update-managed-assets should leave Codex managed_config.toml absent'
+            }
         }
 
     Invoke-ManagedAssetsCase `

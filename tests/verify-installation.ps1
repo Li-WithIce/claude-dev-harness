@@ -40,7 +40,8 @@ function Add-Error {
 function Render-TemplateContent {
     param(
         [string]$Content,
-        [switch]$EscapeForCode
+        [switch]$EscapeForCode,
+        [switch]$EscapeForPowerShellSingleQuotedLiteral
     )
 
     $rendered = $Content
@@ -48,6 +49,8 @@ function Render-TemplateContent {
         $value = $script:RenderTokens[$key]
         if ($EscapeForCode) {
             $value = $value.Replace('\', '\\')
+        } elseif ($EscapeForPowerShellSingleQuotedLiteral) {
+            $value = $value.Replace("'", "''")
         }
         $rendered = $rendered.Replace($key, $value)
     }
@@ -75,32 +78,6 @@ function Test-LineContentMatches {
     }
 
     return $true
-}
-
-function Get-TomlQuotedPathValue {
-    param([string]$Line)
-
-    if ([string]::IsNullOrWhiteSpace($Line)) {
-        return $null
-    }
-
-    if ($Line -notmatch '^\s*path\s*=') {
-        return $null
-    }
-
-    $rawValue = ($Line -replace '^\s*path\s*=\s*', '').Trim()
-    if ($rawValue.Length -lt 2) {
-        return $null
-    }
-
-    $quote = $rawValue[0]
-    $doubleQuote = [char]34
-    $singleQuote = [char]39
-    if (($quote -ne $doubleQuote -and $quote -ne $singleQuote) -or ($rawValue[$rawValue.Length - 1] -ne $quote)) {
-        return $null
-    }
-
-    return Get-NormalizedPath -Path $rawValue.Substring(1, $rawValue.Length - 2)
 }
 
 function Get-JunctionTarget {
@@ -237,7 +214,10 @@ function Assert-TemplateFileMatches {
         return
     }
 
-    $renderedTemplate = Render-TemplateContent -Content $templateContent -EscapeForCode:$EscapeForCode
+    $renderedTemplate = Render-TemplateContent `
+        -Content $templateContent `
+        -EscapeForCode:$EscapeForCode `
+        -EscapeForPowerShellSingleQuotedLiteral:([System.IO.Path]::GetExtension($Path) -ieq '.ps1')
     if (Test-LineContentMatches -ExpectedContent $renderedTemplate -ActualContent $actualContent) {
         Add-Check ("{0} 内容与模板一致" -f $Label)
     } elseif (-not [string]::IsNullOrWhiteSpace($RolloutMarker)) {
@@ -274,12 +254,12 @@ function Get-ExpectedPresetDefinition {
 
     $coreSkills = @('.system','entry-router','orchestrator','plan','implement','review','test','spec')
     if ($Name -eq 'core') {
-        return [ordered]@{features=@('core','v1-compatibility');skills=$coreSkills;hooks=@('pretooluse.ps1','stop.js','workspace-resolver.js');vault_profile='minimal'}
+        return [ordered]@{features=@('core','v1-compatibility');skills=$coreSkills;hooks=@('pretooluse.ps1','codex-pretooluse-launcher.ps1','stop.js','workspace-resolver.js');vault_profile='minimal'}
     }
     if ($Name -eq 'governed') {
-        return [ordered]@{features=@('core','v1-compatibility','governed');skills=@($coreSkills+@('planning','audit'));hooks=@('pretooluse.ps1','stop.js','workspace-resolver.js');vault_profile='minimal'}
+        return [ordered]@{features=@('core','v1-compatibility','governed');skills=@($coreSkills+@('planning','audit'));hooks=@('pretooluse.ps1','codex-pretooluse-launcher.ps1','stop.js','workspace-resolver.js');vault_profile='minimal'}
     }
-    return [ordered]@{features=@('core','v1-compatibility','governed','memory','team','md-html','adapters','provider-references');skills=@(Get-ChildItem -LiteralPath $RepoSkillsPath -Force|Sort-Object Name|Select-Object -ExpandProperty Name);hooks=@('pretooluse.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js');vault_profile='full'}
+    return [ordered]@{features=@('core','v1-compatibility','governed','memory','team','md-html','adapters','provider-references');skills=@(Get-ChildItem -LiteralPath $RepoSkillsPath -Force|Sort-Object Name|Select-Object -ExpandProperty Name);hooks=@('pretooluse.ps1','codex-pretooluse-launcher.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js');vault_profile='full'}
 }
 
 function Assert-GitIgnoreManagedEntries {
@@ -370,38 +350,6 @@ function Get-ManagedTomlBlockContent {
     }
 
     return $match.Groups[1].Value.Trim()
-}
-
-function Get-TomlSkillConfigPaths {
-    param([string]$Content)
-
-    $paths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    if ([string]::IsNullOrWhiteSpace($Content)) {
-        return @()
-    }
-
-    $inSkillsConfig = $false
-    foreach ($line in ([regex]::Split($Content, '\r?\n'))) {
-        if ($line -match '^\[\[skills\.config\]\]\s*$') {
-            $inSkillsConfig = $true
-            continue
-        }
-
-        if ($inSkillsConfig -and $line -match '^\[') {
-            $inSkillsConfig = $false
-        }
-
-        if (-not $inSkillsConfig) {
-            continue
-        }
-
-        $path = Get-TomlQuotedPathValue -Line $line
-        if (-not [string]::IsNullOrWhiteSpace($path)) {
-            [void]$paths.Add($path)
-        }
-    }
-
-    return @($paths)
 }
 
 function Assert-ManagedSkillLinks {
@@ -509,6 +457,7 @@ $ClaudeSettingsPath = Join-Path $ClaudeHome 'settings.json'
 $CodexSettingsPath = Join-Path (Join-Path $CodexHome '.claude') 'settings.local.json'
 $CodexConfigPath = Join-Path $CodexHome 'config.toml'
 $CodexManagedConfigPath = Join-Path $CodexHome 'managed_config.toml'
+$CodexHooksPath = Join-Path $CodexHome 'hooks.json'
 $CodexAgentsPath = Join-Path $CodexHome 'AGENTS.md'
 $WorkspaceAgentsPath = Join-Path $WorkspaceRoot 'AGENTS.md'
 $WorkspaceGitIgnorePath = Join-Path $WorkspaceRoot '.gitignore'
@@ -519,12 +468,16 @@ $WorkspaceValidateArtifactsShimPath = Join-Path $VaultPath 'entry\validate-lite-
 $WorkspaceRuntimeTasksPath = Join-Path $VaultPath '运行时\tasks'
 $InstallRegistryPath = Join-Path $effectiveUserProfile '.dev-harness\install-registry.json'
 $VaultIsFull = Test-FullVaultProfile -VaultPath $VaultPath
-$ForbiddenTokens = @('{REPO_ROOT}', '{WORKSPACE_ROOT}', '{VAULT_PATH}', '{CLAUDE_HOME}', '{CODEX_HOME}')
+$ForbiddenTokens = @('{REPO_ROOT}', '{WORKSPACE_ROOT}', '{VAULT_PATH}', '{CLAUDE_HOME}', '{PWSH_EXE}', '{TASKKILL_EXE}', '{WINDOWS_POWERSHELL_EXE}', '{CODEX_PRETOOLUSE_LAUNCHER_PS_LITERAL}', '{CODEX_HOME}')
 $script:RenderTokens = [ordered]@{
     '{REPO_ROOT}' = $RepoRoot
     '{WORKSPACE_ROOT}' = $WorkspaceRoot
     '{VAULT_PATH}' = $VaultPath
     '{CLAUDE_HOME}' = $ClaudeHome
+    '{PWSH_EXE}' = (Get-Process -Id $PID).Path
+    '{TASKKILL_EXE}' = (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::System)) 'taskkill.exe')
+    '{WINDOWS_POWERSHELL_EXE}' = (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::System)) 'WindowsPowerShell\v1.0\powershell.exe')
+    '{CODEX_PRETOOLUSE_LAUNCHER_PS_LITERAL}' = (Join-Path $ClaudeHome 'hooks-memory\codex-pretooluse-launcher.ps1').Replace("'", "''")
     '{CODEX_HOME}' = $CodexHome
 }
 
@@ -547,6 +500,23 @@ try {
     }
 } catch {
     Add-Error ("Cannot resolve installed preset: {0}" -f $_.Exception.Message)
+}
+$installedPwshExecutable = if ($null -ne $installManifest -and $installManifest.Contains('codex_hook_pwsh_executable')) {
+    Get-NormalizedPath -Path ([string]$installManifest.codex_hook_pwsh_executable)
+} else {
+    $null
+}
+$installedPwshItem = if ([string]::IsNullOrWhiteSpace($installedPwshExecutable)) { $null } else { Get-Item -LiteralPath $installedPwshExecutable -Force -ErrorAction SilentlyContinue }
+$workspacePrefix = $WorkspaceRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar,[System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+if ($null -eq $installedPwshItem -or
+    [System.IO.Path]::GetFileName($installedPwshExecutable) -ine 'pwsh.exe' -or
+    [bool]($installedPwshItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or
+    $installedPwshExecutable.Equals($WorkspaceRoot,[System.StringComparison]::OrdinalIgnoreCase) -or
+    $installedPwshExecutable.StartsWith($workspacePrefix,[System.StringComparison]::OrdinalIgnoreCase)) {
+    Add-Error 'Install manifest does not record a valid non-reparse Codex Hook pwsh executable outside WorkspaceRoot'
+} else {
+    $script:RenderTokens['{PWSH_EXE}'] = $installedPwshExecutable
+    Add-Check 'install manifest binds Codex Hook rendering to the install-time pwsh executable'
 }
 if ($effectivePreset -notin @('core','governed','full')) {
     Add-Error ("Installed effective_preset is invalid: {0}" -f $effectivePreset)
@@ -571,7 +541,7 @@ Assert-ManagedSkillLinks -HostLabel 'Claude' -HostSkillsPath $ClaudeSkillsPath -
 Assert-ManagedSkillLinks -HostLabel 'Codex' -HostSkillsPath $CodexSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
 Assert-ManagedSkillLinks -HostLabel 'Agents' -HostSkillsPath $AgentsSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
 
-foreach ($hookName in @('pretooluse.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js')) {
+foreach ($hookName in @('pretooluse.ps1','codex-pretooluse-launcher.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js')) {
     $hookPath = Join-Path $ClaudeHooksPath $hookName
     if (@($presetDefinition.hooks) -contains $hookName) {
         $templatePath = if ($hookName -eq 'userpromptsubmit.js') { Join-Path $RepoRoot 'runtime-hooks\memory\userpromptsubmit.js' } else { Join-Path $RepoRoot "runtime-hooks\claude\$hookName" }
@@ -796,8 +766,6 @@ if (Test-Path -LiteralPath $CodexSettingsPath -PathType Leaf) {
     Add-Error ("缺少 Codex settings.local.json: {0}" -f $CodexSettingsPath)
 }
 
-$renderedManagedTemplate = Render-TemplateContent -Content (Read-FileUtf8 -Path (Join-Path $RepoRoot 'agent-configs\codex\config.shared.toml.template')) -EscapeForCode
-
 if (Test-Path -LiteralPath $CodexConfigPath -PathType Leaf) {
     $codexConfig = Read-FileUtf8 -Path $CodexConfigPath
     if ($null -eq $codexConfig) {
@@ -813,7 +781,7 @@ if (Test-Path -LiteralPath $CodexConfigPath -PathType Leaf) {
     if ($null -eq $managedBlockContent) {
         Add-Check 'Codex config.toml 未包含旧 managed block'
     } else {
-        Add-Warning 'Codex config.toml 仍包含旧 managed block；托管配置已写入 managed_config.toml，用户私有 config.toml 不会自动改写'
+        Add-Warning 'Codex config.toml 仍包含旧 managed block；当前安装器不会把它迁入管理员策略文件，也不会自动改写用户私有配置'
     }
 
     $configWithoutManagedBlock = [regex]::Replace(
@@ -821,7 +789,9 @@ if (Test-Path -LiteralPath $CodexConfigPath -PathType Leaf) {
         '(?ms)^\# >>> (?<marker>dev-harness|claude-dev-harness) managed block >>>\r?\n.*?^\# <<< \k<marker> managed block <<<\r?\n?',
         ''
     )
-    $managedSkillPaths = Get-TomlSkillConfigPaths -Content $renderedManagedTemplate
+    $managedSkillPaths = @('entry-router','orchestrator','plan','implement','review','test') | ForEach-Object {
+        Join-Path $CodexHome "skills\$_\SKILL.md"
+    }
     $leakedManagedPath = $managedSkillPaths |
         Where-Object { $configWithoutManagedBlock -match [regex]::Escape($_) } |
         Select-Object -First 1
@@ -842,13 +812,43 @@ if (Test-Path -LiteralPath $CodexManagedConfigPath -PathType Leaf) {
         Add-Check 'Codex managed_config.toml 未发现孤立 CR 换行字节'
     }
 
-    if (Test-LineContentMatches -ExpectedContent $renderedManagedTemplate -ActualContent $codexManagedConfig) {
-        Add-Check 'Codex managed_config.toml 内容与模板一致'
-    } else {
-        Add-Error 'Codex managed_config.toml 与模板不一致（可能缺少、变更或多出额外行）'
+    Add-Check 'Codex managed policy remains outside current Harness ownership (including preserved legacy-looking files)'
+} else {
+    Add-Check 'Codex managed_config.toml 不存在；Harness 不创建管理员策略文件'
+}
+
+$renderedCodexHooks = Render-TemplateContent -Content (Read-FileUtf8 -Path (Join-Path $RepoRoot 'agent-configs\codex\hooks.shared.json.template')) -EscapeForCode
+if (Test-Path -LiteralPath $CodexHooksPath -PathType Leaf) {
+    try {
+        $codexHooks = Get-Content -LiteralPath $CodexHooksPath -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop
+        $expectedHooks = $renderedCodexHooks | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop
+        $expectedCommand = [string]$expectedHooks.PreToolUse[0].hooks[0].command
+        $matches = @(
+            foreach ($eventName in @($codexHooks.hooks.Keys)) {
+                foreach ($section in @($codexHooks.hooks[$eventName])) {
+                    foreach ($hook in @($section.hooks)) {
+                        if ([string]$hook.command -ceq $expectedCommand) {
+                            [pscustomobject]@{ Event=$eventName;Section=$section;Hook=$hook }
+                        }
+                    }
+                }
+            }
+        )
+        if ($matches.Count -eq 1 -and
+            [string]$matches[0].Event -ceq 'PreToolUse' -and
+            [string]$matches[0].Section.matcher -ceq '^(Bash|apply_patch)$' -and
+            [string]$matches[0].Hook.type -ceq 'command' -and
+            [int]$matches[0].Hook.timeout -eq 15 -and
+            $expectedCommand -notmatch '\{CLAUDE_HOME\}') {
+            Add-Check 'Codex hooks.json 已配置唯一的普通用户 PreToolUse Hook（信任/启用状态需由宿主另行确认）'
+        } else {
+            Add-Error 'Codex hooks.json 未包含唯一且完整的 Harness PreToolUse Hook'
+        }
+    } catch {
+        Add-Error ("Codex hooks.json 不是合法 JSON: {0}" -f $_.Exception.Message)
     }
 } else {
-    Add-Error ("缺少 Codex managed_config.toml: {0}" -f $CodexManagedConfigPath)
+    Add-Error ("缺少 Codex hooks.json: {0}" -f $CodexHooksPath)
 }
 
 $forbiddenPatterns = Get-Content -LiteralPath (Join-Path $RepoRoot 'tests\forbidden-path-prefixes.txt') -Encoding utf8

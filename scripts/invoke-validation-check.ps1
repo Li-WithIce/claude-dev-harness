@@ -9,6 +9,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 
 function Assert-RawObjectKeys {
     param(

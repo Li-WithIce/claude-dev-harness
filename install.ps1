@@ -313,7 +313,7 @@ function ConvertFrom-JsonDocument {
         return [ordered]@{}
     }
 
-    return ConvertTo-NormalizedObject -Value ($Json | ConvertFrom-Json)
+    return ConvertFrom-InstallJson -Json $Json
 }
 
 function Read-JsonObject {
@@ -330,7 +330,7 @@ function Read-JsonObject {
 function ConvertTo-JsonDocument {
     param($Value)
 
-    return (ConvertTo-Json -InputObject (ConvertTo-NormalizedObject -Value $Value) -Depth 100)
+    return ConvertTo-InstallJson -Value $Value -Depth 100
 }
 
 function ConvertTo-ManifestJsonDocument {
@@ -350,6 +350,7 @@ function New-InstallRegistry {
         global_manifest_history = @()
         retired_manifest_history = @()
         manifest_digests = [ordered]@{}
+        released_target_history = @()
     }
 }
 
@@ -435,6 +436,14 @@ function Read-InstallRegistry {
     if (-not ($registry['retired_manifest_history'] -is [System.Collections.IList])) {
         throw "Invalid install registry retired history array: $Path"
     }
+    if (-not $registry.Contains('released_target_history')) {
+        $registry['released_target_history'] = @()
+    }
+    [void](Get-InstallRegistryReleasedTargetHistoryMap -Registry $registry -ExpectedUserProfile $env:USERPROFILE)
+    Assert-InstallRegistryReleaseMarkerCoverage `
+        -Registry $registry `
+        -ExpectedUserProfile $env:USERPROFILE `
+        -ManifestPaths @($registry['global_manifest_history'])
 
     return $registry
 }
@@ -1328,6 +1337,7 @@ function Assert-RegisteredInstallManifestIdentity {
         }
         Assert-InstallExpectedPostimageShape -Identity $record['expected_postimage'] -Label "Expected postimage for $($record['path'])"
     }
+    [void](Get-InstallReleasedBackupTargetPaths -Manifest $Manifest)
 
     $expectedBackupBase = Join-Path $ExpectedUserProfile '.dev-harness\backups'
     $manifestBackupRoot = Get-NormalizedPath -Path $Manifest['backup_root']
@@ -1339,6 +1349,17 @@ function Assert-RegisteredInstallManifestIdentity {
         (Get-NormalizedPath -Path $Manifest['codex_home']) -ne (Get-NormalizedPath -Path (Join-Path $ExpectedUserProfile '.codex')) -or
         (Get-NormalizedPath -Path $Manifest['agents_home']) -ne (Get-NormalizedPath -Path (Join-Path $ExpectedUserProfile '.agents'))) {
         throw "Registered install manifest path or user identity is invalid: $ManifestPath"
+    }
+    $hookSettingsTargets = @(
+        Get-NormalizedPath -Path (Join-Path $Manifest['claude_home'] 'settings.json')
+        Get-NormalizedPath -Path (Join-Path $Manifest['codex_home'] 'hooks.json')
+    )
+    foreach ($record in @($Manifest['backups'])) {
+        if ([string]$record['expected_postimage']['mode'] -eq 'semantic' -and
+            [string]$record['expected_postimage']['contract'] -eq 'claude-settings/v1' -and
+            (Get-NormalizedPath -Path $record['path']) -notin $hookSettingsTargets) {
+            throw "Hook settings semantic contract is bound to an invalid target: $($record['path'])"
+        }
     }
 }
 
@@ -1718,7 +1739,7 @@ function Merge-DeepObject {
     }
 
     if (($Base -is [System.Collections.IDictionary]) -and ($Overlay -is [System.Collections.IDictionary])) {
-        $merged = [ordered]@{}
+        $merged = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
         foreach ($key in $Base.Keys) {
             $merged[$key] = ConvertTo-NormalizedObject -Value $Base[$key]
         }
@@ -2000,13 +2021,23 @@ function Test-IsHarnessHookCommand {
 function Merge-ClaudeSettingsJsonText {
     param(
         [string]$RenderedHooksJson,
-        [string]$ExistingPath
+        [string]$ExistingPath,
+        [string]$HookHome = (Split-Path -Parent $ExistingPath),
+        $ExpectedSourcePostimage = $null
     )
 
     $existingSnapshot = Read-InstallTextSnapshot -Path $ExistingPath
     $existingJson = $existingSnapshot.Content
     if ([string]::IsNullOrWhiteSpace($existingJson)) {
         $existingJson = '{}'
+    }
+    if ($null -ne $ExpectedSourcePostimage) {
+        Assert-InstallExpectedPostimageShape -Identity $ExpectedSourcePostimage -Label "Registered hook postimage for $ExistingPath"
+        if ([string]$ExpectedSourcePostimage['mode'] -ne 'semantic' -or
+            [string]$ExpectedSourcePostimage['contract'] -ne 'claude-settings/v1' -or
+            -not (Test-HookSettingsTextPostimage -Json $existingJson -Identity $ExpectedSourcePostimage)) {
+            throw "Hook settings changed from their registered Harness postimage: $ExistingPath"
+        }
     }
 
     $result = ConvertFrom-JsonDocument -Json $existingJson
@@ -2021,13 +2052,28 @@ function Merge-ClaudeSettingsJsonText {
             }
         }
     }
-    [void]$managedCommands.Add(('pwsh -NoProfile -NonInteractive -File "{0}"' -f (Join-Path (Split-Path -Parent $ExistingPath) 'hooks-memory\pretooluse.ps1')))
-    [void]$managedCommands.Add(('node "{0}"' -f (Join-Path (Split-Path -Parent $ExistingPath) 'hooks-memory\userpromptsubmit.js')))
-    [void]$managedCommands.Add(('node "{0}"' -f (Join-Path (Split-Path -Parent $ExistingPath) 'hooks-memory\stop.js')))
-    [void]$managedCommands.Add(('node "{0}"' -f (Join-Path (Split-Path -Parent $ExistingPath) 'hooks-memory\posttooluse.js')))
+    if ($null -ne $ExpectedSourcePostimage) {
+        foreach ($ownedHook in @($ExpectedSourcePostimage['managed_hooks'])) {
+            $ownedCommand = [string]$ownedHook['hook']['command']
+            if ([string]::IsNullOrWhiteSpace($ownedCommand)) {
+                throw "Registered hook postimage contains an empty owned command: $ExistingPath"
+            }
+            [void]$managedCommands.Add($ownedCommand.Trim())
+        }
+    }
+    [void]$managedCommands.Add(('pwsh -NoProfile -NonInteractive -File "{0}"' -f (Join-Path $HookHome 'hooks-memory\pretooluse.ps1')))
+    [void]$managedCommands.Add(("pwsh -NoProfile -NonInteractive -File '{0}'" -f (Join-Path $HookHome 'hooks-memory\pretooluse.ps1').Replace("'", "''")))
+    $windowsPowerShell = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::System)) 'WindowsPowerShell\v1.0\powershell.exe'
+    $codexLauncherPath = Join-Path $HookHome 'hooks-memory\codex-pretooluse-launcher.ps1'
+    [void]$managedCommands.Add(('{0} -NoLogo -NoProfile -NonInteractive -Command . ''{1}''' -f $windowsPowerShell,$codexLauncherPath.Replace("'", "''")))
+    [void]$managedCommands.Add(('{0} -NoLogo -NoProfile -NonInteractive -Command . ''{1}'' -PipelineInput $input' -f $windowsPowerShell,$codexLauncherPath.Replace("'", "''")))
+    [void]$managedCommands.Add(('{0} -NoLogo -NoProfile -NonInteractive -File "{1}"' -f $windowsPowerShell,$codexLauncherPath))
+    [void]$managedCommands.Add(('node "{0}"' -f (Join-Path $HookHome 'hooks-memory\userpromptsubmit.js')))
+    [void]$managedCommands.Add(('node "{0}"' -f (Join-Path $HookHome 'hooks-memory\stop.js')))
+    [void]$managedCommands.Add(('node "{0}"' -f (Join-Path $HookHome 'hooks-memory\posttooluse.js')))
     $hooks = if ($result.Contains('hooks')) {
         if (-not ($result['hooks'] -is [System.Collections.IDictionary])) {
-            throw "Claude settings hooks must be a JSON object: $ExistingPath"
+            throw "Hook settings hooks must be a JSON object: $ExistingPath"
         }
         ConvertTo-NormalizedObject -Value $result['hooks']
     } else {
@@ -2080,7 +2126,7 @@ function Merge-ClaudeSettingsJsonText {
 }
 
 function New-ClaudeSettingsPostimageIdentity {
-    param($ManagedSettings)
+    param($ManagedSettings,$PreimageIdentity = $null)
 
     $managedHooks = New-Object System.Collections.ArrayList
     foreach ($eventName in @('PreToolUse', 'UserPromptSubmit', 'Stop', 'PostToolUse')) {
@@ -2110,11 +2156,250 @@ function New-ClaudeSettingsPostimageIdentity {
             }
         }
     }
+    $preimageManagedHooks = New-Object System.Collections.ArrayList
+    if ($null -ne $PreimageIdentity) {
+        Assert-InstallExpectedPostimageShape -Identity $PreimageIdentity -Label 'Registered hook settings postimage'
+        if ([string]$PreimageIdentity['mode'] -ne 'semantic' -or
+            [string]$PreimageIdentity['contract'] -ne 'claude-settings/v1') {
+            throw 'Registered hook settings postimage has an unsupported contract'
+        }
+        foreach ($managedHook in @($PreimageIdentity['managed_hooks'])) {
+            [void]$preimageManagedHooks.Add((ConvertTo-NormalizedObject -Value $managedHook))
+        }
+    }
     return [ordered]@{
         mode = 'semantic'
         contract = 'claude-settings/v1'
         managed_hooks = $managedHooks
+        preimage_managed_hooks = $preimageManagedHooks
     }
+}
+
+function Test-InstallJsonValueEqual {
+    param($Left,$Right)
+
+    if ($null -eq $Left -or $null -eq $Right) {
+        return $null -eq $Left -and $null -eq $Right
+    }
+    if ($Left -is [System.Collections.IDictionary] -or $Right -is [System.Collections.IDictionary]) {
+        if (-not ($Left -is [System.Collections.IDictionary]) -or -not ($Right -is [System.Collections.IDictionary])) { return $false }
+        [string[]]$leftKeys = @($Left.Keys | ForEach-Object { [string]$_ })
+        [string[]]$rightKeys = @($Right.Keys | ForEach-Object { [string]$_ })
+        [array]::Sort($leftKeys,[System.StringComparer]::Ordinal)
+        [array]::Sort($rightKeys,[System.StringComparer]::Ordinal)
+        if (($leftKeys -join "`n") -cne ($rightKeys -join "`n")) { return $false }
+        foreach ($key in $leftKeys) {
+            if (-not (Test-InstallJsonValueEqual -Left $Left[$key] -Right $Right[$key])) { return $false }
+        }
+        return $true
+    }
+    $leftIsList = $Left -is [System.Collections.IList] -and -not ($Left -is [string])
+    $rightIsList = $Right -is [System.Collections.IList] -and -not ($Right -is [string])
+    if ($leftIsList -or $rightIsList) {
+        if (-not $leftIsList -or -not $rightIsList -or $Left.Count -ne $Right.Count) { return $false }
+        for ($index = 0; $index -lt $Left.Count; $index++) {
+            if (-not (Test-InstallJsonValueEqual -Left $Left[$index] -Right $Right[$index])) { return $false }
+        }
+        return $true
+    }
+    if ($Left.GetType() -ne $Right.GetType()) { return $false }
+    if ($Left -is [string]) { return $Left -ceq $Right }
+    return $Left.Equals($Right)
+}
+
+function Test-HookSettingsObjectPostimage {
+    param($Settings,$Identity)
+
+    $settings = $Settings
+    if (-not ($settings -is [System.Collections.IDictionary]) -or
+        -not ($settings['hooks'] -is [System.Collections.IDictionary])) { return $false }
+    $hooks = $settings['hooks']
+    foreach ($expected in @($Identity['managed_hooks'])) {
+        $eventName = [string]$expected['event']
+        if (-not $hooks.Contains($eventName) -or -not ($hooks[$eventName] -is [System.Collections.IList])) { return $false }
+        $expectedCommand = [string]$expected['hook']['command']
+        $commandCount = 0
+        foreach ($event in $hooks.Values) {
+            if (-not ($event -is [System.Collections.IList])) { return $false }
+            foreach ($section in @($event)) {
+                if (-not ($section -is [System.Collections.IDictionary]) -or
+                    -not ($section['hooks'] -is [System.Collections.IList])) { return $false }
+                foreach ($hook in @($section['hooks'])) {
+                    if ($hook -is [System.Collections.IDictionary] -and [string]$hook['command'] -eq $expectedCommand) { $commandCount++ }
+                }
+            }
+        }
+        if ($commandCount -ne [int]$expected['multiplicity']) { return $false }
+
+        $exactCount = 0
+        foreach ($section in @($hooks[$eventName])) {
+            $sectionIdentity = [ordered]@{}
+            foreach ($key in $section.Keys) {
+                if ([string]$key -ne 'hooks') { $sectionIdentity[[string]$key] = $section[$key] }
+            }
+            if (-not (Test-InstallJsonValueEqual -Left $sectionIdentity -Right $expected['section'])) { continue }
+            foreach ($hook in @($section['hooks'])) {
+                if (Test-InstallJsonValueEqual -Left $hook -Right $expected['hook']) { $exactCount++ }
+            }
+        }
+        if ($exactCount -ne [int]$expected['multiplicity']) { return $false }
+    }
+    return $true
+}
+
+function Test-HookSettingsTextPostimage {
+    param([string]$Json,$Identity)
+
+    if ([string]::IsNullOrWhiteSpace($Json)) { return $false }
+    try { $settings = ConvertFrom-JsonDocument -Json $Json } catch { return $false }
+    return Test-HookSettingsObjectPostimage -Settings $settings -Identity $Identity
+}
+
+function Test-HookSettingsPostimage {
+    param([string]$Path,$Identity)
+
+    try { $snapshot = Read-InstallTextSnapshot -Path $Path } catch { return $false }
+    if ([string]$snapshot.Identity['item_type'] -ne 'file') { return $false }
+    return Test-HookSettingsTextPostimage -Json $snapshot.Content -Identity $Identity
+}
+
+function Get-LatestRegisteredBackupRecord {
+    param($Registry,[string]$TargetPath)
+
+    $target = Get-NormalizedPath -Path $TargetPath
+    $history = @($Registry['global_manifest_history'])
+    for ($index = $history.Count - 1; $index -ge 0; $index--) {
+        $manifestPath = Get-NormalizedPath -Path $history[$index]
+        $manifest = Read-JsonObject -Path $manifestPath
+        $matches = @($manifest['backups'] | Where-Object { (Get-NormalizedPath -Path $_['path']) -eq $target })
+        if ($matches.Count -gt 1) { throw "Registered manifest contains duplicate backup records for $target`: $manifestPath" }
+        if ($matches.Count -eq 1) { return $matches[0] }
+    }
+    return $null
+}
+
+function Get-RegisteredManagedExactPathRetirementPlan {
+    param($Registry,[string]$TargetPath)
+
+    $target = Get-NormalizedPath -Path $TargetPath
+    $currentIdentity = Get-InstallManagedPathIdentity -Path $target
+    $cursorIdentity = $currentIdentity
+    $restoreRecord = $null
+    $matchingRecordCount = 0
+    $history = @($Registry['global_manifest_history'])
+    $releasedTargetHistory = Get-InstallRegistryReleasedTargetHistoryMap `
+        -Registry $Registry `
+        -ExpectedUserProfile $env:USERPROFILE
+    $releasedManifestPaths = if ($releasedTargetHistory.ContainsKey($target)) {
+        @($releasedTargetHistory[$target])
+    } else {
+        @()
+    }
+
+    for ($index = $history.Count - 1; $index -ge 0; $index--) {
+        $manifestPath = Get-NormalizedPath -Path $history[$index]
+        if ($releasedManifestPaths -contains $manifestPath) { continue }
+        $manifest = Read-JsonObject -Path $manifestPath
+        if ((Get-InstallReleasedBackupTargetPaths -Manifest $manifest) -contains $target) {
+            throw "Registered release marker is missing registry evidence: $target"
+        }
+        $matches = @($manifest['backups'] | Where-Object { (Get-NormalizedPath -Path $_['path']) -eq $target })
+        if ($matches.Count -gt 1) {
+            throw "Registered manifest contains duplicate backup records for $target`: $manifestPath"
+        }
+        if ($matches.Count -eq 0) { continue }
+
+        $record = $matches[0]
+        if ([string]$record['ownership'] -ne 'managed') {
+            throw "Registered retirement target is not Harness-managed: $target"
+        }
+        $expectedPostimage = $record['expected_postimage']
+        Assert-InstallExpectedPostimageShape -Identity $expectedPostimage -Label "Registered retirement postimage for $target"
+        if ([string]$expectedPostimage['mode'] -ne 'exact') {
+            throw "Registered retirement target has an unsupported postimage identity: $target"
+        }
+        if (-not (Test-InstallExactIdentityEqual -Left $cursorIdentity -Right $expectedPostimage)) {
+            throw "Registered retirement history is discontinuous or the managed target changed: $target"
+        }
+
+        $existed = [bool]$record['existed']
+        $itemType = [string]$record['item_type']
+        if (-not $existed) {
+            if ($itemType -ne 'missing' -or
+                -not [string]::IsNullOrWhiteSpace([string]$record['backup_path']) -or
+                -not [string]::IsNullOrWhiteSpace([string]$record['link_type']) -or
+                -not [string]::IsNullOrWhiteSpace([string]$record['link_target']) -or
+                -not [string]::IsNullOrWhiteSpace([string]$record['backup_payload_sha256'])) {
+                throw "Registered retirement preimage has inconsistent missing metadata: $target"
+            }
+            $preimageIdentity = New-InstallExactMissingIdentity
+        } elseif ($itemType -in @('file','directory')) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$record['link_type']) -or
+                -not [string]::IsNullOrWhiteSpace([string]$record['link_target']) -or
+                [string]$manifest['backup_payload_integrity_contract'] -ne 'sha256-v1') {
+                throw "Registered retirement preimage must be an integrity-protected file or directory: $target"
+            }
+            $backupPath = Get-NormalizedPath -Path $record['backup_path']
+            if ([string]::IsNullOrWhiteSpace($backupPath) -or
+                -not (Test-PathWithinRoot -Path $backupPath -RootPath $manifest['backup_root'])) {
+                throw "Registered retirement backup payload escapes its backup root: $target"
+            }
+            [void](Assert-InstallStatePathHasNoReparsePoint -Path $backupPath -Label 'Registered retirement backup payload')
+            $expectedPathType = if ($itemType -eq 'file') { 'Leaf' } else { 'Container' }
+            if (-not (Test-Path -LiteralPath $backupPath -PathType $expectedPathType)) {
+                throw "Registered retirement backup payload is missing: $backupPath"
+            }
+            $payloadDigest = Get-InstallBackupPayloadDigest -Path $backupPath -ItemType $itemType
+            if ([string]$record['backup_payload_sha256'] -notmatch '^[0-9a-f]{64}$' -or
+                $payloadDigest -ne [string]$record['backup_payload_sha256']) {
+                throw "Registered retirement backup payload digest mismatch: $backupPath"
+            }
+            $preimageIdentity = [ordered]@{
+                mode = 'exact'
+                item_type = $itemType
+                sha256 = $payloadDigest
+            }
+        } elseif ($itemType -eq 'link') {
+            if ([string]$record['link_type'] -notin @('Junction','SymbolicLink') -or
+                [string]::IsNullOrWhiteSpace([string]$record['link_target']) -or
+                -not [string]::IsNullOrWhiteSpace([string]$record['backup_path']) -or
+                -not [string]::IsNullOrWhiteSpace([string]$record['backup_payload_sha256'])) {
+                throw "Registered retirement link preimage has inconsistent metadata: $target"
+            }
+            $preimageIdentity = New-InstallExactLinkIdentity `
+                -Path $target `
+                -LinkType ([string]$record['link_type']) `
+                -Target ([string]$record['link_target'])
+        } else {
+            throw "Registered retirement preimage has an unsupported item type '$itemType': $target"
+        }
+
+        $cursorIdentity = $preimageIdentity
+        $restoreRecord = $record
+        $matchingRecordCount++
+    }
+
+    if ($matchingRecordCount -eq 0) { return $null }
+    return [pscustomobject]@{
+        CurrentIdentity = $currentIdentity
+        DesiredIdentity = $cursorIdentity
+        RestoreRecord = $restoreRecord
+    }
+}
+
+function Assert-RegisteredHookSettingsPostimage {
+    param($Registry,[string]$TargetPath)
+
+    $record = Get-LatestRegisteredBackupRecord -Registry $Registry -TargetPath $TargetPath
+    if ($null -eq $record) { return }
+    $identity = $record['expected_postimage']
+    if ([string]$identity['mode'] -ne 'semantic' -or [string]$identity['contract'] -ne 'claude-settings/v1') {
+        throw "Registered hook settings have an invalid postimage contract: $TargetPath"
+    }
+    if (-not (Test-HookSettingsPostimage -Path $TargetPath -Identity $identity)) {
+        throw "Hook settings changed from their registered Harness postimage; restore or uninstall before updating: $TargetPath"
+    }
+    return ,$identity
 }
 
 function Backup-IfNeeded {
@@ -2123,11 +2408,19 @@ function Backup-IfNeeded {
         [Parameter(Mandatory = $true)]$ExpectedPostimage,
         [ValidateSet('managed', 'create-if-missing', 'user-owned')]
         [string]$Ownership = 'managed',
-        [switch]$AllowFinalReparsePoint
+        [switch]$AllowFinalReparsePoint,
+        $ExpectedCurrentIdentity = $null
     )
 
     $normalizedPath = Get-NormalizedPath -Path $Path
     Assert-InstallExpectedPostimageShape -Identity $ExpectedPostimage -Label "Expected postimage for $normalizedPath"
+    if ($null -ne $ExpectedCurrentIdentity) {
+        Assert-InstallExpectedPostimageShape -Identity $ExpectedCurrentIdentity -Label "Expected backup source for $normalizedPath"
+        if ([string]$ExpectedCurrentIdentity['mode'] -ne 'exact' -or
+            -not (Test-InstallExactIdentityEqual -Left (Get-InstallManagedPathIdentity -Path $normalizedPath) -Right $ExpectedCurrentIdentity)) {
+            throw "Backup source changed from its expected current identity: $normalizedPath"
+        }
+    }
     if (-not $script:BackedUpPaths.Add($normalizedPath)) {
         $existingRecord = @($script:Manifest.backups | Where-Object {
             (Get-NormalizedPath -Path $_['path']) -eq $normalizedPath
@@ -2178,6 +2471,11 @@ function Backup-IfNeeded {
 
     if ($record.existed) {
         $item = Get-Item -LiteralPath $normalizedPath -Force
+        $preimageIdentity = Get-InstallManagedPathIdentity -Path $normalizedPath
+        if ($null -ne $ExpectedCurrentIdentity -and
+            -not (Test-InstallExactIdentityEqual -Left $preimageIdentity -Right $ExpectedCurrentIdentity)) {
+            throw "Backup source changed while its expected snapshot was being recorded: $normalizedPath"
+        }
         $isReparsePoint = [bool]($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
 
         if ($isReparsePoint) {
@@ -2195,7 +2493,6 @@ function Backup-IfNeeded {
             $record.link_target = $target
         } else {
             $record.item_type = if ($item.PSIsContainer) { 'directory' } else { 'file' }
-            $preimageIdentity = Get-InstallManagedPathIdentity -Path $normalizedPath
             $safeName = Get-BackupSafeName -Path $normalizedPath
             $backupPath = Join-Path $script:BackupRoot $safeName
             Ensure-Directory -Path (Split-Path -Parent $backupPath)
@@ -2210,6 +2507,13 @@ function Backup-IfNeeded {
             }
             $record.backup_path = $backupPath
             $record.backup_payload_sha256 = Get-InstallBackupPayloadDigest -Path $backupPath -ItemType $record.item_type
+        }
+    }
+
+    if ($null -ne $ExpectedCurrentIdentity) {
+        $recordedPreimage = Get-InstallBackupRecordPreimageIdentity -Record $record
+        if (-not (Test-InstallExactIdentityEqual -Left $recordedPreimage -Right $ExpectedCurrentIdentity)) {
+            throw "Recorded backup preimage does not match its expected source identity: $normalizedPath"
         }
     }
 
@@ -2362,18 +2666,6 @@ function Sync-SkillsDirectory {
     }
 }
 
-function Update-CodexManagedConfig {
-    param(
-        [string]$TemplatePath,
-        [string]$ManagedTargetPath
-    )
-
-    $renderedManaged = Render-Content -Content (Read-FileUtf8 -Path $TemplatePath) -TargetPath $ManagedTargetPath
-    $newManagedContent = $renderedManaged.Trim() + "`r`n"
-
-    Write-ManagedInstallText -Path $ManagedTargetPath -Content $newManagedContent -RecordBackup
-}
-
 function Install-VaultTemplate {
     param(
         [string]$TemplateRoot,
@@ -2476,7 +2768,7 @@ function Get-InstallPresetDefinition {
             name = 'core'
             features = @('core','v1-compatibility')
             skills = $coreSkills
-            hooks = @('pretooluse.ps1','stop.js','workspace-resolver.js')
+            hooks = @('pretooluse.ps1','codex-pretooluse-launcher.ps1','stop.js','workspace-resolver.js')
             vault_profile = 'minimal'
         }
     }
@@ -2485,7 +2777,7 @@ function Get-InstallPresetDefinition {
             name = 'governed'
             features = @('core','v1-compatibility','governed')
             skills = @($coreSkills + @('planning','audit'))
-            hooks = @('pretooluse.ps1','stop.js','workspace-resolver.js')
+            hooks = @('pretooluse.ps1','codex-pretooluse-launcher.ps1','stop.js','workspace-resolver.js')
             vault_profile = 'minimal'
         }
     }
@@ -2500,7 +2792,7 @@ function Get-InstallPresetDefinition {
         name = 'full'
         features = @('core','v1-compatibility','governed','memory','team','md-html','adapters','provider-references')
         skills = $fullSkills
-        hooks = @('pretooluse.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js')
+        hooks = @('pretooluse.ps1','codex-pretooluse-launcher.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js')
         vault_profile = 'full'
     }
 }
@@ -2631,6 +2923,35 @@ $InstallRegistryPath = Join-Path $InstallStateRoot 'install-registry.json'
 $InstallTransactionJournalPath = Join-Path $InstallStateRoot 'install-transaction.json'
 $BackupRoot = Join-Path $InstallStateRoot ('backups\install-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + "-$PID")
 $LegacyActiveInstallPath = Join-Path $RepoRoot 'backups\active-install.json'
+$PwshExecutable = Get-NormalizedPath -Path (Get-Process -Id $PID).Path
+if ([System.IO.Path]::GetFileName($PwshExecutable) -ine 'pwsh.exe' -or $PSVersionTable.PSVersion -lt [version]'7.3') {
+    throw 'Codex Hook installation requires running install.ps1 under PowerShell 7.3 or newer'
+}
+$pwshItem = Get-Item -LiteralPath $PwshExecutable -Force
+if ([bool]($pwshItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or
+    (Test-PathWithinRoot -Path $PwshExecutable -RootPath $WorkspaceRoot)) {
+    throw "Codex Hook PowerShell 7 executable must be an absolute non-reparse host executable outside WorkspaceRoot: $PwshExecutable"
+}
+$WindowsPowerShellExecutable = Get-NormalizedPath -Path (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::System)) 'WindowsPowerShell\v1.0\powershell.exe')
+if ($WindowsPowerShellExecutable -notmatch '^[A-Za-z]:\\[A-Za-z0-9._~\\-]+\.exe$' -or
+    -not (Test-Path -LiteralPath $WindowsPowerShellExecutable -PathType Leaf)) {
+    throw "Codex Hook requires Windows PowerShell at a shell-safe absolute system path: $WindowsPowerShellExecutable"
+}
+$windowsPowerShellItem = Get-Item -LiteralPath $WindowsPowerShellExecutable -Force
+if ([bool]($windowsPowerShellItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+    throw "Codex Hook Windows PowerShell executable must not be a reparse point: $WindowsPowerShellExecutable"
+}
+$TaskkillExecutable = Get-NormalizedPath -Path (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::System)) 'taskkill.exe')
+$taskkillItem = Get-Item -LiteralPath $TaskkillExecutable -Force -ErrorAction SilentlyContinue
+if ($TaskkillExecutable -notmatch '^[A-Za-z]:\\[A-Za-z0-9._~\\-]+\.exe$' -or
+    $null -eq $taskkillItem -or
+    [bool]($taskkillItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+    throw "Codex Hook requires taskkill.exe at a non-reparse shell-safe system path: $TaskkillExecutable"
+}
+$CodexPreToolUseLauncherPath = Get-NormalizedPath -Path (Join-Path $ClaudeHome 'hooks-memory\codex-pretooluse-launcher.ps1')
+if ($CodexPreToolUseLauncherPath -match '[`$%!^&|<>()]' ) {
+    throw "Codex Hook launcher path cannot be represented safely by both PowerShell and cmd: $CodexPreToolUseLauncherPath"
+}
 [void](Assert-InstallStatePathHasNoReparsePoint -Path $WorkspaceRoot -Label 'WorkspaceRoot')
 foreach ($managedUserGlobalRoot in @($ClaudeHome, $CodexHome, $AgentsHome)) {
     [void](Assert-InstallStatePathHasNoReparsePoint -Path $managedUserGlobalRoot -Label 'Managed user-global root')
@@ -2729,6 +3050,10 @@ $script:RawRenderTokens = [ordered]@{
     '{WORKSPACE_ROOT}' = $WorkspaceRoot
     '{VAULT_PATH}' = $VaultPath
     '{CLAUDE_HOME}' = $ClaudeHome
+    '{PWSH_EXE}' = $PwshExecutable
+    '{TASKKILL_EXE}' = $TaskkillExecutable
+    '{WINDOWS_POWERSHELL_EXE}' = $WindowsPowerShellExecutable
+    '{CODEX_PRETOOLUSE_LAUNCHER_PS_LITERAL}' = $CodexPreToolUseLauncherPath.Replace("'", "''")
     '{CODEX_HOME}' = $CodexHome
     '__RENDER_AT_INSTALL__' = (Get-Date -Format 'yyyy-MM-dd')
     '__RUNTIME_TIMESTAMP__' = ([datetimeoffset]::Now.ToString('yyyy-MM-ddTHH:mm:sszzz'))
@@ -2741,11 +3066,13 @@ $script:Manifest = [ordered]@{
     schema_version = 'install-manifest/v1.2'
     postimage_identity_contract = 'v1'
     installed_at = (Get-Date -Format 's')
+    user_profile = (Get-NormalizedPath -Path $env:USERPROFILE)
     repo_root = $RepoRoot
     workspace_root = $WorkspaceRoot
     vault_path = $VaultPath
     claude_home = $ClaudeHome
     codex_home = $CodexHome
+    codex_hook_pwsh_executable = $PwshExecutable
     agents_home = $AgentsHome
     backup_root = $BackupRoot
     registry_path = $InstallRegistryPath
@@ -2759,8 +3086,10 @@ $script:Manifest = [ordered]@{
     requested_preset = $(if ($presetSpecified) { $Preset } else { $null })
     effective_preset = $null
     preset_source = $null
-    feature_ownership = $null
-    backups = @()
+        feature_ownership = $null
+        released_backup_targets = @()
+        released_backup_manifest_paths = @()
+        backups = @()
 }
 $script:ManifestPath = Join-Path $BackupRoot 'install-manifest.json'
 
@@ -2772,6 +3101,7 @@ $codexSettingsDir = Join-Path $CodexHome '.claude'
 $claudeSettingsPath = Join-Path $ClaudeHome 'settings.json'
 $codexSettingsPath = Join-Path $codexSettingsDir 'settings.local.json'
 $codexOverlayPath = Join-Path $codexSettingsDir 'settings.local.user.json'
+$codexHooksPath = Join-Path $CodexHome 'hooks.json'
 $codexManagedConfigPath = Join-Path $CodexHome 'managed_config.toml'
 $claudeGlobalPath = Join-Path $ClaudeHome 'CLAUDE.md'
 $codexGlobalPath = Join-Path $CodexHome 'AGENTS.md'
@@ -2788,6 +3118,13 @@ try {
         (Get-NormalizedPath -Path $installRegistry['workspaces'][$currentWorkspaceKey]['repo_root']) -ne $RepoRoot) {
         throw "Workspace is already registered to another RepoRoot: $WorkspaceRoot"
     }
+    [void](Get-RegisteredManifestStatusUpgradePlan `
+        -Registry $installRegistry `
+        -RegistryPath $InstallRegistryPath `
+        -ExpectedUserProfile $env:USERPROFILE `
+        -RequireManifestIntegrity $true)
+    $registeredClaudeSettingsPostimage = Assert-RegisteredHookSettingsPostimage -Registry $installRegistry -TargetPath $claudeSettingsPath
+    $registeredCodexHooksPostimage = Assert-RegisteredHookSettingsPostimage -Registry $installRegistry -TargetPath $codexHooksPath
     $legacyPointerImportDigest = Import-LegacyActiveInstall -Registry $installRegistry -PointerPath $LegacyActiveInstallPath -ExpectedUserProfile $env:USERPROFILE -ExpectedRepoRoot $RepoRoot
     $legacyPointerImported = -not [string]::IsNullOrWhiteSpace([string]$legacyPointerImportDigest)
     [void](Get-RegisteredManifestStatusUpgradePlan `
@@ -2795,6 +3132,12 @@ try {
         -RegistryPath $InstallRegistryPath `
         -ExpectedUserProfile $env:USERPROFILE `
         -RequireManifestIntegrity $true)
+    $registeredClaudeSettingsPostimage = Assert-RegisteredHookSettingsPostimage -Registry $installRegistry -TargetPath $claudeSettingsPath
+    $registeredCodexHooksPostimage = Assert-RegisteredHookSettingsPostimage -Registry $installRegistry -TargetPath $codexHooksPath
+    $codexManagedConfigRetirementPlan = Get-RegisteredManagedExactPathRetirementPlan -Registry $installRegistry -TargetPath $codexManagedConfigPath
+    if ($null -ne $codexManagedConfigRetirementPlan) {
+        $script:Manifest.released_backup_targets = @($codexManagedConfigPath)
+    }
     $presetResolution = Resolve-InstallPreset `
         -RequestedPreset $Preset `
         -PresetSpecified $presetSpecified `
@@ -2859,6 +3202,48 @@ try {
         [void](Assert-InstallStatePathHasNoReparsePoint -Path $managedUserGlobalRoot -Label 'Managed user-global root')
     }
     Ensure-Directory -Path $RepoSkillsPath
+
+    if ($null -ne $codexManagedConfigRetirementPlan -and
+        -not (Test-InstallExactIdentityEqual -Left $codexManagedConfigRetirementPlan.CurrentIdentity -Right $codexManagedConfigRetirementPlan.DesiredIdentity)) {
+        Backup-IfNeeded `
+            -Path $codexManagedConfigPath `
+            -Ownership 'managed' `
+            -ExpectedPostimage $codexManagedConfigRetirementPlan.DesiredIdentity `
+            -ExpectedCurrentIdentity $codexManagedConfigRetirementPlan.CurrentIdentity
+        $retirementMaterializer = $null
+        $retirementDesiredItemType = [string]$codexManagedConfigRetirementPlan.DesiredIdentity['item_type']
+        if ($retirementDesiredItemType -in @('file','directory')) {
+            $retirementBackupPath = Get-NormalizedPath -Path $codexManagedConfigRetirementPlan.RestoreRecord['backup_path']
+            $retirementDesiredIdentity = $codexManagedConfigRetirementPlan.DesiredIdentity
+            $retirementMaterializer = if ($retirementDesiredItemType -eq 'file') {
+                {
+                    param($BuildPath)
+                    Copy-InstallStateFileAtomic `
+                        -SourcePath $retirementBackupPath `
+                        -Path $BuildPath `
+                        -ExpectedCurrentIdentity (New-InstallExactMissingIdentity) `
+                        -ExpectedDesiredIdentity $retirementDesiredIdentity
+                }.GetNewClosure()
+            } else {
+                {
+                    param($BuildPath)
+                    Copy-InstallExactDirectory -SourcePath $retirementBackupPath -Path $BuildPath
+                }.GetNewClosure()
+            }
+        } elseif ($retirementDesiredItemType -eq 'link') {
+            $retirementLinkType = [string]$codexManagedConfigRetirementPlan.RestoreRecord['link_type']
+            $retirementLinkTarget = [string]$codexManagedConfigRetirementPlan.RestoreRecord['link_target']
+            $retirementMaterializer = {
+                param($BuildPath)
+                New-Item -ItemType $retirementLinkType -Path $BuildPath -Target $retirementLinkTarget | Out-Null
+            }.GetNewClosure()
+        }
+        [void](Invoke-InstallExactPathTransition `
+            -Path $codexManagedConfigPath `
+            -SourceIdentity $codexManagedConfigRetirementPlan.CurrentIdentity `
+            -DesiredIdentity $codexManagedConfigRetirementPlan.DesiredIdentity `
+            -MaterializeDesired $retirementMaterializer)
+    }
 
     Ensure-Directory -Path (Join-Path $RepoSkillsPath '.system')
     Ensure-WorkspaceGitIgnoreEntries -WorkspaceRoot $WorkspaceRoot
@@ -2936,8 +3321,8 @@ try {
 
     $claudeSettingsTemplate = if ($effectivePreset -eq 'full') { 'settings.local.shared.json.template' } else { 'settings.local.core.json.template' }
     $claudeSharedSettingsJson = Render-JsonTemplateText -TemplatePath (Join-Path $RepoRoot ("agent-configs\claude\{0}" -f $claudeSettingsTemplate)) -TargetPath $claudeSettingsPath
-    $claudeSettingsMerge = Merge-ClaudeSettingsJsonText -RenderedHooksJson $claudeSharedSettingsJson -ExistingPath $claudeSettingsPath
-    $claudeSettingsExpectedPostimage = New-ClaudeSettingsPostimageIdentity -ManagedSettings (ConvertFrom-JsonDocument -Json $claudeSharedSettingsJson)
+    $claudeSettingsMerge = Merge-ClaudeSettingsJsonText -RenderedHooksJson $claudeSharedSettingsJson -ExistingPath $claudeSettingsPath -HookHome $ClaudeHome -ExpectedSourcePostimage $registeredClaudeSettingsPostimage
+    $claudeSettingsExpectedPostimage = New-ClaudeSettingsPostimageIdentity -ManagedSettings (ConvertFrom-JsonDocument -Json $claudeSharedSettingsJson) -PreimageIdentity $registeredClaudeSettingsPostimage
     Backup-IfNeeded -Path $claudeSettingsPath -ExpectedPostimage $claudeSettingsExpectedPostimage
     Write-InstallStateTextAtomic `
         -Path $claudeSettingsPath `
@@ -2948,7 +3333,21 @@ try {
     $codexSettingsMerge = Merge-SettingsLocalJsonText -RenderedSharedJson $codexSharedSettingsJson -ExistingPath $codexSettingsPath -OverlayPath $codexOverlayPath
     Write-ManagedInstallText -Path $codexSettingsPath -Content $codexSettingsMerge.Content -RecordBackup -ExpectedCurrentIdentity $codexSettingsMerge.Identity
 
-    Update-CodexManagedConfig -TemplatePath (Join-Path $RepoRoot 'agent-configs\codex\config.shared.toml.template') -ManagedTargetPath $codexManagedConfigPath
+    $codexHooksJson = Render-JsonTemplateText -TemplatePath (Join-Path $RepoRoot 'agent-configs\codex\hooks.shared.json.template') -TargetPath $codexHooksPath
+    $codexHooksMerge = Merge-ClaudeSettingsJsonText `
+        -RenderedHooksJson $codexHooksJson `
+        -ExistingPath $codexHooksPath `
+        -HookHome $ClaudeHome `
+        -ExpectedSourcePostimage $registeredCodexHooksPostimage
+    $codexHooksExpectedPostimage = New-ClaudeSettingsPostimageIdentity -ManagedSettings (ConvertFrom-JsonDocument -Json $codexHooksJson) -PreimageIdentity $registeredCodexHooksPostimage
+    Backup-IfNeeded `
+        -Path $codexHooksPath `
+        -ExpectedPostimage $codexHooksExpectedPostimage `
+        -ExpectedCurrentIdentity $codexHooksMerge.Identity
+    Write-InstallStateTextAtomic `
+        -Path $codexHooksPath `
+        -Content $codexHooksMerge.Content `
+        -ExpectedCurrentDigest $(if ([string]$codexHooksMerge.Identity['item_type'] -eq 'missing') { 'missing' } else { [string]$codexHooksMerge.Identity['sha256'] })
 
     Sync-SkillsDirectory -HostSkillsPath $claudeSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
     Sync-SkillsDirectory -HostSkillsPath $codexSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
@@ -2962,6 +3361,16 @@ try {
         -RepoRoot $RepoRoot `
         -VaultProfile $effectiveVaultProfile `
         -InstalledAt $script:Manifest.installed_at
+    if (@($script:Manifest.released_backup_targets).Count -gt 0) {
+        $script:Manifest.released_backup_manifest_paths = @($installRegistry['global_manifest_history'])
+        Save-InstallManifestSnapshot
+        Set-InstallRegistryReleasedTargetHistory `
+            -Registry $installRegistry `
+            -TargetPath $codexManagedConfigPath `
+            -ManifestPaths @($installRegistry['global_manifest_history']) `
+            -ReleaseManifestPath $script:ManifestPath `
+            -ExpectedUserProfile $env:USERPROFILE
+    }
     $script:Manifest.transaction_status = 'committed'
     Save-InstallManifestSnapshot
     Refresh-InstallRegistryManifestDigests -Registry $installRegistry

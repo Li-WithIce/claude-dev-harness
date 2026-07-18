@@ -561,6 +561,7 @@ if ($runnerParseErrors.Count -eq 0 -and
     $validationJob -match 'QueryInformationJobObject' -and
     $validationJob -match 'WaitForSingleObject' -and
     $validationJob -match 'ActiveProcessCount == 0' -and
+    $validationSupervisor -match '(?s)\[Console\]::OutputEncoding\s*=\s*\[Text\.UTF8Encoding\]::new\(\$false\).*\$request\s*=\s*Read-ValidationRequest' -and
     $validationSupervisor -match 'JsonDocument\]::Parse' -and
     $validationSupervisor -match 'dev-harness-validation-' -and
     $validationSupervisor -match '\$token -cne \$pathToken' -and

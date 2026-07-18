@@ -42,7 +42,8 @@ Ask is `requirement_state=blocked`, not a fifth profile. Legacy `quick` and `wor
 ## Safety invariants
 
 - Direct never loads lifecycle skills and never creates task state, runtime pointers, recovery entries, or durable task artifacts.
-- A protected write cannot rely on natural-language intent alone; the deterministic hook and Approval checks remain authoritative.
+- A protected write cannot rely on natural-language intent alone. The Codex adapter sends Bash command text to core policy. Codex 0.144.4 does not bind the effective environment identity/cwd into PreToolUse, and a foreign primary may make the deprecated Hook cwd fall back to the local host cwd. Therefore shell-form and direct `apply_patch` are both rejected before core evaluation, even when the patch omits an Environment ID and looks local. Fine-grained patch-path allow decisions remain unavailable until the host supplies a trustworthy execution-environment binding. The pinned `permission_mode` values (`default` and `bypassPermissions`) are approval-policy labels, not a Plan/read-only collaboration signal.
+- The ordinary user Hook is a guardrail, not a complete enforcement boundary. Its transparent Windows chain is qualified with the Codex 0.144.4 environment-shell invocation shape under `cmd.exe /C`, PowerShell 7, and Windows PowerShell, plus pinned absolute PowerShell executables. Harness does not write trust or create/take ownership of managed policy; an upgrade may only retire an exact, registry-proven legacy Harness `managed_config.toml` by restoring its original baseline and then releasing ownership. The registry tombstone is accepted only when a real release manifest binds the target, covered history, and stable plan digest; it remains authoritative across workspace-owner handoff until the final registry is removed. Synthetic command-fixture tests do not establish active trust or endpoint-product allowlisting. If enterprise policy or endpoint isolation blocks the script, the Hook is unavailable and Critical production execution still requires the independent executor defined by release policy.
 - Requested aliases may raise but cannot lower the computed profile.
 - Critical capabilities are an exact minimum set. Missing capability fields or unknown policy keys are rejected.
 - Read-only inspection is zero-write even when optional providers, Memory, or policy infrastructure are unavailable.
@@ -50,6 +51,6 @@ Ask is `requirement_state=blocked`, not a fifth profile. Legacy `quick` and `wor
 
 ## Validation and rollback
 
-`tests/verify-v2-policy-contracts.ps1`, `tests/verify-v2-requirement-gate.ps1`, `tests/verify-v2-direct-no-artifacts.ps1`, `tests/verify-v2-approval.ps1`, and the scenario evals cover the policy boundary. Any unavailable required rollout evidence keeps `auto` on v1.
+`tests/verify-v2-policy-contracts.ps1`, `tests/verify-v2-requirement-gate.ps1`, `tests/verify-v2-direct-no-artifacts.ps1`, `tests/verify-v2-approval.ps1`, `tests/verify-v2-install-presets.ps1`, and the scenario evals cover the policy boundary and installed command fixtures. The install preset test verifies allow/deny JSON under cmd, PowerShell 7, and Windows PowerShell parsers; it does not mark Codex trust, Hook activation, or Flylink/endpoint policy as passed. Any unavailable required rollout evidence keeps `auto` on v1.
 
 Rollback sets `HARNESS_PROTOCOL=v1` or reverts the relevant v2 PR. Existing v1 five-stage tasks and their install, update, uninstall, recovery, and validation paths remain unchanged.
