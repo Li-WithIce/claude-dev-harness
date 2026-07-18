@@ -522,6 +522,8 @@ $quietProcessSource = if ($null -eq $quietProcessFunction) { '' } else { $quietP
 $workflow = Get-Content -LiteralPath $workflowPath -Raw -Encoding utf8
 $readme = Get-Content -LiteralPath $readmePath -Raw -Encoding utf8
 $rolloutGenerator = Get-Content -LiteralPath (Join-Path $RepoRoot 'scripts\generate-v2-rollout-report.ps1') -Raw -Encoding utf8
+$prCoreJob = [regex]::Match($workflow,'(?ms)^  pr-core:\s*$.*?(?=^  changed-optional:\s*$)').Value
+$changedOptionalJob = [regex]::Match($workflow,'(?ms)^  changed-optional:\s*$.*?(?=^  release-model:\s*$)').Value
 $releaseModelJob = [regex]::Match($workflow,'(?ms)^  release-model:\s*$.*?(?=^  release-host:\s*$)').Value
 $releaseHostJob = [regex]::Match($workflow,'(?ms)^  release-host:\s*$.*?(?=^  release-full:\s*$)').Value
 $releaseJob = [regex]::Match($workflow,'(?ms)^  release-full:\s*$.*\z').Value
@@ -706,21 +708,22 @@ if ($null -eq $quietProcessFunction) {
 
 if ($runner -match '(?m)^\s*\[int\]\$CheckTimeoutSeconds = 360\s*$' -and
     $runner -match "verify-host-benchmark-qualification\.ps1'\) \{ \[math\]::Max\(\`$CheckTimeoutSeconds,900\)" -and
-    $workflow -match '(?m)^\s*timeout-minutes:\s*30\s*$' -and
-    $releaseModelJob -match '(?m)^\s*timeout-minutes:\s*120\s*$' -and
-    $releaseHostJob -match '(?m)^\s*timeout-minutes:\s*180\s*$' -and
-    $releaseJob -match '(?m)^\s*timeout-minutes:\s*120\s*$' -and
+    $prCoreJob -match '(?m)^    timeout-minutes:\s*45\s*$' -and
+    $changedOptionalJob -match '(?m)^    timeout-minutes:\s*30\s*$' -and
+    $releaseModelJob -match '(?m)^    timeout-minutes:\s*120\s*$' -and
+    $releaseHostJob -match '(?m)^    timeout-minutes:\s*180\s*$' -and
+    $releaseJob -match '(?m)^    timeout-minutes:\s*120\s*$' -and
     $releaseJob -match '(?m)^\s*fetch-depth:\s*0\s*$' -and
-    $workflow -match 'run-validation\.ps1 -Suite core -CheckTimeoutSeconds 360' -and
+    $prCoreJob -match '(?m)^        run:\s+pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation\.ps1 -Suite core -CheckTimeoutSeconds 360\s*$' -and
     $rolloutGenerator -match 'run-validation\.ps1 -Suite all -CheckTimeoutSeconds 360 -VerboseOutput' -and
     $rolloutGenerator -match '\(\?m\)\^\\\[UNAVAILABLE\\\]\\s\+' -and
-    $workflow -match 'run-changed-optional-validation\.ps1' -and
-    $workflow -match 'run-isolated-install-smoke\.ps1 -RepoRoot \$PWD -Preset core' -and
+    $changedOptionalJob -match '(?m)^        run:\s+pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-changed-optional-validation\.ps1 -RepoRoot \$PWD -ChangedPathsFile changed-paths\.txt\s*$' -and
+    $prCoreJob -match '(?m)^        run:\s+pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-isolated-install-smoke\.ps1 -RepoRoot \$PWD -Preset core\s*$' -and
     $rolloutGenerator -match 'run-isolated-install-smoke\.ps1 -Preset core' -and
     $rolloutGenerator -match 'run-isolated-install-smoke\.ps1 -Preset full' -and
     $workflow -notmatch 'verify-installation\.ps1' -and
     $workflow -notmatch '(?m)^\s*&\s+\.\\uninstall\.ps1' -and
-    $readme -match 'PR job 上限为 30 分钟，model/host/聚合 job 上限分别为 120/180/120 分钟；model/host 的单次 Codex 调用上限分别为 120/900 秒；常规 verify 脚本上限为 360 秒，磁盘密集的 host benchmark qualification 单项上限为 900 秒') {
+    $readme -match '`pr-core` job 上限为 45 分钟，`changed-optional` job 上限为 30 分钟，model/host/聚合 job 上限分别为 120/180/120 分钟；model/host 的单次 Codex 调用上限分别为 120/900 秒；常规 verify 脚本上限为 360 秒，磁盘密集的 host benchmark qualification 单项上限为 900 秒') {
     Add-Check 'CI layers share bounded validation budgets and delegate install rollback to the smoke runner'
 } else {
     Add-Failure 'CI layers, local runner, and README should share bounded budgets and delegate install rollback to the smoke runner'
