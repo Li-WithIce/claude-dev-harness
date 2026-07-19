@@ -7,6 +7,7 @@
 - `settings.local.user.example.json`: 用户本地 overlay 示例
 - `hooks.shared.json.template`: 合并到 Codex 普通用户 `hooks.json` 的安全 Hook
 - `config.user.example.toml`: 用户本地保留字段示例
+- `config.workspace.toml.template`: 仅用于 Desktop 写边界资格实验的 project config；当前安装器不会部署
 
 边界：
 
@@ -17,6 +18,8 @@
 - `Bash` command text 进入 core policy；Codex 0.144.4 Hook 不提供可信的实际 environment identity/cwd，remote primary 还可能把 Hook cwd 回退到本机，因此 Bash shell-form 和所有 direct `apply_patch` 都 fail closed；宿主增加可信绑定前不按看似本地的 patch 路径放行
 - 用户 Hook JSON 由显式 writer 精确保留 `BigInteger` / decimal；不依赖 PowerShell 7.5 才支持的 BigInteger `ConvertTo-Json` 行为
 - 固定版本的 `permission_mode` 只接受 `default` / `bypassPermissions`，它不是 Plan 协作模式信号，也不提供只读保证
+- 资格实验模板把原生工具设为 `:read-only`，只自动批准单一 `write_file` MCP；服务端重新绑定固定 RepoRoot/WorkspaceRoot、规范化路径、目标 CAS，并对 Governed/Critical 写重新校验 TaskId/ExpectedVersion/Profile/Contract/Approval/DryRun。它明确拒绝 Harness repo、`.assistant`、`.codex`、`.git`、`docs/tasks` 与根 `AGENTS.md`
+- 该模板不能作为默认安装面：只读宿主同时会阻断 v1 五阶段文档/runtime、会写缓存或构建产物的验证、删除/重命名和 Git 提交；writer 也不支持 `RepoRoot == WorkspaceRoot`。在这些能力获得同等受控替代、跨版本安装更新/卸载和真实 Desktop E2E 前，状态必须保持 qualification-only / unavailable，而不是 active 或 pass
 - 企业策略或端点隔离阻止 Hook 时应记录为 unavailable，并继续使用 Approval 与独立受控执行器；不得改名、混淆或换载体绕过
 - launcher 路径包含 `` ` $ % ! ^ & | < > ( ) `` 时安装会在写入前拒绝，避免 cmd / PowerShell 双重解析歧义
 - `.toml` 模板必须通过 `tests/forbidden-path-prefixes.txt` 检查

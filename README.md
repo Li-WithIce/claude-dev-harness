@@ -42,6 +42,8 @@ Core 只内置有限的受保护动作规则：生产破坏性数据库命令，
 
 Windows 启动链兼容 Codex 0.144.4 传入的本地环境 shell，并使用绝对 System32 Windows PowerShell 与安装时固化的绝对 PowerShell 7.3+ 路径；用户 JSON 用显式 writer 精确保留 `BigInteger` 与 decimal，不依赖 PowerShell 7.5 才具备的 `ConvertTo-Json` 行为。命令、参数和脚本文件均保持明文，不使用 `EncodedCommand`、隐藏窗口、动态求值、改写信任或安全产品绕过。用户目录若包含无法同时由 cmd 与 PowerShell 安全表示的 `` ` $ % ! ^ & | < > ( ) `` 字符，安装会在写入前拒绝。`tests/verify-v2-install-presets.ps1` 只证明安装后的原样命令可经 `cmd.exe /C`、PowerShell 7 和 Windows PowerShell 解析并产生预期 allow/deny JSON，不证明 Codex 已信任或启用 Hook，也不证明飞连/其他企业端点产品已放行。若企业策略、Hook trust 或端点隔离阻止脚本，Hook 状态就是 unavailable；不得改名、混淆或换载体绕过。宿主 Hook 只是已知工具面的 guardrail，不是完整执行边界。Codex 的“完全访问”不等于生产授权；桌面宿主无法提供不可绕过执行边界时，Critical 生产动作必须交给独立受控执行器，Codex 只生成 Plan、Dry Run、Approval Request 和 Evidence。Hook request 与 remote-primary 回退的固定版本实现见 [hook runtime](https://github.com/openai/codex/blob/rust-v0.144.4/codex-rs/core/src/hook_runtime.rs) 和 [turn context](https://github.com/openai/codex/blob/rust-v0.144.4/codex-rs/core/src/session/turn_context.rs)。
 
+仓库同时提供 qualification-only 的 `config.workspace.toml.template` 与 `harness-write-mcp.ps1`，用于验证“原生只读、唯一受控写工具”的确定性边界。受控 writer 固定 RepoRoot/WorkspaceRoot、规范化目标、执行目标 preimage CAS，并对受保护写重新绑定 v2 task/version/profile/Contract/Approval/dry-run；它拒绝 Harness 控制面和自身 RepoRoot。Codex 0.144.4 已能严格解析并实际启动这一 MCP，但 `install.ps1` 当前不会部署该模板：`:read-only` 也会阻断 v1 五阶段写回、构建/缓存产物、删除/重命名和 Git 提交，现有 writer 尚未提供这些等价能力。把静态配置加载冒充完整 Desktop 可用性会破坏 v1/v2 渐进兼容，因此默认状态仍是 unavailable，不能写成 active/pass。
+
 ## Worktree 与回滚最短路径
 
 - 每个 linked worktree 都要以自己的路径单独安装，例如 `-WorkspaceRoot D:\repo-worktrees\feature-a`；不要复制父工作区的 `.assistant/runtime/current.json` 或 live runtime。

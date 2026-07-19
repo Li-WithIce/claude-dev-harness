@@ -120,8 +120,13 @@ function Assert-HarnessProtectedAction {
     foreach($rule in @($policy.rules)){
         $isMatch=$true;$matchingPaths=[Collections.Generic.List[string]]::new()
         if($rule.match.Contains('command_regex')){try{$isMatch=$isMatch-and($CommandText-match[string]$rule.match.command_regex)}catch{throw 'protected command policy regex is invalid'}}
-        if($rule.match.Contains('environment')){$isMatch=$isMatch-and($Environment-ceq[string]$rule.match.environment)}
         if($rule.match.Contains('path_globs')){$pathMatch=$false;foreach($path in $normalizedPaths){foreach($glob in @($rule.match.path_globs)){if($path-match(Convert-HarnessProtectedGlob -Glob ([string]$glob))){$pathMatch=$true;$matchingPaths.Add($path);break}}};$isMatch=$isMatch-and$pathMatch}
+        if($rule.match.Contains('environment')){
+            if([string]::IsNullOrWhiteSpace($Environment)){
+                if($isMatch){throw "protected write matches rule '$($rule.id)' but has no trusted Environment binding"}
+                $isMatch=$false
+            }else{$isMatch=$isMatch-and($Environment-ceq[string]$rule.match.environment)}
+        }
         if(-not$isMatch){continue};$matched.Add($rule);[void]$scopes.Add("rule:$($rule.id)")
         if($rule.match.Contains('command_regex')){[void]$scopes.Add("command_digest:$((Get-HarnessSha256Text -Content $CommandText))")}
         if($rule.match.Contains('environment')){[void]$scopes.Add("environment:$Environment")}
