@@ -61,7 +61,7 @@ function Remove-RolloutEmptyParents {
 }
 
 try {
-    Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Path.psm1') -Force -ErrorAction Stop
+    $pathModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Path.psm1') -Force -PassThru -ErrorAction Stop
     $protocolModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1') -Force -PassThru -ErrorAction Stop
     $atomicModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.AtomicWrite.psm1') -Force -PassThru -ErrorAction Stop
     $evidenceModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.RolloutEvidence.psm1') -Force -PassThru -ErrorAction Stop
@@ -87,7 +87,7 @@ try {
     $rawDigest = Get-RolloutRawDigest -Bytes $bytes
     try {
         $text = [Text.UTF8Encoding]::new($false,$true).GetString($bytes)
-        $document = $text | ConvertFrom-HarnessJson -ErrorAction Stop
+        $document = & $pathModule { param($Json) $Json | ConvertFrom-HarnessJson -ErrorAction Stop } $text
     } catch { throw 'rollout-promotion-report-invalid-json' }
     & $protocolModule {
         param($Root,$Document)

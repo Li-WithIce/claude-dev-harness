@@ -991,6 +991,7 @@ function Assert-ManagedBackupTarget {
             'entry\advance-stage.ps1'
             'entry\task.ps1'
             'entry\validate-lite-artifacts.ps1'
+            '运行时\tasks\.gitkeep'
         )
         if ([string]$Manifest['effective_vault_profile'] -eq 'minimal') {
             if ($relativeTarget -notin $minimalTargets) {
