@@ -3,6 +3,9 @@ param(
     [ValidateSet('quick', 'core', 'all')]
     [string]$Suite = 'quick',
 
+    [ValidateSet('all', 'entry-lifecycle', 'evaluation-release', 'install-evidence', 'governance-approval', 'harness-contracts')]
+    [string]$CoreGroup = 'all',
+
     [string]$RepoRoot = '',
 
     [string]$WorkspaceRoot = '',
@@ -18,7 +21,7 @@ param(
 if ($PSVersionTable.PSVersion.Major -eq 5) {
     $pwshCommand = Get-Command pwsh -CommandType Application -ErrorAction Stop
     $bridgeArguments = [Collections.Generic.List[string]]::new()
-    foreach ($argument in @('-NoLogo','-NoProfile','-NonInteractive','-File',[IO.Path]::GetFullPath($PSCommandPath),'-Suite',$Suite,'-CheckTimeoutSeconds',[string]$CheckTimeoutSeconds)) {
+    foreach ($argument in @('-NoLogo','-NoProfile','-NonInteractive','-File',[IO.Path]::GetFullPath($PSCommandPath),'-Suite',$Suite,'-CoreGroup',$CoreGroup,'-CheckTimeoutSeconds',[string]$CheckTimeoutSeconds)) {
         [void]$bridgeArguments.Add([string]$argument)
     }
     if (-not [string]::IsNullOrWhiteSpace($RepoRoot)) {
@@ -43,6 +46,10 @@ if (-not $IsWindows) {
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+if ($Suite -ne 'core' -and $CoreGroup -ne 'all') {
+    throw "-CoreGroup '$CoreGroup' is only valid with -Suite core."
+}
 
 . (Join-Path $PSScriptRoot 'lib\Harness.ValidationProcess.ps1')
 
@@ -116,53 +123,68 @@ if ($IncludeCachedDiff) {
     Add-GitCheck -Checks $checks -Name 'git diff --cached --check' -ArgumentList @('diff', '--cached', '--check')
 }
 
-$coreScripts = @(
-    'verify-adversarial-review-gate.ps1',
-    'verify-entry-routing-clarification.ps1',
-    'verify-v2-entry-contract.ps1',
-    'verify-v2-direct-no-artifacts.ps1',
-    'verify-v2-requirement-gate.ps1',
-    'verify-v2-json-compat.ps1',
-    'verify-v2-task-state.ps1',
-    'verify-v2-model-neutrality.ps1',
-    'verify-v1-v2-coexistence.ps1',
-    'verify-v1-to-v2-migration.ps1',
-    'verify-v2-default-flip.ps1',
-    'verify-v2-runtime-memory-decoupling.ps1',
-    'run-scenario-evals.ps1',
-    'verify-model-eval-runner.ps1',
-    'verify-rollout-evidence.ps1',
-    'verify-host-benchmark-runner.ps1',
-    'verify-host-benchmark-otel.ps1',
-    'verify-host-benchmark-qualification.ps1',
-    'verify-release-runner-boundary.ps1',
-    'verify-v2-ci-routing.ps1',
-    'verify-v2-install-presets.ps1',
-    'verify-v2-evidence.ps1',
-    'verify-v2-governed-audit.ps1',
-    'verify-v2-approval.ps1',
-    'verify-v2-readonly-zero-write.ps1',
-    'verify-harness-entry.ps1',
-    'verify-lite-artifact-validator.ps1',
-    'verify-lite-footprint.ps1',
-    'verify-minimal-safe-change-policy.ps1',
-    'verify-no-node-install-dependency.ps1',
-    'verify-placeholder-rendering.ps1',
-    'verify-workflow-contracts.ps1',
-    'verify-workflow-descriptor.ps1',
-    'verify-shared-memory-layers.ps1',
-    'verify-stage-discipline-matrix.ps1',
-    'verify-release-validation.ps1',
-    'verify-runtime-state-contract.ps1',
-    'verify-skill-manifest.ps1',
-    'verify-task-artifact-drift-audit.ps1',
-    'verify-tool-profile.ps1'
-)
+$coreScriptGroups = [ordered]@{
+    'entry-lifecycle' = @(
+        'verify-adversarial-review-gate.ps1',
+        'verify-entry-routing-clarification.ps1',
+        'verify-v2-entry-contract.ps1',
+        'verify-v2-direct-no-artifacts.ps1',
+        'verify-v2-requirement-gate.ps1',
+        'verify-v2-json-compat.ps1',
+        'verify-v2-task-state.ps1',
+        'verify-v2-model-neutrality.ps1',
+        'verify-v1-v2-coexistence.ps1',
+        'verify-v1-to-v2-migration.ps1',
+        'verify-v2-default-flip.ps1',
+        'verify-v2-runtime-memory-decoupling.ps1'
+    )
+    'evaluation-release' = @(
+        'run-scenario-evals.ps1',
+        'verify-model-eval-runner.ps1',
+        'verify-rollout-evidence.ps1',
+        'verify-host-benchmark-runner.ps1',
+        'verify-host-benchmark-otel.ps1',
+        'verify-host-benchmark-qualification.ps1',
+        'verify-release-runner-boundary.ps1',
+        'verify-v2-ci-routing.ps1'
+    )
+    'install-evidence' = @(
+        'verify-v2-install-presets.ps1',
+        'verify-v2-evidence.ps1'
+    )
+    'governance-approval' = @(
+        'verify-v2-governed-audit.ps1',
+        'verify-v2-approval.ps1',
+        'verify-v2-readonly-zero-write.ps1'
+    )
+    'harness-contracts' = @(
+        'verify-harness-entry.ps1',
+        'verify-lite-artifact-validator.ps1',
+        'verify-lite-footprint.ps1',
+        'verify-minimal-safe-change-policy.ps1',
+        'verify-no-node-install-dependency.ps1',
+        'verify-placeholder-rendering.ps1',
+        'verify-workflow-contracts.ps1',
+        'verify-workflow-descriptor.ps1',
+        'verify-shared-memory-layers.ps1',
+        'verify-stage-discipline-matrix.ps1',
+        'verify-release-validation.ps1',
+        'verify-runtime-state-contract.ps1',
+        'verify-skill-manifest.ps1',
+        'verify-task-artifact-drift-audit.ps1',
+        'verify-tool-profile.ps1'
+    )
+}
+$coreScripts = @($coreScriptGroups.Values | ForEach-Object { $_ })
 
 if ($Suite -eq 'quick') {
     $scriptNames = @('verify-lite-footprint.ps1')
 } elseif ($Suite -eq 'core') {
-    $scriptNames = $coreScripts
+    if ($CoreGroup -eq 'all') {
+        $scriptNames = $coreScripts
+    } else {
+        $scriptNames = @($coreScriptGroups[$CoreGroup])
+    }
 } else {
     $scriptNames = Get-ChildItem -LiteralPath $testsRoot -Filter 'verify-*.ps1' -File |
         Where-Object { $_.Name -ne 'verify-installation.ps1' } |
@@ -186,6 +208,7 @@ if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
 }
 
 Write-Output ("Validation suite: {0}" -f $Suite)
+Write-Output ("Core group: {0}" -f $CoreGroup)
 Write-Output ("RepoRoot: {0}" -f $repoRootResolved)
 Write-Output ("PowerShell host: {0}" -f (Get-Process -Id $PID -ErrorAction Stop).Path)
 Write-Output ''

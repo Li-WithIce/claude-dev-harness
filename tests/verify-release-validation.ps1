@@ -230,6 +230,12 @@ $checks = @()
 
 function Add-Check { param([string]$Message) $script:checks += $Message }
 function Add-Failure { param([string]$Message) $script:failures += $Message }
+function Get-WorkflowJobBlock {
+    param([string]$Text,[string]$JobId)
+    $pattern = '(?ms)^  {0}:[ \t]*\r?$.*?(?=^  [A-Za-z0-9_-]+:[ \t]*\r?$|\z)' -f [regex]::Escape($JobId)
+    $matches = [regex]::Matches($Text,$pattern)
+    return [pscustomobject]@{ Count=$matches.Count; Value=$(if($matches.Count -eq 1){$matches[0].Value}else{''}) }
+}
 
 function Get-ExactValidationScratchNames {
     return @(Get-ChildItem -LiteralPath ([IO.Path]::GetTempPath()) -Directory -Filter 'dev-harness-validation-*' -Force -ErrorAction SilentlyContinue |
@@ -528,11 +534,18 @@ $quietProcessSource = if ($null -eq $quietProcessFunction) { '' } else { $quietP
 $workflow = Get-Content -LiteralPath $workflowPath -Raw -Encoding utf8
 $readme = Get-Content -LiteralPath $readmePath -Raw -Encoding utf8
 $rolloutGenerator = Get-Content -LiteralPath (Join-Path $RepoRoot 'scripts\generate-v2-rollout-report.ps1') -Raw -Encoding utf8
-$prCoreJob = [regex]::Match($workflow,'(?ms)^  pr-core:\s*$.*?(?=^  changed-optional:\s*$)').Value
-$changedOptionalJob = [regex]::Match($workflow,'(?ms)^  changed-optional:\s*$.*?(?=^  release-model:\s*$)').Value
-$releaseModelJob = [regex]::Match($workflow,'(?ms)^  release-model:\s*$.*?(?=^  release-host:\s*$)').Value
-$releaseHostJob = [regex]::Match($workflow,'(?ms)^  release-host:\s*$.*?(?=^  release-full:\s*$)').Value
-$releaseJob = [regex]::Match($workflow,'(?ms)^  release-full:\s*$.*\z').Value
+$prCoreChecksBlock = Get-WorkflowJobBlock -Text $workflow -JobId 'pr-core-checks'
+$prCoreBlock = Get-WorkflowJobBlock -Text $workflow -JobId 'pr-core'
+$changedOptionalBlock = Get-WorkflowJobBlock -Text $workflow -JobId 'changed-optional'
+$releaseModelBlock = Get-WorkflowJobBlock -Text $workflow -JobId 'release-model'
+$releaseHostBlock = Get-WorkflowJobBlock -Text $workflow -JobId 'release-host'
+$releaseBlock = Get-WorkflowJobBlock -Text $workflow -JobId 'release-full'
+$prCoreChecksJob = $prCoreChecksBlock.Value
+$prCoreJob = $prCoreBlock.Value
+$changedOptionalJob = $changedOptionalBlock.Value
+$releaseModelJob = $releaseModelBlock.Value
+$releaseHostJob = $releaseHostBlock.Value
+$releaseJob = $releaseBlock.Value
 $producerRunnerPattern = '(?ms)^\s*runs-on:\s*\r?\n\s*-\s*self-hosted\s*\r?\n\s*-\s*Windows\s*\r?\n\s*-\s*\$\{\{\s*vars\.THIN_V2_RELEASE_RUNNER\s*\}\}\s*$'
 $aggregatorRunnerPattern = '(?ms)^\s*runs-on:\s*\r?\n\s*-\s*self-hosted\s*\r?\n\s*-\s*Windows\s*\r?\n\s*-\s*\$\{\{\s*vars\.THIN_V2_RELEASE_AGGREGATOR_RUNNER\s*\}\}\s*$'
 $modelUpload = [regex]::Match($releaseModelJob,'(?ms)^      - name: Upload model evidence\s*$.*\z').Value
@@ -719,15 +732,37 @@ if ($null -eq $quietProcessFunction) {
     }
 }
 
+if (@($prCoreChecksBlock,$prCoreBlock,$changedOptionalBlock,$releaseModelBlock,$releaseHostBlock,$releaseBlock | Where-Object Count -eq 1).Count -eq 6) {
+    Add-Check 'release workflow declares each PR and release job exactly once'
+} else {
+    Add-Failure 'release workflow PR or release jobs are missing or duplicated'
+}
+$prCoreGuardPattern = '(?ms)^    steps:[ \t]*\r?\n^      - name: Require all core groups to pass[ \t]*\r?\n^        shell: pwsh[ \t]*\r?\n^        env:[ \t]*\r?\n^          CORE_CHECKS_RESULT: \$\{\{[ \t]*needs\.pr-core-checks\.result[ \t]*\}\}[ \t]*\r?\n^        run: \|[ \t]*\r?\n^          if \(\$env:CORE_CHECKS_RESULT -cne ''success''\) \{[ \t]*\r?\n^              throw "PR core checks did not succeed: \$env:CORE_CHECKS_RESULT"[ \t]*\r?\n^          \}[ \t]*\r?\n(?:^[ \t]*\r?\n)?(?=^      - name: Check out repository[ \t]*\r?$)'
+$prCoreGuardIndex = $prCoreJob.IndexOf('Require all core groups to pass',[StringComparison]::Ordinal)
+$prCoreCheckoutIndex = $prCoreJob.IndexOf('Check out repository',[StringComparison]::Ordinal)
+$prCoreRollbackIndex = $prCoreJob.IndexOf('Core installation rollback',[StringComparison]::Ordinal)
+$prCoreGuardValid = @([regex]::Matches($prCoreJob,$prCoreGuardPattern)).Count -eq 1 -and $prCoreGuardIndex -ge 0 -and $prCoreCheckoutIndex -gt $prCoreGuardIndex -and $prCoreRollbackIndex -gt $prCoreCheckoutIndex
+
 if ($runner -match '(?m)^\s*\[int\]\$CheckTimeoutSeconds = 360\s*$' -and
+    $runner -match '(?m)^\s*\[string\]\$CoreGroup = ''all''\s*,?\s*$' -and
+    $runner -match [regex]::Escape("'-CoreGroup',`$CoreGroup") -and
+    $runner -match [regex]::Escape("if (`$Suite -ne 'core' -and `$CoreGroup -ne 'all')") -and
     $runner -match "verify-host-benchmark-qualification\.ps1'\) \{ \[math\]::Max\(\`$CheckTimeoutSeconds,900\)" -and
+    $prCoreChecksJob -match '(?m)^    timeout-minutes:\s*45\s*$' -and
     $prCoreJob -match '(?m)^    timeout-minutes:\s*45\s*$' -and
     $changedOptionalJob -match '(?m)^    timeout-minutes:\s*30\s*$' -and
     $releaseModelJob -match '(?m)^    timeout-minutes:\s*120\s*$' -and
     $releaseHostJob -match '(?m)^    timeout-minutes:\s*180\s*$' -and
     $releaseJob -match '(?m)^    timeout-minutes:\s*120\s*$' -and
     $releaseJob -match '(?m)^\s*fetch-depth:\s*0\s*$' -and
-    $prCoreJob -match '(?m)^        run:\s+pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation\.ps1 -Suite core -CheckTimeoutSeconds 360\s*$' -and
+    $prCoreChecksJob -match '(?m)^      fail-fast:\s*false\s*$' -and
+    $prCoreChecksJob -match '(?m)^        run:\s+pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation\.ps1 -Suite core -CoreGroup \$\{\{ matrix\.core_group \}\} -CheckTimeoutSeconds 360\s*$' -and
+    $prCoreChecksJob -notmatch '(?m)^\s{4,8}continue-on-error:' -and
+    $prCoreChecksJob -notmatch 'run-isolated-install-smoke\.ps1' -and
+    @([regex]::Matches($prCoreJob,'(?m)^    needs:[ \t]*pr-core-checks[ \t]*\r?$')).Count -eq 1 -and
+    @([regex]::Matches($prCoreJob,'(?m)^    if:[ \t]*\$\{\{[ \t]*always\(\)[ \t]*&&[ \t]*github\.event_name[ \t]*==[ \t]*''pull_request''[ \t]*\}\}[ \t]*\r?$')).Count -eq 1 -and
+    $prCoreGuardValid -and $prCoreJob -notmatch '(?m)^\s{4,8}continue-on-error:' -and
+    $prCoreJob -notmatch 'run-validation\.ps1 -Suite core' -and
     $rolloutGenerator -match 'run-validation\.ps1 -Suite all -CheckTimeoutSeconds 360 -VerboseOutput' -and
     $rolloutGenerator -match '\(\?m\)\^\\\[UNAVAILABLE\\\]\\s\+' -and
     $changedOptionalJob -match '(?m)^        run:\s+pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-changed-optional-validation\.ps1 -RepoRoot \$PWD -ChangedPathsFile changed-paths\.txt\s*$' -and
@@ -736,10 +771,10 @@ if ($runner -match '(?m)^\s*\[int\]\$CheckTimeoutSeconds = 360\s*$' -and
     $rolloutGenerator -match 'run-isolated-install-smoke\.ps1 -Preset full' -and
     $workflow -notmatch 'verify-installation\.ps1' -and
     $workflow -notmatch '(?m)^\s*&\s+\.\\uninstall\.ps1' -and
-    $readme -match '`pr-core` job 上限为 45 分钟，`changed-optional` job 上限为 30 分钟，model/host/聚合 job 上限分别为 120/180/120 分钟；model/host 的单次 Codex 调用上限分别为 120/900 秒；常规 verify 脚本上限为 360 秒，磁盘密集的 host benchmark qualification 单项上限为 900 秒') {
-    Add-Check 'CI layers share bounded validation budgets and delegate install rollback to the smoke runner'
+    $readme -match '`pr-core-checks` 的每个 matrix leg 与最终 `pr-core` job 上限均为 45 分钟') {
+    Add-Check 'CI layers shard core checks, fail closed through pr-core, and delegate rollback with bounded budgets'
 } else {
-    Add-Failure 'CI layers, local runner, and README should share bounded budgets and delegate install rollback to the smoke runner'
+    Add-Failure 'CI core sharding, fail-closed pr-core gate, bounded budgets, rollback delegation, or README contract is incomplete'
 }
 
 if ($releaseModelJob -match 'run-model-evals\.ps1[^\r\n]+-TimeoutSeconds 120[^\r\n]+-CodexHome \$env:HOST_BENCHMARK_CODEX_HOME[^\r\n]+model-eval\.json' -and
@@ -783,10 +818,10 @@ $checkoutAction = 'actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5'
 $uploadAction = 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'
 $downloadAction = 'actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093'
 
-if (@([regex]::Matches($workflow,[regex]::Escape($checkoutAction))).Count -eq 5 -and
-    @([regex]::Matches($workflow,[regex]::Escape($uploadAction))).Count -eq 3 -and
-    @([regex]::Matches($workflow,[regex]::Escape($downloadAction))).Count -eq 2 -and
-    $workflow -notmatch 'actions/(?:checkout|upload-artifact|download-artifact)@v\d+') {
+if (@([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($checkoutAction)))).Count -eq 6 -and
+    @([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($uploadAction)))).Count -eq 3 -and
+    @([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($downloadAction)))).Count -eq 2 -and
+    $workflow -notmatch '(?m)^\s*uses:\s*actions/(?:checkout|upload-artifact|download-artifact)@v\d+') {
     Add-Check 'release workflow pins every GitHub Action dependency to a verified full commit SHA'
 } else {
     Add-Failure 'release workflow must pin GitHub Action dependencies to the approved commits'

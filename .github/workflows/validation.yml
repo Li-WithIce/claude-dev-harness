@@ -14,8 +14,17 @@ permissions:
   contents: read
 
 jobs:
-  pr-core:
+  pr-core-checks:
     if: github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        core_group:
+          - entry-lifecycle
+          - evaluation-release
+          - install-evidence
+          - governance-approval
+          - harness-contracts
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -26,7 +35,27 @@ jobs:
 
       - name: PR core validation
         shell: pwsh
-        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation.ps1 -Suite core -CheckTimeoutSeconds 360
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation.ps1 -Suite core -CoreGroup ${{ matrix.core_group }} -CheckTimeoutSeconds 360
+
+  pr-core:
+    needs: pr-core-checks
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Require all core groups to pass
+        shell: pwsh
+        env:
+          CORE_CHECKS_RESULT: ${{ needs.pr-core-checks.result }}
+        run: |
+          if ($env:CORE_CHECKS_RESULT -cne 'success') {
+              throw "PR core checks did not succeed: $env:CORE_CHECKS_RESULT"
+          }
+
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
 
       - name: Core installation rollback
         shell: pwsh

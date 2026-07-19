@@ -10,6 +10,12 @@ $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 $script:checks = [System.Collections.Generic.List[string]]::new()
 $script:failures = [System.Collections.Generic.List[string]]::new()
 function Check { param([bool]$Condition,[string]$Pass,[string]$Fail) if($Condition){$script:checks.Add($Pass)}else{$script:failures.Add($Fail)} }
+function Get-WorkflowJobBlock {
+    param([string]$Text,[string]$JobId)
+    $pattern = '(?ms)^  {0}:[ \t]*\r?$.*?(?=^  [A-Za-z0-9_-]+:[ \t]*\r?$|\z)' -f [regex]::Escape($JobId)
+    $matches = [regex]::Matches($Text,$pattern)
+    return [pscustomobject]@{ Count=$matches.Count; Value=$(if($matches.Count -eq 1){$matches[0].Value}else{''}) }
+}
 function Get-Route {
     param([string[]]$Paths)
     $output = @(& $script:router -RepoRoot $RepoRoot -ChangedPaths $Paths -ListOnly -AsJson)
@@ -61,9 +67,17 @@ Check ($routing.run_all_optional -and @($routing.modules).Count -eq 5 -and @($ro
 
 $workflow = Get-Content -LiteralPath $workflowPath -Raw -Encoding utf8
 $rolloutGenerator = Get-Content -LiteralPath $rolloutGeneratorPath -Raw -Encoding utf8
-$releaseModelJob = [regex]::Match($workflow,'(?ms)^  release-model:\s*$.*?(?=^  release-host:\s*$)').Value
-$releaseHostJob = [regex]::Match($workflow,'(?ms)^  release-host:\s*$.*?(?=^  release-full:\s*$)').Value
-$releaseJob = [regex]::Match($workflow,'(?ms)^  release-full:\s*$.*\z').Value
+$prCoreChecksBlock = Get-WorkflowJobBlock -Text $workflow -JobId 'pr-core-checks'
+$prCoreBlock = Get-WorkflowJobBlock -Text $workflow -JobId 'pr-core'
+$changedOptionalBlock = Get-WorkflowJobBlock -Text $workflow -JobId 'changed-optional'
+$releaseModelBlock = Get-WorkflowJobBlock -Text $workflow -JobId 'release-model'
+$releaseHostBlock = Get-WorkflowJobBlock -Text $workflow -JobId 'release-host'
+$releaseBlock = Get-WorkflowJobBlock -Text $workflow -JobId 'release-full'
+$prCoreChecksJob = $prCoreChecksBlock.Value
+$prCoreJob = $prCoreBlock.Value
+$releaseModelJob = $releaseModelBlock.Value
+$releaseHostJob = $releaseHostBlock.Value
+$releaseJob = $releaseBlock.Value
 $producerRunnerPattern = '(?ms)^\s*runs-on:\s*\r?\n\s*-\s*self-hosted\s*\r?\n\s*-\s*Windows\s*\r?\n\s*-\s*\$\{\{\s*vars\.THIN_V2_RELEASE_RUNNER\s*\}\}\s*$'
 $aggregatorRunnerPattern = '(?ms)^\s*runs-on:\s*\r?\n\s*-\s*self-hosted\s*\r?\n\s*-\s*Windows\s*\r?\n\s*-\s*\$\{\{\s*vars\.THIN_V2_RELEASE_AGGREGATOR_RUNNER\s*\}\}\s*$'
 $modelUpload = [regex]::Match($releaseModelJob,'(?ms)^      - name: Upload model evidence\s*$.*\z').Value
@@ -83,10 +97,22 @@ foreach ($producer in @($releaseModelJob,$releaseHostJob)) {
         $producer -notmatch '(?i)secrets\.') { $trustedProducerCount++ }
 }
 Check ($workflow -match '(?m)^\s*schedule:\s*$' -and $workflow -match '(?m)^\s*workflow_dispatch:\s*$') 'CI exposes nightly and manual release validation' 'CI lacks nightly or manual release validation'
-Check ($workflow -match '(?m)^\s*pr-core:\s*$' -and $workflow -match '(?m)^\s*changed-optional:\s*$' -and $workflow -match '(?m)^\s*release-model:\s*$' -and $workflow -match '(?m)^\s*release-host:\s*$' -and $workflow -match '(?m)^\s*release-full:\s*$') 'CI declares PR core, changed optional, split release producers, and release full jobs' 'CI job layering is incomplete'
-Check (@([regex]::Matches($workflow,[regex]::Escape($checkoutAction))).Count -eq 5 -and @([regex]::Matches($workflow,[regex]::Escape($uploadAction))).Count -eq 3 -and @([regex]::Matches($workflow,[regex]::Escape($downloadAction))).Count -eq 2 -and $workflow -notmatch 'actions/(?:checkout|upload-artifact|download-artifact)@v\d+') 'every GitHub Action dependency is pinned to a verified full commit SHA' 'GitHub Action dependencies are movable or not pinned to the approved commits'
-Check ($workflow -match 'run-validation\.ps1 -Suite core' -and $workflow -match 'run-changed-optional-validation\.ps1' -and $rolloutGenerator -match 'run-validation\.ps1 -Suite all') 'each CI layer delegates to the expected validation entry' 'CI layer commands are wrong'
-Check ($workflow -match 'run-isolated-install-smoke\.ps1[^\r\n]+-Preset core' -and $workflow -match 'generate-v2-rollout-report\.ps1' -and $rolloutGenerator -match 'run-isolated-install-smoke\.ps1 -Preset core' -and $rolloutGenerator -match 'run-isolated-install-smoke\.ps1 -Preset full') 'PR and release jobs cover core/full install rollback' 'CI install rollback coverage is incomplete'
+Check (@($prCoreChecksBlock,$prCoreBlock,$changedOptionalBlock,$releaseModelBlock,$releaseHostBlock,$releaseBlock | Where-Object Count -eq 1).Count -eq 6) 'CI declares each PR and release job exactly once' 'CI job layering is missing or duplicated'
+Check (@([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($checkoutAction)))).Count -eq 6 -and @([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($uploadAction)))).Count -eq 3 -and @([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($downloadAction)))).Count -eq 2 -and $workflow -notmatch '(?m)^\s*uses:\s*actions/(?:checkout|upload-artifact|download-artifact)@v\d+') 'every GitHub Action dependency is pinned to a verified full commit SHA' 'GitHub Action dependencies are movable or not pinned to the approved commits'
+$expectedCoreGroups = @('entry-lifecycle','evaluation-release','install-evidence','governance-approval','harness-contracts')
+$matrixPattern = '(?m)^    strategy:[ \t]*\r?\n^      fail-fast:[ \t]*false[ \t]*\r?\n^      matrix:[ \t]*\r?\n^        core_group:[ \t]*\r?\n(?<items>(?:^          - (?<group>[a-z0-9-]+)[ \t]*\r?(?:\n|\z))+)(?=^    runs-on:[ \t])'
+$matrixMatches = [regex]::Matches($prCoreChecksJob,$matrixPattern)
+$matrixGroups = if($matrixMatches.Count -eq 1){@($matrixMatches[0].Groups['group'].Captures | ForEach-Object Value)}else{@()}
+Check ($matrixMatches.Count -eq 1 -and ($matrixGroups -join '|') -ceq ($expectedCoreGroups -join '|') -and @($matrixGroups | Sort-Object -CaseSensitive -Unique).Count -eq 5 -and $prCoreChecksJob -notmatch '(?m)^\s{4,8}continue-on-error:') 'PR core matrix runs five exact groups without fail-fast or masked failures' 'PR core matrix groups, fail-fast, or failure semantics are unsafe'
+Check ($prCoreChecksJob -match '(?m)^        run:\s+pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation\.ps1 -Suite core -CoreGroup \$\{\{ matrix\.core_group \}\} -CheckTimeoutSeconds 360\s*$' -and $prCoreChecksJob -notmatch 'run-isolated-install-smoke\.ps1' -and $prCoreJob -notmatch 'run-validation\.ps1 -Suite core') 'core shards and rollback gate delegate only their assigned work' 'core validation or rollback work is duplicated across jobs'
+$guardPattern = '(?ms)^    steps:[ \t]*\r?\n^      - name: Require all core groups to pass[ \t]*\r?\n^        shell: pwsh[ \t]*\r?\n^        env:[ \t]*\r?\n^          CORE_CHECKS_RESULT: \$\{\{[ \t]*needs\.pr-core-checks\.result[ \t]*\}\}[ \t]*\r?\n^        run: \|[ \t]*\r?\n^          if \(\$env:CORE_CHECKS_RESULT -cne ''success''\) \{[ \t]*\r?\n^              throw "PR core checks did not succeed: \$env:CORE_CHECKS_RESULT"[ \t]*\r?\n^          \}[ \t]*\r?\n(?:^[ \t]*\r?\n)?(?=^      - name: Check out repository[ \t]*\r?$)'
+$guardMatches = [regex]::Matches($prCoreJob,$guardPattern)
+$guardIndex = $prCoreJob.IndexOf('Require all core groups to pass',[StringComparison]::Ordinal)
+$checkoutIndex = $prCoreJob.IndexOf('Check out repository',[StringComparison]::Ordinal)
+$rollbackIndex = $prCoreJob.IndexOf('Core installation rollback',[StringComparison]::Ordinal)
+Check (@([regex]::Matches($prCoreJob,'(?m)^    needs:[ \t]*pr-core-checks[ \t]*\r?$')).Count -eq 1 -and @([regex]::Matches($prCoreJob,'(?m)^    if:[ \t]*\$\{\{[ \t]*always\(\)[ \t]*&&[ \t]*github\.event_name[ \t]*==[ \t]*''pull_request''[ \t]*\}\}[ \t]*\r?$')).Count -eq 1 -and $guardMatches.Count -eq 1 -and $guardIndex -ge 0 -and $checkoutIndex -gt $guardIndex -and $rollbackIndex -gt $checkoutIndex -and $prCoreJob -notmatch '(?m)^\s{4,8}continue-on-error:') 'required pr-core fails closed before checkout and rollback when any shard is not successful' 'required pr-core can become skipped-success, mask a shard failure, or run rollback before its guard'
+Check ($changedOptionalBlock.Value -match 'run-changed-optional-validation\.ps1' -and $rolloutGenerator -match 'run-validation\.ps1 -Suite all') 'optional and release layers delegate to their expected validation entries' 'optional or release validation entry is wrong'
+Check ($prCoreJob -match 'run-isolated-install-smoke\.ps1[^\r\n]+-Preset core' -and $workflow -match 'generate-v2-rollout-report\.ps1' -and $rolloutGenerator -match 'run-isolated-install-smoke\.ps1 -Preset core' -and $rolloutGenerator -match 'run-isolated-install-smoke\.ps1 -Preset full') 'PR and release jobs cover core/full install rollback' 'CI install rollback coverage is incomplete'
 Check ($trustedProducerCount -eq 2 -and $releaseJob -match $aggregatorRunnerPattern -and $releaseJob -match '(?m)^\s*environment:\s*thin-v2-release\s*$' -and $releaseJob -match '(?m)^\s*persist-credentials:\s*false\s*$' -and $releaseJob -notmatch 'HOST_BENCHMARK_CODEX_HOME' -and $releaseJob -notmatch '(?i)secrets\.') 'credentialed producers and credential-blind aggregator use separate dedicated runner labels' 'release runner, trusted-ref, environment, or credential-blind aggregator boundary is unsafe'
 $producerBoundaryCount = 0
 foreach ($producer in @($releaseModelJob,$releaseHostJob)) {
@@ -113,10 +139,68 @@ Check ($releaseUpload -match '!cancelled\(\)' -and $releaseUpload -match [regex]
 Check ($rolloutGenerator -match 'ModelEvalReportPath' -and $rolloutGenerator -match 'HostBenchmarkReportPath' -and $rolloutGenerator -match 'run-validation\.ps1 -Suite all' -and $rolloutGenerator -notmatch 'run-scenario-evals\.ps1 -Suite core' -and $rolloutGenerator -notmatch 'benchmark-harness\.ps1 -Compare bare,v1,v2') 'rollout eligibility consumes real reports while deterministic eval and fixture replay remain non-release evidence' 'rollout eligibility still substitutes deterministic or fixture evidence for real qualification'
 
 $validation = Get-Content -LiteralPath $validationPath -Raw -Encoding utf8
-$coreBlock = [regex]::Match($validation,'(?s)\$coreScripts\s*=\s*@\((?<body>.*?)\r?\n\)').Groups['body'].Value
+$validationTokens=$null;$validationErrors=$null
+$validationAst=[System.Management.Automation.Language.Parser]::ParseFile($validationPath,[ref]$validationTokens,[ref]$validationErrors)
+$expectedCoreScripts = @(
+    'verify-adversarial-review-gate.ps1','verify-entry-routing-clarification.ps1','verify-v2-entry-contract.ps1','verify-v2-direct-no-artifacts.ps1',
+    'verify-v2-requirement-gate.ps1','verify-v2-json-compat.ps1','verify-v2-task-state.ps1','verify-v2-model-neutrality.ps1',
+    'verify-v1-v2-coexistence.ps1','verify-v1-to-v2-migration.ps1','verify-v2-default-flip.ps1','verify-v2-runtime-memory-decoupling.ps1',
+    'run-scenario-evals.ps1','verify-model-eval-runner.ps1','verify-rollout-evidence.ps1','verify-host-benchmark-runner.ps1',
+    'verify-host-benchmark-otel.ps1','verify-host-benchmark-qualification.ps1','verify-release-runner-boundary.ps1','verify-v2-ci-routing.ps1',
+    'verify-v2-install-presets.ps1','verify-v2-evidence.ps1',
+    'verify-v2-governed-audit.ps1','verify-v2-approval.ps1','verify-v2-readonly-zero-write.ps1',
+    'verify-harness-entry.ps1','verify-lite-artifact-validator.ps1','verify-lite-footprint.ps1','verify-minimal-safe-change-policy.ps1',
+    'verify-no-node-install-dependency.ps1','verify-placeholder-rendering.ps1','verify-workflow-contracts.ps1','verify-workflow-descriptor.ps1',
+    'verify-shared-memory-layers.ps1','verify-stage-discipline-matrix.ps1','verify-release-validation.ps1','verify-runtime-state-contract.ps1',
+    'verify-skill-manifest.ps1','verify-task-artifact-drift-audit.ps1','verify-tool-profile.ps1'
+)
+$expectedGroupSizes = [ordered]@{'entry-lifecycle'=12;'evaluation-release'=8;'install-evidence'=2;'governance-approval'=3;'harness-contracts'=15}
+$coreGroupAssignments = @($validationAst.FindAll({param($node)$node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -ceq '$coreScriptGroups'},$true))
+$coreGroupNames=[Collections.Generic.List[string]]::new();$coreGroupSizes=[Collections.Generic.List[int]]::new();$actualCoreScripts=[Collections.Generic.List[string]]::new();$coreShapeValid=$validationErrors.Count -eq 0 -and $coreGroupAssignments.Count -eq 1
+if($coreShapeValid){
+    $hashes=@($coreGroupAssignments[0].Right.FindAll({param($node)$node -is [System.Management.Automation.Language.HashtableAst]},$true));$coreShapeValid=$hashes.Count -eq 1
+    if($coreShapeValid){foreach($pair in $hashes[0].KeyValuePairs){
+        try{$name=[string]$pair.Item1.SafeGetValue();$members=@($pair.Item2.SafeGetValue())}catch{$coreShapeValid=$false;break}
+        if($pair.Item1 -isnot [System.Management.Automation.Language.StringConstantExpressionAst] -or [string]::IsNullOrWhiteSpace($name) -or @($members | Where-Object {$_ -isnot [string] -or $_ -cnotmatch '^[a-z0-9-]+\.ps1$'}).Count){$coreShapeValid=$false;break}
+        $coreGroupNames.Add($name);$coreGroupSizes.Add($members.Count);foreach($member in $members){$actualCoreScripts.Add([string]$member)}
+    }}
+}
+$coreScriptAssignments = @($validationAst.FindAll({param($node)$node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -ceq '$coreScripts'},$true))
+$flattenValid = $coreScriptAssignments.Count -eq 1 -and (($coreScriptAssignments[0].Right.Extent.Text -replace '\s','') -ceq '@($coreScriptGroups.Values|ForEach-Object{$_})')
+$scriptNameAssignments = @($validationAst.FindAll({param($node)$node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -ceq '$scriptNames'},$true))
+$namedGroupAssignments = @($scriptNameAssignments | Where-Object { (($_.Right.Extent.Text -replace '\s','') -ceq '@($coreScriptGroups[$CoreGroup])') })
+$groupSelectionValid = $false
+if($scriptNameAssignments.Count -eq 4 -and $namedGroupAssignments.Count -eq 1){
+    $namedGroupAssignment = $namedGroupAssignments[0]
+    $coreGroupIf = $namedGroupAssignment.Parent.Parent
+    if($coreGroupIf -is [System.Management.Automation.Language.IfStatementAst] -and
+        $coreGroupIf.Clauses.Count -eq 1 -and
+        (($coreGroupIf.Clauses[0].Item1.Extent.Text -replace '\s','') -ceq '$CoreGroup-eq''all''') -and
+        $null -ne $coreGroupIf.ElseClause -and
+        [object]::ReferenceEquals($namedGroupAssignment.Parent,$coreGroupIf.ElseClause) -and
+        @($coreGroupIf.ElseClause.Statements).Count -eq 1){
+        $suiteIf = $coreGroupIf.Parent.Parent
+        $groupSelectionValid = $suiteIf -is [System.Management.Automation.Language.IfStatementAst] -and
+            $suiteIf.Clauses.Count -eq 2 -and
+            (($suiteIf.Clauses[1].Item1.Extent.Text -replace '\s','') -ceq '$Suite-eq''core''') -and
+            [object]::ReferenceEquals($coreGroupIf.Parent,$suiteIf.Clauses[1].Item2) -and
+            @($suiteIf.Clauses[1].Item2.Statements).Count -eq 1
+    }
+}
+$coreGroupParameters = @($validationAst.ParamBlock.Parameters | Where-Object {$_.Name.VariablePath.UserPath -ceq 'CoreGroup'})
+$coreGroupValidateSet = @()
+if($coreGroupParameters.Count -eq 1){
+    $coreGroupValidateSet = @($coreGroupParameters[0].Attributes | Where-Object {$_.TypeName.FullName -ceq 'ValidateSet'})
+}
+$coreGroupAllowed = @()
+if($coreGroupValidateSet.Count -eq 1){
+    $coreGroupAllowed = @($coreGroupValidateSet[0].PositionalArguments | ForEach-Object {$_.SafeGetValue()})
+}
+$coreGroupDefault = if($coreGroupParameters.Count -eq 1){$coreGroupParameters[0].DefaultValue.SafeGetValue()}else{''}
 $optionalNames = @('verify-ask-codex.ps1','verify-codex-entry-autoload.ps1','verify-code-intel-provider-boundary.ps1','verify-context-provider-boundary.ps1','verify-context-provider-install-isolation.ps1','verify-memory-provider-boundary.ps1','verify-md-html-review-renderer.ps1','verify-provider-usage-recording.ps1','verify-render-review-html.ps1','verify-aiteamcode-skill-contract.ps1')
-Check ($coreBlock -match 'run-scenario-evals\.ps1' -and $coreBlock -match 'verify-v2-ci-routing\.ps1') 'core suite includes behavior and CI routing gates' 'core suite omits PR-13 gates'
-Check (@($optionalNames | Where-Object { $coreBlock -match [regex]::Escape($_) }).Count -eq 0) 'core suite excludes changed-path optional modules' 'core suite still runs optional heavy modules unconditionally'
+Check ($coreShapeValid -and ($coreGroupNames -join '|') -ceq (@($expectedGroupSizes.Keys) -join '|') -and ($coreGroupSizes -join '|') -ceq (@($expectedGroupSizes.Values) -join '|') -and $actualCoreScripts.Count -eq 40 -and @($actualCoreScripts | Sort-Object -CaseSensitive -Unique).Count -eq 40 -and ($actualCoreScripts -join '|') -ceq ($expectedCoreScripts -join '|') -and @($actualCoreScripts | Where-Object {-not(Test-Path -LiteralPath (Join-Path $RepoRoot "tests\$_") -PathType Leaf)}).Count -eq 0) 'five core groups contain the exact forty unique scripts in legacy order' 'core group shape, boundary, membership, uniqueness, order, or files drifted'
+Check ($flattenValid -and $groupSelectionValid -and $coreGroupDefault -ceq 'all' -and ($coreGroupAllowed -join '|') -ceq ((@('all')+$expectedCoreGroups) -join '|') -and $validation -match "'-CoreGroup',\`$CoreGroup" -and $validation -match "\`$Suite -ne 'core'.*\`$CoreGroup -ne 'all'") 'CoreGroup defaults to the full legacy suite, bridges safely, and rejects non-core use' 'CoreGroup parameter, flattening, bridge, or selection contract drifted'
+Check (@($optionalNames | Where-Object {$actualCoreScripts -ccontains $_}).Count -eq 0) 'core suite excludes changed-path optional modules' 'core suite still runs optional heavy modules unconditionally'
 
 $readme = Get-Content -LiteralPath $readmePath -Raw -Encoding utf8
 $scenarioDoc = Get-Content -LiteralPath $scenarioDocPath -Raw -Encoding utf8
