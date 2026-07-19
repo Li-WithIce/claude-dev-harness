@@ -127,7 +127,7 @@ while($true){
             'ping'{Write-McpMessage (New-McpResult -Id $id -Result ([ordered]@{}))}
             'tools/list'{Write-McpMessage (New-McpResult -Id $id -Result ([ordered]@{tools=@(Get-McpToolDefinition)}))}
             'tools/call'{
-                if(-not$request.Contains('params')-or$request.params-isnot[Collections.IDictionary]-or-not(Test-McpExactKeys -Value $request.params -Required @('name','arguments'))-or$request.params.name-isnot[string]-or$request.params.arguments-isnot[Collections.IDictionary]){Write-McpMessage (New-McpError -Id $id -Code -32602 -Message 'Invalid params');continue}
+                if(-not$request.Contains('params')-or$request.params-isnot[Collections.IDictionary]-or-not(Test-McpExactKeys -Value $request.params -Required @('name','arguments') -Optional @('_meta'))-or$request.params.name-isnot[string]-or$request.params.arguments-isnot[Collections.IDictionary]-or($request.params.Contains('_meta')-and$request.params._meta-isnot[Collections.IDictionary])){Write-McpMessage (New-McpError -Id $id -Code -32602 -Message 'Invalid params');continue}
                 if([string]$request.params.name-cne'write_file'){Write-McpMessage (New-McpError -Id $id -Code -32602 -Message 'Unknown tool');continue}
                 try{
                     $toolResult=Invoke-McpWriteTool -Arguments $request.params.arguments

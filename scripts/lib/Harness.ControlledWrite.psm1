@@ -16,6 +16,7 @@ function Test-HarnessControlledPathAtOrBelow {
 function Assert-HarnessControlledTarget {
     param([string]$RepoRoot,[string]$WorkspaceRoot,[string]$Path)
     if([string]::IsNullOrWhiteSpace($Path)-or[IO.Path]::IsPathRooted($Path)){throw 'controlled write path must be a non-empty workspace-relative path'}
+    if($Path.Contains(':')){throw 'controlled writer refuses alternate data stream paths'}
     $full=Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $Path -Label 'controlled write target' -AllowMissing
     $relative=(Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path $full).Replace('\','/')
     $lower=$relative.ToLowerInvariant()
@@ -25,6 +26,16 @@ function Assert-HarnessControlledTarget {
     $physicalTarget=[IO.Path]::GetFullPath((Join-Path $physicalWorkspace $relative))
     if(Test-HarnessControlledPathAtOrBelow -Path $physicalTarget -Root $physicalRepo){throw 'controlled writer cannot modify its RepoRoot trust boundary'}
     return [pscustomobject]@{FullPath=$full;RelativePath=$relative}
+}
+
+function Assert-HarnessControlledPreimage {
+    param([string]$WorkspaceRoot,[string]$Path,[string]$ExpectedCurrentDigest)
+    $actual=Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $Path
+    if($ExpectedCurrentDigest-ceq'missing'){
+        if($null-ne$actual){throw 'controlled write target digest changed before authorization'}
+    }elseif($null-eq$actual-or$actual-cne$ExpectedCurrentDigest){
+        throw 'controlled write target digest changed before authorization'
+    }
 }
 
 function Get-HarnessControlledMutexName {
@@ -108,6 +119,7 @@ function Invoke-HarnessControlledWrite {
     try{
         $writerMutex=Enter-HarnessControlledMutex -Name (Get-HarnessControlledMutexName -WorkspaceIdentity $workspaceIdentity -Suffix 'writer')
         if((Get-HarnessPhysicalPathIdentity -Path $WorkspaceRoot)-cne$workspaceIdentity){throw 'WorkspaceRoot physical identity changed during controlled write'}
+        Assert-HarnessControlledPreimage -WorkspaceRoot $WorkspaceRoot -Path $target.RelativePath -ExpectedCurrentDigest $ExpectedCurrentDigest
         if(-not[string]::IsNullOrWhiteSpace($TaskId)){$taskMutex=Enter-HarnessControlledMutex -Name (Get-HarnessControlledMutexName -WorkspaceIdentity $workspaceIdentity -Suffix "task.$TaskId")}
         $guardArgs=@{RepoRoot=$RepoRoot;WorkspaceRoot=$WorkspaceRoot;SessionMode='write';ActionMode='write';ChangedPaths=@($target.RelativePath);Environment=$Environment;TaskId=$TaskId;ExpectedVersion=$ExpectedVersion}
         if($DryRun-eq$true){$guardArgs.DryRun=$true}
@@ -117,7 +129,7 @@ function Invoke-HarnessControlledWrite {
         }elseif(-not[string]::IsNullOrWhiteSpace($TaskId)-or$null-ne$ExpectedVersion-or-not[string]::IsNullOrWhiteSpace($ExecutionProfile)-or-not[string]::IsNullOrWhiteSpace($ContractPath)-or-not[string]::IsNullOrWhiteSpace($ContractDigest)-or-not[string]::IsNullOrWhiteSpace($ApprovalId)){
             throw 'ordinary controlled write must not carry protected governance metadata'
         }
-        if($DryRun-eq$true){return [ordered]@{written=$false;dry_run=$true;path=$target.RelativePath;digest=$ExpectedSourceDigest;protected=[bool]$guard.protected;matched_rules=@($guard.matched_rules);approval_id=$guard.approval_id}}
+        if($DryRun-eq$true){Assert-HarnessControlledPreimage -WorkspaceRoot $WorkspaceRoot -Path $target.RelativePath -ExpectedCurrentDigest $ExpectedCurrentDigest;return [ordered]@{written=$false;dry_run=$true;path=$target.RelativePath;digest=$ExpectedSourceDigest;protected=[bool]$guard.protected;matched_rules=@($guard.matched_rules);approval_id=$guard.approval_id}}
         if((Get-HarnessPhysicalPathIdentity -Path $WorkspaceRoot)-cne$workspaceIdentity){throw 'WorkspaceRoot physical identity changed during controlled write'}
         $finalGuard=Assert-HarnessProtectedAction @guardArgs
         if(($guard|ConvertTo-Json -Depth 20 -Compress)-cne($finalGuard|ConvertTo-Json -Depth 20 -Compress)){throw 'controlled write authorization changed before publish'}
