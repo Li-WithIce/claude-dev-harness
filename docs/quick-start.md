@@ -25,9 +25,27 @@ pwsh -File .\install.ps1 `
 
 不需要手工选择 profile，也不要把未运行的测试写成通过。详细边界见 [Requirement Gate](requirement-gate.md) 与 [Governed work](governed-work.md)。
 
+## 健康状态
+
+需要检查安装与桌面能力时运行：
+
+```powershell
+pwsh -File D:\data\dev-harness\scripts\harness-status.ps1 `
+  -WorkspaceRoot D:\my-project `
+  -RepoRoot D:\data\dev-harness
+```
+
+状态会分别报告 Hook 是否安装、信任与可调用性、Codex Host 版本、Protected Action policy、Desktop enforcement 和 Canonical rollout report。宿主无法权威查询 Hook trust/callable 时结果是 `unknown`；当前受控 Desktop writer 尚未由安装器部署，因此 `desktop_enforcement` 是 `unavailable`。直接运行 `harness-status.ps1` 时整体为 `WARN`，不能当成资格通过；`harness.ps1` 的成功 bootstrap/update 仍返回 `PASS`，并把这项 `WARN` 作为可见的 advisory step 保留下来。
+
 ## Worktree
 
-每个 linked worktree 都是独立工作区，需要用它自己的绝对路径安装：
+每个 linked worktree 都是独立工作区。在 worktree 的任意子目录中可一键完成默认 Core bootstrap 和状态检查：
+
+```powershell
+pwsh -File D:\data\dev-harness\harness.ps1
+```
+
+也可以显式指定它自己的绝对路径安装：
 
 ```powershell
 pwsh -File D:\data\dev-harness\install.ps1 `

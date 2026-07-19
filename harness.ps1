@@ -125,7 +125,7 @@ function Get-OverallStatus {
         return 'FAIL'
     }
 
-    if (@($Results | Where-Object { $_.Status -eq 'WARN' }).Count -gt 0) {
+    if (@($Results | Where-Object { $_.Status -eq 'WARN' -and $_.Name -cne 'harness-status.ps1' }).Count -gt 0) {
         return 'WARN'
     }
 
