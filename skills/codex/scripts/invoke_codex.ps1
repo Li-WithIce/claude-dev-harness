@@ -49,6 +49,10 @@ param(
 
     [string]$OtelCollectorInstanceId,
 
+    [Parameter(DontShow)]
+    [ValidateSet('0.144.4')]
+    [string]$ExpectedCodexVersion = '',
+
     [switch]$AgentOutputOnly,
 
     [switch]$Quiet,
@@ -354,6 +358,7 @@ function Resolve-CodexLaunch {
             Arguments = @()
             EnvironmentOverrides = @{ CODEX_EXECUTABLE = $path }
             OtelClientMode = 'descendant-codex-exe'
+            ResolvedCodexPath = [System.IO.Path]::GetFullPath($path)
         }
     }
     if ($extension -in @('.cmd', '.bat')) {
@@ -362,7 +367,7 @@ function Resolve-CodexLaunch {
     if ($IsWindows -and $extension -ne '.exe') {
         throw "Codex command is not a native executable or PowerShell shim: $path"
     }
-    return [pscustomobject]@{ FilePath = $path; PrefixArguments = @(); Arguments = @($CodexArguments); EnvironmentOverrides = @{}; OtelClientMode = 'direct' }
+    return [pscustomobject]@{ FilePath = $path; PrefixArguments = @(); Arguments = @($CodexArguments); EnvironmentOverrides = @{}; OtelClientMode = 'direct'; ResolvedCodexPath = [System.IO.Path]::GetFullPath($path) }
 }
 
 function Receive-CodexStreamLines {
@@ -678,6 +683,22 @@ if ($Session) { $codexArgs.Add('--'); $codexArgs.Add($Session) }
 $codexArgs.Add('-')
 
 $launch = Resolve-CodexLaunch -CodexArguments $codexArgs.ToArray()
+$verifiedCodexVersion = ''
+if (-not [string]::IsNullOrWhiteSpace($ExpectedCodexVersion)) {
+    $versionLaunch = Resolve-CodexLaunch -CodexArguments @('--version')
+    $pathComparison = if ($IsWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+    if (-not ([string]$versionLaunch.ResolvedCodexPath).Equals([string]$launch.ResolvedCodexPath,$pathComparison)) {
+        throw 'Codex version probe resolved a different executable from the model invocation.'
+    }
+    $versionInvocation = Invoke-CodexProcess -Launch $versionLaunch -Arguments $versionLaunch.Arguments -WorkingDirectory $Workspace -InputText '' -TimeoutSeconds 15 -EnvironmentOverrides @{} -OnStdOut $null -OtelRegistration $null
+    $versionStdOut = @($versionInvocation.StdOutLines | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    $versionStdErr = @($versionInvocation.StdErrLines | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($versionInvocation.TimedOut -or $versionInvocation.ExitCode -ne 0 -or $versionStdErr.Count -ne 0 -or
+        $versionStdOut.Count -ne 1 -or [string]$versionStdOut[0] -cne "codex-cli $ExpectedCodexVersion") {
+        throw 'Codex executable does not match the required release version.'
+    }
+    $verifiedCodexVersion = $ExpectedCodexVersion
+}
 $otelRegistration = if ($hasOtelEndpoint) {
     [pscustomobject]@{identity_path=$OtelClientIdentityPath;collector_instance_id=$OtelCollectorInstanceId;round=$otelRound}
 } else { $null }
@@ -832,7 +853,7 @@ if ($TelemetryOutput) {
     $effectiveSandbox = if ($ReadOnly) { 'read-only' } elseif ($Sandbox) { $Sandbox } elseif ($FullAuto) { 'workspace-write' } else { 'default' }
     $tokenStatus = if ($null -ne $telemetryState.InputTokens -and $null -ne $telemetryState.OutputTokens) { 'measured' } else { 'unavailable' }
     $telemetry = [ordered]@{
-        schema_version = 'codex-invocation-telemetry/v1'
+        schema_version = $(if ([string]::IsNullOrWhiteSpace($verifiedCodexVersion)) { 'codex-invocation-telemetry/v1' } else { 'codex-invocation-telemetry/v2' })
         status = 'measured'
         model = $(if ($Model) { $Model } else { 'inherit' })
         reasoning = $Reasoning
@@ -866,6 +887,7 @@ if ($TelemetryOutput) {
             digest = $(if ($OutputSchema) { 'sha256:' + (Get-FileHash -LiteralPath $OutputSchema -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null })
         }
     }
+    if (-not [string]::IsNullOrWhiteSpace($verifiedCodexVersion)) { $telemetry.codex_cli_version = $verifiedCodexVersion }
     Write-Utf8NoBomAtomic -Path $TelemetryOutput -Content ($telemetry | ConvertTo-Json -Depth 8)
 }
 if ($threadId) { Write-Output "session_id=$threadId" }

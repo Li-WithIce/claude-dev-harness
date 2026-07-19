@@ -124,12 +124,13 @@ try {
     $dataset = Get-Content -LiteralPath $datasetPath -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable -Depth 40
     $observationSchemaDigest = Get-FileDigest (Join-Path $RepoRoot 'schemas\model-eval-observation.schema.json')
     $validTelemetry = [ordered]@{
-        schema_version='codex-invocation-telemetry/v1';status='measured';model='gpt-5.6-sol';reasoning='max';sandbox='read-only';approval_policy='default';ephemeral=$true
+        schema_version='codex-invocation-telemetry/v2';status='measured';model='gpt-5.6-sol';reasoning='max';sandbox='read-only';approval_policy='default';ephemeral=$true
         duration_ms=1.0;first_useful_action_ms=1.0;model_turns=1;agent_messages=1
         tool_calls=[ordered]@{command=0;mcp=0;web_search=0;file_change=0};lifecycle_skill_loads=0
         otel_trace=[ordered]@{enabled=$false;contract=$null;provenance=$null}
         tokens=[ordered]@{status='measured';input=1;cached_input=0;output=1}
         output_schema=[ordered]@{enabled=$true;digest=$observationSchemaDigest}
+        codex_cli_version='0.144.4'
     }
     $modelCases = [Collections.Generic.List[object]]::new()
     foreach ($case in @($dataset.cases)) {
@@ -139,7 +140,7 @@ try {
         }
     }
     $modelReport = [ordered]@{
-        schema_version='harness-model-eval-report/v1';generated_at=[DateTimeOffset]::UtcNow.ToString('o');source_revision=[string]$cleanSource.revision;source_dirty=$false;source_state_stable=$true
+        schema_version='harness-model-eval-report/v2';generated_at=[DateTimeOffset]::UtcNow.ToString('o');source_revision=[string]$cleanSource.revision;source_dirty=$false;source_state_stable=$true
         source=[ordered]@{
             dataset_digest=Get-FileDigest $datasetPath
             observation_schema_digest=$observationSchemaDigest
@@ -150,7 +151,7 @@ try {
             input_head_binding=[ordered]@{start=$true;end=$true;basis='git-hash-object-equals-revision-blob/v1'}
             commit_tree_oid=[string]$cleanSource.commit_tree_oid;object_format=[string]$cleanSource.object_format;start=$sourceState;end=(Copy-Document $sourceState)
         }
-        execution=[ordered]@{model='gpt-5.6-sol';reasoning='max';session_isolation='fresh-workspace-per-paraphrase';ephemeral=$true;sandbox='read-only';prompt_persisted=$false;raw_command_persisted=$false;thread_id_persisted=$false;codex_home='dedicated-config-isolated-auth-home-path-not-persisted';codex_home_layout_stable=$true}
+        execution=[ordered]@{model='gpt-5.6-sol';reasoning='max';expected_codex_cli_version='0.144.4';session_isolation='fresh-workspace-per-paraphrase';ephemeral=$true;sandbox='read-only';prompt_persisted=$false;raw_command_persisted=$false;thread_id_persisted=$false;codex_home='dedicated-config-isolated-auth-home-path-not-persisted';codex_home_layout_stable=$true}
         status='pass';hard_gate_passed=$true
         metrics=[ordered]@{total=40;passed=40;failed=0;unavailable=0;missed_ask=0;critical_missed_ask=0;unnecessary_ask=0;product_inference_violation=0;read_only_write=0;false_pass=0;scope_expansion=0;lifecycle_skill_loads=0;model_turns=40;tool_calls=0;input_tokens=40;output_tokens=40;token_observations=40}
         cases=@($modelCases);report_digest=$null
@@ -168,6 +169,14 @@ try {
 
     $wrongRevision = Copy-Document $modelReport; $wrongRevision.source_revision = '0' * 40; Set-ReportDigest $wrongRevision; $path = Join-Path $temp 'model-wrong-revision.json'; Write-Document $path $wrongRevision
     Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'wrong-revision model report fails closed' 'wrong-revision model report was accepted'
+    $missingModelVersion = Copy-Document $modelReport; [void]$missingModelVersion.execution.Remove('expected_codex_cli_version'); Set-ReportDigest $missingModelVersion; $path = Join-Path $temp 'model-missing-version.json'; Write-Document $path $missingModelVersion
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'model report without the required Codex version fails closed' 'model report without a Codex version was accepted'
+    $wrongModelVersion = Copy-Document $modelReport; $wrongModelVersion.execution.expected_codex_cli_version='0.144.3'; Set-ReportDigest $wrongModelVersion; $path = Join-Path $temp 'model-wrong-version.json'; Write-Document $path $wrongModelVersion
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'model report with the wrong Codex version fails closed' 'model report with the wrong Codex version was accepted'
+    $missingSessionVersion = Copy-Document $modelReport; [void]$missingSessionVersion.cases[0].telemetry.Remove('codex_cli_version'); Set-ReportDigest $missingSessionVersion; $path = Join-Path $temp 'model-session-missing-version.json'; Write-Document $path $missingSessionVersion
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'model session telemetry without a Codex version fails closed' 'model session telemetry without a Codex version was accepted'
+    $wrongSessionVersion = Copy-Document $modelReport; $wrongSessionVersion.cases[0].telemetry.codex_cli_version='0.144.3'; Set-ReportDigest $wrongSessionVersion; $path = Join-Path $temp 'model-session-wrong-version.json'; Write-Document $path $wrongSessionVersion
+    Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'model session telemetry with the wrong Codex version fails closed' 'model session telemetry with the wrong Codex version was accepted'
     $dirtyModel = Copy-Document $modelReport; $dirtyModel.source_dirty = $true; Set-ReportDigest $dirtyModel; $path = Join-Path $temp 'model-dirty.json'; Write-Document $path $dirtyModel
     Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'fail') 'dirty passing model report fails closed' 'dirty passing model report was accepted'
     $forgedModelSource = Copy-Document $modelReport; $forgedModelSource.source.start.commit_tree_oid='0' * 40; $forgedModelSource.source.end.commit_tree_oid='0' * 40; Set-ReportDigest $forgedModelSource; $path = Join-Path $temp 'model-forged-source.json'; Write-Document $path $forgedModelSource

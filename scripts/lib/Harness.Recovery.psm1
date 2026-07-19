@@ -22,7 +22,7 @@ function Read-HarnessRecoveryPointer {
 
     try {
         $pointer = [System.IO.File]::ReadAllText($pointerPath,[System.Text.UTF8Encoding]::new($false,$true)) |
-            ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop
+            ConvertFrom-HarnessJson -ErrorAction Stop
     } catch {
         throw "current pointer is not valid JSON: $($_.Exception.Message)"
     }

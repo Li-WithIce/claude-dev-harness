@@ -95,7 +95,8 @@ function Invoke-HarnessModelEvalSession {
     param(
         [string]$RepoRoot,[string]$ScratchRoot,[string]$SessionKey,
         [string]$Paraphrase,[string]$Context,[string]$Model,[string]$Reasoning,[int]$TimeoutSeconds,
-        [Parameter(Mandatory)][string]$CodexHome
+        [Parameter(Mandatory)][string]$CodexHome,
+        [Parameter(Mandatory)][ValidateSet('0.144.4')][string]$ExpectedCodexVersion
     )
     $workspace = Join-Path $ScratchRoot ('workspace-' + $SessionKey)
     $resultRoot = Join-Path $ScratchRoot ('result-' + $SessionKey)
@@ -128,7 +129,7 @@ This is an isolated read-only decision probe. Do not run tools or edit files. De
         [Environment]::SetEnvironmentVariable('USERPROFILE',$CodexHome,[EnvironmentVariableTarget]::Process)
         [Environment]::SetEnvironmentVariable('CODEX_HOME',$CodexHome,[EnvironmentVariableTarget]::Process)
         foreach ($name in $environmentNames | Where-Object { $_ -notin @('USERPROFILE','CODEX_HOME') }) { [Environment]::SetEnvironmentVariable($name,$null,[EnvironmentVariableTarget]::Process) }
-        $null = @(& pwsh -NoLogo -NoProfile -NonInteractive -File $wrapper -Task $task -Workspace $workspace -Model $Model -Reasoning $Reasoning -ReadOnly -Ephemeral -AgentOutputOnly -Quiet -Isolated -OutputSchema $schema -Output $response -TelemetryOutput $telemetryPath -TimeoutSeconds $TimeoutSeconds 2>&1 | ForEach-Object { [string]$_ })
+        $null = @(& pwsh -NoLogo -NoProfile -NonInteractive -File $wrapper -Task $task -Workspace $workspace -Model $Model -Reasoning $Reasoning -ReadOnly -Ephemeral -AgentOutputOnly -Quiet -Isolated -OutputSchema $schema -Output $response -TelemetryOutput $telemetryPath -ExpectedCodexVersion $ExpectedCodexVersion -TimeoutSeconds $TimeoutSeconds 2>&1 | ForEach-Object { [string]$_ })
         $exitCode = $LASTEXITCODE
     } finally {
         foreach ($entry in $savedEnvironment.GetEnumerator()) { [Environment]::SetEnvironmentVariable([string]$entry.Key,$entry.Value,[EnvironmentVariableTarget]::Process) }
@@ -142,7 +143,7 @@ This is an isolated read-only decision probe. Do not run tools or edit files. De
             $result.observed = $raw | ConvertFrom-Json -AsHashtable -Depth 20
             $result.telemetry = [IO.File]::ReadAllText($telemetryPath,[Text.UTF8Encoding]::new($false,$true)) | ConvertFrom-Json -AsHashtable -Depth 20
             $identity = $result.telemetry
-            if ([string]$identity.schema_version -cne 'codex-invocation-telemetry/v1' -or [string]$identity.model -cne $Model -or [string]$identity.reasoning -cne $Reasoning -or -not [bool]$identity.ephemeral -or [string]$identity.sandbox -cne 'read-only') { throw 'identity' }
+            if ([string]$identity.schema_version -cne 'codex-invocation-telemetry/v2' -or [string]$identity.codex_cli_version -cne $ExpectedCodexVersion -or [string]$identity.model -cne $Model -or [string]$identity.reasoning -cne $Reasoning -or -not [bool]$identity.ephemeral -or [string]$identity.sandbox -cne 'read-only') { throw 'identity' }
             $result.status = 'measured'
         } catch {
             $result.status = 'invalid'

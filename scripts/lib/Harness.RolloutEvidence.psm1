@@ -338,7 +338,7 @@ function Read-ReleaseEvidenceReport {
         $bytes = [IO.File]::ReadAllBytes($fullPath)
         $digest = Get-ReleaseSha256Bytes -Bytes $bytes
         $json = [Text.UTF8Encoding]::new($false,$true).GetString($bytes)
-        $document = $json | ConvertFrom-Json -AsHashtable -DateKind String -Depth 100 -ErrorAction Stop
+        $document = $json | ConvertFrom-HarnessJson -Depth 100 -ErrorAction Stop
         return [ordered]@{exists=$true;document=$document;evidence_digest=$digest;reason=$null}
     } catch {
         $digest = if ($null -ne $bytes) { Get-ReleaseSha256Bytes -Bytes $bytes } else { Get-ReleaseSha256Text -Text "$Kind-report-read-failed" }
@@ -353,7 +353,7 @@ function Assert-ModelEvalReport {
         [Parameter(Mandatory)][System.Collections.IDictionary]$ExpectedSource
     )
     Assert-ReleaseKeys -Value $Document -Expected @('schema_version','generated_at','source_revision','source_dirty','source_state_stable','source','execution','status','hard_gate_passed','metrics','cases','report_digest') -Label 'model report'
-    if ([string]$Document.schema_version -cne 'harness-model-eval-report/v1') { throw 'model report schema is invalid' }
+    if ([string]$Document.schema_version -cne 'harness-model-eval-report/v2') { throw 'model report schema is invalid' }
     Assert-ReleaseDate -Value $Document.generated_at -Label 'model report'
     Assert-ReleaseReportDigest -Document $Document
     if ([string]$Document.source_revision -cne [string]$ExpectedSource.revision) { throw 'model report revision is stale' }
@@ -375,9 +375,9 @@ function Assert-ModelEvalReport {
     Assert-ReleaseCurrentFileDigest -RepoRoot $RepoRoot -Value $Document.source.module_digest -RelativePath 'scripts/lib/Harness.ModelEval.psm1' -Label 'model module'
     Assert-ReleaseCurrentFileDigest -RepoRoot $RepoRoot -Value $Document.source.credential_guard_digest -RelativePath 'scripts/host-benchmark/HostBenchmark.Trial.ps1' -Label 'model credential guard'
 
-    Assert-ReleaseKeys -Value $Document.execution -Expected @('model','reasoning','session_isolation','ephemeral','sandbox','prompt_persisted','raw_command_persisted','thread_id_persisted','codex_home','codex_home_layout_stable') -Label 'model report execution'
+    Assert-ReleaseKeys -Value $Document.execution -Expected @('model','reasoning','expected_codex_cli_version','session_isolation','ephemeral','sandbox','prompt_persisted','raw_command_persisted','thread_id_persisted','codex_home','codex_home_layout_stable') -Label 'model report execution'
     foreach ($name in @('ephemeral','prompt_persisted','raw_command_persisted','thread_id_persisted','codex_home_layout_stable')) { Assert-ReleaseBoolean -Value $Document.execution[$name] -Label "model report execution $name" }
-    if ([string]$Document.execution.model -cne 'gpt-5.6-sol' -or [string]$Document.execution.reasoning -cne 'max' -or
+    if ([string]$Document.execution.model -cne 'gpt-5.6-sol' -or [string]$Document.execution.reasoning -cne 'max' -or [string]$Document.execution.expected_codex_cli_version -cne '0.144.4' -or
         [string]$Document.execution.session_isolation -cne 'fresh-workspace-per-paraphrase' -or -not [bool]$Document.execution.ephemeral -or
         [string]$Document.execution.sandbox -cne 'read-only' -or [bool]$Document.execution.prompt_persisted -or
         [bool]$Document.execution.raw_command_persisted -or [bool]$Document.execution.thread_id_persisted -or
@@ -444,7 +444,7 @@ function Assert-ModelEvalReport {
             if ($expected.Contains('profile') -and [string]$expected.profile -ceq 'direct' -and [int]$observed.lifecycle_skills_loaded -ne 0) { throw 'model report observation loads a lifecycle skill for Direct' }
             if ([bool]$observed.unauthorized_scope_change) { throw 'model report observation declares an unauthorized scope change' }
             $telemetry = $case.telemetry
-            Assert-ReleaseKeys -Value $telemetry -Expected @('schema_version','status','model','reasoning','sandbox','approval_policy','ephemeral','duration_ms','first_useful_action_ms','model_turns','agent_messages','tool_calls','lifecycle_skill_loads','otel_trace','tokens','output_schema') -Label 'model report telemetry'
+            Assert-ReleaseKeys -Value $telemetry -Expected @('schema_version','status','model','reasoning','sandbox','approval_policy','ephemeral','duration_ms','first_useful_action_ms','model_turns','agent_messages','tool_calls','lifecycle_skill_loads','otel_trace','tokens','output_schema','codex_cli_version') -Label 'model report telemetry'
             Assert-ReleaseKeys -Value $telemetry.tool_calls -Expected @('command','mcp','web_search','file_change') -Label 'model report telemetry tool calls'
             Assert-ReleaseKeys -Value $telemetry.tokens -Expected @('status','input','cached_input','output') -Label 'model report telemetry tokens'
             Assert-ReleaseKeys -Value $telemetry.otel_trace -Expected @('enabled','contract','provenance') -Label 'model report telemetry OTLP'
@@ -456,7 +456,7 @@ function Assert-ModelEvalReport {
             foreach ($integerField in @('command','mcp','web_search','file_change')) { [void](Assert-ReleaseInteger -Value $telemetry.tool_calls[$integerField] -Label "model report telemetry tool call $integerField" -NonNegative) }
             [void](Assert-ReleaseNumber -Value $telemetry.duration_ms -Label 'model report telemetry duration' -Positive)
             [void](Assert-ReleaseNumber -Value $telemetry.first_useful_action_ms -Label 'model report telemetry first useful action' -NonNegative)
-            if ([string]$telemetry.schema_version -cne 'codex-invocation-telemetry/v1' -or [string]$telemetry.status -cne 'measured' -or
+            if ([string]$telemetry.schema_version -cne 'codex-invocation-telemetry/v2' -or [string]$telemetry.codex_cli_version -cne '0.144.4' -or [string]$telemetry.status -cne 'measured' -or
                 [string]$telemetry.model -cne 'gpt-5.6-sol' -or [string]$telemetry.reasoning -cne 'max' -or [string]$telemetry.sandbox -cne 'read-only' -or [string]$telemetry.approval_policy -cne 'default' -or
                 -not [bool]$telemetry.ephemeral -or [double]$telemetry.duration_ms -le 0 -or [bool]$telemetry.otel_trace.enabled -or
                 -not [bool]$telemetry.output_schema.enabled -or [string]$telemetry.output_schema.digest -cne [string]$Document.source.observation_schema_digest) { throw 'model report telemetry identity is invalid' }

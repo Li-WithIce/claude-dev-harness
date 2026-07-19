@@ -560,6 +560,35 @@ if ($stateReparseProcess.Process.HasExited -and
 $stateReparseProcess.Process.Dispose()
 Remove-Item -LiteralPath $stateReparsePath -Force -ErrorAction SilentlyContinue
 
+$nestedVaultReparseRoot = Join-Path $scratchRoot 'minimal-vault-nested-reparse-is-write-free'
+$nestedVaultReparseUser = Join-Path $nestedVaultReparseRoot 'user'
+$nestedVaultReparseWorkspace = Join-Path $nestedVaultReparseRoot 'workspace'
+$nestedVaultReparseVictim = Join-Path $nestedVaultReparseRoot 'victim'
+$nestedVaultTasksParent = Join-Path $nestedVaultReparseWorkspace '.assistant\运行时'
+$nestedVaultTasksPath = Join-Path $nestedVaultTasksParent 'tasks'
+New-Item -ItemType Directory -Path $nestedVaultReparseUser,$nestedVaultTasksParent,$nestedVaultReparseVictim -Force | Out-Null
+$nestedVaultVictimFile = Join-Path $nestedVaultReparseVictim '.gitkeep'
+[System.IO.File]::WriteAllText($nestedVaultVictimFile,"victim sentinel`n",(New-Object System.Text.UTF8Encoding($false)))
+$nestedVaultVictimHash = (Get-FileHash -LiteralPath $nestedVaultVictimFile -Algorithm SHA256).Hash
+New-Item -ItemType Junction -Path $nestedVaultTasksPath -Target $nestedVaultReparseVictim | Out-Null
+$nestedVaultReparseProcess = Start-RepoProcess -UserProfile $nestedVaultReparseUser -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @('-WorkspaceRoot',$nestedVaultReparseWorkspace,'-RepoRoot',$RepoRoot,'-Preset','core')
+[void]$nestedVaultReparseProcess.Process.WaitForExit(30000)
+$nestedVaultVictimItems = @(Get-ChildItem -LiteralPath $nestedVaultReparseVictim -Force)
+if ($nestedVaultReparseProcess.Process.HasExited -and
+    $nestedVaultReparseProcess.Process.ExitCode -ne 0 -and
+    $nestedVaultVictimItems.Count -eq 1 -and
+    (Get-FileHash -LiteralPath $nestedVaultVictimFile -Algorithm SHA256).Hash -eq $nestedVaultVictimHash -and
+    -not (Test-Path -LiteralPath (Join-Path $nestedVaultReparseWorkspace '.assistant\entry\AGENTS.md')) -and
+    -not (Test-Path -LiteralPath (Join-Path $nestedVaultReparseWorkspace 'AGENTS.md')) -and
+    -not (Test-Path -LiteralPath (Join-Path $nestedVaultReparseUser '.dev-harness')) -and
+    -not (Test-Path -LiteralPath (Join-Path $nestedVaultReparseUser '.claude'))) {
+    $checks.Add('core install rejects a nested runtime tasks junction without changing the external victim or retaining partial state') | Out-Null
+} else {
+    $failures.Add('minimal vault .gitkeep must use the managed reparse-safe transaction path') | Out-Null
+}
+$nestedVaultReparseProcess.Process.Dispose()
+Remove-Item -LiteralPath $nestedVaultTasksPath -Force -ErrorAction SilentlyContinue
+
 $vanishedPointerUser = Join-Path $scratchRoot 'vanished-pointer-user'
 $vanishedPointerPath = Join-Path $scratchRoot 'vanished-pointer\active-install.json'
 New-Item -ItemType Directory -Path (Split-Path -Parent $vanishedPointerPath),$vanishedPointerUser -Force | Out-Null

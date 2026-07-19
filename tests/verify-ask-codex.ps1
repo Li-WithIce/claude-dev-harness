@@ -414,6 +414,14 @@ if ($args.Count -ge 1 -and [string]$args[0] -ceq '__mock-child') {
 $caseId = $env:ASK_CODEX_TEST_CASE
 $mode = $env:ASK_CODEX_TEST_MODE
 $captureRoot = $env:ASK_CODEX_TEST_CAPTURE_ROOT
+if ($args.Count -eq 1 -and [string]$args[0] -ceq '--version') {
+    switch ($mode) {
+        'version-wrong' { [Console]::Out.WriteLine('codex-cli 0.144.3'); exit 0 }
+        'version-multiline' { [Console]::Out.WriteLine('codex-cli 0.144.4'); [Console]::Out.WriteLine('unexpected'); exit 0 }
+        'version-exit7' { [Console]::Error.WriteLine('version unavailable'); exit 7 }
+        default { [Console]::Out.WriteLine('codex-cli 0.144.4'); exit 0 }
+    }
+}
 if ($mode -in @('timeout', 'natural-child')) {
     $inputReader = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), $utf8, $false)
     try { $null = $inputReader.ReadToEnd() } finally { $inputReader.Dispose() }
@@ -593,7 +601,7 @@ $parameters = @{
     $structuredSchema = Join-Path $scratchRoot 'structured-output.schema.json'
     Write-Utf8NoBom -Path $structuredSchema -Content '{"type":"object","additionalProperties":false,"required":["value"],"properties":{"value":{"type":"string"}}}'
     $structuredModel = 'gpt-5.6-sol'
-    $structuredArgs = @('-Task','structured result','-Workspace',$workspace,'-Model',$structuredModel,'-Reasoning','max','-ReadOnly','-ApprovalPolicy','never','-Ephemeral','-Isolated','-AgentOutputOnly','-Quiet','-OutputSchema',$structuredSchema,'-Output',$structuredOutput,'-TelemetryOutput',$structuredTelemetry,'-TimeoutSeconds','5')
+    $structuredArgs = @('-Task','structured result','-Workspace',$workspace,'-Model',$structuredModel,'-Reasoning','max','-ReadOnly','-ApprovalPolicy','never','-Ephemeral','-Isolated','-AgentOutputOnly','-Quiet','-OutputSchema',$structuredSchema,'-Output',$structuredOutput,'-TelemetryOutput',$structuredTelemetry,'-ExpectedCodexVersion','0.144.4','-TimeoutSeconds','5')
     $structuredResult = Invoke-AskCodex -ScriptPath $scriptPath -Arguments $structuredArgs -Environment (New-CaseEnvironment -CaseId $structuredCase) -WorkingDirectory $callerRoot -Label $structuredCase
     $structuredRecord = Read-MockRecord -CaptureRoot $captureRoot -CaseId $structuredCase
     $isolationFeatures = @('plugins','remote_plugin','apps','browser_use','computer_use','memories','multi_agent','multi_agent_v2','enable_fanout','in_app_browser','image_generation')
@@ -605,7 +613,7 @@ $parameters = @{
     $structuredContent = if (Test-Path -LiteralPath $structuredOutput -PathType Leaf) { Get-Content -LiteralPath $structuredOutput -Raw -Encoding utf8 } else { '' }
     if ($structuredResult.ExitCode -eq 0 -and $null -ne $structuredRecord -and
         (Test-StringSequenceEqual -Actual @($structuredRecord.argv) -Expected $expectedStructuredArgs.ToArray()) -and
-        $null -ne $structuredTelemetryValue -and [string]$structuredTelemetryValue.schema_version -ceq 'codex-invocation-telemetry/v1' -and
+        $null -ne $structuredTelemetryValue -and [string]$structuredTelemetryValue.schema_version -ceq 'codex-invocation-telemetry/v2' -and [string]$structuredTelemetryValue.codex_cli_version -ceq '0.144.4' -and
         [string]$structuredTelemetryValue.model -ceq $structuredModel -and [string]$structuredTelemetryValue.reasoning -ceq 'max' -and
         [bool]$structuredTelemetryValue.ephemeral -and [string]$structuredTelemetryValue.sandbox -ceq 'read-only' -and [string]$structuredTelemetryValue.approval_policy -ceq 'never' -and
         [int]$structuredTelemetryValue.agent_messages -eq 3 -and [string]$structuredTelemetryValue.tokens.status -ceq 'unavailable' -and
@@ -614,6 +622,15 @@ $parameters = @{
         Add-Check 'isolated max session preserves structured-output argv and publishes sanitized aggregate telemetry'
     } else {
         Add-Failure "structured telemetry contract failed: exit=$($structuredResult.ExitCode) record=[$($structuredRecord | ConvertTo-Json -Depth 8 -Compress)] telemetry=[$($structuredTelemetryValue | ConvertTo-Json -Depth 8 -Compress)] stderr=[$($structuredResult.StdErr)]"
+    }
+    foreach ($versionFailure in @('version-wrong','version-multiline','version-exit7')) {
+        $versionOutput = Join-Path $scratchRoot ("outputs\$versionFailure.md")
+        $versionResult = Invoke-AskCodex -ScriptPath $scriptPath -Arguments @('-Task','must not invoke model','-Workspace',$workspace,'-Output',$versionOutput,'-ExpectedCodexVersion','0.144.4','-TimeoutSeconds','5') -Environment (New-CaseEnvironment -CaseId $versionFailure -Mode $versionFailure) -WorkingDirectory $callerRoot -Label $versionFailure
+        if ($versionResult.ExitCode -ne 0 -and $versionResult.StdErr -match 'does not match the required release version' -and -not (Test-Path -LiteralPath $versionOutput) -and $null -eq (Read-MockRecord -CaptureRoot $captureRoot -CaseId $versionFailure)) {
+            Add-Check "version-bound wrapper rejects $versionFailure before the model invocation"
+        } else {
+            Add-Failure "version-bound wrapper did not fail closed for ${versionFailure}: exit=$($versionResult.ExitCode) stdout=[$($versionResult.StdOut)] stderr=[$($versionResult.StdErr)]"
+        }
     }
     $observedNativeMode = if ($null -eq $newRecord) { '' } else { [string]$newRecord.native_argument_mode }
     if ($observedNativeMode -ceq 'Standard') {

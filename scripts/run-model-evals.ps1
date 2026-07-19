@@ -29,6 +29,7 @@ function Add-ModelFailure {
 }
 
 if ($Model -cne 'gpt-5.6-sol') { throw 'Release model eval requires gpt-5.6-sol.' }
+$expectedCodexVersion = '0.144.4'
 $datasetText = [IO.File]::ReadAllText($DatasetPath,[Text.UTF8Encoding]::new($false,$true))
 if ($datasetText -match '(?i)"(?:prompt|prompt_text|raw_prompt)"\s*:') { throw 'Dataset must not persist prompts.' }
 $dataset = $datasetText | ConvertFrom-Json -AsHashtable -Depth 40
@@ -74,7 +75,7 @@ try {
             $m.total++; $key = '{0}-{1:D2}' -f $case.id,($i+1)
             Write-Output ("[MODEL] {0}/40 {1}" -f $m.total,$key)
             $paraphrase = [string]@($case.paraphrases)[$i]
-            $run = Invoke-HarnessModelEvalSession -RepoRoot $RepoRoot -ScratchRoot $scratch -SessionKey $key -Paraphrase $paraphrase -Context ([string]$case.model_context) -Model $Model -Reasoning $Reasoning -TimeoutSeconds $TimeoutSeconds -CodexHome $CodexHome
+            $run = Invoke-HarnessModelEvalSession -RepoRoot $RepoRoot -ScratchRoot $scratch -SessionKey $key -Paraphrase $paraphrase -Context ([string]$case.model_context) -Model $Model -Reasoning $Reasoning -TimeoutSeconds $TimeoutSeconds -CodexHome $CodexHome -ExpectedCodexVersion $expectedCodexVersion
             $status = if ([string]$run.status -ceq 'unavailable') {'unavailable'} else {'pass'}
             $failures = [Collections.Generic.List[string]]::new()
             if ([int]$run.workspace_write_count -ne 0) { $m.read_only_write++; Add-ModelFailure $failures ([ref]$status) 'read-only-workspace-write' }
@@ -135,7 +136,7 @@ $sourceStable = -not $sourceDirty -and [string]$sourceStart.revision -ceq [strin
 $hard = $modelHard -and $sourceStable -and -not $sourceDirty -and $codexHomeLayoutStable
 $status = if(-not $codexHomeLayoutStable){'fail'}elseif($m.unavailable){'unavailable'}elseif($hard){'pass'}else{'fail'}
 $report=[ordered]@{
-    schema_version='harness-model-eval-report/v1';generated_at=[DateTimeOffset]::UtcNow.ToString('o')
+    schema_version='harness-model-eval-report/v2';generated_at=[DateTimeOffset]::UtcNow.ToString('o')
     source_revision=$sourceStart.revision;source_dirty=$sourceDirty;source_state_stable=$sourceStable
     source=[ordered]@{
         dataset_digest=$sourceDigests.dataset;observation_schema_digest=$sourceDigests.observation_schema
@@ -144,7 +145,7 @@ $report=[ordered]@{
         input_head_binding=[ordered]@{start=$sourceInputHeadBoundStart;end=$sourceInputHeadBoundEnd;basis='git-hash-object-equals-revision-blob/v1'}
         commit_tree_oid=$sourceStart.commit_tree_oid;object_format=$sourceStart.object_format;start=$sourceStart;end=$sourceEnd
     }
-    execution=[ordered]@{model=$Model;reasoning=$Reasoning;session_isolation='fresh-workspace-per-paraphrase';ephemeral=$true;sandbox='read-only';codex_home='dedicated-config-isolated-auth-home-path-not-persisted';codex_home_layout_stable=$codexHomeLayoutStable;prompt_persisted=$false;raw_command_persisted=$false;thread_id_persisted=$false}
+    execution=[ordered]@{model=$Model;reasoning=$Reasoning;expected_codex_cli_version=$expectedCodexVersion;session_isolation='fresh-workspace-per-paraphrase';ephemeral=$true;sandbox='read-only';codex_home='dedicated-config-isolated-auth-home-path-not-persisted';codex_home_layout_stable=$codexHomeLayoutStable;prompt_persisted=$false;raw_command_persisted=$false;thread_id_persisted=$false}
     status=$status;hard_gate_passed=$hard;metrics=$m;cases=@($results);report_digest=$null
 }
 $report.report_digest = Get-ModelEvalReportDigest -Document $report

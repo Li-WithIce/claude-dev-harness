@@ -1,6 +1,65 @@
 ﻿Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+function ConvertFrom-HarnessJsonElement {
+    param([Parameter(Mandatory)][System.Text.Json.JsonElement]$Element)
+
+    switch ($Element.ValueKind) {
+        'Object' {
+            $result = [System.Management.Automation.OrderedHashtable]::new()
+            foreach ($property in $Element.EnumerateObject()) {
+                if ($result.ContainsKey($property.Name)) { $result.Remove($property.Name) }
+                $result[$property.Name] = ConvertFrom-HarnessJsonElement -Element $property.Value
+            }
+            return $result
+        }
+        'Array' {
+            $items = [System.Collections.Generic.List[object]]::new()
+            foreach ($item in $Element.EnumerateArray()) {
+                $items.Add((ConvertFrom-HarnessJsonElement -Element $item))
+            }
+            return ,$items.ToArray()
+        }
+        'String' { return $Element.GetString() }
+        'Number' {
+            [long]$integer = 0
+            if ($Element.TryGetInt64([ref]$integer)) { return $integer }
+            $raw = $Element.GetRawText()
+            if ($raw -match '^-?(?:0|[1-9][0-9]*)$') {
+                throw 'JSON integer is outside the supported Int64 range'
+            }
+            return $Element.GetDouble()
+        }
+        'True' { return $true }
+        'False' { return $false }
+        'Null' { return $null }
+        default { throw "Unsupported JSON value kind: $($Element.ValueKind)" }
+    }
+}
+
+function ConvertFrom-HarnessJson {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory,ValueFromPipeline)][AllowEmptyString()][string]$Json,
+        [ValidateRange(1,1024)][int]$Depth = 1024
+    )
+
+    process {
+        if ([string]::IsNullOrWhiteSpace($Json)) { return $null }
+        $options = [System.Text.Json.JsonDocumentOptions]::new()
+        $options.MaxDepth = $Depth
+        $options.AllowTrailingCommas = $true
+        $options.CommentHandling = [System.Text.Json.JsonCommentHandling]::Skip
+        $document = [System.Text.Json.JsonDocument]::Parse($Json,$options)
+        try {
+            $value = ConvertFrom-HarnessJsonElement -Element $document.RootElement
+            Write-Output -InputObject $value
+        } finally {
+            $document.Dispose()
+        }
+    }
+}
+
 function Assert-HarnessTaskId {
     param([Parameter(Mandatory)][string]$TaskId)
     if ($TaskId -cnotmatch '^(?!(?:none|idle|unknown)$)[a-z0-9][a-z0-9-]{0,63}$') { throw "invalid task id: $TaskId" }
@@ -222,4 +281,4 @@ function Get-HarnessRelativePath {
     return ([System.IO.Path]::GetRelativePath($root,$fullPath).Replace('\','/'))
 }
 
-Export-ModuleMember -Function Assert-HarnessTaskId,Resolve-HarnessWorkspaceRoot,Resolve-HarnessContainedPath,New-HarnessContainedDirectory,Get-HarnessRelativePath,Get-HarnessPhysicalPathIdentity,Resolve-HarnessToolCompatibleWorkspaceRoot
+Export-ModuleMember -Function ConvertFrom-HarnessJson,Assert-HarnessTaskId,Resolve-HarnessWorkspaceRoot,Resolve-HarnessContainedPath,New-HarnessContainedDirectory,Get-HarnessRelativePath,Get-HarnessPhysicalPathIdentity,Resolve-HarnessToolCompatibleWorkspaceRoot

@@ -1949,10 +1949,11 @@ function Install-RenderedFile {
         return
     }
 
-    $raw = Read-FileUtf8 -Path $SourcePath
-    if ($null -eq $raw) {
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
         throw "Missing template source: $SourcePath"
     }
+    $raw = Read-FileUtf8 -Path $SourcePath
+    if ($null -eq $raw) { $raw = '' }
 
     $rendered = Render-Content -Content $raw -TargetPath $TargetPath
     Write-ManagedInstallText -Path $TargetPath -Content $rendered -RecordBackup:$RecordBackup -Ownership $Ownership
@@ -2886,10 +2887,9 @@ function Install-MinimalVaultTemplate {
     }
 
     $runtimeTasksRoot = Join-Path $TargetRoot '运行时\tasks'
-    Ensure-Directory -Path $runtimeTasksRoot
     $gitkeepSource = Join-Path $TemplateRoot '运行时\tasks\.gitkeep'
     if (Test-Path -LiteralPath $gitkeepSource -PathType Leaf) {
-        Copy-Item -LiteralPath $gitkeepSource -Destination (Join-Path $runtimeTasksRoot '.gitkeep') -Force
+        Install-RenderedFile -SourcePath $gitkeepSource -TargetPath (Join-Path $runtimeTasksRoot '.gitkeep') -RecordBackup -Ownership managed
     }
 }
 
@@ -3158,6 +3158,11 @@ try {
         skills = @($presetDefinition.skills)
         hooks = @($presetDefinition.hooks)
         vault_profile = $effectiveVaultProfile
+    }
+    if ($effectiveVaultProfile -eq 'minimal') {
+        [void](Assert-InstallStatePathHasNoReparsePoint `
+            -Path (Join-Path $VaultPath '运行时\tasks\.gitkeep') `
+            -Label 'Minimal vault runtime tasks target')
     }
     if ($vaultProfileSpecified) {
         Write-Warning ("VaultProfile is deprecated; '{0}' mapped to Preset '{1}'." -f $VaultProfile,$effectivePreset)

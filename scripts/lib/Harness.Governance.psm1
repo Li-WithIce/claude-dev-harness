@@ -70,7 +70,7 @@ function Resolve-HarnessAuditArtifact {
 
     $recordMatches = [regex]::Matches($text,'(?ms)^<!-- harness-audit-record:start -->\s*\r?\n(?<json>.*?)\r?\n<!-- harness-audit-record:end -->\s*$')
     if ($recordMatches.Count -ne 1) { throw 'independent audit must contain exactly one machine record' }
-    try { $record = $recordMatches[0].Groups['json'].Value | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop }
+    try { $record = $recordMatches[0].Groups['json'].Value | ConvertFrom-HarnessJson -ErrorAction Stop }
     catch { throw "independent audit record is not valid JSON: $($_.Exception.Message)" }
     try { $valid = Test-Json -Json ($record | ConvertTo-Json -Depth 20 -Compress) -SchemaFile (Join-Path $RepoRoot 'schemas\audit-record.schema.json') -ErrorAction Stop -WarningAction SilentlyContinue }
     catch { throw "independent audit record schema validation failed: $($_.Exception.Message)" }

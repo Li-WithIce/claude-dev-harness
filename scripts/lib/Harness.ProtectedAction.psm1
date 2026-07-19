@@ -61,7 +61,7 @@ function Read-HarnessProtectedPolicy {
     param([string]$RepoRoot,[string]$WorkspaceRoot)
     $path=Join-Path $RepoRoot 'policies\protected-actions.json'
     if(-not(Test-Path -LiteralPath $path -PathType Leaf)){throw 'protected action policy is unavailable'}
-    try{$policy=Get-Content -LiteralPath $path -Raw -Encoding utf8|ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop}catch{throw "protected action policy is invalid: $($_.Exception.Message)"}
+    try{$policy=Get-Content -LiteralPath $path -Raw -Encoding utf8|ConvertFrom-HarnessJson -ErrorAction Stop}catch{throw "protected action policy is invalid: $($_.Exception.Message)"}
     Assert-HarnessProtectedExactKeys -Value $policy -Expected @('schema_version','rules') -Label 'protected action policy'
     if([string]$policy.schema_version-cne'protected-actions/v1'){throw 'protected action policy version is invalid'}
     $ids=@($policy.rules|ForEach-Object{[string]$_.id});if(@(Compare-Object @('production-database-destructive','authorization-path-change') $ids).Count){throw 'protected action policy rules are invalid'}
@@ -72,7 +72,7 @@ function Read-HarnessProtectedPolicy {
     $overlayPath = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $overlayRelative -Label 'protected action overlay' -AllowMissing
     if (Test-Path -LiteralPath $overlayPath) {
         if (-not (Test-Path -LiteralPath $overlayPath -PathType Leaf)) { throw 'protected action overlay is invalid: path is not a file' }
-        try { $overlayJson = [IO.File]::ReadAllText($overlayPath,[Text.UTF8Encoding]::new($false,$true)); $overlay = $overlayJson | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop } catch { throw "protected action overlay is invalid: $($_.Exception.Message)" }
+        try { $overlayJson = [IO.File]::ReadAllText($overlayPath,[Text.UTF8Encoding]::new($false,$true)); $overlay = $overlayJson | ConvertFrom-HarnessJson -ErrorAction Stop } catch { throw "protected action overlay is invalid: $($_.Exception.Message)" }
         $overlaySchema = Join-Path $RepoRoot 'schemas\protected-actions-overlay.schema.json'
         try { $overlayValid = Test-Json -Json ($overlay | ConvertTo-Json -Depth 30 -Compress) -SchemaFile $overlaySchema -ErrorAction Stop -WarningAction SilentlyContinue } catch { throw "protected action overlay schema is unavailable: $($_.Exception.Message)" }
         if (-not $overlayValid) { throw 'protected action overlay failed schema validation' }
@@ -90,12 +90,12 @@ function Read-HarnessProtectedPolicy {
 function Read-HarnessProtectedTask {
     param([string]$RepoRoot,[string]$WorkspaceRoot,[string]$TaskId)
     Assert-HarnessTaskId -TaskId $TaskId;$path=".assistant/runtime/tasks/$TaskId/task.json";$full=Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $path -Label 'protected task' -MustExist File
-    try{$task=[IO.File]::ReadAllText($full,[Text.UTF8Encoding]::new($false,$true))|ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop}catch{throw "protected task is invalid: $($_.Exception.Message)"}
+    try{$task=[IO.File]::ReadAllText($full,[Text.UTF8Encoding]::new($false,$true))|ConvertFrom-HarnessJson -ErrorAction Stop}catch{throw "protected task is invalid: $($_.Exception.Message)"}
     try{$valid=Test-Json -Json ($task|ConvertTo-Json -Depth 30 -Compress) -SchemaFile (Join-Path $RepoRoot 'schemas\task-state.schema.json') -ErrorAction Stop -WarningAction SilentlyContinue}catch{throw "protected task schema is unavailable: $($_.Exception.Message)"}
     if(-not$valid){throw 'protected task failed schema validation'}
     if([string]$task.task_id-cne$TaskId){throw 'protected task task_id does not match its canonical path'}
     $contractPath=Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path ([string]$task.contract_path) -Label 'protected task Contract' -MustExist File
-    try{$contract=[IO.File]::ReadAllText($contractPath,[Text.UTF8Encoding]::new($false,$true))|ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop}catch{throw "protected task Contract is invalid: $($_.Exception.Message)"}
+    try{$contract=[IO.File]::ReadAllText($contractPath,[Text.UTF8Encoding]::new($false,$true))|ConvertFrom-HarnessJson -ErrorAction Stop}catch{throw "protected task Contract is invalid: $($_.Exception.Message)"}
     try{$contractValid=Test-Json -Json ($contract|ConvertTo-Json -Depth 30 -Compress) -SchemaFile (Join-Path $RepoRoot 'schemas\requirement-contract.schema.json') -ErrorAction Stop -WarningAction SilentlyContinue}catch{throw "protected task Contract schema is unavailable: $($_.Exception.Message)"}
     if(-not$contractValid-or[string]$contract.task_id-cne$TaskId){throw 'protected task Contract failed validation'}
     $canonical=[ordered]@{};foreach($key in @('schema_version','task_id','goal','acceptance','in_scope','out_of_scope','product_constraints','product_decisions','unresolved_product_decisions','source_authority')){if($contract.Contains($key)){$canonical[$key]=$contract[$key]}}

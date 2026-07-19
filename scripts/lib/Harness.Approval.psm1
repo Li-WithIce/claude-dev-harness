@@ -19,7 +19,7 @@ function Test-HarnessApprovalSchema {
 function Read-HarnessApprovalJson {
     param([string]$WorkspaceRoot,[string]$Path,[string]$Label)
     $fullPath = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $Path -Label $Label -MustExist File
-    try { $value = [System.IO.File]::ReadAllText($fullPath,[System.Text.UTF8Encoding]::new($false,$true)) | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop }
+    try { $value = [System.IO.File]::ReadAllText($fullPath,[System.Text.UTF8Encoding]::new($false,$true)) | ConvertFrom-HarnessJson -ErrorAction Stop }
     catch { throw "$Label is not valid UTF-8 JSON: $($_.Exception.Message)" }
     if ($value -isnot [System.Collections.IDictionary]) { throw "$Label must be a JSON object" }
     return [pscustomobject]@{Document=$value;Path=(Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path $fullPath)}

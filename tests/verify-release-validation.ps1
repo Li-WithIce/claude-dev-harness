@@ -460,6 +460,7 @@ $validationProcessPath = Join-Path $RepoRoot 'scripts\lib\Harness.ValidationProc
 $validationJobPath = Join-Path $RepoRoot 'scripts\lib\Harness.ValidationJob.cs'
 $validationSupervisorPath = Join-Path $RepoRoot 'scripts\invoke-validation-check.ps1'
 $smokeRunnerPath = Join-Path $RepoRoot 'scripts\run-isolated-install-smoke.ps1'
+$runnerBoundaryPath = Join-Path $RepoRoot 'scripts\assert-release-runner-boundary.ps1'
 $workflowPath = Join-Path $RepoRoot '.github\workflows\validation.yml'
 $inventoryPath = Join-Path $RepoRoot 'scripts\get-repo-inventory.ps1'
 $readmePath = Join-Path $RepoRoot 'README.md'
@@ -514,6 +515,11 @@ $validationSupervisor = Get-Content -LiteralPath $validationSupervisorPath -Raw 
 $validationSupervisorTokens = $null
 $validationSupervisorParseErrors = $null
 [void][System.Management.Automation.Language.Parser]::ParseInput($validationSupervisor,[ref]$validationSupervisorTokens,[ref]$validationSupervisorParseErrors)
+$runnerBoundary = Get-Content -LiteralPath $runnerBoundaryPath -Raw -Encoding utf8
+$runnerBoundaryTokens = $null
+$runnerBoundaryParseErrors = $null
+[void][System.Management.Automation.Language.Parser]::ParseInput($runnerBoundary,[ref]$runnerBoundaryTokens,[ref]$runnerBoundaryParseErrors)
+$runnerBoundaryBytes = [IO.File]::ReadAllBytes($runnerBoundaryPath)
 $quietProcessFunction = $validationProcessAst.Find({
     param($node)
     $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-QuietProcess'
@@ -532,6 +538,13 @@ $aggregatorRunnerPattern = '(?ms)^\s*runs-on:\s*\r?\n\s*-\s*self-hosted\s*\r?\n\
 $modelUpload = [regex]::Match($releaseModelJob,'(?ms)^      - name: Upload model evidence\s*$.*\z').Value
 $hostUpload = [regex]::Match($releaseHostJob,'(?ms)^      - name: Upload host evidence\s*$.*\z').Value
 $releaseUpload = [regex]::Match($releaseJob,'(?ms)^      - name: Upload rollout evidence\s*$.*\z').Value
+
+if ($runnerBoundaryParseErrors.Count -eq 0 -and $runnerBoundaryBytes.Length -ge 3 -and
+    $runnerBoundaryBytes[0] -eq 0xEF -and $runnerBoundaryBytes[1] -eq 0xBB -and $runnerBoundaryBytes[2] -eq 0xBF) {
+    Add-Check 'release runner account boundary script parses and has a UTF-8 BOM'
+} else {
+    Add-Failure 'release runner account boundary script must parse and have a UTF-8 BOM'
+}
 
 if ($runnerParseErrors.Count -eq 0 -and
     $validationProcessParseErrors.Count -eq 0 -and
@@ -739,10 +752,31 @@ if ($releaseModelJob -match 'run-model-evals\.ps1[^\r\n]+-TimeoutSeconds 120[^\r
 }
 
 if (@($releaseModelJob,$releaseHostJob | Where-Object { $_ -match $producerRunnerPattern -and $_ -match '(?m)^\s*HOST_BENCHMARK_CODEX_HOME:\s*\$\{\{\s*vars\.HOST_BENCHMARK_CODEX_HOME\s*\}\}\s*$' -and $_ -match '(?m)^\s*environment:\s*thin-v2-release\s*$' -and $_ -match '(?m)^\s*persist-credentials:\s*false\s*$' -and $_ -match 'refs/heads/codex/thin-harness-v2-refactor' -and $_ -notmatch '(?i)secrets\.' }).Count -eq 2 -and
-    $releaseJob -match $aggregatorRunnerPattern -and $releaseJob -notmatch [regex]::Escape('${{ vars.THIN_V2_RELEASE_RUNNER }}') -and $releaseJob -match '(?m)^\s*environment:\s*thin-v2-release\s*$' -and $releaseJob -match '(?m)^\s*persist-credentials:\s*false\s*$' -and $releaseJob -notmatch 'HOST_BENCHMARK_CODEX_HOME' -and $releaseJob -notmatch '(?i)secrets\.') {
+    $releaseJob -match $aggregatorRunnerPattern -and $releaseJob -match '(?m)^\s*environment:\s*thin-v2-release\s*$' -and $releaseJob -match '(?m)^\s*persist-credentials:\s*false\s*$' -and $releaseJob -notmatch 'HOST_BENCHMARK_CODEX_HOME' -and $releaseJob -notmatch '(?i)secrets\.') {
     Add-Check 'credentialed producers and the credential-blind aggregator use separate dedicated runner labels'
 } else {
     Add-Failure 'release CI must map the approved runner and Codex-home repository variables without credential transport'
+}
+
+$producerBoundaryCount = 0
+foreach ($producer in @($releaseModelJob,$releaseHostJob)) {
+    $boundaryIndex = $producer.IndexOf('scripts/assert-release-runner-boundary.ps1',[StringComparison]::Ordinal)
+    $producerWorkIndex = $producer.IndexOf('evidence directory',[StringComparison]::Ordinal)
+    if ($producer -match '(?m)^\s*runner_account_digest:\s*\$\{\{\s*steps\.runner_boundary\.outputs\.runner_account_digest\s*\}\}\s*$' -and
+        $producer -match '(?ms)^\s*- name: Assert credentialed producer runner boundary\s*$\r?\n\s*id:\s*runner_boundary\s*$.*?assert-release-runner-boundary\.ps1 -Mode producer\b' -and
+        $boundaryIndex -ge 0 -and $producerWorkIndex -gt $boundaryIndex) { $producerBoundaryCount++ }
+}
+$aggregatorBoundaryIndex = $releaseJob.IndexOf('scripts/assert-release-runner-boundary.ps1',[StringComparison]::Ordinal)
+$aggregatorDownloadIndex = $releaseJob.IndexOf('actions/download-artifact@',[StringComparison]::Ordinal)
+$aggregatorGenerateIndex = $releaseJob.IndexOf('scripts/generate-v2-rollout-report.ps1',[StringComparison]::Ordinal)
+if ($producerBoundaryCount -eq 2 -and
+    $releaseJob -match '(?m)^\s*MODEL_PRODUCER_ACCOUNT_DIGEST:\s*\$\{\{\s*needs\.release-model\.outputs\.runner_account_digest\s*\}\}\s*$' -and
+    $releaseJob -match '(?m)^\s*HOST_PRODUCER_ACCOUNT_DIGEST:\s*\$\{\{\s*needs\.release-host\.outputs\.runner_account_digest\s*\}\}\s*$' -and
+    $releaseJob -match 'assert-release-runner-boundary\.ps1 -Mode aggregator\b[^\r\n]+-ModelProducerAccountDigest \$env:MODEL_PRODUCER_ACCOUNT_DIGEST[^\r\n]+-HostProducerAccountDigest \$env:HOST_PRODUCER_ACCOUNT_DIGEST' -and
+    $aggregatorBoundaryIndex -ge 0 -and $aggregatorDownloadIndex -gt $aggregatorBoundaryIndex -and $aggregatorGenerateIndex -gt $aggregatorBoundaryIndex) {
+    Add-Check 'release producers publish account digests and the aggregator verifies both before consuming evidence'
+} else {
+    Add-Failure 'release account boundary must bind both producer outputs before evidence download or rollout generation'
 }
 
 $checkoutAction = 'actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5'

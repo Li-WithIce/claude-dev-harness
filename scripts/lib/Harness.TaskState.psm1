@@ -47,7 +47,7 @@ function Read-TaskStateJson {
             $reader = [System.IO.StreamReader]::new($stream,[System.Text.UTF8Encoding]::new($false,$true),$true,4096,$true)
             try { $text = $reader.ReadToEnd() } finally { $reader.Dispose() }
         } finally { $stream.Dispose() }
-        $value = $text | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop
+        $value = $text | ConvertFrom-HarnessJson -ErrorAction Stop
     } catch { throw "$Label is not valid JSON: $($_.Exception.Message)" }
     if ($value -isnot [System.Collections.IDictionary]) { throw "$Label must be a JSON object" }
     return $value
@@ -150,7 +150,7 @@ function Get-RequirementContract {
 function Get-TaskPolicyFlags {
     param([string]$RepoRoot,[string]$Profile,[string[]]$Capabilities)
     if ($Profile -cnotin @('governed','critical')) { throw 'durable task profile must be governed or critical' }
-    $execution = Get-Content -LiteralPath (Join-Path $RepoRoot 'policies\execution-profiles.json') -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop
+    $execution = Get-Content -LiteralPath (Join-Path $RepoRoot 'policies\execution-profiles.json') -Raw -Encoding utf8 | ConvertFrom-HarnessJson -ErrorAction Stop
     $profilePolicy = $execution.profiles[$Profile]
     $allowed = @($profilePolicy.minimum_capabilities) + @($profilePolicy.configurable_capabilities)
     foreach ($capability in $Capabilities) { if ($allowed -cnotcontains $capability) { throw "capability is not allowed for ${Profile}: $capability" } }
@@ -226,7 +226,7 @@ function Read-EventLog {
     if ($text.Length -gt 0) { $lines = @($text.Substring(0,$text.Length-1) -split "`n" | ForEach-Object { $_.TrimEnd("`r") }) }
     foreach ($line in $lines) {
         if ([string]::IsNullOrWhiteSpace($line)) { throw 'event log contains a blank line' }
-        try { $event = $line | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop } catch { throw "event log contains invalid JSON: $($_.Exception.Message)" }
+        try { $event = $line | ConvertFrom-HarnessJson -ErrorAction Stop } catch { throw "event log contains invalid JSON: $($_.Exception.Message)" }
         Test-TaskStateSchema -Value $event -SchemaPath (Join-Path $RepoRoot 'schemas\event.schema.json') -Label 'event'
     }
     return [pscustomobject]@{ Text=$text; Count=$lines.Count }
@@ -421,7 +421,7 @@ function Get-TransactionStepBeforeContent {
 function ConvertFrom-TransactionStepJson {
     param([System.Collections.IDictionary]$Step,[string]$Label)
     $content = Get-TransactionStepContent -Step $Step -Label $Label
-    try { $document = $content | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop } catch { throw "$Label is not valid JSON" }
+    try { $document = $content | ConvertFrom-HarnessJson -ErrorAction Stop } catch { throw "$Label is not valid JSON" }
     if ($document -isnot [System.Collections.IDictionary]) { throw "$Label must be a JSON object" }
     return $document
 }
@@ -430,7 +430,7 @@ function ConvertFrom-TransactionStepBeforeJson {
     param([System.Collections.IDictionary]$Step,[string]$Label)
     $content = Get-TransactionStepBeforeContent -Step $Step -Label $Label
     if ($null -eq $content) { throw "$Label is missing" }
-    try { $document = $content | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop } catch { throw "$Label is not valid JSON" }
+    try { $document = $content | ConvertFrom-HarnessJson -ErrorAction Stop } catch { throw "$Label is not valid JSON" }
     if ($document -isnot [System.Collections.IDictionary]) { throw "$Label must be a JSON object" }
     return $document
 }
@@ -770,7 +770,7 @@ function Assert-TransactionJournal {
     foreach ($rawLine in $eventLines) {
         $line = $rawLine.TrimEnd("`r")
         if ([string]::IsNullOrWhiteSpace($line)) { throw 'transaction event-log payload is invalid' }
-        try { $event = $line | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop } catch { throw 'transaction event-log payload is not valid JSONL' }
+        try { $event = $line | ConvertFrom-HarnessJson -ErrorAction Stop } catch { throw 'transaction event-log payload is not valid JSONL' }
         Test-TaskStateSchema -Value $event -SchemaPath (Join-Path $schemaRoot 'schemas\event.schema.json') -Label 'transaction event payload'
         if ($event -isnot [System.Collections.IDictionary] -or
             [string]$event.schema_version -cne 'event/v1' -or
@@ -1151,7 +1151,7 @@ function Assert-LegacyTransactionJournal {
     foreach ($rawLine in $eventLines) {
         $line=$rawLine.TrimEnd("`r")
         if ([string]::IsNullOrWhiteSpace($line)) { throw 'legacy transaction event-log payload is invalid' }
-        try { $event=$line|ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop } catch { throw 'legacy transaction event-log payload is not valid JSONL' }
+        try { $event=$line|ConvertFrom-HarnessJson -ErrorAction Stop } catch { throw 'legacy transaction event-log payload is not valid JSONL' }
         Test-TaskStateSchema -Value $event -SchemaPath (Join-Path $schemaRoot 'schemas\event.schema.json') -Label 'legacy transaction event payload'
         if ([string]$event.task_id -cne [string]$Journal.task_id -or -not (Test-TaskStateIntegerValue -Value $event.task_version) -or [int64]$event.task_version -lt $previousEventVersion -or [int64]$event.task_version -gt $targetVersion) { throw 'legacy transaction event-log payload does not match its task intent' }
         $previousEventVersion=[int64]$event.task_version;$events.Add($event)
@@ -1293,7 +1293,7 @@ function Assert-TransactionReplayInputs {
         }
         $evidenceStep = $stepsById['evidence']
         $evidenceContent = Get-TransactionStepContent -Step $evidenceStep -Label 'transaction Evidence payload'
-        $journalEvidence = $evidenceContent | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop
+        $journalEvidence = $evidenceContent | ConvertFrom-HarnessJson -ErrorAction Stop
         $pinnedRevision = if ($UseAuthorizedSnapshot) { [string]$journalEvidence.revision } else { '' }
         $resolvedEvidence = & $script:EvidenceModule {
             param($Root,$Workspace,$Task,$Version,$Digest,$AcceptanceCount,$Path,$PinnedRevision)
@@ -1695,7 +1695,7 @@ function Set-HarnessTaskTransition {
         if ($To -ceq 'done') { throw 'done requires verify -Evidence' }
         $current=Read-CurrentPointer -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Current;$isCurrent=$null -ne $current -and [string]$current.task_id -ceq $TaskId
         if ($isCurrent -and [int]$current.task_version -ne $ExpectedVersion) { throw 'current pointer version is stale; replay or repair before transition' }
-        $next=(ConvertTo-HarnessJsonText -Value $task)|ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop;$next.version=$ExpectedVersion+1;$next.status=$To;$next.updated_at=[datetimeoffset]::UtcNow.ToString('o')
+        $next=(ConvertTo-HarnessJsonText -Value $task)|ConvertFrom-HarnessJson -ErrorAction Stop;$next.version=$ExpectedVersion+1;$next.status=$To;$next.updated_at=[datetimeoffset]::UtcNow.ToString('o')
         if ($To -ceq 'blocked') {$next.requirement_state='blocked';$next.block_reason=$Reason}
         elseif ($from -ceq 'blocked' -and $To -ceq 'ready') {$contract=Get-RequirementContract -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -ContractPath $ContractPath;if($contract.Digest -ceq [string]$task.contract_digest){throw 'blocked -> ready requires a revised Contract digest'};$next.requirement_state='clear';$next.block_reason=$null;$next.contract_path=$contract.Path;$next.contract_digest=$contract.Digest}
         Assert-TaskStateDocument -RepoRoot $RepoRoot -Task $next
@@ -1750,7 +1750,7 @@ function Resume-HarnessTaskExecution {
             throw 'current pointer version is stale; replay or repair before resume-and-execute'
         }
 
-        $next = (ConvertTo-HarnessJsonText -Value $task) | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop
+        $next = (ConvertTo-HarnessJsonText -Value $task) | ConvertFrom-HarnessJson -ErrorAction Stop
         $next.version = $ExpectedVersion + 1
         $next.status = 'running'
         $next.updated_at = [datetimeoffset]::UtcNow.ToString('o')
@@ -1803,7 +1803,7 @@ function Set-HarnessTaskApproval {
         if(Test-Path -LiteralPath $approvalTarget){throw 'Approval record already exists'}
         $current=Read-CurrentPointer -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Current;$isCurrent=$null-ne$current-and[string]$current.task_id-ceq$TaskId
         if($isCurrent-and[int]$current.task_version-ne$ExpectedVersion){throw 'current pointer version is stale; replay or repair before approve'}
-        $next=(ConvertTo-HarnessJsonText -Value $task)|ConvertFrom-Json -AsHashtable -DateKind String;$next.version=$ExpectedVersion+1;$next.approvals=@(@($task.approvals)+@([string]$approval.Document.approval_id));$next.updated_at=[datetimeoffset]::UtcNow.ToString('o');Assert-TaskStateDocument -RepoRoot $RepoRoot -Task $next
+        $next=(ConvertTo-HarnessJsonText -Value $task)|ConvertFrom-HarnessJson;$next.version=$ExpectedVersion+1;$next.approvals=@(@($task.approvals)+@([string]$approval.Document.approval_id));$next.updated_at=[datetimeoffset]::UtcNow.ToString('o');Assert-TaskStateDocument -RepoRoot $RepoRoot -Task $next
         $transactionId='txn_'+[guid]::NewGuid().ToString('N');$timestamp=[string]$next.updated_at;$events=Read-EventLog -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Events
         $event=New-TaskEvent -RepoRoot $RepoRoot -EventId ('evt_'+$transactionId.Substring(4)) -TaskId $TaskId -Version ([int]$next.version) -Type 'approval.granted' -Host $ActorHost -Model $ActorModel -Timestamp $timestamp -Payload ([ordered]@{approval_id=[string]$approval.Document.approval_id;approval_type=[string]$approval.Document.approval_type;approval_path=$approval.OutputPath;digest=$approval.Digest})
         $steps=[Collections.Generic.List[object]]::new();$steps.Add((New-TransactionStep -WorkspaceRoot $WorkspaceRoot -Id 'approval' -RelativePath $approval.OutputPath -Action write -Content $approval.Content));$steps.Add((New-TransactionStep -WorkspaceRoot $WorkspaceRoot -Id 'task-state' -RelativePath $paths.Task -Action write -Content (ConvertTo-HarnessJsonText -Value $next)));$steps.Add((New-TransactionStep -WorkspaceRoot $WorkspaceRoot -Id 'event-log' -RelativePath $paths.Events -Action write -Content ($events.Text+(ConvertTo-HarnessJsonLine -Value $event))));$pointerAction='unchanged'
@@ -1833,7 +1833,7 @@ function Set-HarnessTaskEvidence {
         $approval=$null;if([bool]$task.policies.approval_required-and[string]$evidence.NextStatus-ceq'done'){$approval=Assert-HarnessTaskApproval -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Task $task}
         $current=Read-CurrentPointer -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Current;$isCurrent=$null-ne$current-and[string]$current.task_id-ceq$TaskId
         if($isCurrent-and[int]$current.task_version-ne$ExpectedVersion){throw 'current pointer version is stale; replay or repair before verify'}
-        $next=(ConvertTo-HarnessJsonText -Value $task)|ConvertFrom-Json -AsHashtable -DateKind String;$next.version=$ExpectedVersion+1;$next.status=$evidence.NextStatus;$next.evidence_path=$evidence.OutputPath;$next.updated_at=[datetimeoffset]::UtcNow.ToString('o');Assert-TaskStateDocument -RepoRoot $RepoRoot -Task $next
+        $next=(ConvertTo-HarnessJsonText -Value $task)|ConvertFrom-HarnessJson;$next.version=$ExpectedVersion+1;$next.status=$evidence.NextStatus;$next.evidence_path=$evidence.OutputPath;$next.updated_at=[datetimeoffset]::UtcNow.ToString('o');Assert-TaskStateDocument -RepoRoot $RepoRoot -Task $next
         $transactionId='txn_'+[guid]::NewGuid().ToString('N');$timestamp=[string]$next.updated_at;$events=Read-EventLog -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Events
         $recorded=New-TaskEvent -RepoRoot $RepoRoot -EventId ('evt_'+$transactionId.Substring(4)) -TaskId $TaskId -Version ([int]$next.version) -Type 'verification.recorded' -Host $ActorHost -Model $ActorModel -Timestamp $timestamp -Payload ([ordered]@{evidence_path=$evidence.OutputPath;digest=$evidence.Digest;conclusion=$evidence.Conclusion;from='verifying';to=$evidence.NextStatus;plan_path=$(if($null-ne$governance.Plan){$governance.Plan.Path}else{$null});audit_path=$(if($null-ne$governance.Audit){$governance.Audit.Path}else{$null});approval_id=$(if($null-ne$approval){[string]$approval.Document.approval_id}else{$null})})
         $eventText=$events.Text+(ConvertTo-HarnessJsonLine -Value $recorded)
@@ -1885,7 +1885,7 @@ function Assert-LegacyTransactionReplayInputs {
     $mustResolveContract=[string]$Journal.operation-ceq'create'-or[string]$Journal.operation-ceq'verify'
     if($operation-ceq'transition'){
         $eventContent=Get-TransactionStepContent -Step $stepsById['event-log'] -Label 'legacy transaction event-log payload'
-        $events=@($eventContent.TrimEnd("`r","`n")-split"`n"|ForEach-Object{$_|ConvertFrom-Json -AsHashtable -DateKind String})
+        $events=@($eventContent.TrimEnd("`r","`n")-split"`n"|ForEach-Object{$_|ConvertFrom-HarnessJson})
         $targetEvent=@($events|Where-Object{[int64]$_.task_version-eq[int64]$task.version})[-1]
         $mustResolveContract=[string]$targetEvent.payload.from-ceq'blocked'-and[string]$targetEvent.payload.to-ceq'ready'
     }
@@ -1907,7 +1907,7 @@ function Assert-LegacyTransactionReplayInputs {
         }
         $evidenceStep=$stepsById['evidence']
         $evidenceContent=Get-TransactionStepContent -Step $evidenceStep -Label 'legacy transaction Evidence payload'
-        $journalEvidence=$evidenceContent|ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop
+        $journalEvidence=$evidenceContent|ConvertFrom-HarnessJson -ErrorAction Stop
         $resolvedEvidence=& $script:EvidenceModule {
             param($Root,$Workspace,$Task,$Version,$Digest,$AcceptanceCount,$Path,$PinnedRevision)
             Resolve-HarnessEvidenceCore -RepoRoot $Root -WorkspaceRoot $Workspace -TaskId $Task -TaskVersion $Version -ContractDigest $Digest -RequiredAcceptanceCount $AcceptanceCount -EvidencePath $Path -PinnedRevision $PinnedRevision

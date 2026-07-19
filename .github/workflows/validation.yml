@@ -63,12 +63,22 @@ jobs:
     environment: thin-v2-release
     env:
       HOST_BENCHMARK_CODEX_HOME: ${{ vars.HOST_BENCHMARK_CODEX_HOME }}
+    outputs:
+      runner_account_digest: ${{ steps.runner_boundary.outputs.runner_account_digest }}
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Assert credentialed producer runner boundary
+        id: runner_boundary
+        shell: pwsh
+        env:
+          PRODUCER_RUNNER_LABEL: ${{ vars.THIN_V2_RELEASE_RUNNER }}
+          AGGREGATOR_RUNNER_LABEL: ${{ vars.THIN_V2_RELEASE_AGGREGATOR_RUNNER }}
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/assert-release-runner-boundary.ps1 -Mode producer -ProducerRunnerLabel $env:PRODUCER_RUNNER_LABEL -AggregatorRunnerLabel $env:AGGREGATOR_RUNNER_LABEL -RunId $env:GITHUB_RUN_ID -RunAttempt $env:GITHUB_RUN_ATTEMPT
 
       - name: Prepare model evidence directory
         id: model_dir
@@ -104,12 +114,22 @@ jobs:
     environment: thin-v2-release
     env:
       HOST_BENCHMARK_CODEX_HOME: ${{ vars.HOST_BENCHMARK_CODEX_HOME }}
+    outputs:
+      runner_account_digest: ${{ steps.runner_boundary.outputs.runner_account_digest }}
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Assert credentialed producer runner boundary
+        id: runner_boundary
+        shell: pwsh
+        env:
+          PRODUCER_RUNNER_LABEL: ${{ vars.THIN_V2_RELEASE_RUNNER }}
+          AGGREGATOR_RUNNER_LABEL: ${{ vars.THIN_V2_RELEASE_AGGREGATOR_RUNNER }}
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/assert-release-runner-boundary.ps1 -Mode producer -ProducerRunnerLabel $env:PRODUCER_RUNNER_LABEL -AggregatorRunnerLabel $env:AGGREGATOR_RUNNER_LABEL -RunId $env:GITHUB_RUN_ID -RunAttempt $env:GITHUB_RUN_ATTEMPT
 
       - name: Prepare host evidence directory
         id: host_dir
@@ -151,6 +171,15 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Assert credential-blind aggregator runner boundary
+        shell: pwsh
+        env:
+          PRODUCER_RUNNER_LABEL: ${{ vars.THIN_V2_RELEASE_RUNNER }}
+          AGGREGATOR_RUNNER_LABEL: ${{ vars.THIN_V2_RELEASE_AGGREGATOR_RUNNER }}
+          MODEL_PRODUCER_ACCOUNT_DIGEST: ${{ needs.release-model.outputs.runner_account_digest }}
+          HOST_PRODUCER_ACCOUNT_DIGEST: ${{ needs.release-host.outputs.runner_account_digest }}
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/assert-release-runner-boundary.ps1 -Mode aggregator -ProducerRunnerLabel $env:PRODUCER_RUNNER_LABEL -AggregatorRunnerLabel $env:AGGREGATOR_RUNNER_LABEL -ModelProducerAccountDigest $env:MODEL_PRODUCER_ACCOUNT_DIGEST -HostProducerAccountDigest $env:HOST_PRODUCER_ACCOUNT_DIGEST -RunId $env:GITHUB_RUN_ID -RunAttempt $env:GITHUB_RUN_ATTEMPT
 
       - name: Prepare rollout evidence directory
         id: rollout_dir

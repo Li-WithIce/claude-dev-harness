@@ -63,7 +63,7 @@ function Assert-HarnessV2TaskArtifact {
     try {
         if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw 'task.json is not a file' }
         $json = [System.IO.File]::ReadAllText($Path,[System.Text.UTF8Encoding]::new($false,$true))
-        $document = $json | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop
+        $document = $json | ConvertFrom-HarnessJson -ErrorAction Stop
         $schemaPath = Join-Path $RepoRoot 'schemas\task-state.schema.json'
         if (-not (Test-Path -LiteralPath $schemaPath -PathType Leaf)) { throw 'task-state schema is unavailable' }
         if (-not (Test-Json -Json ($document | ConvertTo-Json -Depth 30 -Compress) -SchemaFile $schemaPath -ErrorAction Stop -WarningAction SilentlyContinue)) { throw 'task.json failed task-state/v2 schema validation' }
@@ -249,7 +249,7 @@ function Get-HarnessRolloutEligibility {
         if ($bytes.Length -gt $reportLimitBytes) { throw 'rollout-report-too-large' }
         try {
             $json = [System.Text.UTF8Encoding]::new($false,$true).GetString($bytes)
-            $document = $json | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop
+            $document = $json | ConvertFrom-HarnessJson -ErrorAction Stop
         } catch {
             throw 'rollout-report-invalid-json'
         }

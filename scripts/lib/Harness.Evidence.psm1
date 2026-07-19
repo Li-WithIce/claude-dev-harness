@@ -12,7 +12,7 @@ function ConvertTo-HarnessEvidenceJson {
 function Read-HarnessEvidenceJson {
     param([string]$WorkspaceRoot,[string]$Path)
     $fullPath = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $Path -Label 'Evidence' -MustExist File
-    try { $value = [System.IO.File]::ReadAllText($fullPath,[System.Text.UTF8Encoding]::new($false,$true)) | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop }
+    try { $value = [System.IO.File]::ReadAllText($fullPath,[System.Text.UTF8Encoding]::new($false,$true)) | ConvertFrom-HarnessJson -ErrorAction Stop }
     catch { throw "Evidence is not valid UTF-8 JSON: $($_.Exception.Message)" }
     if ($value -isnot [System.Collections.IDictionary]) { throw 'Evidence must be a JSON object' }
     return [pscustomobject]@{Document=$value;Path=(Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path $fullPath)}
@@ -33,9 +33,49 @@ function Test-HarnessEvidenceExcludedPath {
 }
 
 function Invoke-HarnessEvidenceGit {
-    param([string]$WorkspaceRoot,[string[]]$Arguments)
-    $output = @(& git -C $WorkspaceRoot @Arguments 2>$null)
-    return [pscustomobject]@{ExitCode=$LASTEXITCODE;Text=($output -join "`n");Lines=$output}
+    param([string]$GitPath,[string]$WorkspaceRoot,[string[]]$Arguments)
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $GitPath
+    $startInfo.WorkingDirectory = $WorkspaceRoot
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.CreateNoWindow = $true
+    $utf8 = [System.Text.UTF8Encoding]::new($false,$true)
+    $startInfo.StandardOutputEncoding = $utf8
+    $startInfo.StandardErrorEncoding = $utf8
+    foreach ($name in @($startInfo.Environment.Keys)) {
+        if ([string]$name -like 'GIT_*') { [void]$startInfo.Environment.Remove([string]$name) }
+    }
+    $startInfo.Environment['GIT_TERMINAL_PROMPT'] = '0'
+    $startInfo.Environment['GIT_OPTIONAL_LOCKS'] = '0'
+    $startInfo.Environment['GIT_CONFIG_NOSYSTEM'] = '1'
+    $startInfo.Environment['GIT_CONFIG_GLOBAL'] = $(if ($IsWindows) { 'NUL' } else { '/dev/null' })
+    $startInfo.Environment['GIT_ATTR_NOSYSTEM'] = '1'
+    $startInfo.ArgumentList.Add('-c')
+    $startInfo.ArgumentList.Add('core.fsmonitor=false')
+    $startInfo.ArgumentList.Add('-C')
+    $startInfo.ArgumentList.Add($WorkspaceRoot)
+    foreach ($argument in $Arguments) { $startInfo.ArgumentList.Add([string]$argument) }
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        [void]$process.Start()
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(60000)) {
+            try { $process.Kill($true) } catch {}
+            throw 'Git evidence inspection timed out'
+        }
+        $stdout = $stdoutTask.GetAwaiter().GetResult().Replace("`r`n","`n").TrimEnd("`n")
+        [void]$stderrTask.GetAwaiter().GetResult()
+        $lines = if ([string]::IsNullOrEmpty($stdout)) { @() } else { @($stdout -split "`n" | ForEach-Object { $_.TrimEnd("`r") }) }
+        return [pscustomobject]@{ExitCode=$process.ExitCode;Text=$stdout;Lines=$lines}
+    } finally {
+        $process.Dispose()
+    }
 }
 
 function Get-HarnessEvidenceRevision {
@@ -59,12 +99,13 @@ function Get-HarnessEvidenceRevision {
     foreach ($record in @($Evidence.records)) {
         $recordPath = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path ([string]$record.evidence_path) -Label 'record evidence_path' -MustExist File
         $relative = Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path $recordPath
-        [void]$exactExclusions.Add($relative)
         $digest = Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $recordPath
         $evidenceFiles.Add([ordered]@{path=$relative;digest=$digest})
     }
     $gitToolRoot = Resolve-HarnessToolCompatibleWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
-    $gitRoot = Invoke-HarnessEvidenceGit -WorkspaceRoot $gitToolRoot -Arguments @('rev-parse','--show-toplevel')
+    $gitCommand = @(Get-Command git -CommandType Application -ErrorAction Stop)[0]
+    $gitPath = [System.IO.Path]::GetFullPath([string]$gitCommand.Source)
+    $gitRoot = Invoke-HarnessEvidenceGit -GitPath $gitPath -WorkspaceRoot $gitToolRoot -Arguments @('rev-parse','--show-toplevel')
     $head = '';$workingDiff='';$stagedDiff='';$untracked=[System.Collections.Generic.List[object]]::new();$gitUsable=$false
     if ($gitRoot.ExitCode -eq 0) {
         try { $resolvedGitRoot = (Resolve-Path -LiteralPath $gitRoot.Text).Path } catch { $resolvedGitRoot = '' }
@@ -82,17 +123,22 @@ function Get-HarnessEvidenceRevision {
         }
     }
     if ($gitUsable) {
-        $headRun=Invoke-HarnessEvidenceGit -WorkspaceRoot $gitToolRoot -Arguments @('rev-parse','HEAD');if($headRun.ExitCode -eq 0){$head=$headRun.Text.Trim()}
-        $indexState=Invoke-HarnessEvidenceGit -WorkspaceRoot $gitToolRoot -Arguments @('ls-files','-v','--','.')
+        $trackedInput=Invoke-HarnessEvidenceGit -GitPath $gitPath -WorkspaceRoot $gitToolRoot -Arguments @('ls-files','--error-unmatch','--',$inputRelative)
+        if($trackedInput.ExitCode-eq0){[void]$exactExclusions.Remove($inputRelative)}elseif($trackedInput.ExitCode-ne1){throw 'unable to classify Evidence input path in Git'}
+        $headRun=Invoke-HarnessEvidenceGit -GitPath $gitPath -WorkspaceRoot $gitToolRoot -Arguments @('rev-parse','HEAD');if($headRun.ExitCode -eq 0){$head=$headRun.Text.Trim()}
+        $indexState=Invoke-HarnessEvidenceGit -GitPath $gitPath -WorkspaceRoot $gitToolRoot -Arguments @('ls-files','-v','--','.')
         if($indexState.ExitCode-ne0){throw 'unable to inspect Git index flags for Evidence revision'}
         $unsafeIndex=@($indexState.Lines|Where-Object{[string]::IsNullOrEmpty([string]$_)-or-not([string]$_).StartsWith('H ',[StringComparison]::Ordinal)})
         if($unsafeIndex.Count-gt0){throw 'Evidence workspace has unsafe Git index flags'}
+        $effectiveFilters=Invoke-HarnessEvidenceGit -GitPath $gitPath -WorkspaceRoot $gitToolRoot -Arguments @('config','--includes','--get-regexp','^filter\.')
+        if($effectiveFilters.ExitCode-eq0){throw 'Evidence workspace has unsupported Git clean filters'}
+        if($effectiveFilters.ExitCode-ne1){throw 'unable to inspect Git clean filters for Evidence revision'}
         $pathspec=[System.Collections.Generic.List[string]]::new();$pathspec.Add('.')
         $pathspec.Add($(if($runningOnWindows){':(icase,glob,exclude).assistant/runtime/**'}else{':(glob,exclude).assistant/runtime/**'}))
         foreach($excluded in @($exactExclusions|Sort-Object)){$pathspec.Add($(if($runningOnWindows){":(icase,literal,exclude)$excluded"}else{":(literal,exclude)$excluded"}))}
-        $working=Invoke-HarnessEvidenceGit -WorkspaceRoot $gitToolRoot -Arguments (@('diff','--binary','--')+@($pathspec));if($working.ExitCode -ne 0){throw 'unable to compute working diff for Evidence revision'};$workingDiff=$working.Text
-        $staged=Invoke-HarnessEvidenceGit -WorkspaceRoot $gitToolRoot -Arguments (@('diff','--cached','--binary','--')+@($pathspec));if($staged.ExitCode -ne 0){throw 'unable to compute staged diff for Evidence revision'};$stagedDiff=$staged.Text
-        $others=Invoke-HarnessEvidenceGit -WorkspaceRoot $gitToolRoot -Arguments @('ls-files','--others','--exclude-standard','--','.');if($others.ExitCode -ne 0){throw 'unable to enumerate untracked files for Evidence revision'}
+        $working=Invoke-HarnessEvidenceGit -GitPath $gitPath -WorkspaceRoot $gitToolRoot -Arguments (@('diff','--ignore-submodules=none','--no-ext-diff','--no-textconv','--binary','--')+@($pathspec));if($working.ExitCode -ne 0){throw 'unable to compute working diff for Evidence revision'};$workingDiff=$working.Text
+        $staged=Invoke-HarnessEvidenceGit -GitPath $gitPath -WorkspaceRoot $gitToolRoot -Arguments (@('diff','--cached','--ignore-submodules=none','--no-ext-diff','--no-textconv','--binary','--')+@($pathspec));if($staged.ExitCode -ne 0){throw 'unable to compute staged diff for Evidence revision'};$stagedDiff=$staged.Text
+        $others=Invoke-HarnessEvidenceGit -GitPath $gitPath -WorkspaceRoot $gitToolRoot -Arguments @('ls-files','--others','--exclude-standard','--','.');if($others.ExitCode-ne0){throw 'unable to enumerate untracked files for Evidence revision'}
         foreach($path in @($others.Lines|ForEach-Object{$_.Replace('\','/')}|Sort-Object)){
             if(Test-HarnessEvidenceExcludedPath -Path $path -ExactPaths @($exactExclusions)){continue}
             $untracked.Add([ordered]@{path=$path;digest=(Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $path)})
