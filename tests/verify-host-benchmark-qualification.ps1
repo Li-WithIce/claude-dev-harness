@@ -95,6 +95,12 @@ try {
     . (Join-Path $RepoRoot 'scripts\host-benchmark\HostBenchmark.Trial.ps1')
     . (Join-Path $RepoRoot 'skills\obsidian-memory\scripts\runtime-state-common.ps1')
 
+    $emptyChangeWorkspace = Join-Path $scratch 'workspace-empty-change-set'
+    [void][IO.Directory]::CreateDirectory($emptyChangeWorkspace)
+    $loadedPathModule = @(Get-Module Harness.Path -All | Select-Object -Last 1)[0]
+    Check (Test-HostWorkspaceChangePathsSafe -Workspace $emptyChangeWorkspace -Paths @() -PathModule $loadedPathModule) 'empty workspace change set was rejected before safety evaluation'
+    Check (-not (Test-HostWorkspaceChangePathsSafe -Workspace $emptyChangeWorkspace -Paths @('__git_index_flag__/probe') -PathModule $loadedPathModule)) 'Git index safety marker was accepted as an ordinary empty change set'
+
     Check ((Resolve-HostTrialStatus -Protocol v2 -InvocationUnavailable $true -ContractFailure $false -WriteBoundaryPassed $true -SourceBindingFailure $false -FreshSessions 1 -HostTurns 0 -ObservationComplete $false -WorkflowCompleted $true -DirectContractPassed $false -V1ContractPassed $true -Complete $false) -ceq 'unavailable') 'Direct wrapper failure was misclassified as a known contract failure'
     Check ((Resolve-HostTrialStatus -Protocol v1 -InvocationUnavailable $true -ContractFailure $false -WriteBoundaryPassed $true -SourceBindingFailure $false -FreshSessions 1 -HostTurns 0 -ObservationComplete $false -WorkflowCompleted $false -DirectContractPassed $true -V1ContractPassed $false -Complete $false) -ceq 'unavailable') 'v1 wrapper failure was misclassified as a known contract failure'
     Check ((Resolve-HostTrialStatus -Protocol v2 -InvocationUnavailable $true -ContractFailure $false -WriteBoundaryPassed $true -SourceBindingFailure $false -FreshSessions 2 -HostTurns 1 -ObservationComplete $false -WorkflowCompleted $true -DirectContractPassed $false -V1ContractPassed $true -Complete $false) -ceq 'fail') 'observed Direct session overrun was hidden by unavailable execution'

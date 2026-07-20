@@ -11,6 +11,17 @@ function Get-ExactCommandAst {
     if ($null -eq $Ast) { return @() }
     return @($Ast.FindAll({param($node) $node -is [Management.Automation.Language.CommandAst]},$true) | Where-Object { $_.GetCommandName() -ceq $Name })
 }
+function Get-UnsupportedHostSchemaKeyword {
+    param([AllowNull()]$Value)
+    if ($Value -is [Collections.IDictionary]) {
+        foreach ($key in @($Value.Keys)) {
+            if ([string]$key -cin @('allOf','oneOf','not','dependentRequired','dependentSchemas','if','then','else','const')) { [string]$key }
+            Get-UnsupportedHostSchemaKeyword -Value $Value[$key]
+        }
+    } elseif ($Value -is [Collections.IEnumerable] -and $Value -isnot [string]) {
+        foreach ($item in $Value) { Get-UnsupportedHostSchemaKeyword -Value $item }
+    }
+}
 $runner=Join-Path $RepoRoot 'scripts\run-host-benchmark.ps1'
 $schema=Join-Path $RepoRoot 'schemas\host-benchmark\observation.schema.json'
 $wrapper=Join-Path $RepoRoot 'skills\codex\scripts\invoke_codex.ps1'
@@ -23,15 +34,25 @@ foreach($path in @($runner,$schema,$wrapper,$atomic,$pathModule,$otel,$trial,$co
 Check (-not (Test-Path -LiteralPath (Join-Path $RepoRoot 'scripts\lib\HostBenchmark.Common.ps1'))) 'quarantined Common helper still exists'
 Check (@(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'scripts\lib') -Filter 'HostBenchmark.*' -File -ErrorAction Stop).Count -eq 0) 'release-only host benchmark helper leaked into the core runtime library'
 foreach($path in @($runner,$atomic,$pathModule,$otel,$trial,$collector,$PSCommandPath)){$tokens=$null;$errors=$null;[Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)|Out-Null;Check (@($errors).Count-eq0) "PowerShell parse failed: $path"}
+$schemaDocument=[IO.File]::ReadAllText($schema,[Text.UTF8Encoding]::new($false,$true))|ConvertFrom-Json -AsHashtable -Depth 20
+$unsupportedSchemaKeywords=@(Get-UnsupportedHostSchemaKeyword -Value $schemaDocument)
+$schemaFields=@('schema_version','outcome','task_completed','verification_executed','verification_passed','reason_code')
+$schemaRootValid=@($schemaDocument.Keys).Count-eq4-and$schemaDocument.Contains('type')-and$schemaDocument.Contains('additionalProperties')-and$schemaDocument.Contains('required')-and$schemaDocument.Contains('properties')-and[string]$schemaDocument.type-ceq'object'-and$schemaDocument.additionalProperties-is[bool]-and-not[bool]$schemaDocument.additionalProperties-and$unsupportedSchemaKeywords.Count-eq0
+$schemaFieldsValid=@($schemaDocument.required).Count-eq$schemaFields.Count-and@($schemaFields|Where-Object{$_-cnotin@($schemaDocument.required)}).Count-eq0-and@($schemaDocument.properties.Keys).Count-eq$schemaFields.Count-and@($schemaFields|Where-Object{-not$schemaDocument.properties.Contains($_)}).Count-eq0
+$schemaPropertiesValid=@($schemaDocument.properties.schema_version.Keys).Count-eq2-and[string]$schemaDocument.properties.schema_version.type-ceq'string'-and@($schemaDocument.properties.schema_version.enum).Count-eq1-and[string]$schemaDocument.properties.schema_version.enum[0]-ceq'host-benchmark-observation/v1'-and@($schemaDocument.properties.outcome.Keys).Count-eq2-and[string]$schemaDocument.properties.outcome.type-ceq'string'-and(@($schemaDocument.properties.outcome.enum)-join'|')-ceq'completed|in_progress|blocked|failed'-and@($schemaDocument.properties.reason_code.Keys).Count-eq2-and[string]$schemaDocument.properties.reason_code.type-ceq'string'-and(@($schemaDocument.properties.reason_code.enum)-join'|')-ceq'completed|stage_boundary|missing_decision|capability_block|execution_failed|verification_failed'
+foreach($booleanField in @('task_completed','verification_executed','verification_passed')){$schemaPropertiesValid=$schemaPropertiesValid-and@($schemaDocument.properties[$booleanField].Keys).Count-eq1-and[string]$schemaDocument.properties[$booleanField].type-ceq'boolean'}
+Check ($schemaRootValid-and$schemaFieldsValid-and$schemaPropertiesValid) 'host observation output schema is outside the exact Structured Outputs root-object subset'
 $valid='{"schema_version":"host-benchmark-observation/v1","outcome":"completed","task_completed":true,"verification_executed":true,"verification_passed":true,"reason_code":"completed"}'
 Check (Test-Json -Json $valid -SchemaFile $schema -ErrorAction Stop -WarningAction SilentlyContinue) 'valid host observation rejected'
 $invalid=$valid -replace ',"verification_passed":true',''
 Check (-not(Test-Json -Json $invalid -SchemaFile $schema -ErrorAction SilentlyContinue -WarningAction SilentlyContinue)) 'missing host observation field accepted'
 $contradictory='{"schema_version":"host-benchmark-observation/v1","outcome":"completed","task_completed":false,"verification_executed":false,"verification_passed":true,"reason_code":"completed"}'
-Check (-not(Test-Json -Json $contradictory -SchemaFile $schema -ErrorAction SilentlyContinue -WarningAction SilentlyContinue)) 'logically contradictory completed observation accepted'
+Check (Test-Json -Json $contradictory -SchemaFile $schema -ErrorAction Stop -WarningAction SilentlyContinue) 'Structured Outputs base schema unexpectedly contains cross-field composition'
 $runnerText=Get-Content -LiteralPath $runner -Raw -Encoding utf8
 $runnerAstTokens=$null;$runnerAstErrors=$null
 $runnerAst=[Management.Automation.Language.Parser]::ParseFile($runner,[ref]$runnerAstTokens,[ref]$runnerAstErrors)
+$trialAstTokens=$null;$trialAstErrors=$null
+$trialAst=[Management.Automation.Language.Parser]::ParseFile($trial,[ref]$trialAstTokens,[ref]$trialAstErrors)
 $otelText=Get-Content -LiteralPath $otel -Raw -Encoding utf8
 $trialText=Get-Content -LiteralPath $trial -Raw -Encoding utf8
 $collectorText=Get-Content -LiteralPath $collector -Raw -Encoding utf8
@@ -43,6 +64,46 @@ Check ($text-match'Import-Module \$atomicWritePath'-and$text-match'Get-HarnessFi
 $trialResolveStart=$trialText.IndexOf('function Test-HostWorkspaceChangePathsSafe')
 $trialResolveEnd=$trialText.IndexOf('function Resolve-HostTrialStatus',$trialResolveStart)
 $trialResolveBlock=if($trialResolveStart-ge0-and$trialResolveEnd-gt$trialResolveStart){$trialText.Substring($trialResolveStart,$trialResolveEnd-$trialResolveStart)}else{''}
+$workspacePathSafetyFunctions=@($trialAst.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Test-HostWorkspaceChangePathsSafe'},$true))
+$workspacePathSafetyFunction=if($workspacePathSafetyFunctions.Count-eq1){$workspacePathSafetyFunctions[0]}else{$null}
+$workspacePathSafetyPaths=@(if($null-ne$workspacePathSafetyFunction){$workspacePathSafetyFunction.Body.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -ceq 'Paths' }})
+$workspacePathSafetyMandatoryAttributes=@(if($workspacePathSafetyPaths.Count-eq1){$workspacePathSafetyPaths[0].Attributes | Where-Object { $_ -is [Management.Automation.Language.AttributeAst] -and $_.TypeName.FullName -ceq 'Parameter' -and $_.Extent.Text -ceq '[Parameter(Mandatory)]' }})
+$workspacePathSafetyAllowEmptyAttributes=@(if($workspacePathSafetyPaths.Count-eq1){$workspacePathSafetyPaths[0].Attributes | Where-Object { $_ -is [Management.Automation.Language.AttributeAst] -and $_.TypeName.FullName -ceq 'AllowEmptyCollection' }})
+$workspacePathSafetyTypes=@(if($workspacePathSafetyPaths.Count-eq1){$workspacePathSafetyPaths[0].Attributes | Where-Object { $_ -is [Management.Automation.Language.TypeConstraintAst] -and $_.TypeName.FullName -ceq 'string[]' }})
+$workspacePathSafetySignatureValid=$workspacePathSafetyPaths.Count-eq1-and$workspacePathSafetyMandatoryAttributes.Count-eq1-and$workspacePathSafetyAllowEmptyAttributes.Count-eq1-and$workspacePathSafetyTypes.Count-eq1
+$workspacePathSafetyCalls=@(Get-ExactCommandAst -Ast $trialAst -Name 'Test-HostWorkspaceChangePathsSafe')
+$workspacePathSafetyCall=if($workspacePathSafetyCalls.Count-eq1){$workspacePathSafetyCalls[0]}else{$null}
+$workspacePathSafetyElements=@(if($null-ne$workspacePathSafetyCall){$workspacePathSafetyCall.CommandElements})
+$workspacePathSafetyAssignment=if($null-ne$workspacePathSafetyCall-and$workspacePathSafetyCall.Parent.Parent -is [Management.Automation.Language.AssignmentStatementAst]){$workspacePathSafetyCall.Parent.Parent}else{$null}
+$workspacePathSafetyCallValid=$workspacePathSafetyElements.Count-eq7-and$workspacePathSafetyElements[1] -is [Management.Automation.Language.CommandParameterAst]-and$workspacePathSafetyElements[1].ParameterName -ceq 'Workspace'-and$workspacePathSafetyElements[2] -is [Management.Automation.Language.VariableExpressionAst]-and$workspacePathSafetyElements[2].VariablePath.UserPath -ceq 'workspace'-and$workspacePathSafetyElements[3] -is [Management.Automation.Language.CommandParameterAst]-and$workspacePathSafetyElements[3].ParameterName -ceq 'Paths'-and$workspacePathSafetyElements[4] -is [Management.Automation.Language.VariableExpressionAst]-and$workspacePathSafetyElements[4].VariablePath.UserPath -ceq 'changed'-and$workspacePathSafetyElements[5] -is [Management.Automation.Language.CommandParameterAst]-and$workspacePathSafetyElements[5].ParameterName -ceq 'PathModule'-and$workspacePathSafetyElements[6] -is [Management.Automation.Language.VariableExpressionAst]-and$workspacePathSafetyElements[6].VariablePath.UserPath -ceq 'pathModule'-and$null-ne$workspacePathSafetyAssignment-and$workspacePathSafetyAssignment.Left -is [Management.Automation.Language.VariableExpressionAst]-and$workspacePathSafetyAssignment.Left.VariablePath.UserPath -ceq 'safeChangedPaths'
+Check (@($trialAstErrors).Count-eq0-and$workspacePathSafetyFunctions.Count-eq1-and$workspacePathSafetySignatureValid) 'workspace change safety rejects the valid empty change set before evaluating it'
+Check ($workspacePathSafetyCalls.Count-eq1-and$workspacePathSafetyCallValid) 'workspace change safety signature is not bound to the production changed-path evidence'
+$invokeHostTrialFunctions=@($trialAst.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Invoke-HostTrial'},$true))
+$invokeHostTrialFunction=if($invokeHostTrialFunctions.Count-eq1){$invokeHostTrialFunctions[0]}else{$null}
+$observationSemanticFunctions=@($trialAst.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Test-HostObservationSemantics'},$true))
+$invokeObservationSemanticCalls=@(Get-ExactCommandAst -Ast $invokeHostTrialFunction -Name 'Test-HostObservationSemantics')
+$invokeObservationSemanticCall=if($invokeObservationSemanticCalls.Count-eq1){$invokeObservationSemanticCalls[0]}else{$null}
+$observationValidationTry=$null
+$observationAncestor=if($null-ne$invokeObservationSemanticCall){$invokeObservationSemanticCall.Parent}else{$null}
+while($null-ne$observationAncestor-and$observationAncestor-isnot[Management.Automation.Language.TryStatementAst]){$observationAncestor=$observationAncestor.Parent}
+if($observationAncestor-is[Management.Automation.Language.TryStatementAst]){$observationValidationTry=$observationAncestor}
+$observationValidationBody=if($null-ne$observationValidationTry){$observationValidationTry.Body}else{$null}
+$schemaValidationCalls=@(Get-ExactCommandAst -Ast $observationValidationBody -Name 'Test-Json')
+$schemaValidationCall=if($schemaValidationCalls.Count-eq1){$schemaValidationCalls[0]}else{$null}
+$observationSemanticCalls=@(Get-ExactCommandAst -Ast $observationValidationBody -Name 'Test-HostObservationSemantics')
+$observationSemanticCall=if($observationSemanticCalls.Count-eq1){$observationSemanticCalls[0]}else{$null}
+$observationSemanticElements=@(if($null-ne$observationSemanticCall){$observationSemanticCall.CommandElements})
+$observationSemanticIf=$null
+$observationSemanticAncestor=if($null-ne$observationSemanticCall){$observationSemanticCall.Parent}else{$null}
+while($null-ne$observationSemanticAncestor-and$observationSemanticAncestor-isnot[Management.Automation.Language.IfStatementAst]){$observationSemanticAncestor=$observationSemanticAncestor.Parent}
+if($observationSemanticAncestor-is[Management.Automation.Language.IfStatementAst]){$observationSemanticIf=$observationSemanticAncestor}
+$observationAssignments=@(if($null-ne$observationValidationBody){$observationValidationBody.FindAll({param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left -is [Management.Automation.Language.VariableExpressionAst] -and $node.Left.VariablePath.UserPath -ceq 'observation'},$true)})
+$telemetryAssignments=@(if($null-ne$observationValidationBody){$observationValidationBody.FindAll({param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left -is [Management.Automation.Language.VariableExpressionAst] -and $node.Left.VariablePath.UserPath -ceq 'telemetry'},$true)})
+$invalidWrapperStrings=@(if($null-ne$observationValidationTry){$observationValidationTry.FindAll({param($node) $node -is [Management.Automation.Language.StringConstantExpressionAst] -and $node.Value -ceq 'invalid-wrapper-output'},$true)})
+$observationSemanticIfValid=$null-ne$observationSemanticIf-and$observationSemanticIf.Clauses.Count-eq1-and$null-eq$observationSemanticIf.ElseClause-and$observationSemanticIf.Clauses[0].Item1.Extent.Text-ceq'-not (Test-HostObservationSemantics -Observation $observation)'-and$observationSemanticIf.Clauses[0].Item2.Statements.Count-eq1-and$observationSemanticIf.Clauses[0].Item2.Statements[0] -is [Management.Automation.Language.ThrowStatementAst]-and$observationSemanticIf.Clauses[0].Item2.Statements[0].Extent.Text-ceq"throw 'invalid observation semantics'"
+$observationAssignmentValid=$observationAssignments.Count-eq1-and$observationAssignments[0].Right -is [Management.Automation.Language.PipelineAst]-and$observationAssignments[0].Right.Extent.Text-ceq'$rawObservation | ConvertFrom-Json -AsHashtable -Depth 20'
+$observationSemanticCallValid=$null-ne$schemaValidationCall-and$schemaValidationCall.Extent.Text-ceq'Test-Json -Json $rawObservation -SchemaFile $SchemaPath -ErrorAction Stop -WarningAction SilentlyContinue'-and$observationSemanticElements.Count-eq3-and$observationSemanticElements[1] -is [Management.Automation.Language.CommandParameterAst]-and$observationSemanticElements[1].ParameterName -ceq 'Observation'-and$observationSemanticElements[2] -is [Management.Automation.Language.VariableExpressionAst]-and$observationSemanticElements[2].VariablePath.UserPath -ceq 'observation'-and$observationAssignmentValid-and$observationSemanticIfValid-and$telemetryAssignments.Count-eq1-and$schemaValidationCall.Extent.StartOffset-lt$observationAssignments[0].Extent.StartOffset-and$observationAssignments[0].Extent.StartOffset-lt$observationSemanticCall.Extent.StartOffset-and$observationSemanticCall.Extent.StartOffset-lt$telemetryAssignments[0].Extent.StartOffset-and@($observationValidationTry.CatchClauses).Count-eq1-and$invalidWrapperStrings.Count-eq1
+Check ($invokeHostTrialFunctions.Count-eq1-and$observationSemanticFunctions.Count-eq1-and$invokeObservationSemanticCalls.Count-eq1-and$null-ne$observationValidationTry-and$schemaValidationCalls.Count-eq1-and$observationSemanticCalls.Count-eq1-and$observationSemanticCallValid) 'host observation schema and cross-field semantics are not fail-closed in one validation try'
 $pathModuleCaptureIndex=$trialText.IndexOf('$pathModule = @(Get-Module Harness.Path')
 $protocolForceIndex=$trialText.IndexOf("Import-Module (Join-Path `$RepoRoot 'scripts\lib\Harness.Protocol.psm1') -Force")
 Check ($pathModuleCaptureIndex-ge0-and$protocolForceIndex-gt$pathModuleCaptureIndex-and$trialResolveBlock-match'&\s*\$PathModule\s*\{[^}]*Resolve-HarnessContainedPath') 'Trial changed-path safety still depends on the replaceable global Harness.Path command'
@@ -80,6 +141,7 @@ Check ($runnerText-match'raw_trace_persisted=\$\(if\(\$groupRawTraceCleanupConfi
 Check ($text-match'advance exactly once'-and$text-match"lastReason -cne 'stage_boundary'"-and$text-match'Test-V1RuntimeState'-and$text-match'PLAN_REVIEW>IMPLEMENT>CODE_REVIEW>TEST>DONE'-and$text-match'alpha>alpha>beta>beta>beta'-and$text-match"diagnostic = 'v1-stage-boundary-violation'") 'v1 one-stage-per-host-turn or target-timing boundary is not fail closed'
 Check ($trialText-match'Assert-HostCodexHomeLayout'-and$runnerText-match'HOST_BENCHMARK_CODEX_HOME'-and$trialText-match'ReparsePoint'-and$trialText-match"@\('auth.json','models_cache.json'"-and$trialText-match'host-benchmark-auth-home-linked-credential'-and$trialText-match'Get-HostFileSystemIdentity'-and$trialText-match'fsutil file queryFileID'-and$trialText-match'mountvol'-and$trialText-match'host-benchmark-auth-home-unsafe-location'-and$trialText-match'AllowNativeSystemSkills'-and$trialText-match'AllowIsolatedHostConfig'-and$trialText-match'HostIsolatedConfigSentinelText'-and$trialText-match'HostIsolatedConfigOwnerPrefix'-and$trialText-match'FileMode\]::CreateNew'-and$trialText-match'File\]::Move\(\$tempPath,\$configPath,\$false\)'-and$trialText-match'FileAttributes\]::ReadOnly'-and$trialText-match'function Recover-HostIsolatedConfigSentinel'-and$trialText-match'function Enter-HostCodexHomeMutex'-and$trialText-match'Global\\dev-harness\.host-benchmark\.'-and$trialText-match'406e58b4e35d949e'-and$trialText-match"'CODEX_API_KEY','CODEX_ACCESS_TOKEN','OPENAI_API_KEY','CODEX_EXECUTABLE','CODEX_THREAD_ID','CODEX_INTERNAL_ORIGINATOR_OVERRIDE','CODEX_SHELL'"-and$runnerText-match'Get-HostPhysicalPathInfo'-and$runnerText-match'Host benchmark output must not overlap the dedicated Codex home'-and$wrapperText-match'--ignore-user-config'-and$wrapperText-match'skills\.enabled=false') 'dedicated config-isolated Codex home or physical-identity contract is missing'
 Check ($trialText-match'Assert-HostCodexHome -Path \$CodexHome -RepoRoot \$RepoRoot -ScratchRoot \$ScratchRoot -AllowNativeSystemSkills -AllowIsolatedHostConfig'-and$trialText-match'else \{ \$null = Assert-HostCodexHomeLayout -Path \$CodexHome -AllowNativeSystemSkills -AllowIsolatedHostConfig \}') 'cognitive Host does not require strict native skills and exact sentinel on both initial and final layout checks'
+Check ($trialText.Contains("'-ExpectedCodexVersion',`$ExpectedCodexVersion")-and$trialText-match"telemetry\.schema_version -cne 'codex-invocation-telemetry/v2'"-and$trialText-match'telemetry\.codex_cli_version -cne \$ExpectedCodexVersion') 'Host wrapper invocation or telemetry is not bound to the expected Codex CLI version'
 $cognitiveIfAsts=@($runnerAst.FindAll({param($node) $node -is [Management.Automation.Language.IfStatementAst] -and $node.Extent.Text -match '^if \(\$BenchmarkPath -ceq ''cognitive-fast-path'' -and -not \[string\]::IsNullOrWhiteSpace\(\$CodexHome\)\)'},$true))
 $cognitiveIfAst=if($cognitiveIfAsts.Count-eq1){$cognitiveIfAsts[0]}else{$null}
 $cognitiveBlockAst=if($null-ne$cognitiveIfAst){$cognitiveIfAst.Clauses[0].Item2}else{$null}
@@ -151,6 +213,45 @@ $fixtureIndex=$trialText.IndexOf('Initialize-V1FixedWorkflowFixture -Workspace $
 Check ($protocolSetIndex-ge0-and$installIndex-gt$protocolSetIndex-and$fixtureIndex-gt$protocolSetIndex) 'HARNESS_PROTOCOL is not isolated before installation and v1 fixture activation'
 Check ($trialText-match"core\.longpaths','true"-and$trialText-match'git -c core\.longpaths=true clone') 'Windows long-path source/workspace Git contract is missing'
 . $trial
+$validSemanticTuples=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+foreach($tuple in @(
+    'completed|True|True|True|completed',
+    'in_progress|False|False|False|stage_boundary',
+    'in_progress|False|True|False|stage_boundary',
+    'blocked|False|False|False|missing_decision',
+    'blocked|False|True|False|missing_decision',
+    'blocked|False|False|False|capability_block',
+    'blocked|False|True|False|capability_block',
+    'failed|False|False|False|execution_failed',
+    'failed|False|True|False|verification_failed'
+)){[void]$validSemanticTuples.Add($tuple)}
+foreach($outcome in @('completed','in_progress','blocked','failed')){
+    foreach($taskCompleted in @($false,$true)){
+        foreach($verificationExecuted in @($false,$true)){
+            foreach($verificationPassed in @($false,$true)){
+                foreach($reason in @('completed','stage_boundary','missing_decision','capability_block','execution_failed','verification_failed')){
+                    $tuple="$outcome|$taskCompleted|$verificationExecuted|$verificationPassed|$reason"
+                    $observation=[ordered]@{schema_version='host-benchmark-observation/v1';outcome=$outcome;task_completed=$taskCompleted;verification_executed=$verificationExecuted;verification_passed=$verificationPassed;reason_code=$reason}
+                    Check ((Test-HostObservationSemantics -Observation $observation)-eq$validSemanticTuples.Contains($tuple)) "host observation semantic tuple was misclassified: $tuple"
+                }
+            }
+        }
+    }
+}
+$contradictoryObservation=$contradictory|ConvertFrom-Json -AsHashtable -Depth 10
+Check (-not(Test-HostObservationSemantics -Observation $contradictoryObservation)) 'logically contradictory completed observation accepted'
+$invalidShape=$valid|ConvertFrom-Json -AsHashtable -Depth 10
+$null=$invalidShape.Remove('reason_code')
+Check (-not(Test-HostObservationSemantics -Observation $invalidShape)) 'host observation semantics accepted a missing field'
+$invalidShape=$valid|ConvertFrom-Json -AsHashtable -Depth 10
+$invalidShape.extra='unexpected'
+Check (-not(Test-HostObservationSemantics -Observation $invalidShape)) 'host observation semantics accepted an extra field'
+$invalidShape=$valid|ConvertFrom-Json -AsHashtable -Depth 10
+$invalidShape.task_completed='true'
+Check (-not(Test-HostObservationSemantics -Observation $invalidShape)) 'host observation semantics accepted a non-boolean field'
+$invalidShape=$valid|ConvertFrom-Json -AsHashtable -Depth 10
+$invalidShape.schema_version='host-benchmark-observation/v2'
+Check (-not(Test-HostObservationSemantics -Observation $invalidShape)) 'host observation semantics accepted an unknown schema version'
 $installFixture=Join-Path ([IO.Path]::GetTempPath()) ('host-install-integrity-'+[guid]::NewGuid().ToString('N'))
 $savedFixtureCodexHome=[Environment]::GetEnvironmentVariable('CODEX_HOME',[EnvironmentVariableTarget]::Process)
 try{

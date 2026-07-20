@@ -184,7 +184,7 @@ function Test-HostIdentityMatchesOwnerMetadata {
 }
 
 function Test-HostWorkspaceChangePathsSafe {
-    param([Parameter(Mandatory)][string]$Workspace,[Parameter(Mandatory)][string[]]$Paths,[Parameter(Mandatory)][object]$PathModule)
+    param([Parameter(Mandatory)][string]$Workspace,[Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Paths,[Parameter(Mandatory)][object]$PathModule)
     try {
         foreach ($relative in $Paths) {
             if ($relative.StartsWith('__git_index_flag__/',[StringComparison]::Ordinal)) { return $false }
@@ -194,6 +194,31 @@ function Test-HostWorkspaceChangePathsSafe {
         }
         return $true
     } catch { return $false }
+}
+
+function Test-HostObservationSemantics {
+    param([Parameter(Mandatory)][Collections.IDictionary]$Observation)
+    $expectedKeys = @('schema_version','outcome','task_completed','verification_executed','verification_passed','reason_code')
+    if (@($Observation.Keys).Count -ne $expectedKeys.Count -or @($expectedKeys | Where-Object { -not $Observation.Contains($_) }).Count -ne 0 -or
+        $Observation.schema_version -isnot [string] -or $Observation.outcome -isnot [string] -or $Observation.reason_code -isnot [string] -or
+        $Observation.task_completed -isnot [bool] -or $Observation.verification_executed -isnot [bool] -or $Observation.verification_passed -isnot [bool] -or
+        [string]$Observation.schema_version -cne 'host-benchmark-observation/v1') { return $false }
+    $taskCompleted = [bool]$Observation.task_completed
+    $verificationExecuted = [bool]$Observation.verification_executed
+    $verificationPassed = [bool]$Observation.verification_passed
+    $reason = [string]$Observation.reason_code
+    switch -CaseSensitive ([string]$Observation.outcome) {
+        'completed' { return $taskCompleted -and $verificationExecuted -and $verificationPassed -and $reason -ceq 'completed' }
+        'in_progress' { return -not $taskCompleted -and -not $verificationPassed -and $reason -ceq 'stage_boundary' }
+        'blocked' { return -not $taskCompleted -and -not $verificationPassed -and @('missing_decision','capability_block') -ccontains $reason }
+        'failed' {
+            return -not $taskCompleted -and -not $verificationPassed -and (
+                (-not $verificationExecuted -and $reason -ceq 'execution_failed') -or
+                ($verificationExecuted -and $reason -ceq 'verification_failed')
+            )
+        }
+        default { return $false }
+    }
 }
 
 function Resolve-HostTrialStatus {
@@ -1071,7 +1096,7 @@ Work only inside this workspace. The user explicitly authorizes this complete, r
                 )
             }
             $invocationOffsetMs = $trialTimer.Elapsed.TotalMilliseconds
-            $wrapperArguments = @('-NoLogo','-NoProfile','-NonInteractive','-File',$WrapperPath,'-Task',$task,'-Workspace',$workspace,'-Model',$Model,'-Reasoning',$Reasoning,'-Sandbox','danger-full-access','-ApprovalPolicy','never','-Ephemeral','-AgentOutputOnly','-Quiet')
+            $wrapperArguments = @('-NoLogo','-NoProfile','-NonInteractive','-File',$WrapperPath,'-Task',$task,'-Workspace',$workspace,'-Model',$Model,'-Reasoning',$Reasoning,'-Sandbox','danger-full-access','-ApprovalPolicy','never','-Ephemeral','-AgentOutputOnly','-Quiet','-ExpectedCodexVersion',$ExpectedCodexVersion)
             if ($installedMode) { $wrapperArguments += '-LoadUserConfig' } else { $wrapperArguments += '-Isolated' }
             $wrapperArguments += @('-OutputSchema',$SchemaPath,'-Output',$responsePath,'-TelemetryOutput',$telemetryPath)
             $wrapperArguments += $otelArguments
@@ -1088,10 +1113,11 @@ Work only inside this workspace. The user explicitly authorizes this complete, r
                 $rawObservation = [IO.File]::ReadAllText($responsePath,[Text.UTF8Encoding]::new($false,$true))
                 if (-not (Test-Json -Json $rawObservation -SchemaFile $SchemaPath -ErrorAction Stop -WarningAction SilentlyContinue)) { throw 'invalid observation schema' }
                 $observation = $rawObservation | ConvertFrom-Json -AsHashtable -Depth 20
+                if (-not (Test-HostObservationSemantics -Observation $observation)) { throw 'invalid observation semantics' }
                 $telemetry = [IO.File]::ReadAllText($telemetryPath,[Text.UTF8Encoding]::new($false,$true)) | ConvertFrom-Json -AsHashtable -Depth 20
                 $otelEnabled = [string]$collector.status -ceq 'measured'
                 $userConfigIdentityValid = if ($installedMode) { $telemetry.Contains('user_config_mode') -and [string]$telemetry.user_config_mode -ceq 'loaded' } else { -not $telemetry.Contains('user_config_mode') }
-                if ([string]$telemetry.schema_version -cne 'codex-invocation-telemetry/v1' -or [string]$telemetry.model -cne $Model -or [string]$telemetry.reasoning -cne $Reasoning -or -not [bool]$telemetry.ephemeral -or [string]$telemetry.sandbox -cne 'danger-full-access' -or [string]$telemetry.approval_policy -cne 'never' -or -not $userConfigIdentityValid -or [bool]$telemetry.otel_trace.enabled -ne $otelEnabled) { throw 'invalid telemetry identity' }
+                if ([string]$telemetry.schema_version -cne 'codex-invocation-telemetry/v2' -or [string]$telemetry.codex_cli_version -cne $ExpectedCodexVersion -or [string]$telemetry.model -cne $Model -or [string]$telemetry.reasoning -cne $Reasoning -or -not [bool]$telemetry.ephemeral -or [string]$telemetry.sandbox -cne 'danger-full-access' -or [string]$telemetry.approval_policy -cne 'never' -or -not $userConfigIdentityValid -or [bool]$telemetry.otel_trace.enabled -ne $otelEnabled) { throw 'invalid telemetry identity' }
                 if ($otelEnabled -and ([string]$telemetry.otel_trace.contract -cne 'codex-0.144.4-successful-websocket-send/v2' -or [string]$telemetry.otel_trace.provenance -cne 'verified-owner-pid-start-time/v1')) { throw 'invalid OTel telemetry contract' }
             } catch {
                 $invocationUnavailable = $true
