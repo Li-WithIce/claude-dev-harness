@@ -18,6 +18,23 @@ For project-scoped development and read-only engineering requests, route through
 
 **输出语言：** 中文（非代码文本）；代码、命令、标识符保留英文。
 
+## v1 route table
+
+Only use this table after protocol selection resolves to v1.
+
+| case_id | condition | route | writes | stage_skill |
+| --- | --- | --- | --- | --- |
+| `non-project` | request is not project-scoped | `host-native` | `none` | `none` |
+| `new-readonly` | clear standalone project read-only request | `quick` | `none` | `none` |
+| `new-bounded-mutation` | clear low-risk bounded mutation | `quick` | `requested-scope` | `none` |
+| `new-durable-risky` | durable, high-risk, cross-module, or staged-evidence mutation | `workflow` | `authorized-scope` | `current-v1` |
+| `new-ambiguous` | read/write intent or route identity is ambiguous | `ask` | `none` | `none` |
+| `bare-resume` | resume request lacks execute intent | `ask` | `none` | `none` |
+| `active-status` | status or read-only review of the current task | `resume-current/readonly` | `none` | `none` |
+| `resume-execute` | explicit resume-and-execute of the current task | `resume-current/workflow` | `authorized-scope` | `current-v1` |
+| `inactive-status` | status or read-only review of an inactive task | `switch-existing/readonly` | `none` | `none` |
+| `durable-unowned` | authorized actionable durable item lacks task identity | `inbox-first` | `inbox-row-only` | `none` |
+
 ## 共享记忆（内联自 obsidian-memory）
 
 共享真相源只在 `.assistant`；详细规则参考 `obsidian-memory` skill（已降级为参考文档）。
@@ -31,6 +48,8 @@ For project-scoped development and read-only engineering requests, route through
 3. 细节不足时读 `运行时\当前任务.md` → `运行时\tasks\<task-id>.md`
 4. 再读 `运行时\中断任务.md` → `运行时\上次会话.md`
 5. 回复三段式：当前主任务 / 其他中断任务 / 恢复选项
+
+只读取实际存在的上述运行时文件；缺失表示没有已记录的活动状态，不是错误或阻断。
 
 ### 写回规则
 
@@ -72,7 +91,7 @@ For project-scoped development and read-only engineering requests, route through
 - `quick`：只加载入口规则、用户偏好 / 必要配置和直接相关 skill；不加载 orchestrator 或全部 stage skill。
 - `workflow`：加载本 skill + `orchestrator`，再按当前 stage 只加载一个阶段 skill（`PLAN→plan`、`PLAN_REVIEW/CODE_REVIEW→review`、`IMPLEMENT→implement`、`TEST→test`）。
 - `resume-current` / `switch-existing`：先只读 identity/runtime/artifact；只有明确继续 / 切换并执行当前 workflow 时才处理 fallback、`-SyncOnly` / activate 并加载 current-stage skill。read-only inspect/status 保持 minimal context 和零写。
-- `ask`：不加载 workflow stage skill；不进入 quick、workflow、PLAN、IMPLEMENT 或后续阶段；不创建 `docs/tasks/{task_id}/`、不改代码、不初始化 provider。Remain in ask until all blocking uncertainties are resolved.
+- `ask`：不加载 workflow stage skill；不进入 quick、workflow、PLAN、IMPLEMENT 或后续阶段；不创建 `docs/tasks/{task_id}/`、不改代码、不写共享 runtime/inbox、不初始化 provider。Remain in ask until all blocking uncertainties are resolved.
 
 禁止 bulk-load 全部 skills / 全部历史任务 / Claude 兼容 skill / `workflow-team`；仅在显式 backend override、frontmatter 命中或 `$env:AITEAMCODE_TEAM_MODE='1'` 时才加载这些路径。
 
@@ -119,7 +138,7 @@ If any item is materially unknown and affects the work, remain in ask. Simple am
 
 ### 同族分支路由（按需，写法见对应单一真相源）
 
-- **Clarification 协议族**（需求澄清 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认 / `clarify` / `brainstorm` / `pressure test` 等）：pure read-only/no-edit 的方案审查仍 quick；只有需要 durable development decision、canonical artifact 或后续实现时才走 `new-task mode=workflow`，在 `PLAN -> ## Clarification` 的 `clarification_ledger` 沉淀问题 / 证据 / 推荐答案 / 决策 / 影响，并保留 Clarification 最低字段。PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径不足以指导 IMPLEMENT 时沿用该 durable Clarification；确认前 `## User Confirmation` 保持 `draft`。若读写/归属仍不清楚则停留 `ask`，不得创建 artifact；可查问题先自查，剩余用户决策一次一个并给推荐答案。详细写法见 `plan` skill 与 lite-writing-guide。
+- **Clarification 协议族**（需求澄清 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认 / `clarify` / `brainstorm` / `pressure test` 等）：pure read-only/no-edit 的方案审查仍 quick；只有需要 durable development decision、canonical artifact 或后续实现时才走 `new-task mode=workflow`，在 `PLAN -> ## Clarification` 的 `clarification_ledger` 沉淀问题 / 证据 / 推荐答案 / 决策 / 影响，并保留 Clarification 最低字段。PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径不足以指导 IMPLEMENT 时沿用该 durable Clarification；任一 `clarification_ledger` 条目仍为 `decision: pending` 时，`## User Confirmation` 必须保持 `draft`。若读写/归属仍不清楚则停留 `ask`，不得创建 artifact；可查问题先自查，剩余用户决策一次一个并给推荐答案。详细写法见 `plan` skill 与 lite-writing-guide。
 - **Stage Discipline Matrix**：Entry/Ask 用 Socratic Blocking Clarification，Quick 用 Smallest Reversible Action。完整矩阵在 `docs/工作流/stage-discipline-matrix.md`；只在需要澄清 route/stage discipline 或审查 stage 行为时加载。
 - **阶段原则路由**：不新增五转流程；按阶段借用认知视角。Entry/Clarification 用 Socrates 分流：外部论点先查来源与代码 / 文档 / artifact 证据，用户需求进入 Clarification 问题树，内部推理回到根约束并找反例，待验证结论进入 Verification / TEST 证据收集；PLAN 用 Osborn 发散、Hegel 收敛、First Principles + Occam 选最小方案；PLAN_REVIEW 用 Hegel + Bayes；IMPLEMENT 用 Ponytail / surgical change；CODE_REVIEW 用 Feynman；TEST 用 Bayes；`revise` 后用 Debono 保留仍成立的价值和约束。
 - **Markdown / HTML artifact**：需要互转 / HTML 报告 / 网页 artifact / 发布预览 / 从 URL 提取 Markdown 时按需加载 `md-html` skill；Markdown 是 source of truth、HTML 是 generated artifact，边界见该 skill。

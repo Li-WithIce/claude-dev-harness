@@ -12,7 +12,6 @@ $endMarker = '<!-- END GENERATED ENTRY CONTRACT -->'
 $sourceRelativePath = 'policies/entry-contract.md'
 $targetRelativePaths = @(
     'agent-configs/workspace/AGENTS.md.template',
-    'agent-configs/codex/AGENTS.md.template',
     'agent-configs/claude/CLAUDE.md.template',
     'vault-template/entry/AGENTS.md.template'
 )

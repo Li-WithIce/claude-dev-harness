@@ -32,6 +32,8 @@ pwsh -File .\install.ps1 `
 
 只读请求使用 Inspect，保持零写入。`quick` / `workflow` 仅是 Direct / Governed 的兼容别名，不是第二套规则。
 
+默认加载面只包含宿主级 Overlay 和短协议 Bootstrap；完整 v1 路由表、Ask 十项退出条件、Inbox、Recovery 与阶段规则只有在 artifact/protocol detector 选择 v1 后才从 `entry-router` / `orchestrator` 懒加载。Codex 会读取 workspace `AGENTS.md`，所以全局文件保持纯 Overlay；Claude 不消费该文件，因此其全局 `CLAUDE.md` 携带同一短 Bootstrap，但不再注入完整 v1 合同。
+
 恢复语义保持兼容：明确“继续”或“恢复并执行”才推进；只问状态时保持只读；裸“恢复一下”/`resume` 若意图不明则 ask。
 
 ## Evidence、Approval 与受保护动作

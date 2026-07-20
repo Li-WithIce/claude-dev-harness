@@ -73,13 +73,16 @@ foreach ($caseId in @(
         'inactive-status',
         'durable-unowned'
     )) {
-    Need-Text $entryContractPath ('`{0}`' -f $caseId)
+    Need-Text 'skills/entry-router/SKILL.md' ('`{0}`' -f $caseId)
 }
-Need-Text $entryContractPath 'identity never broadens authorization'
-Need-Text $entryContractPath 'Status/read-only recovery never replays fallback, syncs pointers, writes task/runtime state, or loads a stage skill'
-Need-Text $entryContractPath 'interactive ambiguity remains `ask` with zero writes'
-Need-Text $entryContractPath '`quick` loads only entry rules'
-Need-Text $entryContractPath '`workflow` loads `entry-router`, `orchestrator`, and only the current v1 stage skill'
+Need-Text $entryContractPath 'Only a detector-selected v1 request loads `entry-router`'
+Need-Text $entryContractPath 'An unresolved Requirement or product decision blocks every write and enters Ask'
+Need-Text $entryContractPath 'Read-only work performs zero writes'
+Need-Text 'skills/entry-router/SKILL.md' 'route identity does not broaden requested action'
+Need-Text 'skills/entry-router/SKILL.md' 'read-only inspect/status 保持 minimal context 和零写'
+Need-Text 'skills/entry-router/SKILL.md' '交互式归属或读写歧义直接 `ask`，不写 inbox'
+Need-Text 'skills/entry-router/SKILL.md' '`quick`：只加载入口规则'
+Need-Text 'skills/entry-router/SKILL.md' '`workflow`：加载本 skill + `orchestrator`'
 
 Need-Text 'skills/entry-router/SKILL.md' 'Remain in ask until all blocking uncertainties are resolved'
 Need-Text 'skills/entry-router/SKILL.md' 'after every user answer'

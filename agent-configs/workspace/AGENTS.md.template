@@ -8,44 +8,19 @@
 - The executable workspace entry shim remains `.assistant\entry\AGENTS.md`.
 
 <!-- BEGIN GENERATED ENTRY CONTRACT -->
-<!-- source-sha256: 61cc675cece2259b8be8d0d067317b58485d09ec5a9559f9a49cf5f7b7c40757 -->
-# Entry Contract
+<!-- source-sha256: 2ba95301164f2367bf9e594b1aa8941ff541907ee2a251ffd182c6b4a9a7c7b3 -->
+# Entry Contract Bootstrap
 
-Canonical shared routing contract. Host templates may add only host-specific overlays outside the generated markers.
+Canonical workspace bootstrap. A host-global file that natively consumes the resolved workspace entry stays overlay-only; a host without that native workspace entry carries this short bootstrap. Full v1 routing and lifecycle rules stay lazy in `entry-router` and `orchestrator`.
 
 - `protocol_default`: `auto`
 - `auto_resolves_to`: `existing-artifact-or-gated-v2-new`
 - `v2_entry_activation`: `explicit-new-or-existing-v2-or-eligible-auto-new`
-- `stage_chain`: `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`
 
-- `HARNESS_PROTOCOL=v2`: classify inline before v1 routing; Direct loads no `entry-router`/lifecycle skill.
-- For a known task, run `.assistant\entry\task.ps1 protocol -TaskId {task_id}`: v2 `task.json` wins, then v1 `plan.md`; for a new task, `auto` selects v2 only with a current all-pass rollout report and otherwise returns a v1 fallback. Conflicts fail closed, migration is explicit, and v2 never calls `advance-stage.ps1`.
-- Blocked, protected, expanded-scope, or non-Direct results reroute before writes.
-- Clear Direct hands off to the main Agent: `understand -> edit -> focused verification -> self-review -> report`; it does not load `entry-router`, `orchestrator`, lifecycle skills, Memory, Team, or Provider.
-- Direct writes no task/runtime/current state. `quick` aliases Direct without policy downgrade; file count alone does not escalate.
-- Response Evidence lists changes, actual commands/results, self-review, and gaps; `not_run`/unavailable never means pass.
-- The table/rules below are v1-only: v1 routing, stages, recovery, and rollback remain authoritative whenever the detector selects v1, but do not apply after v2 selection.
-
-| case_id | condition | route | writes | stage_skill |
-| --- | --- | --- | --- | --- |
-| `non-project` | request is not project-scoped | `host-native` | `none` | `none` |
-| `new-readonly` | clear standalone project read-only request | `quick` | `none` | `none` |
-| `new-bounded-mutation` | clear low-risk bounded mutation | `quick` | `requested-scope` | `none` |
-| `new-durable-risky` | durable, high-risk, cross-module, or staged-evidence mutation | `workflow` | `authorized-scope` | `current-v1` |
-| `new-ambiguous` | read/write intent or route identity is ambiguous | `ask` | `none` | `none` |
-| `bare-resume` | resume request lacks execute intent | `ask` | `none` | `none` |
-| `active-status` | status or read-only review of the current task | `resume-current/readonly` | `none` | `none` |
-| `resume-execute` | explicit resume-and-execute of the current task | `resume-current/workflow` | `authorized-scope` | `current-v1` |
-| `inactive-status` | status or read-only review of an inactive task | `switch-existing/readonly` | `none` | `none` |
-| `durable-unowned` | authorized actionable durable item lacks task identity | `inbox-first` | `inbox-row-only` | `none` |
-
-- Resolve project/task identity before mode; identity never broadens authorization. For project-scoped development and read-only engineering requests, `entry-router` is the default first hop. Do not invoke other workflow skills before routing; after routing, load only the context required by the selected mode.
-- `quick` loads only entry rules, necessary configuration, and the directly relevant skill; it creates no workflow artifact or shared pointer.
-- `workflow` loads `entry-router`, `orchestrator`, and only the current v1 stage skill; `plan.md` frontmatter is the sole stage truth.
-- `ask` is an iterative blocking clarification gate: do not load workflow stage skills, create task artifacts, edit code, write shared runtime/inbox, or initialize providers until all blocking uncertainties are resolved; ask one highest-value question at a time.
-- Ask exit criteria: ask cannot exit until the agent can state User goal, Success / acceptance criteria, In scope, Out of scope / non-goals, Affected area, Constraints, Risk level, Expected output, Recommended route: quick or workflow, and Why this route is safe.
-- Clarification ledger: answer code/doc-discoverable questions first, keep the base Clarification fields, ask remaining user decisions one at a time with a recommended answer, and keep `User Confirmation` draft while any `clarification_ledger` item is `decision: pending`.
-- Status/read-only recovery never replays fallback, syncs pointers, writes task/runtime state, or loads a stage skill; only explicit continue/switch-and-execute may do so within authorized `workflow` scope.
-- `inbox-first` is limited to already-authorized actionable durable capture; interactive ambiguity remains `ask` with zero writes.
-- Optional memory and provider indexes never block routing; absent or unavailable providers fall back to repository inspection.
+- Resolve protocol before workflow routing. For a known task, run `.assistant\entry\task.ps1 protocol -TaskId {task_id}`: v2 `task.json` wins, then v1 `plan.md`. For a new task, `auto` selects v2 only with a current all-pass rollout report and otherwise returns a v1 fallback. Missing, corrupt, conflicting, or stale evidence fails closed.
+- `HARNESS_PROTOCOL=v2` classifies a new task inline before v1 routing. Selected v2 Direct loads no `entry-router`, `orchestrator`, lifecycle skill, Memory, Team, or Provider.
+- An unresolved Requirement or product decision blocks every write and enters Ask. Protected, expanded-scope, or non-Direct results reroute before writes.
+- Clear Direct hands off to the main Agent: `understand -> edit -> focused verification -> self-review -> report`. Direct writes no task/runtime/current state and creates no lifecycle artifact.
+- Read-only work performs zero writes. Response Evidence contains actual commands/results, self-review, and remaining gaps; `not_run` or unavailable never means pass.
+- Only a detector-selected v1 request loads `entry-router`; missing v1 compatibility rules fail closed. That lazy path may then load `orchestrator` and one current-stage skill.
 <!-- END GENERATED ENTRY CONTRACT -->

@@ -818,11 +818,13 @@ exit 0
             }
 
             $codexAgentsPath = Join-Path (Join-Path $UserProfile '.codex') 'AGENTS.md'
-            Assert-ManagedTextContains -Path $codexAgentsPath -Needle 'entry-router'
+            Assert-ManagedTextContains -Path $codexAgentsPath -Needle 'Read the resolved workspace''s `AGENTS.md` first'
+            Assert-ManagedTextNotContains -Path $codexAgentsPath -Needle 'entry-router'
             Assert-ManagedTextNotContains -Path $codexAgentsPath -Needle 'using-superpowers'
 
             $claudeInstructionsPath = Join-Path (Join-Path $UserProfile '.claude') 'CLAUDE.md'
             Assert-ManagedTextContains -Path $claudeInstructionsPath -Needle '/entry-router'
+            Assert-ManagedTextContains -Path $claudeInstructionsPath -Needle '`protocol_default`: `auto`'
             Assert-ManagedTextNotContains -Path $claudeInstructionsPath -Needle '/using-superpowers'
 
             $workspaceAgentsPath = Join-Path $WorkspaceRoot 'AGENTS.md'
@@ -923,17 +925,20 @@ exit 0
         -Mutator {
             param($CaseRoot, $UserProfile, $WorkspaceRoot)
 
-            $managedTextFiles = @(
+            $managedRouterTextFiles = @(
                 (Join-Path (Join-Path $UserProfile '.claude') 'CLAUDE.md'),
-                (Join-Path (Join-Path $UserProfile '.codex') 'AGENTS.md'),
                 (Join-Path $WorkspaceRoot 'AGENTS.md'),
                 (Join-Path (Join-Path (Join-Path $WorkspaceRoot '.assistant') 'entry') 'AGENTS.md')
             )
 
-            foreach ($path in $managedTextFiles) {
+            foreach ($path in $managedRouterTextFiles) {
                 $content = Get-Content -LiteralPath $path -Raw -Encoding utf8
                 [System.IO.File]::WriteAllText($path, ($content -replace 'entry-router', 'using-superpowers'), (New-Object System.Text.UTF8Encoding($false)))
             }
+
+            $codexAgentsPath = Join-Path (Join-Path $UserProfile '.codex') 'AGENTS.md'
+            $codexAgents = Get-Content -LiteralPath $codexAgentsPath -Raw -Encoding utf8
+            [System.IO.File]::WriteAllText($codexAgentsPath, ($codexAgents -replace 'Read the resolved workspace', 'Read the stale workspace'), (New-Object System.Text.UTF8Encoding($false)))
 
             $codexConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'config.toml'
             $codexConfig = if (Test-Path -LiteralPath $codexConfigPath -PathType Leaf) {
@@ -955,14 +960,13 @@ enabled = true
         -PostAssert {
             param($CaseRoot, $UserProfile, $WorkspaceRoot, $Result)
 
-            $managedTextFiles = @(
+            $managedRouterTextFiles = @(
                 (Join-Path (Join-Path $UserProfile '.claude') 'CLAUDE.md'),
-                (Join-Path (Join-Path $UserProfile '.codex') 'AGENTS.md'),
                 (Join-Path $WorkspaceRoot 'AGENTS.md'),
                 (Join-Path (Join-Path (Join-Path $WorkspaceRoot '.assistant') 'entry') 'AGENTS.md')
             )
 
-            foreach ($path in $managedTextFiles) {
+            foreach ($path in $managedRouterTextFiles) {
                 $content = Get-Content -LiteralPath $path -Raw -Encoding utf8
                 if (-not $content.Contains('entry-router')) {
                     throw ("managed entry file should be refreshed to entry-router: {0}" -f $path)
@@ -972,6 +976,14 @@ enabled = true
                     $content.Contains('/using-superpowers')) {
                     throw ("managed entry file should not retain default using-superpowers routing: {0}" -f $path)
                 }
+            }
+
+            $codexAgentsPath = Join-Path (Join-Path $UserProfile '.codex') 'AGENTS.md'
+            $codexAgents = Get-Content -LiteralPath $codexAgentsPath -Raw -Encoding utf8
+            if (-not $codexAgents.Contains("Read the resolved workspace's ``AGENTS.md`` first") -or
+                $codexAgents.Contains('Read the stale workspace') -or
+                $codexAgents.Contains('entry-router')) {
+                throw 'Codex host overlay should be refreshed without duplicating the workspace entry contract'
             }
 
             $codexManagedConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'managed_config.toml'
