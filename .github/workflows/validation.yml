@@ -139,7 +139,7 @@ jobs:
       - self-hosted
       - Windows
       - ${{ vars.THIN_V2_RELEASE_RUNNER }}
-    timeout-minutes: 180
+    timeout-minutes: 240
     environment: thin-v2-release
     env:
       HOST_BENCHMARK_CODEX_HOME: ${{ vars.HOST_BENCHMARK_CODEX_HOME }}

@@ -752,7 +752,8 @@ if ($runner -match '(?m)^\s*\[int\]\$CheckTimeoutSeconds = 360\s*$' -and
     $prCoreJob -match '(?m)^    timeout-minutes:\s*45\s*$' -and
     $changedOptionalJob -match '(?m)^    timeout-minutes:\s*30\s*$' -and
     $releaseModelJob -match '(?m)^    timeout-minutes:\s*120\s*$' -and
-    $releaseHostJob -match '(?m)^    timeout-minutes:\s*180\s*$' -and
+    $releaseHostJob -match '(?m)^    timeout-minutes:\s*240\s*$' -and
+    @([regex]::Matches($releaseHostJob,'(?m)^    timeout-minutes:\s*\d+\s*$')).Count -eq 1 -and
     $releaseJob -match '(?m)^    timeout-minutes:\s*120\s*$' -and
     $releaseJob -match '(?m)^\s*fetch-depth:\s*0\s*$' -and
     $prCoreChecksJob -match '(?m)^      fail-fast:\s*false\s*$' -and

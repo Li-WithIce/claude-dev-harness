@@ -101,12 +101,26 @@ try {
     Check (Test-HostWorkspaceChangePathsSafe -Workspace $emptyChangeWorkspace -Paths @() -PathModule $loadedPathModule) 'empty workspace change set was rejected before safety evaluation'
     Check (-not (Test-HostWorkspaceChangePathsSafe -Workspace $emptyChangeWorkspace -Paths @('__git_index_flag__/probe') -PathModule $loadedPathModule)) 'Git index safety marker was accepted as an ordinary empty change set'
 
+    $expectedV1RoundContracts = @(
+        [ordered]@{stage='PLAN';next_stage='PLAN_REVIEW';expected_target='alpha';target_action='preserve'},
+        [ordered]@{stage='PLAN_REVIEW';next_stage='IMPLEMENT';expected_target='alpha';target_action='preserve'},
+        [ordered]@{stage='IMPLEMENT';next_stage='CODE_REVIEW';expected_target='beta';target_action='change'},
+        [ordered]@{stage='CODE_REVIEW';next_stage='TEST';expected_target='beta';target_action='preserve'},
+        [ordered]@{stage='TEST';next_stage='DONE';expected_target='beta';target_action='preserve'}
+    )
+    foreach ($expected in $expectedV1RoundContracts) {
+        $actual = Get-V1FixedWorkflowRoundContract -Stage ([string]$expected.stage)
+        Check ($null -ne $actual -and @($actual.Keys).Count -eq 4 -and [string]$actual.next_stage -ceq [string]$expected.next_stage -and [string]$actual.expected_target -ceq [string]$expected.expected_target -and [string]$actual.target_action -ceq [string]$expected.target_action -and [string]$actual.stage_action -ceq "Complete only the $([string]$expected.stage) work for the confirmed task.") "v1 round contract drifted for $([string]$expected.stage)"
+    }
+    Check ($null -eq (Get-V1FixedWorkflowRoundContract -Stage 'DONE') -and $null -eq (Get-V1FixedWorkflowRoundContract -Stage 'UNKNOWN')) 'v1 round contract accepted a terminal or unknown start stage'
+
     Check ((Resolve-HostTrialStatus -Protocol v2 -InvocationUnavailable $true -ContractFailure $false -WriteBoundaryPassed $true -SourceBindingFailure $false -FreshSessions 1 -HostTurns 0 -ObservationComplete $false -WorkflowCompleted $true -DirectContractPassed $false -V1ContractPassed $true -Complete $false) -ceq 'unavailable') 'Direct wrapper failure was misclassified as a known contract failure'
     Check ((Resolve-HostTrialStatus -Protocol v1 -InvocationUnavailable $true -ContractFailure $false -WriteBoundaryPassed $true -SourceBindingFailure $false -FreshSessions 1 -HostTurns 0 -ObservationComplete $false -WorkflowCompleted $false -DirectContractPassed $true -V1ContractPassed $false -Complete $false) -ceq 'unavailable') 'v1 wrapper failure was misclassified as a known contract failure'
     Check ((Resolve-HostTrialStatus -Protocol v2 -InvocationUnavailable $true -ContractFailure $false -WriteBoundaryPassed $true -SourceBindingFailure $false -FreshSessions 2 -HostTurns 1 -ObservationComplete $false -WorkflowCompleted $true -DirectContractPassed $false -V1ContractPassed $true -Complete $false) -ceq 'fail') 'observed Direct session overrun was hidden by unavailable execution'
     Check ((Resolve-HostTrialStatus -Protocol v1 -InvocationUnavailable $true -ContractFailure $false -WriteBoundaryPassed $true -SourceBindingFailure $false -FreshSessions 5 -HostTurns 5 -ObservationComplete $true -WorkflowCompleted $true -DirectContractPassed $true -V1ContractPassed $false -Complete $false) -ceq 'fail') 'completed invalid v1 workflow was hidden by unavailable measurement'
     Check ((Resolve-HostTrialStatus -Protocol v1 -InvocationUnavailable $true -ContractFailure $false -WriteBoundaryPassed $true -SourceBindingFailure $false -FreshSessions 6 -HostTurns 5 -ObservationComplete $false -WorkflowCompleted $false -DirectContractPassed $true -V1ContractPassed $false -Complete $false) -ceq 'fail') 'partial v1 session overrun was hidden by unavailable execution'
     Check ((Resolve-HostTrialStatus -Protocol v1 -InvocationUnavailable $true -ContractFailure $false -WriteBoundaryPassed $true -SourceBindingFailure $false -FreshSessions 5 -HostTurns 6 -ObservationComplete $false -WorkflowCompleted $false -DirectContractPassed $true -V1ContractPassed $false -Complete $false) -ceq 'fail') 'partial v1 turn overrun was hidden by unavailable execution'
+    Check ((Resolve-HostTrialStatus -Protocol v1 -InvocationUnavailable $true -ContractFailure $true -WriteBoundaryPassed $true -SourceBindingFailure $false -FreshSessions 1 -HostTurns 1 -ObservationComplete $false -WorkflowCompleted $false -DirectContractPassed $true -V1ContractPassed $false -Complete $false) -ceq 'fail') 'observed v1 stage-boundary contract failure was hidden by unavailable execution'
 
     $authHome = Join-Path $scratch 'dedicated-auth-home'
     Write-Utf8 (Join-Path $authHome 'auth.json') '{}'

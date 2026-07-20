@@ -880,12 +880,26 @@ function Get-V1FixedWorkflowStage {
     return [string]$resolution.v1_stage
 }
 
-function Get-V1FixedWorkflowNextStage {
+function Get-V1FixedWorkflowRoundContract {
     param([Parameter(Mandatory)][string]$Stage)
-    $stages = @('PLAN','PLAN_REVIEW','IMPLEMENT','CODE_REVIEW','TEST','DONE')
-    $index = [array]::IndexOf($stages,$Stage)
-    if ($index -lt 0 -or $index -ge ($stages.Count - 1)) { return '' }
-    return $stages[$index + 1]
+    switch -CaseSensitive ($Stage) {
+        'PLAN' {
+            return [ordered]@{next_stage='PLAN_REVIEW';expected_target='alpha';target_action='preserve';stage_action='Complete only the PLAN work for the confirmed task.'}
+        }
+        'PLAN_REVIEW' {
+            return [ordered]@{next_stage='IMPLEMENT';expected_target='alpha';target_action='preserve';stage_action='Complete only the PLAN_REVIEW work for the confirmed task.'}
+        }
+        'IMPLEMENT' {
+            return [ordered]@{next_stage='CODE_REVIEW';expected_target='beta';target_action='change';stage_action='Complete only the IMPLEMENT work for the confirmed task.'}
+        }
+        'CODE_REVIEW' {
+            return [ordered]@{next_stage='TEST';expected_target='beta';target_action='preserve';stage_action='Complete only the CODE_REVIEW work for the confirmed task.'}
+        }
+        'TEST' {
+            return [ordered]@{next_stage='DONE';expected_target='beta';target_action='preserve';stage_action='Complete only the TEST work for the confirmed task.'}
+        }
+        default { return $null }
+    }
 }
 
 function Test-V1FixedWorkflowComplete {
@@ -1075,8 +1089,10 @@ Execute the authorized workspace task directly. This workspace intentionally has
             $responsePath = Join-Path $resultRoot ("response-$round.json")
             $telemetryPath = Join-Path $resultRoot ("telemetry-$round.json")
             $v1StageBefore = if ($Protocol -ceq 'v1') { Get-V1FixedWorkflowStage -Workspace $workspace -RepoRoot $RepoRoot -TaskId ([string]$v1Fixture.task_id) } else { '' }
-            $v1ExpectedStage = if ($Protocol -ceq 'v1') { Get-V1FixedWorkflowNextStage -Stage $v1StageBefore } else { '' }
-            if ($Protocol -ceq 'v1' -and [string]::IsNullOrWhiteSpace($v1ExpectedStage)) {
+            $v1RoundContract = if ($Protocol -ceq 'v1') { Get-V1FixedWorkflowRoundContract -Stage $v1StageBefore } else { $null }
+            $v1ExpectedStage = if ($null -ne $v1RoundContract) { [string]$v1RoundContract.next_stage } else { '' }
+            $v1ExpectedTarget = if ($null -ne $v1RoundContract) { [string]$v1RoundContract.expected_target } else { '' }
+            if ($Protocol -ceq 'v1' -and $null -eq $v1RoundContract) {
                 $contractFailure = $true
                 $diagnostic = 'v1-invalid-start-stage'
                 break
@@ -1084,8 +1100,18 @@ Execute the authorized workspace task directly. This workspace intentionally has
             $routeContext = if ($Protocol -ceq 'v1') {
                 "The confirmed task host-benchmark-fixed-workflow already exists at docs/tasks/host-benchmark-fixed-workflow/plan.md and is the active current task. This fresh host turn may perform only current stage $v1StageBefore and advance exactly once to $v1ExpectedStage; do not execute $v1ExpectedStage or a later stage in this turn. Do not route it as quick and do not create another task. Unless the required next stage is DONE, return outcome in_progress, task_completed false, and reason_code stage_boundary after that one transition."
             } else { 'This is a new task and no harness task artifact exists for it.' }
+            $taskAction = if ($Protocol -ceq 'v1') {
+                $targetDirective = if ([string]$v1RoundContract.target_action -ceq 'change') {
+                    "Change only src/value.txt from exactly alpha to exactly $v1ExpectedTarget, then verify that its exact bytes are $v1ExpectedTarget."
+                } else {
+                    "Do not change src/value.txt; verify that its exact bytes remain $v1ExpectedTarget."
+                }
+                ([string]$v1RoundContract.stage_action + ' ' + $targetDirective)
+            } else {
+                'Change only src/value.txt from exactly alpha to exactly beta, then verify that its exact bytes are beta.'
+            }
             $task = @"
-Work only inside this workspace. The user explicitly authorizes this complete, reversible, private one-file task and all normal harness stage transitions needed to finish it. $routeContext Change only src/value.txt from exactly alpha to exactly beta. Do not ask about scope, acceptance, rollback, or authorization: they are fully confirmed here. Run a real verification command that succeeds only when the file content is exactly beta. Do not change another user file; harness-required task/runtime records are allowed. Return only schema-valid JSON. Set task_completed and verification_passed true only after the exact file check has actually passed and, for the fixed v1 comparator, its plan stage is DONE.
+Work only inside this workspace. The user explicitly authorizes this complete, reversible, private one-file task and all normal harness stage transitions needed to finish it. $routeContext $taskAction Do not ask about scope, acceptance, rollback, or authorization: they are fully confirmed here. Do not change another user file; harness-required task/runtime records are allowed. Return only schema-valid JSON. Set task_completed and verification_passed true only after the exact file check required for this turn has actually passed and, for the fixed v1 comparator, its plan stage is DONE.
 "@
             $otelArguments = @()
             if ([string]$collector.status -ceq 'measured') {
@@ -1146,7 +1172,6 @@ Work only inside this workspace. The user explicitly authorizes this complete, r
                 $isIntermediate = $v1ExpectedStage -cne 'DONE'
                 $v1TargetAfter = if (Test-HostExactUtf8File -Path (Join-Path $workspace 'src\value.txt') -ExpectedText 'alpha') { 'alpha' } elseif (Test-HostExactUtf8File -Path (Join-Path $workspace 'src\value.txt') -ExpectedText 'beta') { 'beta' } else { 'invalid' }
                 $v1TargetJournal.Add($v1TargetAfter)
-                $v1ExpectedTarget = if ($v1ExpectedStage -cin @('PLAN_REVIEW','IMPLEMENT')) { 'alpha' } else { 'beta' }
                 if ($v1StageAfter -cne $v1ExpectedStage -or $v1TargetAfter -cne $v1ExpectedTarget -or -not (Test-V1RuntimeState -Workspace $workspace -TaskId ([string]$v1Fixture.task_id) -ExpectedStage $v1ExpectedStage) -or ($isIntermediate -and ([bool]$observation.task_completed -or $lastOutcome -cne 'in_progress' -or $lastReason -cne 'stage_boundary')) -or (-not $isIntermediate -and ($lastOutcome -cne 'completed' -or $lastReason -cne 'completed'))) {
                     $contractFailure = $true
                     $diagnostic = 'v1-stage-boundary-violation'
