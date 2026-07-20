@@ -9,6 +9,7 @@ $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 $failures = [Collections.Generic.List[string]]::new()
 $checks = 0
 $script:hostBenchmarkTemplateRoot = ''
+$script:hostBenchmarkCognitiveHome = ''
 function Check([bool]$Condition,[string]$Message) {
     if ($Condition) { $script:checks++ } else { $script:failures.Add($Message) }
 }
@@ -63,19 +64,24 @@ function Invoke-FixtureRunner {
     $oldMode = $env:HOST_BENCHMARK_TEST_MODE
     $oldLog = $env:HOST_BENCHMARK_TEST_LOG
     $oldTemplate = $env:HOST_BENCHMARK_TEST_TEMPLATE_ROOT
+    $oldExpectedCodexHome = $env:HOST_BENCHMARK_TEST_EXPECTED_CODEX_HOME
     try {
         if ([string]::IsNullOrWhiteSpace($script:hostBenchmarkTemplateRoot)) { throw 'host benchmark fixture templates are not initialized' }
+        if ($BenchmarkPath -ceq 'cognitive-fast-path' -and [string]::IsNullOrWhiteSpace($CodexHome)) { $CodexHome = $script:hostBenchmarkCognitiveHome }
         $env:HOST_BENCHMARK_TEST_MODE = $Mode
         $env:HOST_BENCHMARK_TEST_LOG = $logPath
         $env:HOST_BENCHMARK_TEST_TEMPLATE_ROOT = $script:hostBenchmarkTemplateRoot
+        if ($BenchmarkPath -ceq 'cognitive-fast-path') { $env:HOST_BENCHMARK_TEST_EXPECTED_CODEX_HOME = [IO.Path]::GetFullPath($CodexHome).TrimEnd('\') } else { Remove-Item Env:HOST_BENCHMARK_TEST_EXPECTED_CODEX_HOME -ErrorAction Ignore }
         $runnerArguments = @('-NoLogo','-NoProfile','-NonInteractive','-File',(Join-Path $Fixture 'scripts\run-host-benchmark.ps1'),'-RepoRoot',$Fixture,'-OutputPath',$outputPath,'-Groups',$Groups,'-Trials',$Trials,'-MaxRoundTrips',1,'-TimeoutSeconds',30,'-BenchmarkPath',$BenchmarkPath)
-        if ($BenchmarkPath -ceq 'installed-desktop-path') { $runnerArguments += @('-CodexHome',$CodexHome,'-EligibilityReportPath',$EligibilityReportPath) }
+        if (-not [string]::IsNullOrWhiteSpace($CodexHome)) { $runnerArguments += @('-CodexHome',$CodexHome) }
+        if ($BenchmarkPath -ceq 'installed-desktop-path') { $runnerArguments += @('-EligibilityReportPath',$EligibilityReportPath) }
         $lines = @(& pwsh @runnerArguments 2>&1 | ForEach-Object { [string]$_ })
         $exitCode = $LASTEXITCODE
     } finally {
         if ($null -eq $oldMode) { Remove-Item Env:HOST_BENCHMARK_TEST_MODE -ErrorAction Ignore } else { $env:HOST_BENCHMARK_TEST_MODE = $oldMode }
         if ($null -eq $oldLog) { Remove-Item Env:HOST_BENCHMARK_TEST_LOG -ErrorAction Ignore } else { $env:HOST_BENCHMARK_TEST_LOG = $oldLog }
         if ($null -eq $oldTemplate) { Remove-Item Env:HOST_BENCHMARK_TEST_TEMPLATE_ROOT -ErrorAction Ignore } else { $env:HOST_BENCHMARK_TEST_TEMPLATE_ROOT = $oldTemplate }
+        if ($null -eq $oldExpectedCodexHome) { Remove-Item Env:HOST_BENCHMARK_TEST_EXPECTED_CODEX_HOME -ErrorAction Ignore } else { $env:HOST_BENCHMARK_TEST_EXPECTED_CODEX_HOME = $oldExpectedCodexHome }
     }
     $report = if (Test-Path -LiteralPath $outputPath -PathType Leaf) { [IO.File]::ReadAllText($outputPath,[Text.UTF8Encoding]::new($false,$true)) | ConvertFrom-Json -Depth 80 } else { $null }
     $order = if (Test-Path -LiteralPath $logPath -PathType Leaf) { @([IO.File]::ReadAllLines($logPath,[Text.UTF8Encoding]::new($false,$true))) } else { @() }
@@ -134,6 +140,215 @@ try {
     try { $null = Assert-HostCodexHomeLayout -Path $authHome } catch { $extraRejected = $_.Exception.Message -like 'host-benchmark-auth-home-*' }
     Check $extraRejected 'unexpected dedicated auth-home file was accepted'
     Remove-Item -LiteralPath (Join-Path $authHome 'unexpected.txt') -Force
+
+    $sentinelHome = Join-Path $scratch 'isolated-config-sentinel-home'
+    Write-Utf8 (Join-Path $sentinelHome 'auth.json') '{}'
+    $sentinelPath = Join-Path $sentinelHome 'config.toml'
+    $createdSentinel = Initialize-HostIsolatedConfigSentinel -Path $sentinelHome
+    $sentinelItem = Get-Item -LiteralPath $sentinelPath -Force
+    Check ([bool]$createdSentinel.created_by_runner -and (Test-Path -LiteralPath $createdSentinel.owner_path -PathType Container) -and @(Get-ChildItem -LiteralPath $createdSentinel.owner_path -Force).Count -eq 0 -and ($sentinelItem.Attributes -band [IO.FileAttributes]::ReadOnly) -ne 0 -and (Test-HostExactUtf8File -Path $sentinelPath -ExpectedText "# isolated host benchmark sentinel`n")) 'runner sentinel initialization did not create the exact read-only file and empty persistent owner marker'
+    Check (@(Get-ChildItem -LiteralPath $sentinelHome -Force | Where-Object { $_.Name.StartsWith($script:HostIsolatedConfigStagingPrefix,[StringComparison]::Ordinal) }).Count -eq 0) 'runner sentinel initialization retained its staging journal'
+    $sentinelRejectedWithoutOptIn = $false
+    try { $null = Assert-HostCodexHomeLayout -Path $sentinelHome } catch { $sentinelRejectedWithoutOptIn = $_.Exception.Message -ceq 'host-benchmark-auth-home-not-isolated' }
+    Check $sentinelRejectedWithoutOptIn 'default auth-home layout accepted the isolated Host config sentinel'
+    $sentinelRejectedForModelLayout = $false
+    try { $null = Assert-HostCodexHomeLayout -Path $sentinelHome -AllowNativeSystemSkills } catch { $sentinelRejectedForModelLayout = $_.Exception.Message -ceq 'host-benchmark-auth-home-not-isolated' }
+    Check $sentinelRejectedForModelLayout 'native-system-only model layout accepted the Host config sentinel'
+    Check ((Assert-HostCodexHomeLayout -Path $sentinelHome -AllowNativeSystemSkills -AllowIsolatedHostConfig) -ceq (Resolve-Path -LiteralPath $sentinelHome).Path) 'exact read-only Host config sentinel was rejected with its narrow opt-in'
+    $null = Complete-HostIsolatedConfigSentinel -State $createdSentinel
+    Check (-not (Test-Path -LiteralPath $sentinelPath) -and -not (Test-Path -LiteralPath $createdSentinel.owner_path)) 'runner-created sentinel or persistent owner marker was not removed after strict cleanup'
+
+    Write-Utf8 $sentinelPath "# isolated host benchmark sentinel`n"
+    [IO.File]::SetAttributes($sentinelPath,([IO.File]::GetAttributes($sentinelPath) -bor [IO.FileAttributes]::ReadOnly))
+    $sentinelIdentity = Get-HostFileSystemIdentity -Path $sentinelPath
+    $reusedSentinel = Initialize-HostIsolatedConfigSentinel -Path $sentinelHome
+    $null = Complete-HostIsolatedConfigSentinel -State $reusedSentinel
+    $reusedIdentity = Get-HostFileSystemIdentity -Path $sentinelPath
+    $reusedItem = Get-Item -LiteralPath $sentinelPath -Force
+    Check (-not [bool]$reusedSentinel.created_by_runner -and [string]$reusedIdentity.volume -ceq [string]$sentinelIdentity.volume -and [string]$reusedIdentity.file_id -ceq [string]$sentinelIdentity.file_id -and ($reusedItem.Attributes -band [IO.FileAttributes]::ReadOnly) -ne 0 -and (Test-HostExactUtf8File -Path $sentinelPath -ExpectedText "# isolated host benchmark sentinel`n")) 'preexisting exact sentinel was rewritten or removed'
+    [IO.File]::SetAttributes($sentinelPath,[IO.FileAttributes]::Normal)
+    [IO.File]::Delete($sentinelPath)
+
+    $abandonedSentinel = Initialize-HostIsolatedConfigSentinel -Path $sentinelHome
+    $abandonedRecovered = Recover-HostIsolatedConfigSentinel -Path $sentinelHome
+    Check ($abandonedRecovered -and -not (Test-Path -LiteralPath $sentinelPath) -and -not (Test-Path -LiteralPath $abandonedSentinel.owner_path) -and (Assert-HostCodexHomeLayout -Path $sentinelHome -AllowNativeSystemSkills)) 'exact abandoned sentinel and owner marker were not safely recovered'
+
+    $ownerOnlySentinel = Initialize-HostIsolatedConfigSentinel -Path $sentinelHome
+    [IO.File]::SetAttributes($sentinelPath,[IO.FileAttributes]::Normal)
+    [IO.File]::Delete($sentinelPath)
+    $ownerOnlyRecovered = Recover-HostIsolatedConfigSentinel -Path $sentinelHome
+    Check ($ownerOnlyRecovered -and -not (Test-Path -LiteralPath $ownerOnlySentinel.owner_path) -and (Assert-HostCodexHomeLayout -Path $sentinelHome -AllowNativeSystemSkills)) 'owner-only crash residue was not safely recovered'
+
+    $emptyStagingPath = Join-Path $sentinelHome ($script:HostIsolatedConfigStagingPrefix + [guid]::NewGuid().ToString('N'))
+    [void][IO.Directory]::CreateDirectory($emptyStagingPath)
+    $emptyStagingRecovered = Recover-HostIsolatedConfigSentinel -Path $sentinelHome
+    Check ($emptyStagingRecovered -and -not (Test-Path -LiteralPath $emptyStagingPath) -and (Assert-HostCodexHomeLayout -Path $sentinelHome -AllowNativeSystemSkills)) 'empty pre-publication staging journal was not safely recovered'
+
+    $partialStagingPath = Join-Path $sentinelHome ($script:HostIsolatedConfigStagingPrefix + [guid]::NewGuid().ToString('N'))
+    Write-Utf8 (Join-Path $partialStagingPath $script:HostIsolatedConfigStagedLeaf) 'partial'
+    $partialStagingRecovered = Recover-HostIsolatedConfigSentinel -Path $sentinelHome
+    Check ($partialStagingRecovered -and -not (Test-Path -LiteralPath $partialStagingPath) -and (Assert-HostCodexHomeLayout -Path $sentinelHome -AllowNativeSystemSkills)) 'partial pre-publication staging journal was not safely recovered'
+
+    $finalStagedSentinel = Initialize-HostIsolatedConfigSentinel -Path $sentinelHome
+    $finalStagedPath = Join-Path ([string]$finalStagedSentinel.owner_path) $script:HostIsolatedConfigStagedLeaf
+    [IO.File]::Move($sentinelPath,$finalStagedPath,$false)
+    $finalStagedRecovered = Recover-HostIsolatedConfigSentinel -Path $sentinelHome
+    Check ($finalStagedRecovered -and -not (Test-Path -LiteralPath $finalStagedPath) -and -not (Test-Path -LiteralPath $finalStagedSentinel.owner_path) -and (Assert-HostCodexHomeLayout -Path $sentinelHome -AllowNativeSystemSkills)) 'identity-bound final owner plus staged sentinel was not safely recovered'
+
+    $writableCleanupSentinel = Initialize-HostIsolatedConfigSentinel -Path $sentinelHome
+    [IO.File]::SetAttributes($sentinelPath,[IO.FileAttributes]::Normal)
+    $writableCleanupRecovered = Recover-HostIsolatedConfigSentinel -Path $sentinelHome
+    Check ($writableCleanupRecovered -and -not (Test-Path -LiteralPath $sentinelPath) -and -not (Test-Path -LiteralPath $writableCleanupSentinel.owner_path) -and (Assert-HostCodexHomeLayout -Path $sentinelHome -AllowNativeSystemSkills)) 'cleanup-in-progress writable owned sentinel was not safely recovered'
+
+    $foreignRecoverySentinel = Initialize-HostIsolatedConfigSentinel -Path $sentinelHome
+    [IO.File]::SetAttributes($sentinelPath,[IO.FileAttributes]::Normal)
+    [IO.File]::Delete($sentinelPath)
+    Write-Utf8 $sentinelPath 'model = "foreign-after-crash"'
+    $foreignRecoveryIdentity = Get-HostFileSystemIdentity -Path $sentinelPath
+    $foreignRecoveryDigest = (Get-FileHash -LiteralPath $sentinelPath -Algorithm SHA256).Hash
+    $foreignRecoveryRejected = $false
+    try { $null = Recover-HostIsolatedConfigSentinel -Path $sentinelHome } catch { $foreignRecoveryRejected = $_.Exception.Message -ceq 'host-benchmark-auth-home-config-sentinel-recovery-failed' }
+    $foreignRecoveryIdentityAfter = Get-HostFileSystemIdentity -Path $sentinelPath
+    Check ($foreignRecoveryRejected -and [string]$foreignRecoveryIdentityAfter.volume -ceq [string]$foreignRecoveryIdentity.volume -and [string]$foreignRecoveryIdentityAfter.file_id -ceq [string]$foreignRecoveryIdentity.file_id -and (Get-FileHash -LiteralPath $sentinelPath -Algorithm SHA256).Hash -ceq $foreignRecoveryDigest -and (Test-Path -LiteralPath $foreignRecoverySentinel.owner_path -PathType Container)) 'abandoned-state recovery deleted or rewrote a foreign replacement config or its owner evidence'
+    [IO.File]::Delete($sentinelPath)
+    [IO.Directory]::Delete([string]$foreignRecoverySentinel.owner_path,$false)
+
+    $sameByteRecoverySentinel = Initialize-HostIsolatedConfigSentinel -Path $sentinelHome
+    $recoveryReplacementSource = Join-Path $scratch 'recovery-same-byte-replacement.toml'
+    Write-Utf8 $recoveryReplacementSource "# isolated host benchmark sentinel`n"
+    $recoveryReplacementIdentity = Get-HostFileSystemIdentity -Path $recoveryReplacementSource
+    Check ([string]$recoveryReplacementIdentity.file_id -cne [string]$sameByteRecoverySentinel.file_id) 'same-byte recovery replacement fixture did not have a distinct file identity'
+    [IO.File]::SetAttributes($sentinelPath,[IO.FileAttributes]::Normal)
+    [IO.File]::Delete($sentinelPath)
+    [IO.File]::Move($recoveryReplacementSource,$sentinelPath,$false)
+    [IO.File]::SetAttributes($sentinelPath,([IO.File]::GetAttributes($sentinelPath) -bor [IO.FileAttributes]::ReadOnly))
+    $sameByteRecoveryRejected = $false
+    try { $null = Recover-HostIsolatedConfigSentinel -Path $sentinelHome } catch { $sameByteRecoveryRejected = $_.Exception.Message -ceq 'host-benchmark-auth-home-config-sentinel-recovery-failed' }
+    $sameByteRecoveryIdentityAfter = Get-HostFileSystemIdentity -Path $sentinelPath
+    Check ($sameByteRecoveryRejected -and [string]$sameByteRecoveryIdentityAfter.volume -ceq [string]$recoveryReplacementIdentity.volume -and [string]$sameByteRecoveryIdentityAfter.file_id -ceq [string]$recoveryReplacementIdentity.file_id -and (Test-HostExactUtf8File -Path $sentinelPath -ExpectedText "# isolated host benchmark sentinel`n") -and (Test-Path -LiteralPath $sameByteRecoverySentinel.owner_path -PathType Container)) 'recovery accepted or modified an exact-byte foreign file with the wrong identity'
+    [IO.File]::SetAttributes($sentinelPath,[IO.FileAttributes]::Normal)
+    [IO.File]::Delete($sentinelPath)
+    [IO.Directory]::Delete([string]$sameByteRecoverySentinel.owner_path,$false)
+
+    $hardlinkRecoverySentinel = Initialize-HostIsolatedConfigSentinel -Path $sentinelHome
+    $hardlinkRecoveryAlias = Join-Path $scratch 'recovery-sentinel-hardlink-alias.toml'
+    [void](New-Item -ItemType HardLink -Path $hardlinkRecoveryAlias -Target $sentinelPath -ErrorAction Stop)
+    $hardlinkRecoveryRejected = $false
+    try { $null = Recover-HostIsolatedConfigSentinel -Path $sentinelHome } catch { $hardlinkRecoveryRejected = $_.Exception.Message -ceq 'host-benchmark-auth-home-config-sentinel-recovery-failed' }
+    Check ($hardlinkRecoveryRejected -and (Test-Path -LiteralPath $sentinelPath -PathType Leaf) -and (Test-Path -LiteralPath $hardlinkRecoveryAlias -PathType Leaf) -and (Test-Path -LiteralPath $hardlinkRecoverySentinel.owner_path -PathType Container) -and (Test-HostExactUtf8File -Path $hardlinkRecoveryAlias -ExpectedText "# isolated host benchmark sentinel`n")) 'recovery accepted an identity-matching hardlink or touched its alias/owner evidence'
+    [IO.File]::SetAttributes($sentinelPath,[IO.FileAttributes]::Normal)
+    [IO.File]::Delete($sentinelPath)
+    [IO.File]::Delete($hardlinkRecoveryAlias)
+    [IO.Directory]::Delete([string]$hardlinkRecoverySentinel.owner_path,$false)
+
+    $crashHome = Join-Path $scratch 'isolated-config-crash-home'
+    Write-Utf8 (Join-Path $crashHome 'auth.json') '{}'
+    $crashReady = Join-Path $scratch 'isolated-config-crash-ready.txt'
+    $crashChildPath = Join-Path $scratch 'isolated-config-crash-child.ps1'
+    Write-Utf8 $crashChildPath @'
+param([string]$TrialPath,[string]$CodexHome,[string]$ReadyPath)
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+. $TrialPath
+$lock = $null
+$state = $null
+try {
+    $lock = Enter-HostCodexHomeMutex -Path $CodexHome -FailureCode 'fixture-lock-timeout'
+    $null = Recover-HostIsolatedConfigSentinel -Path $CodexHome
+    $state = Initialize-HostIsolatedConfigSentinel -Path $CodexHome
+    [IO.File]::WriteAllText($ReadyPath,[string]$lock.name,[Text.UTF8Encoding]::new($false))
+    while ($true) { Start-Sleep -Seconds 1 }
+} finally {
+    if ($null -ne $state) { $null = Complete-HostIsolatedConfigSentinel -State $state }
+    Exit-HostCodexHomeMutex -State $lock
+}
+'@
+    $crashProcess = $null
+    $mutexObserver = $null
+    try {
+        $crashProcess = Start-Process -FilePath (Get-Command pwsh -ErrorAction Stop).Source -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-File',$crashChildPath,'-TrialPath',(Join-Path $RepoRoot 'scripts\host-benchmark\HostBenchmark.Trial.ps1'),'-CodexHome',$crashHome,'-ReadyPath',$crashReady) -WindowStyle Hidden -PassThru
+        $readyDeadline = [DateTime]::UtcNow.AddSeconds(15)
+        while (-not (Test-Path -LiteralPath $crashReady -PathType Leaf) -and -not $crashProcess.HasExited -and [DateTime]::UtcNow -lt $readyDeadline) { Start-Sleep -Milliseconds 50 }
+        if (-not (Test-Path -LiteralPath $crashReady -PathType Leaf) -or $crashProcess.HasExited) { throw 'crash recovery child did not publish its ready marker' }
+        $crashOwners = @(Get-ChildItem -LiteralPath $crashHome -Force | Where-Object { $_.Name.StartsWith($script:HostIsolatedConfigOwnerPrefix,[StringComparison]::Ordinal) })
+        Check ((Test-Path -LiteralPath (Join-Path $crashHome 'config.toml') -PathType Leaf) -and $crashOwners.Count -eq 1) 'crash recovery child did not publish the owned sentinel pair'
+        $mutexObserver = [Threading.Mutex]::OpenExisting([IO.File]::ReadAllText($crashReady,[Text.UTF8Encoding]::new($false,$true)))
+        Stop-Process -Id $crashProcess.Id -Force -ErrorAction Stop
+        [void]$crashProcess.WaitForExit(10000)
+        $recoveryLock = Enter-HostCodexHomeMutex -Path $crashHome -FailureCode 'fixture-recovery-lock-timeout'
+        $recoveryWasAbandoned = [bool]$recoveryLock.abandoned
+        try { $crashRecovered = Recover-HostIsolatedConfigSentinel -Path $crashHome } finally { Exit-HostCodexHomeMutex -State $recoveryLock }
+        Check ($recoveryWasAbandoned -and $crashRecovered -and -not (Test-Path -LiteralPath (Join-Path $crashHome 'config.toml')) -and @(Get-ChildItem -LiteralPath $crashHome -Force | Where-Object { $_.Name.StartsWith($script:HostIsolatedConfigOwnerPrefix,[StringComparison]::Ordinal) }).Count -eq 0 -and (Assert-HostCodexHomeLayout -Path $crashHome -AllowNativeSystemSkills)) 'abandoned mutex recovery did not make the profile immediately model-safe'
+        $nextHostSentinel = Initialize-HostIsolatedConfigSentinel -Path $crashHome
+        $null = Complete-HostIsolatedConfigSentinel -State $nextHostSentinel
+        Check (-not (Test-Path -LiteralPath (Join-Path $crashHome 'config.toml')) -and -not (Test-Path -LiteralPath $nextHostSentinel.owner_path)) 'next Host lifecycle failed after abandoned process recovery'
+    } finally {
+        if ($null -ne $crashProcess -and -not $crashProcess.HasExited) { Stop-Process -Id $crashProcess.Id -Force -ErrorAction SilentlyContinue }
+        if ($null -ne $mutexObserver) { $mutexObserver.Dispose() }
+    }
+
+    Write-Utf8 $sentinelPath "# isolated host benchmark sentinel`n"
+    $writableSentinelRejected = $false
+    try { $null = Assert-HostCodexHomeLayout -Path $sentinelHome -AllowNativeSystemSkills -AllowIsolatedHostConfig } catch { $writableSentinelRejected = $_.Exception.Message -ceq 'host-benchmark-auth-home-not-isolated' }
+    Check $writableSentinelRejected 'writable Host config sentinel was accepted'
+    Remove-Item -LiteralPath $sentinelPath -Force
+    $bom = [Text.UTF8Encoding]::new($true).GetPreamble()
+    $sentinelBytes = [Text.UTF8Encoding]::new($false).GetBytes("# isolated host benchmark sentinel`n")
+    [IO.File]::WriteAllBytes($sentinelPath,[byte[]]($bom + $sentinelBytes))
+    [IO.File]::SetAttributes($sentinelPath,([IO.File]::GetAttributes($sentinelPath) -bor [IO.FileAttributes]::ReadOnly))
+    $bomSentinelRejected = $false
+    try { $null = Assert-HostCodexHomeLayout -Path $sentinelHome -AllowNativeSystemSkills -AllowIsolatedHostConfig } catch { $bomSentinelRejected = $_.Exception.Message -ceq 'host-benchmark-auth-home-not-isolated' }
+    Check $bomSentinelRejected 'BOM-prefixed Host config sentinel was accepted'
+    Remove-Item -LiteralPath $sentinelPath -Force
+    Write-Utf8 $sentinelPath 'model = "fixture"'
+    $rogueIdentity = Get-HostFileSystemIdentity -Path $sentinelPath
+    $rogueDigest = (Get-FileHash -LiteralPath $sentinelPath -Algorithm SHA256).Hash
+    $rogueConfigRejected = $false
+    try { $null = Initialize-HostIsolatedConfigSentinel -Path $sentinelHome } catch { $rogueConfigRejected = $_.Exception.Message -ceq 'host-benchmark-auth-home-not-isolated' }
+    $rogueIdentityAfter = Get-HostFileSystemIdentity -Path $sentinelPath
+    Check ($rogueConfigRejected -and [string]$rogueIdentityAfter.volume -ceq [string]$rogueIdentity.volume -and [string]$rogueIdentityAfter.file_id -ceq [string]$rogueIdentity.file_id -and (Get-FileHash -LiteralPath $sentinelPath -Algorithm SHA256).Hash -ceq $rogueDigest) 'foreign config.toml was accepted or overwritten by sentinel initialization'
+    Remove-Item -LiteralPath $sentinelPath -Force
+    $tamperedSentinel = Initialize-HostIsolatedConfigSentinel -Path $sentinelHome
+    [IO.File]::SetAttributes($sentinelPath,[IO.FileAttributes]::Normal)
+    Write-Utf8 $sentinelPath 'tampered'
+    $tamperedCleanupRejected = $false
+    try { $null = Complete-HostIsolatedConfigSentinel -State $tamperedSentinel } catch { $tamperedCleanupRejected = $_.Exception.Message -ceq 'host-benchmark-auth-home-config-sentinel-changed' }
+    Check ($tamperedCleanupRejected -and (Test-Path -LiteralPath $sentinelPath -PathType Leaf) -and (Test-Path -LiteralPath $tamperedSentinel.owner_path -PathType Container) -and [IO.File]::ReadAllText($sentinelPath) -ceq 'tampered') 'tampered runner sentinel or its owner evidence was deleted or treated as clean'
+    Remove-Item -LiteralPath $sentinelPath -Force
+    [IO.Directory]::Delete([string]$tamperedSentinel.owner_path,$false)
+    $replacedSentinel = Initialize-HostIsolatedConfigSentinel -Path $sentinelHome
+    $replacementSource = Join-Path $scratch 'replacement-sentinel.toml'
+    Write-Utf8 $replacementSource "# isolated host benchmark sentinel`n"
+    [IO.File]::SetAttributes($replacementSource,([IO.File]::GetAttributes($replacementSource) -bor [IO.FileAttributes]::ReadOnly))
+    $replacementIdentity = Get-HostFileSystemIdentity -Path $replacementSource
+    [IO.File]::SetAttributes($sentinelPath,[IO.FileAttributes]::Normal)
+    [IO.File]::Delete($sentinelPath)
+    [IO.File]::Move($replacementSource,$sentinelPath,$false)
+    $replacedCleanupRejected = $false
+    try { $null = Complete-HostIsolatedConfigSentinel -State $replacedSentinel } catch { $replacedCleanupRejected = $_.Exception.Message -ceq 'host-benchmark-auth-home-config-sentinel-changed' }
+    $replacementAfter = Get-HostFileSystemIdentity -Path $sentinelPath
+    Check ($replacedCleanupRejected -and [string]$replacementAfter.volume -ceq [string]$replacementIdentity.volume -and [string]$replacementAfter.file_id -ceq [string]$replacementIdentity.file_id -and (Get-Item -LiteralPath $sentinelPath -Force).Attributes.HasFlag([IO.FileAttributes]::ReadOnly) -and (Test-Path -LiteralPath $replacedSentinel.owner_path -PathType Container)) 'same-byte replacement sentinel or its owner evidence was deleted or accepted as the runner-owned file'
+    Remove-Item -LiteralPath $sentinelPath -Force
+    [IO.Directory]::Delete([string]$replacedSentinel.owner_path,$false)
+
+    $hardlinkSentinelHome = Join-Path $scratch 'hardlink-sentinel-home'
+    $hardlinkSentinelTarget = Join-Path $scratch 'hardlink-sentinel-target.toml'
+    Write-Utf8 (Join-Path $hardlinkSentinelHome 'auth.json') '{}'
+    Write-Utf8 $hardlinkSentinelTarget "# isolated host benchmark sentinel`n"
+    [void](New-Item -ItemType HardLink -Path (Join-Path $hardlinkSentinelHome 'config.toml') -Target $hardlinkSentinelTarget -ErrorAction Stop)
+    [IO.File]::SetAttributes($hardlinkSentinelTarget,([IO.File]::GetAttributes($hardlinkSentinelTarget) -bor [IO.FileAttributes]::ReadOnly))
+    $hardlinkSentinelRejected = $false
+    try { $null = Assert-HostCodexHomeLayout -Path $hardlinkSentinelHome -AllowNativeSystemSkills -AllowIsolatedHostConfig } catch { $hardlinkSentinelRejected = $_.Exception.Message -ceq 'host-benchmark-auth-home-linked-credential' }
+    Check $hardlinkSentinelRejected 'hard-linked Host config sentinel was accepted'
+
+    $junctionSentinelHome = Join-Path $scratch 'junction-sentinel-home'
+    $junctionSentinelTarget = Join-Path $scratch 'junction-sentinel-target'
+    Write-Utf8 (Join-Path $junctionSentinelHome 'auth.json') '{}'
+    [void][IO.Directory]::CreateDirectory($junctionSentinelTarget)
+    [void](New-Item -ItemType Junction -Path (Join-Path $junctionSentinelHome 'config.toml') -Target $junctionSentinelTarget -ErrorAction Stop)
+    $junctionSentinelRejected = $false
+    try { $null = Assert-HostCodexHomeLayout -Path $junctionSentinelHome -AllowNativeSystemSkills -AllowIsolatedHostConfig } catch { $junctionSentinelRejected = $_.Exception.Message -ceq 'host-benchmark-auth-home-reparse-point' }
+    Check $junctionSentinelRejected 'junction Host config sentinel was accepted'
 
     $junctionTarget = Join-Path $scratch 'junction-target'
     [void][IO.Directory]::CreateDirectory($junctionTarget)
@@ -564,6 +779,19 @@ exit 0
 $stub = @'
 . (Join-Path $PSScriptRoot 'HostBenchmark.Trial.Real.ps1')
 
+function Assert-HostCodexHome {
+    param(
+        [AllowEmptyString()][string]$Path,
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$ScratchRoot,
+        [switch]$AllowUserConfig,
+        [switch]$AllowInstalledAssets,
+        [switch]$AllowNativeSystemSkills,
+        [switch]$AllowIsolatedHostConfig
+    )
+    return Assert-HostCodexHomeLayout -Path $Path -AllowUserConfig:$AllowUserConfig -AllowInstalledAssets:$AllowInstalledAssets -AllowNativeSystemSkills:$AllowNativeSystemSkills -AllowIsolatedHostConfig:$AllowIsolatedHostConfig
+}
+
 $script:InstalledFixtureWorkspaces = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $script:InstalledFixtureDriftInjected = $false
 function Write-InstalledFixtureEvent([string]$Event) {
@@ -702,6 +930,19 @@ function Invoke-HostTrial {
     }
     [IO.File]::AppendAllText($env:HOST_BENCHMARK_TEST_LOG,("{0}{1}`n" -f $Protocol,$Trial),[Text.UTF8Encoding]::new($false))
     $mode = [string]$env:HOST_BENCHMARK_TEST_MODE
+    if ([string]$named.BenchmarkPath -ceq 'cognitive-fast-path') {
+        $actualCodexHome = [IO.Path]::GetFullPath([string]$named.CodexHome).TrimEnd('\')
+        if ([string]::IsNullOrWhiteSpace($env:HOST_BENCHMARK_TEST_EXPECTED_CODEX_HOME) -or $actualCodexHome -cne $env:HOST_BENCHMARK_TEST_EXPECTED_CODEX_HOME) { throw 'fixture-cognitive-home-not-forwarded' }
+        $configPath = Join-Path $actualCodexHome 'config.toml'
+        $configItem = Get-Item -LiteralPath $configPath -Force -ErrorAction Stop
+        $ownerCount = @(Get-ChildItem -LiteralPath $actualCodexHome -Force | Where-Object { $_.Name.StartsWith($script:HostIsolatedConfigOwnerPrefix,[StringComparison]::Ordinal) }).Count
+        if ($ownerCount -ne 1 -or ($configItem.Attributes -band [IO.FileAttributes]::ReadOnly) -eq 0 -or -not (Test-HostExactUtf8File -Path $configPath -ExpectedText "# isolated host benchmark sentinel`n")) { throw 'fixture-cognitive-sentinel-not-active' }
+    }
+    if ($mode -ceq 'cognitive-sentinel-tamper' -and $Protocol -ceq 'bare' -and $Trial -eq 1) {
+        $configPath = Join-Path ([string]$named.CodexHome) 'config.toml'
+        [IO.File]::SetAttributes($configPath,[IO.FileAttributes]::Normal)
+        [IO.File]::WriteAllText($configPath,'tampered by fixture',[Text.UTF8Encoding]::new($false))
+    }
     if ($mode -ceq 'exception' -and $Protocol -ceq 'v2' -and $Trial -eq 1) { throw 'host-benchmark-auth-home-unavailable' }
     $baseline = Initialize-StubTrialEvidence -Protocol $Protocol -Trial $Trial -Named $named -Mode $mode
     $unavailable = $mode -cin @('unavailable','unavailable-completed-violation','unavailable-direct-sessions') -and $Protocol -ceq 'v2' -and $Trial -eq 1
@@ -779,6 +1020,8 @@ function Invoke-HostTrial {
     $fixtureRevision = (@(Invoke-Git $fixture @('rev-parse','HEAD')) -join '').Trim()
     [void](Invoke-Git $sourceTemplate @('-c','core.hooksPath=NUL','checkout','--quiet','--detach',$fixtureRevision,'--'))
     $script:hostBenchmarkTemplateRoot = $templateRoot
+    $script:hostBenchmarkCognitiveHome = Join-Path $scratch 'fixture-cognitive-home'
+    Write-Utf8 (Join-Path $script:hostBenchmarkCognitiveHome 'auth.json') '{"fixture":"cognitive-runner"}'
     $templateDigestBefore = Get-DirectoryContentDigest -Root $templateRoot
     $copyProbe = Join-Path $scratch 'template-copy-probe'
     Copy-Item -LiteralPath (Join-Path $templateRoot 'workspace-direct') -Destination $copyProbe -Recurse -Force
@@ -818,6 +1061,22 @@ function Invoke-HostTrial {
         Remove-Item -LiteralPath $scratchJunction -Force
     }
 
+    $rogueCognitiveHome = Join-Path $scratch 'fixture-cognitive-rogue-home'
+    Write-Utf8 (Join-Path $rogueCognitiveHome 'auth.json') '{"fixture":"cognitive-rogue"}'
+    Write-Utf8 (Join-Path $rogueCognitiveHome 'config.toml') 'model = "foreign"'
+    $rogueCognitiveDigest = (Get-FileHash -LiteralPath (Join-Path $rogueCognitiveHome 'config.toml') -Algorithm SHA256).Hash
+    $rogueCognitive = Invoke-FixtureRunner -Fixture $fixture -OutputRoot $scratch -Mode 'cognitive-rogue-config' -Trials 1 -Groups 1 -CodexHome $rogueCognitiveHome
+    Check ($rogueCognitive.ExitCode -ne 0 -and $null -eq $rogueCognitive.Report -and ($rogueCognitive.Output -join "`n") -match 'host-benchmark-auth-home-not-isolated' -and @($rogueCognitive.Order | Where-Object { $_ -match '^(?:bare|v1|v2)\d+$' }).Count -eq 0 -and (Get-FileHash -LiteralPath (Join-Path $rogueCognitiveHome 'config.toml') -Algorithm SHA256).Hash -ceq $rogueCognitiveDigest) 'cognitive runner accepted or overwrote a foreign config.toml'
+
+    $tamperCognitiveHome = Join-Path $scratch 'fixture-cognitive-tamper-home'
+    Write-Utf8 (Join-Path $tamperCognitiveHome 'auth.json') '{"fixture":"cognitive-tamper"}'
+    $tamperCognitive = Invoke-FixtureRunner -Fixture $fixture -OutputRoot $scratch -Mode 'cognitive-sentinel-tamper' -Trials 1 -Groups 1 -CodexHome $tamperCognitiveHome
+    $tamperCognitiveConfig = Join-Path $tamperCognitiveHome 'config.toml'
+    $tamperCognitiveOwners = @(Get-ChildItem -LiteralPath $tamperCognitiveHome -Force | Where-Object { $_.Name.StartsWith($script:HostIsolatedConfigOwnerPrefix,[StringComparison]::Ordinal) })
+    Check ($tamperCognitive.ExitCode -ne 0 -and $null -eq $tamperCognitive.Report -and ($tamperCognitive.Output -join "`n") -match 'host-benchmark-auth-home-config-sentinel-changed' -and $tamperCognitive.Order -contains 'bare1' -and (Test-Path -LiteralPath $tamperCognitiveConfig -PathType Leaf) -and $tamperCognitiveOwners.Count -eq 1 -and [IO.File]::ReadAllText($tamperCognitiveConfig) -ceq 'tampered by fixture') 'cognitive runner deleted or accepted a tampered runner sentinel or owner evidence'
+    Remove-Item -LiteralPath $tamperCognitiveConfig -Force
+    [IO.Directory]::Delete($tamperCognitiveOwners[0].FullName,$false)
+
     $pass = Invoke-FixtureRunner $fixture $scratch 'pass' 3 3
     $expectedOrder = @(
         'bare1','v11','v21','v12','v22','bare2','v23','bare3','v13',
@@ -826,6 +1085,7 @@ function Invoke-HostTrial {
     )
     $passQualified = $pass.ExitCode -eq 0 -and $null -ne $pass.Report -and [bool]$pass.Report.performance.eligible
     Check $passQualified 'three independent clean 3x3 groups did not qualify'
+    Check (-not (Test-Path -LiteralPath (Join-Path $script:hostBenchmarkCognitiveHome 'config.toml')) -and @(Get-ChildItem -LiteralPath $script:hostBenchmarkCognitiveHome -Force | Where-Object { $_.Name.StartsWith($script:HostIsolatedConfigOwnerPrefix,[StringComparison]::Ordinal) }).Count -eq 0) 'successful cognitive runner retained its runner-created config sentinel or owner marker'
     Check (@(Compare-Object $expectedOrder $pass.Order -SyncWindow 0).Count -eq 0) 'independent-group rotating execution order changed'
     Check (@($pass.Report.groups).Count -eq 3 -and @($pass.Report.groups | Where-Object { @($_.execution.actual_trial_order).Count -eq 9 }).Count -eq 3) 'grouped 3x3 report omitted group or execution-order records'
     Check (@($pass.Report.groups.group_run_id | Sort-Object -Unique).Count -eq 3 -and @($pass.Report.groups.group_root_digest | Sort-Object -Unique).Count -eq 3) 'grouped 3x3 report reused a group id or namespace root'
@@ -905,6 +1165,7 @@ function Invoke-HostTrial {
 
     $exception = Invoke-FixtureRunner $fixture $scratch 'exception' 3
     Check ($exception.ExitCode -eq 1 -and $null -ne $exception.Report -and [string]$exception.Report.groups[0].status -ceq 'unavailable' -and (@($exception.Report.groups[0].protocols.v2.trials | Where-Object {$_.diagnostic -ceq 'isolated-auth-home-unavailable'}).Count -eq 1)) 'trial exception did not produce a sanitized unavailable group'
+    Check (-not (Test-Path -LiteralPath (Join-Path $script:hostBenchmarkCognitiveHome 'config.toml')) -and @(Get-ChildItem -LiteralPath $script:hostBenchmarkCognitiveHome -Force | Where-Object { $_.Name.StartsWith($script:HostIsolatedConfigOwnerPrefix,[StringComparison]::Ordinal) }).Count -eq 0) 'trial exception retained the runner-created config sentinel, owner marker, or profile lock state'
 
     $dirtyPath = Join-Path $fixture '目录\未跟踪.txt'
     Write-Utf8 $dirtyPath '诊断'

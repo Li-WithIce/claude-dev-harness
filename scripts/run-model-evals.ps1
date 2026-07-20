@@ -54,8 +54,11 @@ $sourceInputHeadBoundStart = @($sourceInputPaths | Where-Object { -not (Test-Mod
 $results = [Collections.Generic.List[object]]::new()
 $m = [ordered]@{ total=0; passed=0; failed=0; unavailable=0; missed_ask=0; critical_missed_ask=0; unnecessary_ask=0; product_inference_violation=0; read_only_write=0; false_pass=0; scope_expansion=0; lifecycle_skill_loads=0; model_turns=0; tool_calls=0; input_tokens=0; output_tokens=0; token_observations=0 }
 $codexHomeLayoutStable = $true
+$profileLock = $null
 
 try {
+    $profileLock = Enter-HostCodexHomeMutex -Path $CodexHome -FailureCode 'model-eval-auth-home-lock-timeout'
+    $null = Recover-HostIsolatedConfigSentinel -Path $CodexHome
     $CodexHome = Assert-HostCodexHome -Path $CodexHome -RepoRoot $RepoRoot -ScratchRoot $scratch -AllowNativeSystemSkills
     $physicalOutput = Get-HostPhysicalPathInfo -Path $OutputPath -AllowMissing -RejectLinks
     $physicalCodexHome = Get-HostPhysicalPathInfo -Path $CodexHome -RejectLinks
@@ -119,8 +122,12 @@ try {
         }
     }
 } finally {
-    try { $null = Assert-HostCodexHomeLayout -Path $CodexHome -AllowNativeSystemSkills } catch { $codexHomeLayoutStable = $false }
-    if(-not $KeepScratch -and (Test-Path $scratch)){Remove-Item $scratch -Recurse -Force -ErrorAction SilentlyContinue}
+    try {
+        if ($null -eq $profileLock) { $codexHomeLayoutStable = $false } else { try { $null = Assert-HostCodexHomeLayout -Path $CodexHome -AllowNativeSystemSkills } catch { $codexHomeLayoutStable = $false } }
+        if(-not $KeepScratch -and (Test-Path $scratch)){Remove-Item $scratch -Recurse -Force -ErrorAction SilentlyContinue}
+    } finally {
+        Exit-HostCodexHomeMutex -State $profileLock
+    }
 }
 
 $modelHard = $m.critical_missed_ask -eq 0 -and $m.read_only_write -eq 0 -and $m.false_pass -eq 0 -and $m.product_inference_violation -eq 0 -and $m.failed -eq 0 -and $m.unavailable -eq 0

@@ -6,6 +6,11 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Split-Path -Parent $P
 $RepoRoot = (Resolve-Path $RepoRoot).Path
 $failures = [Collections.Generic.List[string]]::new(); $checks = 0
 function Check([bool]$Condition,[string]$Message) { if($Condition){$script:checks++}else{$script:failures.Add($Message)} }
+function Get-ExactCommandAst {
+    param([AllowNull()][Management.Automation.Language.Ast]$Ast,[Parameter(Mandatory)][string]$Name)
+    if ($null -eq $Ast) { return @() }
+    return @($Ast.FindAll({param($node) $node -is [Management.Automation.Language.CommandAst]},$true) | Where-Object { $_.GetCommandName() -ceq $Name })
+}
 
 $runner = Join-Path $RepoRoot 'scripts\run-model-evals.ps1'
 $module = Join-Path $RepoRoot 'scripts\lib\Harness.ModelEval.psm1'
@@ -14,7 +19,7 @@ $credentialGuard = Join-Path $RepoRoot 'scripts\host-benchmark\HostBenchmark.Tri
 $schema = Join-Path $RepoRoot 'schemas\model-eval-observation.schema.json'
 $datasetPath = Join-Path $RepoRoot 'tests\evals\core-scenarios.json'
 foreach($path in @($runner,$module,$wrapper,$credentialGuard,$schema,$datasetPath)) { Check (Test-Path $path -PathType Leaf) "missing model-eval contract: $path" }
-foreach($path in @($runner,$module,$wrapper)) {
+foreach($path in @($runner,$module,$wrapper,$credentialGuard)) {
     $tokens=$null;$errors=$null;[Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)|Out-Null
     Check ($errors.Count -eq 0) "PowerShell parse failed: $path"
 }
@@ -27,10 +32,22 @@ $valid='{"schema_version":"harness-model-observation/v1","action":"inspect","ask
 Check (Test-Json -Json $valid -SchemaFile $schema -ErrorAction Stop -WarningAction SilentlyContinue) 'valid model observation rejected'
 $invalid=$valid -replace '"unauthorized_scope_change":false,',''
 Check (-not (Test-Json -Json $invalid -SchemaFile $schema -ErrorAction SilentlyContinue -WarningAction SilentlyContinue)) 'missing model observation field accepted'
-$runnerText=Get-Content $runner -Raw -Encoding utf8; $moduleText=Get-Content $module -Raw -Encoding utf8; $wrapperText=Get-Content $wrapper -Raw -Encoding utf8
+$runnerText=Get-Content $runner -Raw -Encoding utf8; $moduleText=Get-Content $module -Raw -Encoding utf8; $wrapperText=Get-Content $wrapper -Raw -Encoding utf8; $credentialGuardText=Get-Content $credentialGuard -Raw -Encoding utf8
+$runnerAstTokens=$null;$runnerAstErrors=$null;$runnerAst=[Management.Automation.Language.Parser]::ParseFile($runner,[ref]$runnerAstTokens,[ref]$runnerAstErrors)
 Check ($runnerText -match "gpt-5\.6-sol" -and $runnerText -match "ValidateSet\('max'\)" -and $moduleText -match '-Ephemeral' -and $moduleText -match '-ReadOnly' -and $moduleText -match '-Isolated' -and $wrapperText -match 'skills\.enabled=false') 'release identity/isolation contract missing'
 Check ($runnerText -match "expectedCodexVersion\s*=\s*'0\.144\.4'" -and $runnerText -match 'harness-model-eval-report/v2' -and $runnerText -match 'expected_codex_cli_version=\$expectedCodexVersion' -and $moduleText -match '-ExpectedCodexVersion \$ExpectedCodexVersion') 'release model eval is not bound to Codex CLI 0.144.4'
-Check ($runnerText -match '\[string\]\$CodexHome' -and $runnerText -match 'Real model eval requires an explicit dedicated -CodexHome' -and $runnerText -match 'Assert-HostCodexHome' -and @([regex]::Matches($runnerText,'AllowNativeSystemSkills')).Count -eq 2 -and $runnerText -match 'HostBenchmark\.Trial\.ps1') 'dedicated logged-in Codex home guard is missing'
+Check ($runnerText -match '\[string\]\$CodexHome' -and $runnerText -match 'Real model eval requires an explicit dedicated -CodexHome' -and $runnerText -match 'Assert-HostCodexHome' -and @([regex]::Matches($runnerText,'AllowNativeSystemSkills')).Count -eq 2 -and $runnerText -notmatch 'AllowIsolatedHostConfig' -and $runnerText -match 'HostBenchmark\.Trial\.ps1') 'dedicated logged-in Codex home guard or model/Host config isolation is missing'
+$modelTryAsts=@($runnerAst.FindAll({param($node) $node -is [Management.Automation.Language.TryStatementAst] -and $null-ne$node.Finally},$true) | Where-Object { @(Get-ExactCommandAst -Ast $_.Body -Name 'Invoke-HarnessModelEvalSession').Count -eq 1 })
+$modelTryAst=if($modelTryAsts.Count-eq1){$modelTryAsts[0]}else{$null}
+$modelBodyAst=if($null-ne$modelTryAst){$modelTryAst.Body}else{$null};$modelFinallyAst=if($null-ne$modelTryAst){$modelTryAst.Finally}else{$null}
+$modelLock=@(Get-ExactCommandAst -Ast $modelBodyAst -Name 'Enter-HostCodexHomeMutex')
+$modelRecovery=@(Get-ExactCommandAst -Ast $modelBodyAst -Name 'Recover-HostIsolatedConfigSentinel')
+$modelStrict=@(Get-ExactCommandAst -Ast $modelBodyAst -Name 'Assert-HostCodexHome')
+$modelSession=@(Get-ExactCommandAst -Ast $modelBodyAst -Name 'Invoke-HarnessModelEvalSession')
+$modelFinalStrict=@(Get-ExactCommandAst -Ast $modelFinallyAst -Name 'Assert-HostCodexHomeLayout')
+$modelUnlock=@(Get-ExactCommandAst -Ast $modelFinallyAst -Name 'Exit-HostCodexHomeMutex')
+$modelOrderValid=$modelLock.Count-eq1-and$modelRecovery.Count-eq1-and$modelStrict.Count-eq1-and$modelSession.Count-eq1-and$modelFinalStrict.Count-eq1-and$modelUnlock.Count-eq1-and$modelLock[0].Extent.StartOffset-lt$modelRecovery[0].Extent.StartOffset-and$modelRecovery[0].Extent.StartOffset-lt$modelStrict[0].Extent.StartOffset-and$modelStrict[0].Extent.StartOffset-lt$modelSession[0].Extent.StartOffset-and$modelFinalStrict[0].Extent.StartOffset-lt$modelUnlock[0].Extent.StartOffset-and$modelStrict[0].Extent.Text-match'-AllowNativeSystemSkills$'-and$modelFinalStrict[0].Extent.Text-match'-AllowNativeSystemSkills$'
+Check (@($runnerAstErrors).Count-eq0-and$modelTryAsts.Count-eq1-and$modelOrderValid-and$credentialGuardText-match'HostIsolatedConfigOwnerPrefix'-and$credentialGuardText-match'function Recover-HostIsolatedConfigSentinel') 'model eval does not recover an exact abandoned Host sentinel under the shared lock before strict layout, or strict final validation does not precede unlock'
 Check ($runnerText -match 'Test-ModelEvalReportPath' -and $runnerText -match 'Model eval output must not overlap the dedicated Codex home' -and $runnerText -match 'Get-HostPhysicalPathInfo') 'model report path is not isolated from source and credential storage'
 Check ($moduleText -match "'USERPROFILE','CODEX_HOME','CODEX_API_KEY','CODEX_ACCESS_TOKEN','OPENAI_API_KEY','CODEX_EXECUTABLE','CODEX_THREAD_ID','CODEX_INTERNAL_ORIGINATOR_OVERRIDE','CODEX_SHELL'" -and $moduleText -match 'SetEnvironmentVariable\(''CODEX_HOME'',\$CodexHome' -and $moduleText -match 'savedEnvironment\.GetEnumerator') 'per-session credential environment isolation/restore is missing'
 Check ($moduleText -match 'Read-only intent always uses profile=inspect') 'model rules must preserve the read-only Inspect override'

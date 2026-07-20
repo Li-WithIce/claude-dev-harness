@@ -55,6 +55,11 @@ function Complete-HostPendingOtlpCleanup {
     return $true
 }
 
+$script:HostIsolatedConfigSentinelText = "# isolated host benchmark sentinel`n"
+$script:HostIsolatedConfigOwnerPrefix = '.host-config-sentinel-owner-v1-'
+$script:HostIsolatedConfigStagingPrefix = '.host-config-sentinel-staging-v1-'
+$script:HostIsolatedConfigStagedLeaf = 'config.toml.tmp'
+
 function Test-HostExactUtf8File {
     param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][AllowEmptyString()][string]$ExpectedText)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
@@ -135,6 +140,49 @@ function Get-HostPhysicalPathInfo {
     return [ordered]@{volume=$identity.volume;file_id=$identity.file_id;physical_path=[IO.Path]::GetFullPath($physicalPath)}
 }
 
+function Enter-HostCodexHomeMutex {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [ValidateRange(1,600000)][int]$TimeoutMilliseconds = 10000,
+        [string]$FailureCode = 'host-benchmark-auth-home-lock-timeout'
+    )
+    $physical = Get-HostPhysicalPathInfo -Path $Path -RejectLinks
+    $lockBytes = [Text.UTF8Encoding]::new($false).GetBytes(('{0}|{1}' -f [string]$physical.volume,[string]$physical.file_id).ToLowerInvariant())
+    $lockHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($lockBytes)).ToLowerInvariant()
+    $mutex = [Threading.Mutex]::new($false,"Global\dev-harness.host-benchmark.$lockHash")
+    $acquired = $false
+    $abandoned = $false
+    try { $acquired = $mutex.WaitOne($TimeoutMilliseconds) } catch [Threading.AbandonedMutexException] { $acquired = $true; $abandoned = $true }
+    if (-not $acquired) { $mutex.Dispose(); throw $FailureCode }
+    return [ordered]@{mutex=$mutex;acquired=$true;abandoned=$abandoned;name="Global\dev-harness.host-benchmark.$lockHash"}
+}
+
+function Exit-HostCodexHomeMutex {
+    param([AllowNull()][System.Collections.IDictionary]$State)
+    if ($null -eq $State) { return }
+    try { if ([bool]$State.acquired) { [void]$State.mutex.ReleaseMutex() } } finally { $State.mutex.Dispose() }
+}
+
+function Get-HostIsolatedConfigOwnerMetadata {
+    param([Parameter(Mandatory)][string]$Name)
+    $pattern = '^' + [regex]::Escape($script:HostIsolatedConfigOwnerPrefix) + '(?<volume>[0-9a-f]{32})-(?<file>[0-9a-f]{32})-(?<run>[0-9a-f]{32})$'
+    $match = [regex]::Match($Name,$pattern)
+    if (-not $match.Success) { return $null }
+    return [ordered]@{volume_hex=$match.Groups['volume'].Value;file_id=('0x' + $match.Groups['file'].Value);run_id=$match.Groups['run'].Value}
+}
+
+function Get-HostIdentityVolumeHex {
+    param([Parameter(Mandatory)][string]$Volume)
+    $match = [regex]::Match($Volume,'(?i)\{(?<id>[0-9a-f-]{36})\}')
+    if (-not $match.Success) { throw 'host-benchmark-path-physical-identity-unavailable' }
+    return $match.Groups['id'].Value.Replace('-','').ToLowerInvariant()
+}
+
+function Test-HostIdentityMatchesOwnerMetadata {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Identity,[Parameter(Mandatory)][System.Collections.IDictionary]$Metadata)
+    return (Get-HostIdentityVolumeHex -Volume ([string]$Identity.volume)) -ceq [string]$Metadata.volume_hex -and [string]$Identity.file_id -ceq [string]$Metadata.file_id
+}
+
 function Test-HostWorkspaceChangePathsSafe {
     param([Parameter(Mandatory)][string]$Workspace,[Parameter(Mandatory)][string[]]$Paths,[Parameter(Mandatory)][object]$PathModule)
     try {
@@ -177,8 +225,9 @@ function Resolve-HostTrialStatus {
 }
 
 function Assert-HostCodexHomeLayout {
-    param([AllowEmptyString()][string]$Path,[switch]$AllowUserConfig,[switch]$AllowInstalledAssets,[switch]$AllowNativeSystemSkills)
+    param([AllowEmptyString()][string]$Path,[switch]$AllowUserConfig,[switch]$AllowInstalledAssets,[switch]$AllowNativeSystemSkills,[switch]$AllowIsolatedHostConfig)
     if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Container)) { throw 'host-benchmark-auth-home-unavailable' }
+    if ($AllowIsolatedHostConfig -and ($AllowUserConfig -or $AllowInstalledAssets)) { throw 'host-benchmark-auth-home-not-isolated' }
     $absolute = [IO.Path]::GetFullPath($Path).TrimEnd('\')
     $probe = $absolute
     while (-not [string]::IsNullOrWhiteSpace($probe)) {
@@ -200,11 +249,26 @@ function Assert-HostCodexHomeLayout {
         $allowedDirectories += '.claude'
     }
     $stack = [Collections.Generic.Stack[string]]::new()
+    $isolatedConfigSeen = $false
+    $isolatedOwnerPath = ''
+    $isolatedOwnerMetadata = $null
     foreach ($child in @(Get-ChildItem -LiteralPath $resolved -Force -ErrorAction Stop)) {
         if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
             throw 'host-benchmark-auth-home-reparse-point'
         }
         if (-not $child.PSIsContainer -and -not [string]::IsNullOrWhiteSpace([string]$child.LinkType)) { throw 'host-benchmark-auth-home-linked-credential' }
+        if ($AllowIsolatedHostConfig -and -not $child.PSIsContainer -and [string]$child.Name -ceq 'config.toml') {
+            if (($child.Attributes -band [IO.FileAttributes]::ReadOnly) -eq 0 -or -not (Test-HostExactUtf8File -Path $child.FullName -ExpectedText $script:HostIsolatedConfigSentinelText)) { throw 'host-benchmark-auth-home-not-isolated' }
+            $isolatedConfigSeen = $true
+            continue
+        }
+        $ownerMetadata = Get-HostIsolatedConfigOwnerMetadata -Name ([string]$child.Name)
+        if ($AllowIsolatedHostConfig -and $child.PSIsContainer -and $null -ne $ownerMetadata) {
+            if (-not [string]::IsNullOrWhiteSpace($isolatedOwnerPath) -or -not [string]::IsNullOrWhiteSpace([string]$child.LinkType) -or @(Get-ChildItem -LiteralPath $child.FullName -Force -ErrorAction Stop).Count -ne 0) { throw 'host-benchmark-auth-home-not-isolated' }
+            $isolatedOwnerPath = $child.FullName
+            $isolatedOwnerMetadata = $ownerMetadata
+            continue
+        }
         if (($AllowUserConfig -or $AllowNativeSystemSkills) -and $child.PSIsContainer -and [string]$child.Name -ceq 'skills') {
             $skillEntries = @(Get-ChildItem -LiteralPath $child.FullName -Force -ErrorAction Stop)
             if ($AllowNativeSystemSkills -and -not $AllowUserConfig -and ($skillEntries.Count -ne 1 -or [string]$skillEntries[0].Name -cne '.system')) { throw 'host-benchmark-auth-home-not-isolated' }
@@ -242,6 +306,11 @@ function Assert-HostCodexHomeLayout {
             throw 'host-benchmark-auth-home-not-isolated'
         }
     }
+    if ($AllowIsolatedHostConfig -and -not $isolatedConfigSeen) { throw 'host-benchmark-auth-home-not-isolated' }
+    if ($AllowIsolatedHostConfig -and -not [string]::IsNullOrWhiteSpace($isolatedOwnerPath)) {
+        $configIdentity = Get-HostFileSystemIdentity -Path (Join-Path $resolved 'config.toml')
+        if (-not (Test-HostIdentityMatchesOwnerMetadata -Identity $configIdentity -Metadata $isolatedOwnerMetadata)) { throw 'host-benchmark-auth-home-not-isolated' }
+    }
     while ($stack.Count -gt 0) {
         foreach ($child in @(Get-ChildItem -LiteralPath $stack.Pop() -Force -ErrorAction Stop)) {
             if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
@@ -258,6 +327,156 @@ function Assert-HostCodexHomeLayout {
     return $resolved
 }
 
+function Initialize-HostIsolatedConfigSentinel {
+    param([Parameter(Mandatory)][string]$Path)
+    $resolved = (Resolve-Path -LiteralPath $Path).Path.TrimEnd('\')
+    $configPath = Join-Path $resolved 'config.toml'
+    $journalEntries = @(Get-ChildItem -LiteralPath $resolved -Force -ErrorAction Stop | Where-Object { $_.Name.StartsWith($script:HostIsolatedConfigOwnerPrefix,[StringComparison]::Ordinal) -or $_.Name.StartsWith($script:HostIsolatedConfigStagingPrefix,[StringComparison]::Ordinal) })
+    if ($journalEntries.Count -ne 0) { throw 'host-benchmark-auth-home-config-sentinel-recovery-required' }
+    if (Test-Path -LiteralPath $configPath) {
+        $null = Assert-HostCodexHomeLayout -Path $resolved -AllowNativeSystemSkills -AllowIsolatedHostConfig
+        $identity = Get-HostFileSystemIdentity -Path $configPath
+        return [ordered]@{path=$configPath;created_by_runner=$false;volume=$identity.volume;file_id=$identity.file_id}
+    }
+    $null = Assert-HostCodexHomeLayout -Path $resolved -AllowNativeSystemSkills
+    $runId = [guid]::NewGuid().ToString('N')
+    $stagingPath = Join-Path $resolved ($script:HostIsolatedConfigStagingPrefix + $runId)
+    $ownerPath = ''
+    $journalPath = $stagingPath
+    $journalIdentity = $null
+    $tempPath = Join-Path $stagingPath $script:HostIsolatedConfigStagedLeaf
+    $tempIdentity = $null
+    try {
+        [void][IO.Directory]::CreateDirectory($stagingPath)
+        $journalIdentity = Get-HostFileSystemIdentity -Path $stagingPath
+        $stagingItem = Get-Item -LiteralPath $stagingPath -Force -ErrorAction Stop
+        if (($stagingItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not [string]::IsNullOrWhiteSpace([string]$stagingItem.LinkType) -or @(Get-ChildItem -LiteralPath $stagingPath -Force -ErrorAction Stop).Count -ne 0) { throw 'staging-marker-invalid' }
+        $bytes = [Text.UTF8Encoding]::new($false).GetBytes($script:HostIsolatedConfigSentinelText)
+        $stream = [IO.FileStream]::new($tempPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+        try { $stream.Write($bytes,0,$bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
+        $tempIdentity = Get-HostFileSystemIdentity -Path $tempPath
+        [IO.File]::SetAttributes($tempPath,([IO.File]::GetAttributes($tempPath) -bor [IO.FileAttributes]::ReadOnly))
+        $tempItem = Get-Item -LiteralPath $tempPath -Force -ErrorAction Stop
+        if (($tempItem.Attributes -band [IO.FileAttributes]::ReadOnly) -eq 0 -or ($tempItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not [string]::IsNullOrWhiteSpace([string]$tempItem.LinkType) -or -not (Test-HostExactUtf8File -Path $tempPath -ExpectedText $script:HostIsolatedConfigSentinelText)) { throw 'temp-sentinel-invalid' }
+        $ownerName = $script:HostIsolatedConfigOwnerPrefix + (Get-HostIdentityVolumeHex -Volume ([string]$tempIdentity.volume)) + '-' + ([string]$tempIdentity.file_id).Substring(2) + '-' + $runId
+        $ownerPath = Join-Path $resolved $ownerName
+        $state = [ordered]@{path=$configPath;created_by_runner=$true;volume=$tempIdentity.volume;file_id=$tempIdentity.file_id;owner_path=$ownerPath;owner_volume=$journalIdentity.volume;owner_file_id=$journalIdentity.file_id}
+        [IO.Directory]::Move($stagingPath,$ownerPath)
+        $journalPath = $ownerPath
+        $tempPath = Join-Path $ownerPath $script:HostIsolatedConfigStagedLeaf
+        [IO.File]::Move($tempPath,$configPath,$false)
+        return $state
+    } catch {
+        $cleanupFailed = $false
+        if (Test-Path -LiteralPath $journalPath -PathType Container) {
+            try {
+                $journalItem = Get-Item -LiteralPath $journalPath -Force -ErrorAction Stop
+                $currentJournalIdentity = Get-HostFileSystemIdentity -Path $journalPath
+                $sameJournalIdentity = $null -eq $journalIdentity -or ([string]$currentJournalIdentity.volume -ceq [string]$journalIdentity.volume -and [string]$currentJournalIdentity.file_id -ceq [string]$journalIdentity.file_id)
+                $entries = @(Get-ChildItem -LiteralPath $journalPath -Force -ErrorAction Stop)
+                if (-not $sameJournalIdentity -or ($journalItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not [string]::IsNullOrWhiteSpace([string]$journalItem.LinkType) -or $entries.Count -gt 1 -or ($entries.Count -eq 1 -and ($entries[0].PSIsContainer -or [string]$entries[0].Name -cne $script:HostIsolatedConfigStagedLeaf -or ($entries[0].Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not [string]::IsNullOrWhiteSpace([string]$entries[0].LinkType)))) { throw 'journal-changed' }
+                if ($entries.Count -eq 1) {
+                    $currentTempIdentity = Get-HostFileSystemIdentity -Path $entries[0].FullName
+                    if ($null -ne $tempIdentity -and ([string]$currentTempIdentity.volume -cne [string]$tempIdentity.volume -or [string]$currentTempIdentity.file_id -cne [string]$tempIdentity.file_id)) { throw 'temp-sentinel-changed' }
+                    $attributes = [IO.File]::GetAttributes($entries[0].FullName)
+                    $writableAttributes = [IO.FileAttributes]([int]$attributes -band (-bnot [int][IO.FileAttributes]::ReadOnly))
+                    if ([int]$writableAttributes -eq 0) { $writableAttributes = [IO.FileAttributes]::Normal }
+                    [IO.File]::SetAttributes($entries[0].FullName,$writableAttributes)
+                    [IO.File]::Delete($entries[0].FullName)
+                }
+                [IO.Directory]::Delete($journalPath,$false)
+            } catch { $cleanupFailed = $true }
+        }
+        if (Test-Path -LiteralPath $journalPath) { $cleanupFailed = $true }
+        if ($cleanupFailed) { throw 'host-benchmark-auth-home-config-sentinel-cleanup-failed' }
+        throw 'host-benchmark-auth-home-not-isolated'
+    }
+}
+
+function Recover-HostIsolatedConfigSentinel {
+    param([Parameter(Mandatory)][string]$Path)
+    $resolved = (Resolve-Path -LiteralPath $Path).Path.TrimEnd('\')
+    $journals = @(Get-ChildItem -LiteralPath $resolved -Force -ErrorAction Stop | Where-Object { $_.Name.StartsWith($script:HostIsolatedConfigOwnerPrefix,[StringComparison]::Ordinal) -or $_.Name.StartsWith($script:HostIsolatedConfigStagingPrefix,[StringComparison]::Ordinal) })
+    if ($journals.Count -eq 0) { return $false }
+    if ($journals.Count -ne 1) { throw 'host-benchmark-auth-home-config-sentinel-recovery-failed' }
+    $journal = $journals[0]
+    $metadata = Get-HostIsolatedConfigOwnerMetadata -Name ([string]$journal.Name)
+    $stagingMatch = [regex]::Match([string]$journal.Name,('^' + [regex]::Escape($script:HostIsolatedConfigStagingPrefix) + '[0-9a-f]{32}$'))
+    if (($null -eq $metadata -and -not $stagingMatch.Success) -or -not $journal.PSIsContainer -or ($journal.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not [string]::IsNullOrWhiteSpace([string]$journal.LinkType)) { throw 'host-benchmark-auth-home-config-sentinel-recovery-failed' }
+    $journalIdentity = Get-HostFileSystemIdentity -Path $journal.FullName
+    $contents = @(Get-ChildItem -LiteralPath $journal.FullName -Force -ErrorAction Stop)
+    $configPath = Join-Path $resolved 'config.toml'
+    $configExists = Test-Path -LiteralPath $configPath
+    if ($contents.Count -gt 1 -or ($contents.Count -eq 1 -and ($contents[0].PSIsContainer -or [string]$contents[0].Name -cne $script:HostIsolatedConfigStagedLeaf -or ($contents[0].Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not [string]::IsNullOrWhiteSpace([string]$contents[0].LinkType)))) { throw 'host-benchmark-auth-home-config-sentinel-recovery-failed' }
+    if ($stagingMatch.Success -and $configExists) { throw 'host-benchmark-auth-home-config-sentinel-recovery-failed' }
+    if ($null -ne $metadata -and $configExists -and $contents.Count -ne 0) { throw 'host-benchmark-auth-home-config-sentinel-recovery-failed' }
+    $sentinelPath = if ($contents.Count -eq 1) { $contents[0].FullName } elseif ($configExists) { $configPath } else { '' }
+    if ($null -ne $metadata -and -not [string]::IsNullOrWhiteSpace($sentinelPath)) {
+        $sentinel = Get-Item -LiteralPath $sentinelPath -Force -ErrorAction Stop
+        $sentinelIdentity = Get-HostFileSystemIdentity -Path $sentinelPath
+        if ($sentinel.PSIsContainer -or ($sentinel.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not [string]::IsNullOrWhiteSpace([string]$sentinel.LinkType) -or -not (Test-HostExactUtf8File -Path $sentinelPath -ExpectedText $script:HostIsolatedConfigSentinelText) -or -not (Test-HostIdentityMatchesOwnerMetadata -Identity $sentinelIdentity -Metadata $metadata)) { throw 'host-benchmark-auth-home-config-sentinel-recovery-failed' }
+    }
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($sentinelPath)) {
+            $attributes = [IO.File]::GetAttributes($sentinelPath)
+            $writableAttributes = [IO.FileAttributes]([int]$attributes -band (-bnot [int][IO.FileAttributes]::ReadOnly))
+            if ([int]$writableAttributes -eq 0) { $writableAttributes = [IO.FileAttributes]::Normal }
+            [IO.File]::SetAttributes($sentinelPath,$writableAttributes)
+            [IO.File]::Delete($sentinelPath)
+            if (Test-Path -LiteralPath $sentinelPath) { throw 'sentinel-delete-failed' }
+        }
+        $currentJournal = Get-Item -LiteralPath $journal.FullName -Force -ErrorAction Stop
+        $currentJournalIdentity = Get-HostFileSystemIdentity -Path $journal.FullName
+        if ([string]$currentJournalIdentity.volume -cne [string]$journalIdentity.volume -or [string]$currentJournalIdentity.file_id -cne [string]$journalIdentity.file_id -or ($currentJournal.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not [string]::IsNullOrWhiteSpace([string]$currentJournal.LinkType) -or @(Get-ChildItem -LiteralPath $journal.FullName -Force -ErrorAction Stop).Count -ne 0) { throw 'journal-changed' }
+        [IO.Directory]::Delete($journal.FullName,$false)
+        if (Test-Path -LiteralPath $journal.FullName) { throw 'journal-delete-failed' }
+    } catch { throw 'host-benchmark-auth-home-config-sentinel-cleanup-failed' }
+    $null = Assert-HostCodexHomeLayout -Path $resolved -AllowNativeSystemSkills
+    return $true
+}
+
+function Complete-HostIsolatedConfigSentinel {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$State)
+    $configPath = [IO.Path]::GetFullPath([string]$State.path)
+    try {
+        $identity = Get-HostFileSystemIdentity -Path $configPath
+        if ([string]$identity.volume -cne [string]$State.volume -or [string]$identity.file_id -cne [string]$State.file_id) { throw 'changed' }
+        $codexHome = [IO.Path]::GetDirectoryName($configPath)
+        $null = Assert-HostCodexHomeLayout -Path $codexHome -AllowNativeSystemSkills -AllowIsolatedHostConfig
+        if ([bool]$State.created_by_runner) {
+            $ownerPath = [IO.Path]::GetFullPath([string]$State.owner_path)
+            $owner = Get-Item -LiteralPath $ownerPath -Force -ErrorAction Stop
+            $ownerIdentity = Get-HostFileSystemIdentity -Path $ownerPath
+            if (-not $owner.PSIsContainer -or ($owner.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not [string]::IsNullOrWhiteSpace([string]$owner.LinkType) -or @(Get-ChildItem -LiteralPath $ownerPath -Force -ErrorAction Stop).Count -ne 0 -or [string]$ownerIdentity.volume -cne [string]$State.owner_volume -or [string]$ownerIdentity.file_id -cne [string]$State.owner_file_id) { throw 'changed' }
+        }
+    } catch { throw 'host-benchmark-auth-home-config-sentinel-changed' }
+    if (-not [bool]$State.created_by_runner) { return $true }
+    try {
+        $attributes = [IO.File]::GetAttributes($configPath)
+        $writableAttributes = [IO.FileAttributes]([int]$attributes -band (-bnot [int][IO.FileAttributes]::ReadOnly))
+        if ([int]$writableAttributes -eq 0) { $writableAttributes = [IO.FileAttributes]::Normal }
+        [IO.File]::SetAttributes($configPath,$writableAttributes)
+        [IO.File]::Delete($configPath)
+        if (Test-Path -LiteralPath $configPath) { throw 'delete-failed' }
+        $owner = Get-Item -LiteralPath $ownerPath -Force -ErrorAction Stop
+        $ownerIdentity = Get-HostFileSystemIdentity -Path $ownerPath
+        if (($owner.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not [string]::IsNullOrWhiteSpace([string]$owner.LinkType) -or @(Get-ChildItem -LiteralPath $ownerPath -Force -ErrorAction Stop).Count -ne 0 -or [string]$ownerIdentity.volume -cne [string]$State.owner_volume -or [string]$ownerIdentity.file_id -cne [string]$State.owner_file_id) { throw 'owner-marker-changed' }
+        [IO.Directory]::Delete($ownerPath,$false)
+        if (Test-Path -LiteralPath $ownerPath) { throw 'owner-delete-failed' }
+    } catch {
+        try {
+            if (Test-Path -LiteralPath $configPath -PathType Leaf) {
+                $identity = Get-HostFileSystemIdentity -Path $configPath
+                if ([string]$identity.volume -ceq [string]$State.volume -and [string]$identity.file_id -ceq [string]$State.file_id -and (Test-HostExactUtf8File -Path $configPath -ExpectedText $script:HostIsolatedConfigSentinelText)) {
+                    [IO.File]::SetAttributes($configPath,([IO.File]::GetAttributes($configPath) -bor [IO.FileAttributes]::ReadOnly))
+                }
+            }
+        } catch {}
+        throw 'host-benchmark-auth-home-config-sentinel-cleanup-failed'
+    }
+    return $true
+}
+
 function Assert-HostCodexHome {
     param(
         [AllowEmptyString()][string]$Path,
@@ -265,9 +484,10 @@ function Assert-HostCodexHome {
         [Parameter(Mandatory)][string]$ScratchRoot,
         [switch]$AllowUserConfig,
         [switch]$AllowInstalledAssets,
-        [switch]$AllowNativeSystemSkills
+        [switch]$AllowNativeSystemSkills,
+        [switch]$AllowIsolatedHostConfig
     )
-    $resolved = Assert-HostCodexHomeLayout -Path $Path -AllowUserConfig:$AllowUserConfig -AllowInstalledAssets:$AllowInstalledAssets -AllowNativeSystemSkills:$AllowNativeSystemSkills
+    $resolved = Assert-HostCodexHomeLayout -Path $Path -AllowUserConfig:$AllowUserConfig -AllowInstalledAssets:$AllowInstalledAssets -AllowNativeSystemSkills:$AllowNativeSystemSkills -AllowIsolatedHostConfig:$AllowIsolatedHostConfig
     $resolvedPhysical = Get-HostPhysicalPathInfo -Path $resolved -RejectLinks
     foreach ($unsafeRoot in @($RepoRoot,$ScratchRoot)) {
         $unsafePhysical = Get-HostPhysicalPathInfo -Path $unsafeRoot -RejectLinks
@@ -306,7 +526,7 @@ function Assert-HostCodexHome {
         $env:CODEX_HOME = $resolved
         $status = @(& codex login status 2>&1 | ForEach-Object { [string]$_ })
         if ($LASTEXITCODE -ne 0) { throw 'host-benchmark-auth-home-not-logged-in' }
-        $null = Assert-HostCodexHomeLayout -Path $resolved -AllowUserConfig:$AllowUserConfig -AllowInstalledAssets:$AllowInstalledAssets -AllowNativeSystemSkills:$AllowNativeSystemSkills
+        $null = Assert-HostCodexHomeLayout -Path $resolved -AllowUserConfig:$AllowUserConfig -AllowInstalledAssets:$AllowInstalledAssets -AllowNativeSystemSkills:$AllowNativeSystemSkills -AllowIsolatedHostConfig:$AllowIsolatedHostConfig
     } finally {
         [Environment]::SetEnvironmentVariable('USERPROFILE',$savedHome,[EnvironmentVariableTarget]::Process)
         [Environment]::SetEnvironmentVariable('HOME',$savedUnixHome,[EnvironmentVariableTarget]::Process)
@@ -716,7 +936,7 @@ function Invoke-HostTrial {
         if (-not (Get-InstalledDesktopProfileRoot -CodexHome $CodexHome).Equals($profileRoot,[StringComparison]::OrdinalIgnoreCase)) { throw 'host-benchmark-installed-profile-invalid' }
         $null = Assert-InstalledDesktopProfileReady -CodexHome $CodexHome
     } else {
-        $CodexHome = Assert-HostCodexHome -Path $CodexHome -RepoRoot $RepoRoot -ScratchRoot $ScratchRoot -AllowNativeSystemSkills
+        $CodexHome = Assert-HostCodexHome -Path $CodexHome -RepoRoot $RepoRoot -ScratchRoot $ScratchRoot -AllowNativeSystemSkills -AllowIsolatedHostConfig
     }
     $sourceBinding = [ordered]@{status='diagnostic';revision=$SourceRevision;commit_tree_oid=$SourceCommitTree;verification='live-dirty-diagnostic';reason='Dirty live source is diagnostic-only and cannot satisfy release eligibility.'}
     if ($SourceBindingRequired) {
@@ -1019,7 +1239,7 @@ Work only inside this workspace. The user explicitly authorizes this complete, r
         try {
             if ($installedMode -and $Protocol -cne 'bare') { $null = Assert-HostCodexHomeLayout -Path $CodexHome -AllowUserConfig -AllowInstalledAssets }
             elseif ($installedMode) { $null = Assert-InstalledDesktopProfileReady -CodexHome $CodexHome }
-            else { $null = Assert-HostCodexHomeLayout -Path $CodexHome -AllowNativeSystemSkills }
+            else { $null = Assert-HostCodexHomeLayout -Path $CodexHome -AllowNativeSystemSkills -AllowIsolatedHostConfig }
         } catch { $authLayoutValid = $false }
         if ($installedMode) {
             try { $profileConfigStable = Test-InstalledDesktopUserConfigBinding -Expected $profileConfigBinding -Actual (Get-InstalledDesktopUserConfigBinding -CodexHome $CodexHome) } catch { $profileConfigStable = $false }

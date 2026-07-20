@@ -407,21 +407,24 @@ $sourceMode = if ([bool]$sourceStart.dirty -or -not $sourceInputHeadBoundStart) 
 $benchmarkGroups = [Collections.Generic.List[object]]::new()
 $protocolNames = @('bare','v1','v2')
 $timer = [Diagnostics.Stopwatch]::StartNew()
-$installedProfileMutex = $null
-$installedProfileMutexAcquired = $false
+$profileLock = $null
+$isolatedConfigSentinel = $null
 $scratchBase = $null
 $scratchRoot = $null
 try {
-    if ($BenchmarkPath -ceq 'installed-desktop-path') {
-        $profileIdentity = Get-HostPhysicalPathInfo -Path $CodexHome -RejectLinks
-        $profileLockBytes = [Text.UTF8Encoding]::new($false).GetBytes(('{0}|{1}' -f [string]$profileIdentity.volume,[string]$profileIdentity.file_id).ToLowerInvariant())
-        $profileLockHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($profileLockBytes)).ToLowerInvariant()
-        $installedProfileMutex = [Threading.Mutex]::new($false,"Global\dev-harness.installed-desktop.$profileLockHash")
-        try { $installedProfileMutexAcquired = $installedProfileMutex.WaitOne(10000) } catch [Threading.AbandonedMutexException] { $installedProfileMutexAcquired = $true }
-        if (-not $installedProfileMutexAcquired) { throw 'host-benchmark-installed-profile-lock-timeout' }
+    if (-not [string]::IsNullOrWhiteSpace($CodexHome)) {
+        $lockFailure = if($BenchmarkPath-ceq'installed-desktop-path'){'host-benchmark-installed-profile-lock-timeout'}else{'host-benchmark-auth-home-lock-timeout'}
+        $profileLock = Enter-HostCodexHomeMutex -Path $CodexHome -FailureCode $lockFailure
     }
     $scratchBase = New-HarnessContainedDirectory -WorkspaceRoot $RepoRoot -Path '.assistant\运行时\release-qualification' -Label 'host benchmark scratch base'
     $scratchRoot = New-HarnessContainedDirectory -WorkspaceRoot $scratchBase -Path ('thin-v2-host-benchmark-' + [guid]::NewGuid().ToString('N')) -Label 'host benchmark scratch root'
+    if ($BenchmarkPath -ceq 'cognitive-fast-path' -and -not [string]::IsNullOrWhiteSpace($CodexHome)) {
+        $null = Recover-HostIsolatedConfigSentinel -Path $CodexHome
+        $configExists = Test-Path -LiteralPath (Join-Path $CodexHome 'config.toml')
+        $CodexHome = Assert-HostCodexHome -Path $CodexHome -RepoRoot $RepoRoot -ScratchRoot $scratchRoot -AllowNativeSystemSkills -AllowIsolatedHostConfig:$configExists
+        $isolatedConfigSentinel = Initialize-HostIsolatedConfigSentinel -Path $CodexHome
+        $CodexHome = Assert-HostCodexHome -Path $CodexHome -RepoRoot $RepoRoot -ScratchRoot $scratchRoot -AllowNativeSystemSkills -AllowIsolatedHostConfig
+    }
     for ($groupIndex=1; $groupIndex -le $Groups; $groupIndex++) {
         $groupTimer = [Diagnostics.Stopwatch]::StartNew()
         $groupRunId = [guid]::NewGuid().ToString('N')
@@ -656,8 +659,10 @@ try {
             Remove-Item -LiteralPath $resolvedScratch -Recurse -Force
         }
     } finally {
-        if ($null -ne $installedProfileMutex) {
-            try { if ($installedProfileMutexAcquired) { [void]$installedProfileMutex.ReleaseMutex() } } finally { $installedProfileMutex.Dispose() }
+        try {
+            if ($null -ne $isolatedConfigSentinel) { $null = Complete-HostIsolatedConfigSentinel -State $isolatedConfigSentinel }
+        } finally {
+            Exit-HostCodexHomeMutex -State $profileLock
         }
     }
 }
