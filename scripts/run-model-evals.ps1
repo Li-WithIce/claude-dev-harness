@@ -56,7 +56,7 @@ $m = [ordered]@{ total=0; passed=0; failed=0; unavailable=0; missed_ask=0; criti
 $codexHomeLayoutStable = $true
 
 try {
-    $CodexHome = Assert-HostCodexHome -Path $CodexHome -RepoRoot $RepoRoot -ScratchRoot $scratch
+    $CodexHome = Assert-HostCodexHome -Path $CodexHome -RepoRoot $RepoRoot -ScratchRoot $scratch -AllowNativeSystemSkills
     $physicalOutput = Get-HostPhysicalPathInfo -Path $OutputPath -AllowMissing -RejectLinks
     $physicalCodexHome = Get-HostPhysicalPathInfo -Path $CodexHome -RejectLinks
     if ((Test-HostPathAtOrBelow -Path ([string]$physicalOutput.physical_path) -Root ([string]$physicalCodexHome.physical_path)) -or
@@ -119,7 +119,7 @@ try {
         }
     }
 } finally {
-    try { $null = Assert-HostCodexHomeLayout -Path $CodexHome } catch { $codexHomeLayoutStable = $false }
+    try { $null = Assert-HostCodexHomeLayout -Path $CodexHome -AllowNativeSystemSkills } catch { $codexHomeLayoutStable = $false }
     if(-not $KeepScratch -and (Test-Path $scratch)){Remove-Item $scratch -Recurse -Force -ErrorAction SilentlyContinue}
 }
 

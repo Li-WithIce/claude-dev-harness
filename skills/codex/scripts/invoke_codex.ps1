@@ -131,7 +131,7 @@ Options:
   -OtelCollectorInstanceId <id> Internal OTLP collector instance binding
   -AgentOutputOnly             Omit command summaries from the response file
   -Quiet                       Suppress live command/message previews
-  -Isolated                    Disable plugins, apps, memory, browser/computer, and multi-agent features
+  -Isolated                    Disable skills, plugins, apps, memory, browser/computer, and multi-agent features
   -Help                        Show this help
 
 Success requires Codex exit 0 and an agent response. Only then are these printed:
@@ -651,6 +651,7 @@ if ($Isolated) {
     foreach ($feature in @('plugins','remote_plugin','apps','browser_use','computer_use','memories','multi_agent','multi_agent_v2','enable_fanout','in_app_browser','image_generation')) {
         $codexArgs.Add('--disable'); $codexArgs.Add($feature)
     }
+    $codexArgs.Add('-c'); $codexArgs.Add('skills.enabled=false')
 }
 if ($Session) {
     $codexArgs.Add('resume')

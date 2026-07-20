@@ -177,7 +177,7 @@ function Resolve-HostTrialStatus {
 }
 
 function Assert-HostCodexHomeLayout {
-    param([AllowEmptyString()][string]$Path,[switch]$AllowUserConfig,[switch]$AllowInstalledAssets)
+    param([AllowEmptyString()][string]$Path,[switch]$AllowUserConfig,[switch]$AllowInstalledAssets,[switch]$AllowNativeSystemSkills)
     if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Container)) { throw 'host-benchmark-auth-home-unavailable' }
     $absolute = [IO.Path]::GetFullPath($Path).TrimEnd('\')
     $probe = $absolute
@@ -205,11 +205,29 @@ function Assert-HostCodexHomeLayout {
             throw 'host-benchmark-auth-home-reparse-point'
         }
         if (-not $child.PSIsContainer -and -not [string]::IsNullOrWhiteSpace([string]$child.LinkType)) { throw 'host-benchmark-auth-home-linked-credential' }
-        if ($AllowUserConfig -and $child.PSIsContainer -and [string]$child.Name -ceq 'skills') {
-            foreach ($skill in @(Get-ChildItem -LiteralPath $child.FullName -Force -ErrorAction Stop)) {
+        if (($AllowUserConfig -or $AllowNativeSystemSkills) -and $child.PSIsContainer -and [string]$child.Name -ceq 'skills') {
+            $skillEntries = @(Get-ChildItem -LiteralPath $child.FullName -Force -ErrorAction Stop)
+            if ($AllowNativeSystemSkills -and -not $AllowUserConfig -and ($skillEntries.Count -ne 1 -or [string]$skillEntries[0].Name -cne '.system')) { throw 'host-benchmark-auth-home-not-isolated' }
+            foreach ($skill in $skillEntries) {
                 $managedSkill = [string]$skill.Name -cin @('entry-router','orchestrator','plan','implement','review','test','spec')
                 $linked = ($skill.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
                 if ([string]$skill.Name -ceq '.system' -and $skill.PSIsContainer -and -not $linked) {
+                    if ($AllowNativeSystemSkills -and -not $AllowUserConfig) {
+                        $nativeSystemDirectories = @('imagegen','openai-docs','plugin-creator','skill-creator','skill-installer')
+                        $nativeSystemEntries = @(Get-ChildItem -LiteralPath $skill.FullName -Force -ErrorAction Stop)
+                        if ($nativeSystemEntries.Count -ne 6) { throw 'host-benchmark-auth-home-not-isolated' }
+                        foreach ($nativeSystemEntry in $nativeSystemEntries) {
+                            if (($nativeSystemEntry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'host-benchmark-auth-home-reparse-point' }
+                            if (-not $nativeSystemEntry.PSIsContainer -and -not [string]::IsNullOrWhiteSpace([string]$nativeSystemEntry.LinkType)) { throw 'host-benchmark-auth-home-linked-credential' }
+                            if ([string]$nativeSystemEntry.Name -ceq '.codex-system-skills.marker') {
+                                if ($nativeSystemEntry.PSIsContainer -or -not (Test-HostExactUtf8File -Path $nativeSystemEntry.FullName -ExpectedText "406e58b4e35d949e`n")) { throw 'host-benchmark-auth-home-not-isolated' }
+                            } elseif (-not $nativeSystemEntry.PSIsContainer -or [string]$nativeSystemEntry.Name -cnotin $nativeSystemDirectories) {
+                                throw 'host-benchmark-auth-home-not-isolated'
+                            } elseif (-not (Test-Path -LiteralPath (Join-Path $nativeSystemEntry.FullName 'SKILL.md') -PathType Leaf)) {
+                                throw 'host-benchmark-auth-home-not-isolated'
+                            }
+                        }
+                    }
                     $stack.Push($skill.FullName)
                 } elseif ($AllowInstalledAssets -and $managedSkill -and $skill.PSIsContainer -and $linked) {
                     continue
@@ -246,9 +264,10 @@ function Assert-HostCodexHome {
         [Parameter(Mandatory)][string]$RepoRoot,
         [Parameter(Mandatory)][string]$ScratchRoot,
         [switch]$AllowUserConfig,
-        [switch]$AllowInstalledAssets
+        [switch]$AllowInstalledAssets,
+        [switch]$AllowNativeSystemSkills
     )
-    $resolved = Assert-HostCodexHomeLayout -Path $Path -AllowUserConfig:$AllowUserConfig -AllowInstalledAssets:$AllowInstalledAssets
+    $resolved = Assert-HostCodexHomeLayout -Path $Path -AllowUserConfig:$AllowUserConfig -AllowInstalledAssets:$AllowInstalledAssets -AllowNativeSystemSkills:$AllowNativeSystemSkills
     $resolvedPhysical = Get-HostPhysicalPathInfo -Path $resolved -RejectLinks
     foreach ($unsafeRoot in @($RepoRoot,$ScratchRoot)) {
         $unsafePhysical = Get-HostPhysicalPathInfo -Path $unsafeRoot -RejectLinks
@@ -287,7 +306,7 @@ function Assert-HostCodexHome {
         $env:CODEX_HOME = $resolved
         $status = @(& codex login status 2>&1 | ForEach-Object { [string]$_ })
         if ($LASTEXITCODE -ne 0) { throw 'host-benchmark-auth-home-not-logged-in' }
-        $null = Assert-HostCodexHomeLayout -Path $resolved -AllowUserConfig:$AllowUserConfig -AllowInstalledAssets:$AllowInstalledAssets
+        $null = Assert-HostCodexHomeLayout -Path $resolved -AllowUserConfig:$AllowUserConfig -AllowInstalledAssets:$AllowInstalledAssets -AllowNativeSystemSkills:$AllowNativeSystemSkills
     } finally {
         [Environment]::SetEnvironmentVariable('USERPROFILE',$savedHome,[EnvironmentVariableTarget]::Process)
         [Environment]::SetEnvironmentVariable('HOME',$savedUnixHome,[EnvironmentVariableTarget]::Process)
@@ -697,7 +716,7 @@ function Invoke-HostTrial {
         if (-not (Get-InstalledDesktopProfileRoot -CodexHome $CodexHome).Equals($profileRoot,[StringComparison]::OrdinalIgnoreCase)) { throw 'host-benchmark-installed-profile-invalid' }
         $null = Assert-InstalledDesktopProfileReady -CodexHome $CodexHome
     } else {
-        $CodexHome = Assert-HostCodexHome -Path $CodexHome -RepoRoot $RepoRoot -ScratchRoot $ScratchRoot
+        $CodexHome = Assert-HostCodexHome -Path $CodexHome -RepoRoot $RepoRoot -ScratchRoot $ScratchRoot -AllowNativeSystemSkills
     }
     $sourceBinding = [ordered]@{status='diagnostic';revision=$SourceRevision;commit_tree_oid=$SourceCommitTree;verification='live-dirty-diagnostic';reason='Dirty live source is diagnostic-only and cannot satisfy release eligibility.'}
     if ($SourceBindingRequired) {
@@ -1000,7 +1019,7 @@ Work only inside this workspace. The user explicitly authorizes this complete, r
         try {
             if ($installedMode -and $Protocol -cne 'bare') { $null = Assert-HostCodexHomeLayout -Path $CodexHome -AllowUserConfig -AllowInstalledAssets }
             elseif ($installedMode) { $null = Assert-InstalledDesktopProfileReady -CodexHome $CodexHome }
-            else { $null = Assert-HostCodexHomeLayout -Path $CodexHome }
+            else { $null = Assert-HostCodexHomeLayout -Path $CodexHome -AllowNativeSystemSkills }
         } catch { $authLayoutValid = $false }
         if ($installedMode) {
             try { $profileConfigStable = Test-InstalledDesktopUserConfigBinding -Expected $profileConfigBinding -Actual (Get-InstalledDesktopUserConfigBinding -CodexHome $CodexHome) } catch { $profileConfigStable = $false }

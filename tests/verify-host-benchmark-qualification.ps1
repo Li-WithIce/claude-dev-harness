@@ -100,6 +100,35 @@ try {
     Write-Utf8 (Join-Path $authHome 'auth.json') '{}'
     [void][IO.Directory]::CreateDirectory((Join-Path $authHome 'cache'))
     Check ((Assert-HostCodexHomeLayout -Path $authHome) -ceq (Resolve-Path -LiteralPath $authHome).Path) 'minimal dedicated auth-home layout was rejected'
+    $nativeSystemRoot = Join-Path $authHome 'skills\.system'
+    Write-Utf8 (Join-Path $nativeSystemRoot '.codex-system-skills.marker') "406e58b4e35d949e`n"
+    foreach ($name in @('imagegen','openai-docs','plugin-creator','skill-creator','skill-installer')) { Write-Utf8 (Join-Path $nativeSystemRoot "$name\SKILL.md") 'fixture' }
+    $nativeSystemRejectedWithoutOptIn = $false
+    try { $null = Assert-HostCodexHomeLayout -Path $authHome } catch { $nativeSystemRejectedWithoutOptIn = $_.Exception.Message -ceq 'host-benchmark-auth-home-not-isolated' }
+    Check $nativeSystemRejectedWithoutOptIn 'minimal dedicated auth-home accepted native system skills without an explicit opt-in'
+    Check ((Assert-HostCodexHomeLayout -Path $authHome -AllowNativeSystemSkills) -ceq (Resolve-Path -LiteralPath $authHome).Path) 'strict native system skills layout was rejected with an explicit opt-in'
+    Remove-Item -LiteralPath (Join-Path $nativeSystemRoot 'imagegen') -Recurse -Force
+    Write-Utf8 (Join-Path $nativeSystemRoot 'rogue\SKILL.md') 'fixture'
+    $rogueNativeSystemEntryRejected = $false
+    try { $null = Assert-HostCodexHomeLayout -Path $authHome -AllowNativeSystemSkills } catch { $rogueNativeSystemEntryRejected = $_.Exception.Message -ceq 'host-benchmark-auth-home-not-isolated' }
+    Check $rogueNativeSystemEntryRejected 'unknown native system skill entry was accepted'
+    Remove-Item -LiteralPath (Join-Path $nativeSystemRoot 'rogue') -Recurse -Force
+    Write-Utf8 (Join-Path $nativeSystemRoot 'imagegen\SKILL.md') 'fixture'
+    Remove-Item -LiteralPath (Join-Path $nativeSystemRoot 'imagegen\SKILL.md') -Force
+    $missingNativeSkillContractRejected = $false
+    try { $null = Assert-HostCodexHomeLayout -Path $authHome -AllowNativeSystemSkills } catch { $missingNativeSkillContractRejected = $_.Exception.Message -ceq 'host-benchmark-auth-home-not-isolated' }
+    Check $missingNativeSkillContractRejected 'native system skill without SKILL.md was accepted'
+    Write-Utf8 (Join-Path $nativeSystemRoot 'imagegen\SKILL.md') 'fixture'
+    Write-Utf8 (Join-Path $nativeSystemRoot '.codex-system-skills.marker') "invalid`n"
+    $invalidNativeSystemMarkerRejected = $false
+    try { $null = Assert-HostCodexHomeLayout -Path $authHome -AllowNativeSystemSkills } catch { $invalidNativeSystemMarkerRejected = $_.Exception.Message -ceq 'host-benchmark-auth-home-not-isolated' }
+    Check $invalidNativeSystemMarkerRejected 'invalid native system skills marker was accepted'
+    Remove-Item -LiteralPath (Join-Path $authHome 'skills') -Recurse -Force
+    [void][IO.Directory]::CreateDirectory((Join-Path $authHome 'skills'))
+    $emptyNativeSkillsRootRejected = $false
+    try { $null = Assert-HostCodexHomeLayout -Path $authHome -AllowNativeSystemSkills } catch { $emptyNativeSkillsRootRejected = $_.Exception.Message -ceq 'host-benchmark-auth-home-not-isolated' }
+    Check $emptyNativeSkillsRootRejected 'empty native skills root was accepted'
+    Remove-Item -LiteralPath (Join-Path $authHome 'skills') -Recurse -Force
     Write-Utf8 (Join-Path $authHome 'unexpected.txt') 'x'
     $extraRejected = $false
     try { $null = Assert-HostCodexHomeLayout -Path $authHome } catch { $extraRejected = $_.Exception.Message -like 'host-benchmark-auth-home-*' }

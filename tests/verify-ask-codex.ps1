@@ -656,6 +656,7 @@ $parameters = @{
     $expectedStructuredArgs = [System.Collections.Generic.List[string]]::new()
     foreach ($value in @('-a','never','exec','--ignore-user-config')) { $expectedStructuredArgs.Add($value) }
     foreach ($feature in $isolationFeatures) { $expectedStructuredArgs.Add('--disable'); $expectedStructuredArgs.Add($feature) }
+    foreach ($value in @('-c','skills.enabled=false')) { $expectedStructuredArgs.Add($value) }
     foreach ($value in @('--cd',$workspace,'--skip-git-repo-check','--json','-c','model_reasoning_effort="max"','--sandbox','read-only','-m',$structuredModel,'--ephemeral','--output-schema',$structuredSchema,'-')) { $expectedStructuredArgs.Add($value) }
     $structuredTelemetryValue = if (Test-Path -LiteralPath $structuredTelemetry -PathType Leaf) { Get-Content -LiteralPath $structuredTelemetry -Raw -Encoding utf8 | ConvertFrom-Json } else { $null }
     $structuredContent = if (Test-Path -LiteralPath $structuredOutput -PathType Leaf) { Get-Content -LiteralPath $structuredOutput -Raw -Encoding utf8 } else { '' }
