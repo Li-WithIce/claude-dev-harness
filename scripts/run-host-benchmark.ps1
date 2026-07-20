@@ -5,6 +5,8 @@ param(
     [string]$RepoRoot = '',
     [string]$OutputPath = '',
     [string]$CodexHome = '',
+    [ValidateSet('cognitive-fast-path','installed-desktop-path')][string]$BenchmarkPath = 'cognitive-fast-path',
+    [string]$EligibilityReportPath = '',
     [ValidateRange(1,10)][int]$Groups = 1,
     [ValidateRange(1,10)][int]$Trials = 3,
     [ValidateRange(1,12)][int]$MaxRoundTrips = 8,
@@ -80,6 +82,20 @@ function Test-HostReportPath {
     $relative = [IO.Path]::GetRelativePath($rootFull,$pathFull).Replace('\','/')
     & git -C $rootFull check-ignore --no-index --quiet -- $relative 2>$null
     return $LASTEXITCODE -eq 0
+}
+
+function Get-HostInstalledRolloutReportBinding {
+    param([Parameter(Mandatory)][string]$Path)
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if ($item.PSIsContainer -or $item.Length -gt 4MB -or -not [string]::IsNullOrWhiteSpace([string]$item.LinkType)) { throw 'host-benchmark-installed-rollout-report-invalid' }
+    $bytes = [IO.File]::ReadAllBytes($item.FullName)
+    if ($bytes.Length -gt 4MB) { throw 'host-benchmark-installed-rollout-report-invalid' }
+    try {
+        $document = [Text.UTF8Encoding]::new($false,$true).GetString($bytes) | ConvertFrom-Json -AsHashtable -Depth 100 -ErrorAction Stop
+    } catch { throw 'host-benchmark-installed-rollout-report-invalid' }
+    if ([string]$document.report_digest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'host-benchmark-installed-rollout-report-invalid' }
+    $rawDigest = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+    return [ordered]@{report_digest=[string]$document.report_digest;file_digest=('sha256:' + $rawDigest)}
 }
 
 function Get-HostMedian {
@@ -187,6 +203,9 @@ function Test-HostTrialContract {
         [Parameter(Mandatory)][int]$ExpectedTrial,
         [Parameter(Mandatory)][string]$SourceRevision,
         [Parameter(Mandatory)][string]$SourceCommitTree,
+        [ValidateSet('cognitive-fast-path','installed-desktop-path')][string]$BenchmarkPath = 'cognitive-fast-path',
+        [AllowEmptyString()][string]$ExpectedRolloutReportDigest = '',
+        [AllowEmptyString()][string]$ExpectedRolloutFileDigest = '',
         [switch]$AllowUnavailableRequestMeasurement,
         [switch]$AllowUnavailableRecord,
         [switch]$RequireSourceBinding
@@ -213,6 +232,28 @@ function Test-HostTrialContract {
             if ([string]$Record.workflow_contract -cne 'new-task' -or [int]$Record.fresh_sessions -ne 1 -or [int]$Record.host_turns.value -ne 1) { return $false }
             if ([int]$Record.artifact_writes -ne 0 -or [int]$Record.runtime_writes -ne 0) { return $false }
         }
+        if ($BenchmarkPath -ceq 'installed-desktop-path') {
+            $desktop = $Record.installed_desktop
+            if ($desktop -isnot [Collections.IDictionary] -or [string]$desktop.benchmark_path -cne $BenchmarkPath -or [string]$desktop.host_surface -cne 'codex-cli-host-equivalent' -or [string]$desktop.user_config_mode -cne 'loaded' -or [string]$desktop.protocol_environment -cne 'cleared' -or [string]$desktop.hook_trust -cne 'unknown' -or [string]$desktop.hook_callability -cne 'unknown') { return $false }
+            $profileConfig = $desktop.profile_config
+            if ($profileConfig -isnot [Collections.IDictionary] -or (@($profileConfig.Keys | Sort-Object) -join ',') -cne 'digest,status') { return $false }
+            if ([string]$profileConfig.status -ceq 'absent') {
+                if ($null -ne $profileConfig.digest) { return $false }
+            } elseif ([string]$profileConfig.status -ceq 'present') {
+                if ([string]$profileConfig.digest -cnotmatch '^sha256:[0-9a-f]{64}$') { return $false }
+            } else { return $false }
+            if ($Protocol -ceq 'bare') {
+                if ([string]$desktop.install_status -cne 'not-applicable' -or [string]$desktop.verification_status -cne 'not-applicable' -or [string]$desktop.cleanup_status -cne 'not-required' -or [string]$desktop.hook_installed -cne 'not-applicable' -or $null -ne $desktop.route_probe -or $null -ne $desktop.rollout_promotion) { return $false }
+            } else {
+                if ([string]$desktop.install_status -cne 'pass' -or [string]$desktop.verification_status -cne 'pass' -or -not [bool]$desktop.auth_unchanged -or [string]$desktop.cleanup_status -cne 'passed' -or [string]$desktop.hook_installed -cne 'verified') { return $false }
+                if ($desktop.rollout_promotion -isnot [Collections.IDictionary] -or [string]$desktop.rollout_promotion.status -cne 'pass' -or [string]$desktop.rollout_promotion.source_revision -cne $SourceRevision -or [string]$desktop.rollout_promotion.report_digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or [string]$desktop.rollout_promotion.file_digest -cnotmatch '^sha256:[0-9a-f]{64}$') { return $false }
+                if ((-not [string]::IsNullOrWhiteSpace($ExpectedRolloutReportDigest) -and [string]$desktop.rollout_promotion.report_digest -cne $ExpectedRolloutReportDigest) -or (-not [string]::IsNullOrWhiteSpace($ExpectedRolloutFileDigest) -and [string]$desktop.rollout_promotion.file_digest -cne $ExpectedRolloutFileDigest)) { return $false }
+                if ($desktop.route_probe -isnot [Collections.IDictionary] -or [string]$desktop.route_probe.requested_protocol -cne 'auto' -or [string]$desktop.route_probe.selected_protocol -cne $Protocol) { return $false }
+                if ($Protocol -ceq 'v2') {
+                    if ([string]$desktop.route_probe.detected_protocol -cne 'new' -or [string]$desktop.route_probe.reason -cne 'eligible-rollout-report' -or [string]$desktop.route_probe.rollout_status -cne 'pass' -or [string]$desktop.route_probe.report_digest -cne [string]$desktop.rollout_promotion.report_digest) { return $false }
+                } elseif ([string]$desktop.route_probe.detected_protocol -cne 'v1' -or [string]$desktop.route_probe.reason -cne 'existing-v1-plan' -or [string]$desktop.route_probe.rollout_status -cne 'not-required' -or $null -ne $desktop.route_probe.report_digest) { return $false }
+            }
+        } elseif ($Record -is [Collections.IDictionary] -and $Record.Contains('installed_desktop')) { return $false }
         if ($RequireSourceBinding) {
             if ([string]$Record.source_binding.status -cne 'bound' -or [string]$Record.source_binding.revision -cne $SourceRevision -or [string]$Record.source_binding.commit_tree_oid -cne $SourceCommitTree -or [string]$Record.source_binding.verification -cne 'git-head-tree-clean/v1') { return $false }
         }
@@ -225,18 +266,36 @@ function Test-ReleaseHostTrialSet {
         [Parameter(Mandatory)][System.Collections.IDictionary]$Records,
         [Parameter(Mandatory)][int]$RequiredTrials,
         [Parameter(Mandatory)][string]$SourceRevision,
-        [Parameter(Mandatory)][string]$SourceCommitTree
+        [Parameter(Mandatory)][string]$SourceCommitTree,
+        [ValidateSet('cognitive-fast-path','installed-desktop-path')][string]$BenchmarkPath = 'cognitive-fast-path',
+        [AllowEmptyString()][string]$ExpectedRolloutReportDigest = '',
+        [AllowEmptyString()][string]$ExpectedRolloutFileDigest = ''
     )
     if ($RequiredTrials -ne 3) { return $false }
+    $profileConfig = $null
+    $rolloutReportDigest = $null
+    $rolloutFileDigest = $null
     foreach ($protocol in @('bare','v1','v2')) {
         if (-not $Records.Contains($protocol)) { return $false }
         $trials = @($Records[$protocol].trials)
         if ($trials.Count -ne $RequiredTrials) { return $false }
         if ((@($trials | ForEach-Object { [int]$_.trial } | Sort-Object) -join ',') -cne '1,2,3') { return $false }
         foreach ($record in $trials) {
-            if (-not (Test-HostTrialContract -Protocol $protocol -Record $record -ExpectedTrial ([int]$record.runner_expected_trial) -SourceRevision $SourceRevision -SourceCommitTree $SourceCommitTree -RequireSourceBinding)) { return $false }
+            if (-not (Test-HostTrialContract -Protocol $protocol -Record $record -ExpectedTrial ([int]$record.runner_expected_trial) -SourceRevision $SourceRevision -SourceCommitTree $SourceCommitTree -BenchmarkPath $BenchmarkPath -ExpectedRolloutReportDigest $ExpectedRolloutReportDigest -ExpectedRolloutFileDigest $ExpectedRolloutFileDigest -RequireSourceBinding)) { return $false }
+            if ($BenchmarkPath -ceq 'installed-desktop-path') {
+                if ($null -eq $profileConfig) { $profileConfig = $record.installed_desktop.profile_config }
+                elseif (-not (Test-InstalledDesktopUserConfigBinding -Expected $profileConfig -Actual $record.installed_desktop.profile_config)) { return $false }
+                if ($protocol -cne 'bare') {
+                    $promotion = $record.installed_desktop.rollout_promotion
+                    if ($null -eq $rolloutReportDigest) {
+                        $rolloutReportDigest = [string]$promotion.report_digest
+                        $rolloutFileDigest = [string]$promotion.file_digest
+                    } elseif ([string]$promotion.report_digest -cne $rolloutReportDigest -or [string]$promotion.file_digest -cne $rolloutFileDigest) { return $false }
+                }
+            }
         }
     }
+    if ($BenchmarkPath -ceq 'installed-desktop-path' -and ($null -eq $rolloutReportDigest -or $null -eq $rolloutFileDigest)) { return $false }
     return $true
 }
 
@@ -245,6 +304,7 @@ function Get-SanitizedHostTrialDiagnostic {
     $message = [string]$ErrorRecord.Exception.Message
     if ($message -match '^host-benchmark-auth-home-') { return 'isolated-auth-home-unavailable' }
     if ($message -match '^host-benchmark-source-') { return 'source-binding-unavailable' }
+    if ($message -match '^host-benchmark-installed-') { return 'installed-desktop-unavailable' }
     return 'trial-exception'
 }
 
@@ -288,6 +348,7 @@ $OutputPath = [IO.Path]::GetFullPath($OutputPath)
 if (-not (Test-HostReportPath -Root $RepoRoot -Path $OutputPath)) { throw 'Host benchmark output must be outside the source tree or ignored by Git.' }
 if ([string]::IsNullOrWhiteSpace($CodexHome)) { $CodexHome = [Environment]::GetEnvironmentVariable('HOST_BENCHMARK_CODEX_HOME',[EnvironmentVariableTarget]::Process) }
 if (-not [string]::IsNullOrWhiteSpace($CodexHome)) {
+    $CodexHome = [IO.Path]::GetFullPath($CodexHome).TrimEnd('\')
     if ((Test-HostRunnerPathAtOrBelow -Path $OutputPath -Root $CodexHome) -or (Test-HostRunnerPathAtOrBelow -Path $CodexHome -Root $OutputPath)) { throw 'Host benchmark output must not overlap the dedicated Codex home.' }
     if (Test-Path -LiteralPath $CodexHome -PathType Container) {
         $physicalOutput = Get-HostPhysicalPathInfo -Path $OutputPath -AllowMissing -RejectLinks
@@ -295,9 +356,33 @@ if (-not [string]::IsNullOrWhiteSpace($CodexHome)) {
         if ((Test-HostRunnerPathAtOrBelow -Path ([string]$physicalOutput.physical_path) -Root ([string]$physicalCodexHome.physical_path)) -or (Test-HostRunnerPathAtOrBelow -Path ([string]$physicalCodexHome.physical_path) -Root ([string]$physicalOutput.physical_path))) { throw 'Host benchmark output must not overlap the dedicated Codex home.' }
     }
 }
+$installedRolloutReportBinding = [ordered]@{report_digest='';file_digest=''}
+if ($BenchmarkPath -ceq 'installed-desktop-path') {
+    if ([string]::IsNullOrWhiteSpace($CodexHome) -or [IO.Path]::GetFileName($CodexHome) -cne '.codex') { throw 'host-benchmark-installed-profile-invalid' }
+    if ([string]::IsNullOrWhiteSpace($EligibilityReportPath)) { throw 'host-benchmark-installed-rollout-report-missing' }
+    if (-not [IO.Path]::IsPathRooted($EligibilityReportPath) -or -not (Test-Path -LiteralPath $EligibilityReportPath -PathType Leaf)) { throw 'host-benchmark-installed-rollout-report-unavailable' }
+    $EligibilityReportPath = [IO.Path]::GetFullPath($EligibilityReportPath)
+    $installedRolloutReportBinding = Get-HostInstalledRolloutReportBinding -Path $EligibilityReportPath
+    $installedProfileRoot = [IO.Path]::GetDirectoryName($CodexHome)
+    if ((Test-HostRunnerPathAtOrBelow -Path $OutputPath -Root $installedProfileRoot) -or (Test-HostRunnerPathAtOrBelow -Path $installedProfileRoot -Root $OutputPath)) { throw 'Host benchmark output must not overlap the installed Desktop profile.' }
+    $physicalInstalledProfile = Get-HostPhysicalPathInfo -Path $installedProfileRoot -RejectLinks
+    $physicalInstalledOutput = Get-HostPhysicalPathInfo -Path $OutputPath -AllowMissing -RejectLinks
+    if ((Test-HostRunnerPathAtOrBelow -Path ([string]$physicalInstalledOutput.physical_path) -Root ([string]$physicalInstalledProfile.physical_path)) -or (Test-HostRunnerPathAtOrBelow -Path ([string]$physicalInstalledProfile.physical_path) -Root ([string]$physicalInstalledOutput.physical_path))) { throw 'Host benchmark output must not physically overlap the installed Desktop profile.' }
+} elseif (-not [string]::IsNullOrWhiteSpace($EligibilityReportPath)) {
+    throw 'EligibilityReportPath is valid only for installed-desktop-path.'
+}
 
 $sourceStart = Get-HostGitState -Root $RepoRoot
 $sourceInputPaths = @($PSCommandPath,$wrapperPath,$schemaPath,$collectorPath,$atomicWritePath,$pathModulePath,$otelContractPath,$trialPath)
+if ($BenchmarkPath -ceq 'installed-desktop-path') {
+    $sourceInputPaths += @(
+        (Join-Path $RepoRoot 'install.ps1'),
+        (Join-Path $RepoRoot 'uninstall.ps1'),
+        (Join-Path $RepoRoot 'tests\verify-installation.ps1'),
+        (Join-Path $RepoRoot 'scripts\promote-v2-rollout-report.ps1'),
+        (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1')
+    )
+}
 $sourceInputHeadBoundStart = @($sourceInputPaths | Where-Object { -not (Test-HostGitFileMatchesRevision -Root $RepoRoot -Path $_ -Revision ([string]$sourceStart.revision)) }).Count -eq 0
 $sourceInputs = [ordered]@{
     runner_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path $PSCommandPath
@@ -309,13 +394,34 @@ $sourceInputs = [ordered]@{
     otel_contract_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path $otelContractPath
     trial_helper_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path $trialPath
 }
+if ($BenchmarkPath -ceq 'installed-desktop-path') {
+    $sourceInputs['installed_inputs'] = [ordered]@{
+        install_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path (Join-Path $RepoRoot 'install.ps1')
+        uninstall_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path (Join-Path $RepoRoot 'uninstall.ps1')
+        verification_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path (Join-Path $RepoRoot 'tests\verify-installation.ps1')
+        promotion_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path (Join-Path $RepoRoot 'scripts\promote-v2-rollout-report.ps1')
+        protocol_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1')
+    }
+}
 $sourceMode = if ([bool]$sourceStart.dirty -or -not $sourceInputHeadBoundStart) { 'live-dirty-diagnostic' } else { 'clean-commit-clone' }
-$scratchBase = New-HarnessContainedDirectory -WorkspaceRoot $RepoRoot -Path '.assistant\运行时\release-qualification' -Label 'host benchmark scratch base'
-$scratchRoot = New-HarnessContainedDirectory -WorkspaceRoot $scratchBase -Path ('thin-v2-host-benchmark-' + [guid]::NewGuid().ToString('N')) -Label 'host benchmark scratch root'
 $benchmarkGroups = [Collections.Generic.List[object]]::new()
 $protocolNames = @('bare','v1','v2')
 $timer = [Diagnostics.Stopwatch]::StartNew()
+$installedProfileMutex = $null
+$installedProfileMutexAcquired = $false
+$scratchBase = $null
+$scratchRoot = $null
 try {
+    if ($BenchmarkPath -ceq 'installed-desktop-path') {
+        $profileIdentity = Get-HostPhysicalPathInfo -Path $CodexHome -RejectLinks
+        $profileLockBytes = [Text.UTF8Encoding]::new($false).GetBytes(('{0}|{1}' -f [string]$profileIdentity.volume,[string]$profileIdentity.file_id).ToLowerInvariant())
+        $profileLockHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($profileLockBytes)).ToLowerInvariant()
+        $installedProfileMutex = [Threading.Mutex]::new($false,"Global\dev-harness.installed-desktop.$profileLockHash")
+        try { $installedProfileMutexAcquired = $installedProfileMutex.WaitOne(10000) } catch [Threading.AbandonedMutexException] { $installedProfileMutexAcquired = $true }
+        if (-not $installedProfileMutexAcquired) { throw 'host-benchmark-installed-profile-lock-timeout' }
+    }
+    $scratchBase = New-HarnessContainedDirectory -WorkspaceRoot $RepoRoot -Path '.assistant\运行时\release-qualification' -Label 'host benchmark scratch base'
+    $scratchRoot = New-HarnessContainedDirectory -WorkspaceRoot $scratchBase -Path ('thin-v2-host-benchmark-' + [guid]::NewGuid().ToString('N')) -Label 'host benchmark scratch root'
     for ($groupIndex=1; $groupIndex -le $Groups; $groupIndex++) {
         $groupTimer = [Diagnostics.Stopwatch]::StartNew()
         $groupRunId = [guid]::NewGuid().ToString('N')
@@ -337,26 +443,88 @@ try {
                 $trialRunId = [guid]::NewGuid().ToString('N')
                 $trialRoot = Join-Path $groupRoot ("$protocol-$trial")
                 $trialRootDigest = Get-HarnessSha256Text -Content ("host-benchmark-trial-root/v1`n" + [IO.Path]::GetFullPath($trialRoot))
+                $installedProfileConfigBefore = $null
+                $installedIntegrityFailed = $false
                 try {
-                    $record = Invoke-HostTrial -Protocol $protocol -Trial $trial -ScratchRoot $groupRoot -RepoRoot $RepoRoot -WrapperPath $wrapperPath -SchemaPath $schemaPath -CollectorPath $collectorPath -CodexHome $CodexHome -Model $Model -Reasoning $Reasoning -MaxRoundTrips $MaxRoundTrips -TimeoutSeconds $TimeoutSeconds -ExpectedCodexVersion $expectedCodexVersion -SourceBindingRequired (-not [bool]$groupSourceStart.dirty -and $groupInputHeadBoundStart) -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid)
+                    if ($BenchmarkPath -ceq 'installed-desktop-path') { $installedProfileConfigBefore = Get-InstalledDesktopUserConfigBinding -CodexHome $CodexHome }
+                    $record = Invoke-HostTrial -Protocol $protocol -Trial $trial -ScratchRoot $groupRoot -RepoRoot $RepoRoot -WrapperPath $wrapperPath -SchemaPath $schemaPath -CollectorPath $collectorPath -CodexHome $CodexHome -BenchmarkPath $BenchmarkPath -EligibilityReportPath $EligibilityReportPath -ExpectedRolloutReportDigest ([string]$installedRolloutReportBinding.report_digest) -ExpectedRolloutFileDigest ([string]$installedRolloutReportBinding.file_digest) -Model $Model -Reasoning $Reasoning -MaxRoundTrips $MaxRoundTrips -TimeoutSeconds $TimeoutSeconds -ExpectedCodexVersion $expectedCodexVersion -SourceBindingRequired (-not [bool]$groupSourceStart.dirty -and $groupInputHeadBoundStart) -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid)
                 } catch {
+                    $installedIntegrityFailed = $BenchmarkPath -ceq 'installed-desktop-path' -and [string]$_.Exception.Message -cmatch '^host-benchmark-installed-(?:install|verification)-(?:profile-integrity-failed|changed-auth|changed-config)$'
                     $diagnostic = Get-SanitizedHostTrialDiagnostic -ErrorRecord $_
-                    $preTraceFailure = $diagnostic -cin @('isolated-auth-home-unavailable','source-binding-unavailable')
+                    $preTraceFailure = $diagnostic -cin @('isolated-auth-home-unavailable','source-binding-unavailable','installed-desktop-unavailable')
                     $record = New-HostUnavailableTrial -Trial $trial -Diagnostic $diagnostic -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -RawTraceDeleted $preTraceFailure
+                } finally {
+                    Import-Module $atomicWritePath -Force -ErrorAction Stop
+                    Import-Module $pathModulePath -Force -ErrorAction Stop
                 }
-                $runnerEvidencePassed = Test-HostRunnerTrialEvidence -Protocol $protocol -TrialRoot $trialRoot -Record $record -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -RequireSourceBinding:(-not [bool]$groupSourceStart.dirty)
-                if ($record -is [Collections.IDictionary]) {
-                    $record['trial_run_id'] = $trialRunId
-                    $record['trial_root_digest'] = $trialRootDigest
-                    $record['runner_expected_trial'] = $trial
-                    $record['runner_evidence_passed'] = $runnerEvidencePassed
-                } else {
-                    $record | Add-Member -NotePropertyName trial_run_id -NotePropertyValue $trialRunId -Force
-                    $record | Add-Member -NotePropertyName trial_root_digest -NotePropertyValue $trialRootDigest -Force
-                    $record | Add-Member -NotePropertyName runner_expected_trial -NotePropertyValue $trial -Force
-                    $record | Add-Member -NotePropertyName runner_evidence_passed -NotePropertyValue $runnerEvidencePassed -Force
+                $installedCleanupFailed = $false
+                try {
+                    $runnerEvidencePassed = Test-HostRunnerTrialEvidence -Protocol $protocol -TrialRoot $trialRoot -Record $record -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -RequireSourceBinding:(-not [bool]$groupSourceStart.dirty)
+                    if ($record -is [Collections.IDictionary]) {
+                        $record['trial_run_id'] = $trialRunId
+                        $record['trial_root_digest'] = $trialRootDigest
+                        $record['runner_expected_trial'] = $trial
+                        $record['runner_evidence_passed'] = $runnerEvidencePassed
+                    } else {
+                        $record | Add-Member -NotePropertyName trial_run_id -NotePropertyValue $trialRunId -Force
+                        $record | Add-Member -NotePropertyName trial_root_digest -NotePropertyValue $trialRootDigest -Force
+                        $record | Add-Member -NotePropertyName runner_expected_trial -NotePropertyValue $trial -Force
+                        $record | Add-Member -NotePropertyName runner_evidence_passed -NotePropertyValue $runnerEvidencePassed -Force
+                    }
+                } finally {
+                    if ($BenchmarkPath -ceq 'installed-desktop-path') {
+                        $cleanupStatus = if ($protocol -ceq 'bare') { 'not-required' } else { 'passed' }
+                        try {
+                            $workspace = Join-Path $trialRoot 'workspace'
+                            if (Test-InstalledDesktopWorkspaceRegistered -CodexHome $CodexHome -Workspace $workspace) {
+                                $trialSourceRoot = Join-Path $trialRoot 'source'
+                                $cleanupRepoRoot = if (Test-Path -LiteralPath $trialSourceRoot -PathType Container) { $trialSourceRoot } else { $RepoRoot }
+                                [void](Invoke-InstalledDesktopTrialCleanup -CodexHome $CodexHome -Workspace $workspace -RepoRoot $cleanupRepoRoot)
+                            } else {
+                                $trialSourceRoot = Join-Path $trialRoot 'source'
+                                $cleanupRepoRoot = if (Test-Path -LiteralPath $trialSourceRoot -PathType Container) { $trialSourceRoot } else { $RepoRoot }
+                                $recovery = Get-InstalledDesktopPendingRecovery -CodexHome $CodexHome -Workspace $workspace -RepoRoot $cleanupRepoRoot
+                                if ($null -ne $recovery) {
+                                    [void](Invoke-InstalledDesktopTrialRecovery -CodexHome $CodexHome -Workspace $workspace -RepoRoot $cleanupRepoRoot -Recovery $recovery)
+                                    $cleanupStatus = 'recovered'
+                                } else { [void](Assert-InstalledDesktopProfileReady -CodexHome $CodexHome) }
+                            }
+                            if ($installedProfileConfigBefore -isnot [Collections.IDictionary] -or -not (Test-InstalledDesktopUserConfigBinding -Expected $installedProfileConfigBefore -Actual (Get-InstalledDesktopUserConfigBinding -CodexHome $CodexHome))) { throw 'host-benchmark-installed-config-changed' }
+                        } catch {
+                            $cleanupStatus = 'failed'
+                            $installedCleanupFailed = $true
+                            if ($record -is [Collections.IDictionary]) {
+                                $record['status'] = 'fail'
+                                $record['completion_passed'] = $false
+                                $record['diagnostic'] = 'installed-desktop-cleanup-failed'
+                            } else {
+                                $record | Add-Member -NotePropertyName status -NotePropertyValue 'fail' -Force
+                                $record | Add-Member -NotePropertyName completion_passed -NotePropertyValue $false -Force
+                                $record | Add-Member -NotePropertyName diagnostic -NotePropertyValue 'installed-desktop-cleanup-failed' -Force
+                            }
+                        }
+                        if ($record -is [Collections.IDictionary]) {
+                            if (-not $record.Contains('installed_desktop') -or $record['installed_desktop'] -isnot [Collections.IDictionary]) { $record['installed_desktop'] = [ordered]@{} }
+                            $record['installed_desktop']['cleanup_status'] = $cleanupStatus
+                        } else {
+                            if ($null -eq $record.PSObject.Properties['installed_desktop']) { $record | Add-Member -NotePropertyName installed_desktop -NotePropertyValue ([ordered]@{}) }
+                            $record.installed_desktop['cleanup_status'] = $cleanupStatus
+                        }
+                        if ($installedIntegrityFailed) {
+                            if ($record -is [Collections.IDictionary]) {
+                                $record['status'] = 'fail'
+                                $record['completion_passed'] = $false
+                                $record['diagnostic'] = 'installed-desktop-profile-integrity-failed'
+                            } else {
+                                $record | Add-Member -NotePropertyName status -NotePropertyValue 'fail' -Force
+                                $record | Add-Member -NotePropertyName completion_passed -NotePropertyValue $false -Force
+                                $record | Add-Member -NotePropertyName diagnostic -NotePropertyValue 'installed-desktop-profile-integrity-failed' -Force
+                            }
+                        }
+                    }
                 }
                 $trialRecordsByProtocol[$protocol].Add($record)
+                if ($installedCleanupFailed -or $installedIntegrityFailed) { throw 'Installed Desktop profile integrity failed; refusing subsequent trials.' }
             }
         }
         $pendingCleanupFailures = @($script:HostPendingOtlpCollectors | Where-Object { -not (Complete-HostPendingOtlpCleanup -Pending $_) }).Count
@@ -368,11 +536,11 @@ try {
                 if ([string]$_.status -ceq 'fail') { return $true }
                 if ([string]$_.status -ceq 'unavailable') {
                     if ([string]$_.outcome -cne 'completed' -or [string]$_.reason_code -cne 'completed') { return $false }
-                    return -not (Test-HostTrialContract -Protocol $protocol -Record $_ -ExpectedTrial ([int]$_.runner_expected_trial) -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -AllowUnavailableRequestMeasurement -AllowUnavailableRecord -RequireSourceBinding:(-not [bool]$groupSourceStart.dirty -and $groupInputHeadBoundStart))
+                    return -not (Test-HostTrialContract -Protocol $protocol -Record $_ -ExpectedTrial ([int]$_.runner_expected_trial) -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -BenchmarkPath $BenchmarkPath -ExpectedRolloutReportDigest ([string]$installedRolloutReportBinding.report_digest) -ExpectedRolloutFileDigest ([string]$installedRolloutReportBinding.file_digest) -AllowUnavailableRequestMeasurement -AllowUnavailableRecord -RequireSourceBinding:(-not [bool]$groupSourceStart.dirty -and $groupInputHeadBoundStart))
                 }
-                if (-not (Test-HostTrialContract -Protocol $protocol -Record $_ -ExpectedTrial ([int]$_.runner_expected_trial) -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -AllowUnavailableRequestMeasurement -RequireSourceBinding:(-not [bool]$groupSourceStart.dirty -and $groupInputHeadBoundStart))) { return $true }
+                if (-not (Test-HostTrialContract -Protocol $protocol -Record $_ -ExpectedTrial ([int]$_.runner_expected_trial) -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -BenchmarkPath $BenchmarkPath -ExpectedRolloutReportDigest ([string]$installedRolloutReportBinding.report_digest) -ExpectedRolloutFileDigest ([string]$installedRolloutReportBinding.file_digest) -AllowUnavailableRequestMeasurement -RequireSourceBinding:(-not [bool]$groupSourceStart.dirty -and $groupInputHeadBoundStart))) { return $true }
                 if ([string]$_.successful_request_sends.status -ceq 'unavailable') { return $false }
-                return -not (Test-HostTrialContract -Protocol $protocol -Record $_ -ExpectedTrial ([int]$_.runner_expected_trial) -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -RequireSourceBinding:(-not [bool]$groupSourceStart.dirty -and $groupInputHeadBoundStart))
+                return -not (Test-HostTrialContract -Protocol $protocol -Record $_ -ExpectedTrial ([int]$_.runner_expected_trial) -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -BenchmarkPath $BenchmarkPath -ExpectedRolloutReportDigest ([string]$installedRolloutReportBinding.report_digest) -ExpectedRolloutFileDigest ([string]$installedRolloutReportBinding.file_digest) -RequireSourceBinding:(-not [bool]$groupSourceStart.dirty -and $groupInputHeadBoundStart))
             }).Count
             $protocolStatus = if ($invalidCount -gt 0 -or $all.Count -ne $Trials) { 'fail' } elseif ($unavailableCount -gt 0) { 'unavailable' } else { 'measured' }
             $sendStatus = if (@($all | Where-Object { [string]$_.successful_request_sends.status -cne 'measured' }).Count -eq 0 -and $all.Count -eq $Trials) { 'measured' } else { 'unavailable' }
@@ -393,6 +561,34 @@ try {
             }
         }
 
+        $groupProfileConfig = $null
+        $groupProfileConfigConsistent = $true
+        $groupRolloutReportDigest = $null
+        $groupRolloutFileDigest = $null
+        $groupRolloutReportConsistent = $true
+        if ($BenchmarkPath -ceq 'installed-desktop-path') {
+            foreach ($candidate in @($groupRecords.Values | ForEach-Object { @($_.trials) } | ForEach-Object {
+                if ($_ -is [Collections.IDictionary] -and $_.Contains('installed_desktop') -and $_['installed_desktop'] -is [Collections.IDictionary] -and $_['installed_desktop'].Contains('profile_config')) { $_['installed_desktop']['profile_config'] }
+            } | Where-Object { $_ -is [Collections.IDictionary] })) {
+                if ($null -eq $groupProfileConfig) { $groupProfileConfig = $candidate }
+                elseif (-not (Test-InstalledDesktopUserConfigBinding -Expected $groupProfileConfig -Actual $candidate)) { $groupProfileConfigConsistent = $false }
+            }
+            foreach ($protocol in @('v1','v2')) {
+                foreach ($candidate in @($groupRecords[$protocol].trials)) {
+                    if ($candidate -isnot [Collections.IDictionary] -or -not $candidate.Contains('installed_desktop') -or $candidate['installed_desktop'] -isnot [Collections.IDictionary] -or $candidate['installed_desktop']['rollout_promotion'] -isnot [Collections.IDictionary]) {
+                        $groupRolloutReportConsistent = $false
+                        continue
+                    }
+                    $promotion = $candidate['installed_desktop']['rollout_promotion']
+                    if ($null -eq $groupRolloutReportDigest) {
+                        $groupRolloutReportDigest = [string]$promotion.report_digest
+                        $groupRolloutFileDigest = [string]$promotion.file_digest
+                    } elseif ([string]$promotion.report_digest -cne $groupRolloutReportDigest -or [string]$promotion.file_digest -cne $groupRolloutFileDigest) { $groupRolloutReportConsistent = $false }
+                }
+            }
+            if ($groupRolloutReportDigest -cne [string]$installedRolloutReportBinding.report_digest -or $groupRolloutFileDigest -cne [string]$installedRolloutReportBinding.file_digest) { $groupRolloutReportConsistent = $false }
+        }
+
         $groupSourceEnd = Get-HostGitState -Root $RepoRoot
         $groupInputHeadBoundEnd = @($sourceInputPaths | Where-Object { -not (Test-HostGitFileMatchesRevision -Root $RepoRoot -Path $_ -Revision ([string]$groupSourceEnd.revision)) }).Count -eq 0
         $groupSourceDirty = [bool]$groupSourceStart.dirty -or [bool]$groupSourceEnd.dirty -or -not $groupInputHeadBoundStart -or -not $groupInputHeadBoundEnd
@@ -410,13 +606,18 @@ try {
         $protocolUnavailable = @($groupRecords.Values | Where-Object { [string]$_.status -ceq 'unavailable' }).Count -gt 0
         $protocolFailed = @($groupRecords.Values | Where-Object { [string]$_.status -ceq 'fail' }).Count -gt 0
         $gateUnavailable = [string]$direct.status -ceq 'unavailable' -or [string]$requestSend.status -ceq 'unavailable'
-        $releaseTrialSetPassed = -not $groupSourceDirty -and (Test-ReleaseHostTrialSet -Records $groupRecords -RequiredTrials 3 -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid))
+        $releaseTrialSetPassed = -not $groupSourceDirty -and $groupProfileConfigConsistent -and $groupRolloutReportConsistent -and (Test-ReleaseHostTrialSet -Records $groupRecords -RequiredTrials 3 -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -BenchmarkPath $BenchmarkPath -ExpectedRolloutReportDigest ([string]$installedRolloutReportBinding.report_digest) -ExpectedRolloutFileDigest ([string]$installedRolloutReportBinding.file_digest))
         $releaseTrialSet = [ordered]@{status=$(if($releaseTrialSetPassed){'pass'}else{'fail'});required_trials_per_protocol=3;reason=$(if($releaseTrialSetPassed){'Each protocol in this group has exactly three runner-rechecked, source-bound trials.'}else{'Each release group requires clean source and exactly three runner-rechecked, source-bound trials for every protocol.'})}
         $groupEligible = $groupSourceStable -and -not $groupSourceDirty -and $releaseTrialSetPassed -and -not $protocolFailed -and [string]$direct.status -ceq 'pass' -and [string]$requestSend.status -ceq 'pass'
         $groupConfigurationFailure = $Trials -ne 3
         $groupPerformanceFailure = $groupSourceStable -and -not $groupSourceDirty -and $releaseTrialSetPassed -and ([string]$direct.status -ceq 'fail' -or [string]$requestSend.status -ceq 'fail')
         $groupKnownFailure = $protocolFailed -or $groupConfigurationFailure -or $groupPerformanceFailure
         $groupStatus = if ($groupKnownFailure) { 'fail' } elseif ($protocolUnavailable -or -not $groupSourceStable -or $gateUnavailable) { 'unavailable' } elseif ($groupSourceDirty -or -not $releaseTrialSetPassed) { 'fail' } elseif ($groupEligible) { 'pass' } else { 'fail' }
+        $measurementPassed = $groupEligible
+        if ($BenchmarkPath -ceq 'installed-desktop-path') {
+            $groupEligible = $false
+            if ($groupStatus -ceq 'pass') { $groupStatus = 'unavailable' }
+        }
         $groupTimer.Stop()
         $groupRawTraceCleanupConfirmed = @($groupRecords.Values | ForEach-Object { @($_.trials) } | Where-Object { -not [bool]$_.raw_trace_deleted }).Count -eq 0
         $groupSourceMode = if ($groupSourceDirty) { 'live-dirty-diagnostic' } else { 'clean-commit-clone' }
@@ -427,17 +628,37 @@ try {
             execution=[ordered]@{model=$Model;reasoning=$Reasoning;trials_per_protocol=$Trials;release_trials_required=3;max_fresh_sessions=$MaxRoundTrips;fresh_workspace_per_trial=$true;fresh_ephemeral_session_per_invocation=$true;v1_comparator='confirmed-plan-to-done-one-stage-per-host-turn';bare_and_v2_start='new-task';semantic_task='change exact private file bytes and verify';host_turn_basis='codex-jsonl-turn.started';successful_request_send_measurement='codex-0.144.4-successful-websocket-send/v2';expected_codex_service_version=$expectedCodexVersion;trial_order_strategy='round-interleaved-rotating-start';actual_trial_order=@($executionOrder);cache_state='shared-dedicated-auth-home-and-host-cache-not-cleared-between-trials';codex_home='dedicated-config-isolated-auth-home-path-not-persisted';sandbox='danger-full-access';approval_policy='never';workspace_boundary='dedicated-ignored-nested-git-root';prompt_persisted=$false;raw_command_persisted=$false;thread_id_persisted=$false;raw_trace_persisted=$(if($groupRawTraceCleanupConfirmed){$false}else{$null});raw_trace_cleanup_confirmed=$groupRawTraceCleanupConfirmed;scratch_persisted=[bool]$KeepScratch;install_duration_included=$false;duration_ms=[math]::Round($groupTimer.Elapsed.TotalMilliseconds,2)}
             protocols=$groupRecords;performance=[ordered]@{release_trial_set=$releaseTrialSet;direct_latency=$direct;successful_request_send_reduction=$requestSend;eligible=$groupEligible};status=$groupStatus;group_digest=$null
         }
+        if ($BenchmarkPath -ceq 'installed-desktop-path') {
+            $group.source['installed_inputs'] = $sourceInputs.installed_inputs
+            $group.execution['benchmark_path'] = $BenchmarkPath
+            $group.execution['host_surface'] = 'codex-cli-host-equivalent'
+            $group.execution['user_config_mode'] = 'loaded'
+            $group.execution['codex_home'] = 'dedicated-installed-desktop-profile-path-not-persisted'
+            $group.execution['profile_config'] = $(if($groupProfileConfigConsistent){$groupProfileConfig}else{$null})
+            $group.execution['profile_config_consistent'] = $groupProfileConfigConsistent
+            $group.execution['rollout_report_digest'] = $(if($groupRolloutReportConsistent){$groupRolloutReportDigest}else{$null})
+            $group.execution['rollout_report_file_digest'] = $(if($groupRolloutReportConsistent){$groupRolloutFileDigest}else{$null})
+            $group.execution['rollout_report_consistent'] = $groupRolloutReportConsistent
+            $group.performance['measurement_passed'] = $measurementPassed
+            $group['qualification'] = [ordered]@{status='unavailable';reason='RQ-25A does not authoritatively observe runtime protocol/profile/lifecycle or Desktop Hook trust and callability.'}
+        }
         $group.group_digest = Get-HarnessSha256Text -Content ($group | ConvertTo-Json -Depth 100 -Compress)
         $benchmarkGroups.Add($group)
     }
 } finally {
     $timer.Stop()
-    $pendingCleanupFailures = @($script:HostPendingOtlpCollectors | Where-Object { -not (Complete-HostPendingOtlpCleanup -Pending $_) }).Count
-    if ($pendingCleanupFailures -gt 0) { throw 'OTLP collector or raw trace cleanup remained pending after the final bounded retry.' }
-    if (-not $KeepScratch -and (Test-Path -LiteralPath $scratchRoot -PathType Container)) {
-        $resolvedScratch = Resolve-HarnessContainedPath -WorkspaceRoot $scratchBase -Path $scratchRoot -Label 'host benchmark scratch cleanup' -MustExist Directory
-        if (-not (Split-Path -Leaf $resolvedScratch).StartsWith('thin-v2-host-benchmark-',[StringComparison]::Ordinal)) { throw 'Refusing to remove unsafe host benchmark scratch path.' }
-        Remove-Item -LiteralPath $resolvedScratch -Recurse -Force
+    try {
+        $pendingCleanupFailures = @($script:HostPendingOtlpCollectors | Where-Object { -not (Complete-HostPendingOtlpCleanup -Pending $_) }).Count
+        if ($pendingCleanupFailures -gt 0) { throw 'OTLP collector or raw trace cleanup remained pending after the final bounded retry.' }
+        if (-not $KeepScratch -and -not [string]::IsNullOrWhiteSpace($scratchRoot) -and (Test-Path -LiteralPath $scratchRoot -PathType Container)) {
+            $resolvedScratch = Resolve-HarnessContainedPath -WorkspaceRoot $scratchBase -Path $scratchRoot -Label 'host benchmark scratch cleanup' -MustExist Directory
+            if (-not (Split-Path -Leaf $resolvedScratch).StartsWith('thin-v2-host-benchmark-',[StringComparison]::Ordinal)) { throw 'Refusing to remove unsafe host benchmark scratch path.' }
+            Remove-Item -LiteralPath $resolvedScratch -Recurse -Force
+        }
+    } finally {
+        if ($null -ne $installedProfileMutex) {
+            try { if ($installedProfileMutexAcquired) { [void]$installedProfileMutex.ReleaseMutex() } } finally { $installedProfileMutex.Dispose() }
+        }
     }
 }
 
@@ -445,10 +666,36 @@ $sourceEnd = Get-HostGitState -Root $RepoRoot
 $sourceInputHeadBoundEnd = @($sourceInputPaths | Where-Object { -not (Test-HostGitFileMatchesRevision -Root $RepoRoot -Path $_ -Revision ([string]$sourceEnd.revision)) }).Count -eq 0
 $sourceDirty = [bool]$sourceStart.dirty -or [bool]$sourceEnd.dirty -or -not $sourceInputHeadBoundStart -or -not $sourceInputHeadBoundEnd
 $sourceStable = -not $sourceDirty -and [string]$sourceStart.revision -ceq [string]$sourceEnd.revision -and [string]$sourceStart.commit_tree_oid -ceq [string]$sourceEnd.commit_tree_oid -and [string]$sourceStart.state_digest -ceq [string]$sourceEnd.state_digest
+$installedProfileConfig = $null
+$installedProfileConfigConsistent = $true
+$installedRolloutReportDigest = $null
+$installedRolloutFileDigest = $null
+$installedRolloutReportConsistent = $true
+if ($BenchmarkPath -ceq 'installed-desktop-path') {
+    foreach ($group in $benchmarkGroups) {
+        if (-not [bool]$group.execution.profile_config_consistent) { $installedProfileConfigConsistent = $false; continue }
+        $candidate = $group.execution.profile_config
+        if ($candidate -isnot [Collections.IDictionary]) { continue }
+        if ($null -eq $installedProfileConfig) { $installedProfileConfig = $candidate }
+        elseif (-not (Test-InstalledDesktopUserConfigBinding -Expected $installedProfileConfig -Actual $candidate)) { $installedProfileConfigConsistent = $false }
+    }
+    foreach ($group in $benchmarkGroups) {
+        if (-not [bool]$group.execution.rollout_report_consistent) { $installedRolloutReportConsistent = $false; continue }
+        $candidateReportDigest = [string]$group.execution.rollout_report_digest
+        $candidateFileDigest = [string]$group.execution.rollout_report_file_digest
+        if ($candidateReportDigest -cnotmatch '^sha256:[0-9a-f]{64}$' -or $candidateFileDigest -cnotmatch '^sha256:[0-9a-f]{64}$') { $installedRolloutReportConsistent = $false; continue }
+        if ($null -eq $installedRolloutReportDigest) {
+            $installedRolloutReportDigest = $candidateReportDigest
+            $installedRolloutFileDigest = $candidateFileDigest
+        } elseif ($candidateReportDigest -cne $installedRolloutReportDigest -or $candidateFileDigest -cne $installedRolloutFileDigest) { $installedRolloutReportConsistent = $false }
+    }
+    if ($installedRolloutReportDigest -cne [string]$installedRolloutReportBinding.report_digest -or $installedRolloutFileDigest -cne [string]$installedRolloutReportBinding.file_digest) { $installedRolloutReportConsistent = $false }
+}
 $passedGroups = @($benchmarkGroups | Where-Object { [string]$_.status -ceq 'pass' -and [bool]$_.performance.eligible }).Count
+$measurementPassedGroups = if ($BenchmarkPath -ceq 'installed-desktop-path') { @($benchmarkGroups | Where-Object { [bool]$_.performance.measurement_passed }).Count } else { $passedGroups }
 $failedGroups = @($benchmarkGroups | Where-Object { [string]$_.status -ceq 'fail' }).Count
 $unavailableGroups = @($benchmarkGroups | Where-Object { [string]$_.status -ceq 'unavailable' }).Count
-$releaseConfigurationFailure = $Groups -ne 3 -or $Trials -ne 3
+$releaseConfigurationFailure = $Groups -ne 3 -or $Trials -ne 3 -or -not $installedProfileConfigConsistent -or -not $installedRolloutReportConsistent
 $eligible = $sourceStable -and -not $sourceDirty -and -not $releaseConfigurationFailure -and $benchmarkGroups.Count -eq 3 -and $passedGroups -eq 3
 $reportStatus = if ($releaseConfigurationFailure -or $failedGroups -gt 0 -or $sourceDirty) { 'fail' } elseif ($unavailableGroups -gt 0 -or -not $sourceStable) { 'unavailable' } elseif ($eligible) { 'pass' } else { 'fail' }
 $releaseGroupSet = [ordered]@{status=$(if($eligible){'pass'}else{$reportStatus});required_groups=3;required_trials_per_protocol_per_group=3;passed_groups=$passedGroups;reason=$(if($eligible){'All three independent clean 3x3 groups passed their own latency and request-reduction gates.'}else{'Release eligibility requires three independent clean groups, each with bare/v1/v2 3x3 evidence and independently passing thresholds.'})}
@@ -458,6 +705,24 @@ $report = [ordered]@{
     source=[ordered]@{runner_digest=$sourceInputs.runner_digest;wrapper_digest=$sourceInputs.wrapper_digest;observation_schema_digest=$sourceInputs.observation_schema_digest;otlp_collector_digest=$sourceInputs.otlp_collector_digest;atomic_write_module_digest=$sourceInputs.atomic_write_module_digest;path_module_digest=$sourceInputs.path_module_digest;otel_contract_digest=$sourceInputs.otel_contract_digest;trial_helper_digest=$sourceInputs.trial_helper_digest;input_head_binding=[ordered]@{start=$sourceInputHeadBoundStart;end=$sourceInputHeadBoundEnd;basis='git-hash-object-equals-revision-blob/v1'};execution_mode=$sourceMode;commit_tree_oid=$sourceStart.commit_tree_oid;object_format=$sourceStart.object_format;start=$sourceStart;end=$sourceEnd}
     execution=[ordered]@{model=$Model;reasoning=$Reasoning;groups=$Groups;required_groups=3;trials_per_protocol_per_group=$Trials;required_trials_per_protocol_per_group=3;group_order_strategy='independent-groups-round-interleaved-rotating-start';max_fresh_sessions=$MaxRoundTrips;fresh_workspace_per_trial=$true;fresh_ephemeral_session_per_invocation=$true;codex_home='dedicated-config-isolated-auth-home-path-not-persisted';duration_ms=[math]::Round($timer.Elapsed.TotalMilliseconds,2)}
     groups=@($benchmarkGroups);performance=[ordered]@{release_group_set=$releaseGroupSet;eligible=$eligible};status=$reportStatus;report_digest=$null
+}
+if ($BenchmarkPath -ceq 'installed-desktop-path') {
+    $report.schema_version = 'harness-installed-desktop-benchmark-report/v1'
+    $report['benchmark_path'] = $BenchmarkPath
+    $report.source['installed_inputs'] = $sourceInputs.installed_inputs
+    $report.execution['benchmark_path'] = $BenchmarkPath
+    $report.execution['host_surface'] = 'codex-cli-host-equivalent'
+    $report.execution['user_config_mode'] = 'loaded'
+    $report.execution['codex_home'] = 'dedicated-installed-desktop-profile-path-not-persisted'
+    $report.execution['profile_config'] = $installedProfileConfig
+    $report.execution['profile_config_consistent'] = $installedProfileConfigConsistent
+    $report.execution['rollout_report_digest'] = $(if($installedRolloutReportConsistent){$installedRolloutReportDigest}else{$null})
+    $report.execution['rollout_report_file_digest'] = $(if($installedRolloutReportConsistent){$installedRolloutFileDigest}else{$null})
+    $report.execution['rollout_report_consistent'] = $installedRolloutReportConsistent
+    $report.performance['measurement_passed_groups'] = $measurementPassedGroups
+    $report.performance['measurement_passed'] = ($Groups -eq 3 -and $measurementPassedGroups -eq 3)
+    $report.performance['eligible'] = $false
+    $report['qualification'] = [ordered]@{status='unavailable';reason='RQ-25A does not authoritatively observe runtime protocol/profile/lifecycle or Desktop Hook trust and callability.'}
 }
 $report.report_digest = Get-HarnessSha256Text -Content ($report | ConvertTo-Json -Depth 100 -Compress)
 $outputParent = [IO.Path]::GetDirectoryName($OutputPath)

@@ -48,7 +48,16 @@ function Commit-GitFixture {
     [void](Invoke-Git $Root @('-c','user.name=Harness Test','-c','user.email=harness@example.invalid','commit','--quiet','--no-gpg-sign','-m','fixture'))
 }
 function Invoke-FixtureRunner {
-    param([string]$Fixture,[string]$OutputRoot,[string]$Mode,[int]$Trials,[int]$Groups = 1)
+    param(
+        [string]$Fixture,
+        [string]$OutputRoot,
+        [string]$Mode,
+        [int]$Trials,
+        [int]$Groups = 1,
+        [string]$BenchmarkPath = 'cognitive-fast-path',
+        [string]$CodexHome = '',
+        [string]$EligibilityReportPath = ''
+    )
     $outputPath = Join-Path $OutputRoot ("report-$Mode-$Groups-$Trials.json")
     $logPath = Join-Path $OutputRoot ("order-$Mode-$Groups-$Trials.txt")
     $oldMode = $env:HOST_BENCHMARK_TEST_MODE
@@ -59,7 +68,9 @@ function Invoke-FixtureRunner {
         $env:HOST_BENCHMARK_TEST_MODE = $Mode
         $env:HOST_BENCHMARK_TEST_LOG = $logPath
         $env:HOST_BENCHMARK_TEST_TEMPLATE_ROOT = $script:hostBenchmarkTemplateRoot
-        $lines = @(& pwsh -NoLogo -NoProfile -NonInteractive -File (Join-Path $Fixture 'scripts\run-host-benchmark.ps1') -RepoRoot $Fixture -OutputPath $outputPath -Groups $Groups -Trials $Trials -MaxRoundTrips 1 -TimeoutSeconds 30 2>&1 | ForEach-Object { [string]$_ })
+        $runnerArguments = @('-NoLogo','-NoProfile','-NonInteractive','-File',(Join-Path $Fixture 'scripts\run-host-benchmark.ps1'),'-RepoRoot',$Fixture,'-OutputPath',$outputPath,'-Groups',$Groups,'-Trials',$Trials,'-MaxRoundTrips',1,'-TimeoutSeconds',30,'-BenchmarkPath',$BenchmarkPath)
+        if ($BenchmarkPath -ceq 'installed-desktop-path') { $runnerArguments += @('-CodexHome',$CodexHome,'-EligibilityReportPath',$EligibilityReportPath) }
+        $lines = @(& pwsh @runnerArguments 2>&1 | ForEach-Object { [string]$_ })
         $exitCode = $LASTEXITCODE
     } finally {
         if ($null -eq $oldMode) { Remove-Item Env:HOST_BENCHMARK_TEST_MODE -ErrorAction Ignore } else { $env:HOST_BENCHMARK_TEST_MODE = $oldMode }
@@ -140,6 +151,241 @@ try {
     $hardlinkNestedRejected = $false
     try { $null = Assert-HostCodexHomeLayout -Path $hardlinkNestedHome } catch { $hardlinkNestedRejected = $_.Exception.Message -ceq 'host-benchmark-auth-home-linked-credential' }
     Check $hardlinkNestedRejected 'hard-linked nested Codex state file was accepted'
+
+    $installedProfileRoot = Join-Path $scratch 'installed-profile-clean'
+    $installedCodexHome = Join-Path $installedProfileRoot '.codex'
+    Write-Utf8 (Join-Path $installedCodexHome 'auth.json') '{"fixture":"installed-profile"}'
+    Write-Utf8 (Join-Path $installedCodexHome 'config.toml') 'model = "fixture"'
+    Write-Utf8 (Join-Path $installedCodexHome '.personality_migration') 'complete'
+    Write-Utf8 (Join-Path $installedCodexHome 'goals_1.sqlite') 'fixture'
+    Write-Utf8 (Join-Path $installedCodexHome 'logs_1.sqlite-wal') 'fixture'
+    Write-Utf8 (Join-Path $installedCodexHome 'memories_1.sqlite-shm') 'fixture'
+    Write-Utf8 (Join-Path $installedCodexHome 'plugins\fixture\state.json') '{}'
+    Write-Utf8 (Join-Path $installedCodexHome 'skills\.system\fixture\SKILL.md') 'fixture'
+    Check ((Assert-InstalledDesktopProfileReady -CodexHome $installedCodexHome) -ceq [IO.Path]::GetFullPath($installedProfileRoot).TrimEnd('\')) 'clean installed Desktop profile with config.toml was rejected'
+    [void][IO.Directory]::CreateDirectory((Join-Path $installedCodexHome 'skills\rogue'))
+    $rogueSkillRejected = $false
+    try { $null = Assert-HostCodexHomeLayout -Path $installedCodexHome -AllowUserConfig } catch { $rogueSkillRejected = $_.Exception.Message -ceq 'host-benchmark-auth-home-not-isolated' }
+    Check $rogueSkillRejected 'installed Desktop profile accepted a rogue user skill'
+    Remove-Item -LiteralPath (Join-Path $installedCodexHome 'skills\rogue') -Recurse -Force
+
+    $managedAssetsProfile = Join-Path $scratch 'installed-assets-profile'
+    $managedAssetsHome = Join-Path $managedAssetsProfile '.codex'
+    $managedSkillTarget = Join-Path $scratch 'managed-skill-target'
+    Write-Utf8 (Join-Path $managedAssetsHome 'auth.json') '{"fixture":"managed-assets"}'
+    [void][IO.Directory]::CreateDirectory((Join-Path $managedAssetsHome 'skills\.system'))
+    [void][IO.Directory]::CreateDirectory((Join-Path $managedAssetsHome '.claude'))
+    [void][IO.Directory]::CreateDirectory($managedSkillTarget)
+    foreach ($skillName in @('entry-router','orchestrator','plan','implement','review','test','spec')) {
+        [void](New-Item -ItemType Junction -Path (Join-Path $managedAssetsHome "skills\$skillName") -Target $managedSkillTarget -ErrorAction Stop)
+    }
+    Check ((Assert-HostCodexHomeLayout -Path $managedAssetsHome -AllowUserConfig -AllowInstalledAssets) -ceq [IO.Path]::GetFullPath($managedAssetsHome).TrimEnd('\')) 'the seven direct managed skill junctions were rejected'
+    [void](New-Item -ItemType Junction -Path (Join-Path $managedAssetsHome 'skills\rogue') -Target $managedSkillTarget -ErrorAction Stop)
+    $rogueManagedJunctionRejected = $false
+    try { $null = Assert-HostCodexHomeLayout -Path $managedAssetsHome -AllowUserConfig -AllowInstalledAssets } catch { $rogueManagedJunctionRejected = $true }
+    Check $rogueManagedJunctionRejected 'a non-managed direct skill junction was accepted'
+
+    foreach ($case in @(
+        [pscustomobject]@{Name='skills-root';Relative='skills'},
+        [pscustomobject]@{Name='claude-root';Relative='.claude'},
+        [pscustomobject]@{Name='system-skill';Relative='skills\.system'},
+        [pscustomobject]@{Name='claude-descendant';Relative='.claude\nested\linked'}
+    )) {
+        $reparseProfile = Join-Path $scratch ("installed-assets-reparse-" + $case.Name)
+        $reparseHome = Join-Path $reparseProfile '.codex'
+        Write-Utf8 (Join-Path $reparseHome 'auth.json') '{"fixture":"reparse"}'
+        $reparsePath = Join-Path $reparseHome $case.Relative
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($reparsePath))
+        [void](New-Item -ItemType Junction -Path $reparsePath -Target $managedSkillTarget -ErrorAction Stop)
+        $installedReparseRejected = $false
+        try { $null = Assert-HostCodexHomeLayout -Path $reparseHome -AllowUserConfig -AllowInstalledAssets } catch { $installedReparseRejected = $true }
+        Check $installedReparseRejected "installed assets accepted the $($case.Name) reparse point"
+    }
+
+    foreach ($case in @(
+        [pscustomobject]@{Relative='AGENTS.md';Directory=$false},
+        [pscustomobject]@{Relative='hooks.json';Directory=$false},
+        [pscustomobject]@{Relative='managed_config.toml';Directory=$false}
+    )) {
+        $candidate = Join-Path $installedCodexHome $case.Relative
+        if ($case.Directory) { [void][IO.Directory]::CreateDirectory($candidate) } else { Write-Utf8 $candidate 'fixture' }
+        $installedAssetRejected = $false
+        try { $null = Assert-InstalledDesktopProfileReady -CodexHome $installedCodexHome } catch { $installedAssetRejected = $true }
+        Check $installedAssetRejected "installed Desktop profile retained $($case.Relative)"
+        if ($case.Directory) { Remove-Item -LiteralPath $candidate -Recurse -Force } else { Remove-Item -LiteralPath $candidate -Force }
+    }
+    $postUninstallContainers = @(
+        (Join-Path $installedCodexHome '.claude'),
+        (Join-Path $installedProfileRoot '.claude\skills'),
+        (Join-Path $installedProfileRoot '.agents\skills')
+    )
+    foreach ($container in $postUninstallContainers) { [void][IO.Directory]::CreateDirectory($container) }
+    Write-Utf8 (Join-Path $installedProfileRoot '.dev-harness\backups\history\install-manifest.json') '{}'
+    Check ((Assert-InstalledDesktopProfileReady -CodexHome $installedCodexHome) -ceq [IO.Path]::GetFullPath($installedProfileRoot).TrimEnd('\')) 'installed Desktop profile rejected empty post-uninstall containers or backup history'
+    $postUninstallJunctionTarget = Join-Path $scratch 'post-uninstall-junction-target'
+    [void][IO.Directory]::CreateDirectory($postUninstallJunctionTarget)
+    foreach ($container in $postUninstallContainers) {
+        Write-Utf8 (Join-Path $container 'unexpected.txt') 'managed'
+        $containerFileRejected = $false
+        try { $null = Assert-InstalledDesktopProfileReady -CodexHome $installedCodexHome } catch { $containerFileRejected = $true }
+        Check $containerFileRejected "installed Desktop profile accepted a file under $container"
+        Remove-Item -LiteralPath (Join-Path $container 'unexpected.txt') -Force
+
+        Remove-Item -LiteralPath $container -Recurse -Force
+        [void](New-Item -ItemType Junction -Path $container -Target $postUninstallJunctionTarget -ErrorAction Stop)
+        $containerJunctionRejected = $false
+        try { $null = Assert-InstalledDesktopProfileReady -CodexHome $installedCodexHome } catch { $containerJunctionRejected = $true }
+        Check $containerJunctionRejected "installed Desktop profile accepted a reparse-backed post-uninstall container at $container"
+        Remove-Item -LiteralPath $container -Force
+        [void][IO.Directory]::CreateDirectory($container)
+    }
+
+    $installedStateRoot = Join-Path $installedProfileRoot '.dev-harness'
+    $installedRegistryPath = Join-Path $installedStateRoot 'install-registry.json'
+    Write-Utf8 $installedRegistryPath '{"workspaces":{}}'
+    Check ((Assert-InstalledDesktopProfileReady -CodexHome $installedCodexHome) -ceq [IO.Path]::GetFullPath($installedProfileRoot).TrimEnd('\')) 'empty installed Desktop registry was rejected'
+    $registeredWorkspace = Join-Path $scratch 'registered-workspace'
+    $nearbyWorkspace = Join-Path $scratch 'registered-workspace-copy'
+    [void][IO.Directory]::CreateDirectory($registeredWorkspace)
+    [void][IO.Directory]::CreateDirectory($nearbyWorkspace)
+    $activeRegistry = [ordered]@{workspaces=[ordered]@{
+        registered=[ordered]@{workspace_root=$registeredWorkspace}
+        nearby=[ordered]@{workspace_root=$nearbyWorkspace}
+    }}
+    Write-Utf8 $installedRegistryPath ($activeRegistry | ConvertTo-Json -Depth 10 -Compress)
+    Check (Test-InstalledDesktopWorkspaceRegistered -CodexHome $installedCodexHome -Workspace $registeredWorkspace) 'installed Desktop registry missed the exact workspace'
+    Check (-not (Test-InstalledDesktopWorkspaceRegistered -CodexHome $installedCodexHome -Workspace (Join-Path $scratch 'registered-workspace-child'))) 'installed Desktop registry accepted a workspace path prefix'
+    $activeRegistryRejected = $false
+    try { $null = Assert-InstalledDesktopProfileReady -CodexHome $installedCodexHome } catch { $activeRegistryRejected = $_.Exception.Message -ceq 'host-benchmark-installed-profile-not-clean' }
+    Check $activeRegistryRejected 'installed Desktop profile with active registry workspaces was accepted as clean'
+    Write-Utf8 $installedRegistryPath '{"workspaces":{}}'
+
+    foreach ($journalName in @('install-transaction.json','uninstall-transaction.json')) {
+        $journalPath = Join-Path $installedStateRoot $journalName
+        Write-Utf8 $journalPath '{}'
+        $pendingJournalRejected = $false
+        try { $null = Assert-InstalledDesktopProfileReady -CodexHome $installedCodexHome } catch { $pendingJournalRejected = $_.Exception.Message -ceq 'host-benchmark-installed-profile-transaction-pending' }
+        Check $pendingJournalRejected "installed Desktop profile accepted pending $journalName"
+        Remove-Item -LiteralPath $journalPath -Force
+    }
+
+    $installedAliasTarget = Join-Path $scratch 'installed-profile-alias-target'
+    Write-Utf8 (Join-Path $installedAliasTarget '.codex\auth.json') '{"fixture":"alias"}'
+    $installedProfileAlias = Join-Path $scratch 'installed-profile-alias'
+    [void](New-Item -ItemType Junction -Path $installedProfileAlias -Target $installedAliasTarget -ErrorAction Stop)
+    try {
+        $installedProfileReparseRejected = $false
+        try { $null = Assert-InstalledDesktopProfileReady -CodexHome (Join-Path $installedProfileAlias '.codex') } catch { $installedProfileReparseRejected = $_.Exception.Message -ceq 'host-benchmark-installed-profile-reparse-point' }
+        Check $installedProfileReparseRejected 'reparse-backed installed Desktop profile root was accepted'
+    } finally {
+        Remove-Item -LiteralPath $installedProfileAlias -Force
+    }
+
+    $cleanupProfileRoot = Join-Path $scratch 'installed-cleanup-profile'
+    $cleanupCodexHome = Join-Path $cleanupProfileRoot '.codex'
+    $cleanupWorkspace = Join-Path $scratch 'installed-cleanup-workspace'
+    $cleanupRepo = Join-Path $scratch 'installed-cleanup-repo'
+    [void][IO.Directory]::CreateDirectory($cleanupWorkspace)
+    Write-Utf8 (Join-Path $cleanupCodexHome 'auth.json') '{"fixture":"cleanup"}'
+    Write-Utf8 (Join-Path $cleanupProfileRoot '.dev-harness\install-registry.json') (([ordered]@{workspaces=[ordered]@{cleanup=[ordered]@{workspace_root=$cleanupWorkspace}}}) | ConvertTo-Json -Depth 10 -Compress)
+    Write-Utf8 (Join-Path $cleanupRepo 'uninstall.ps1') @'
+param([string]$WorkspaceRoot,[string]$RepoRoot)
+$registryPath = Join-Path $env:USERPROFILE '.dev-harness\install-registry.json'
+[IO.File]::WriteAllText($registryPath,'{"workspaces":{}}',[Text.UTF8Encoding]::new($false))
+$observation = [ordered]@{userprofile=$env:USERPROFILE;home=$env:HOME;codex_home=$env:CODEX_HOME;workspace=$WorkspaceRoot;repo=$RepoRoot}
+[IO.File]::WriteAllText((Join-Path $RepoRoot 'cleanup-observation.json'),($observation | ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
+exit 0
+'@
+    $cleanupSavedEnvironment = [ordered]@{}
+    foreach ($name in @('USERPROFILE','HOME','CODEX_HOME')) { $cleanupSavedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name,[EnvironmentVariableTarget]::Process) }
+    try {
+        $env:USERPROFILE = Join-Path $scratch 'sentinel-userprofile'
+        $env:HOME = Join-Path $scratch 'sentinel-home'
+        $env:CODEX_HOME = Join-Path $scratch 'sentinel-codex-home'
+        $cleanupAuthBefore = (Get-FileHash -LiteralPath (Join-Path $cleanupCodexHome 'auth.json') -Algorithm SHA256).Hash
+        $cleanupPassed = Invoke-InstalledDesktopTrialCleanup -CodexHome $cleanupCodexHome -Workspace $cleanupWorkspace -RepoRoot $cleanupRepo
+        $cleanupObservation = [IO.File]::ReadAllText((Join-Path $cleanupRepo 'cleanup-observation.json'),[Text.UTF8Encoding]::new($false,$true)) | ConvertFrom-Json
+        Check ($cleanupPassed -and [string]$cleanupObservation.userprofile -ceq $cleanupProfileRoot -and [string]$cleanupObservation.home -ceq $cleanupProfileRoot -and [string]$cleanupObservation.codex_home -ceq $cleanupCodexHome -and [string]$cleanupObservation.workspace -ceq $cleanupWorkspace) 'installed Desktop cleanup did not use the fixture profile and workspace'
+        Check ((Get-FileHash -LiteralPath (Join-Path $cleanupCodexHome 'auth.json') -Algorithm SHA256).Hash -ceq $cleanupAuthBefore) 'installed Desktop cleanup changed fixture auth'
+        Check ($env:USERPROFILE -ceq (Join-Path $scratch 'sentinel-userprofile') -and $env:HOME -ceq (Join-Path $scratch 'sentinel-home') -and $env:CODEX_HOME -ceq (Join-Path $scratch 'sentinel-codex-home')) 'installed Desktop cleanup did not restore the caller environment'
+    } finally {
+        foreach ($entry in $cleanupSavedEnvironment.GetEnumerator()) { [Environment]::SetEnvironmentVariable([string]$entry.Key,$entry.Value,[EnvironmentVariableTarget]::Process) }
+    }
+
+    $recoveryProfileRoot = Join-Path $scratch 'installed-recovery-profile'
+    $recoveryCodexHome = Join-Path $recoveryProfileRoot '.codex'
+    $recoveryWorkspace = Join-Path $scratch 'installed-recovery-workspace'
+    $recoveryRepo = Join-Path $scratch 'installed-recovery-repo'
+    $recoveryManifest = Join-Path $recoveryProfileRoot '.dev-harness\backups\fixture\install-manifest.json'
+    $recoveryJournalPath = Join-Path $recoveryProfileRoot '.dev-harness\install-transaction.json'
+    [void][IO.Directory]::CreateDirectory($recoveryWorkspace)
+    Write-Utf8 (Join-Path $recoveryCodexHome 'auth.json') '{"fixture":"recovery"}'
+    Write-Utf8 (Join-Path $recoveryCodexHome 'config.toml') 'model = "fixture"'
+    Write-Utf8 $recoveryManifest '{}'
+    $recoveryJournal = [ordered]@{
+        schema_version = 'install-transaction/v1.1'
+        user_profile = $recoveryProfileRoot
+        workspace_root = $recoveryWorkspace
+        repo_root = $recoveryRepo
+        manifest_path = $recoveryManifest
+    }
+    Write-Utf8 $recoveryJournalPath ($recoveryJournal | ConvertTo-Json -Depth 10 -Compress)
+    $recovery = Get-InstalledDesktopPendingRecovery -CodexHome $recoveryCodexHome -Workspace $recoveryWorkspace -RepoRoot $recoveryRepo
+    Check ([string]$recovery.manifest_path -ceq [IO.Path]::GetFullPath($recoveryManifest)) 'installed Desktop pending recovery did not bind the expected manifest'
+
+    foreach ($case in @(
+        [pscustomobject]@{Field='user_profile';Value=(Join-Path $scratch 'wrong-recovery-profile');Message='profile'},
+        [pscustomobject]@{Field='workspace_root';Value=(Join-Path $scratch 'wrong-recovery-workspace');Message='workspace'},
+        [pscustomobject]@{Field='repo_root';Value=(Join-Path $scratch 'wrong-recovery-repo');Message='repo'}
+    )) {
+        $expected = $recoveryJournal[$case.Field]
+        $recoveryJournal[$case.Field] = $case.Value
+        Write-Utf8 $recoveryJournalPath ($recoveryJournal | ConvertTo-Json -Depth 10 -Compress)
+        $bindingRejected = $false
+        try { $null = Get-InstalledDesktopPendingRecovery -CodexHome $recoveryCodexHome -Workspace $recoveryWorkspace -RepoRoot $recoveryRepo } catch { $bindingRejected = $_.Exception.Message -ceq 'host-benchmark-installed-recovery-invalid' }
+        Check $bindingRejected "installed Desktop pending recovery accepted the wrong $($case.Message) binding"
+        $recoveryJournal[$case.Field] = $expected
+    }
+    $outsideManifest = Join-Path $scratch 'outside-backups\install-manifest.json'
+    Write-Utf8 $outsideManifest '{}'
+    $recoveryJournal.manifest_path = $outsideManifest
+    Write-Utf8 $recoveryJournalPath ($recoveryJournal | ConvertTo-Json -Depth 10 -Compress)
+    $outsideManifestRejected = $false
+    try { $null = Get-InstalledDesktopPendingRecovery -CodexHome $recoveryCodexHome -Workspace $recoveryWorkspace -RepoRoot $recoveryRepo } catch { $outsideManifestRejected = $_.Exception.Message -ceq 'host-benchmark-installed-recovery-invalid' }
+    Check $outsideManifestRejected 'installed Desktop pending recovery accepted an out-of-profile manifest'
+    $recoveryJournal.manifest_path = $recoveryManifest
+    Write-Utf8 $recoveryJournalPath ($recoveryJournal | ConvertTo-Json -Depth 10 -Compress)
+
+    Write-Utf8 (Join-Path $recoveryCodexHome 'AGENTS.md') 'managed'
+    Write-Utf8 (Join-Path $recoveryCodexHome 'hooks.json') '{}'
+    Write-Utf8 (Join-Path $recoveryProfileRoot '.dev-harness\install-registry.json') (([ordered]@{workspaces=[ordered]@{recovery=[ordered]@{workspace_root=$recoveryWorkspace}}}) | ConvertTo-Json -Depth 10 -Compress)
+    Write-Utf8 (Join-Path $recoveryRepo 'uninstall.ps1') @'
+param([string]$RecoveryManifestPath,[string]$RepoRoot)
+$profileRoot = $env:USERPROFILE
+$codexHome = $env:CODEX_HOME
+foreach ($relative in @('AGENTS.md','hooks.json')) { Remove-Item -LiteralPath (Join-Path $codexHome $relative) -Force -ErrorAction Stop }
+[IO.File]::WriteAllText((Join-Path $profileRoot '.dev-harness\install-registry.json'),'{"workspaces":{}}',[Text.UTF8Encoding]::new($false))
+Remove-Item -LiteralPath (Join-Path $profileRoot '.dev-harness\install-transaction.json') -Force -ErrorAction Stop
+$observation = [ordered]@{userprofile=$env:USERPROFILE;home=$env:HOME;codex_home=$env:CODEX_HOME;manifest=$RecoveryManifestPath;repo=$RepoRoot}
+[IO.File]::WriteAllText((Join-Path $RepoRoot 'recovery-observation.json'),($observation | ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
+exit 0
+'@
+    $recoverySavedEnvironment = [ordered]@{}
+    foreach ($name in @('USERPROFILE','HOME','CODEX_HOME')) { $recoverySavedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name,[EnvironmentVariableTarget]::Process) }
+    try {
+        $env:USERPROFILE = Join-Path $scratch 'recovery-sentinel-userprofile'
+        $env:HOME = Join-Path $scratch 'recovery-sentinel-home'
+        $env:CODEX_HOME = Join-Path $scratch 'recovery-sentinel-codex-home'
+        $recoveryAuthBefore = (Get-FileHash -LiteralPath (Join-Path $recoveryCodexHome 'auth.json') -Algorithm SHA256).Hash
+        $recoveryPassed = Invoke-InstalledDesktopTrialRecovery -CodexHome $recoveryCodexHome -Workspace $recoveryWorkspace -RepoRoot $recoveryRepo -Recovery $recovery
+        $recoveryObservation = [IO.File]::ReadAllText((Join-Path $recoveryRepo 'recovery-observation.json'),[Text.UTF8Encoding]::new($false,$true)) | ConvertFrom-Json
+        Check ($recoveryPassed -and [string]$recoveryObservation.userprofile -ceq $recoveryProfileRoot -and [string]$recoveryObservation.home -ceq $recoveryProfileRoot -and [string]$recoveryObservation.codex_home -ceq $recoveryCodexHome -and [string]$recoveryObservation.manifest -ceq [IO.Path]::GetFullPath($recoveryManifest)) 'installed Desktop recovery did not use the bound fixture profile and manifest'
+        Check ((Get-FileHash -LiteralPath (Join-Path $recoveryCodexHome 'auth.json') -Algorithm SHA256).Hash -ceq $recoveryAuthBefore) 'installed Desktop recovery changed fixture auth'
+        Check ($env:USERPROFILE -ceq (Join-Path $scratch 'recovery-sentinel-userprofile') -and $env:HOME -ceq (Join-Path $scratch 'recovery-sentinel-home') -and $env:CODEX_HOME -ceq (Join-Path $scratch 'recovery-sentinel-codex-home')) 'installed Desktop recovery did not restore the caller environment'
+        Check ((Assert-InstalledDesktopProfileReady -CodexHome $recoveryCodexHome) -ceq [IO.Path]::GetFullPath($recoveryProfileRoot).TrimEnd('\')) 'installed Desktop recovery did not leave the fixture profile clean'
+    } finally {
+        foreach ($entry in $recoverySavedEnvironment.GetEnumerator()) { [Environment]::SetEnvironmentVariable([string]$entry.Key,$entry.Value,[EnvironmentVariableTarget]::Process) }
+    }
 
     $traceSafetyRoot = Join-Path $scratch 'trace-safety'
     $traceResultRoot = Join-Path $traceSafetyRoot 'results'
@@ -280,10 +526,65 @@ try {
     Copy-Item -LiteralPath (Join-Path $RepoRoot 'scripts\host-benchmark\HostBenchmark.Trial.ps1') -Destination (Join-Path $fixture 'scripts\host-benchmark\HostBenchmark.Trial.Real.ps1')
     Write-Utf8 (Join-Path $fixture '.gitignore') ".assistant/`n"
     Write-Utf8 (Join-Path $fixture 'install.ps1') "throw 'fixture install must not execute'`n"
+    Write-Utf8 (Join-Path $fixture 'uninstall.ps1') "throw 'fixture uninstall must not execute'`n"
+    Write-Utf8 (Join-Path $fixture 'tests\verify-installation.ps1') "throw 'fixture verification must not execute'`n"
+    Write-Utf8 (Join-Path $fixture 'scripts\promote-v2-rollout-report.ps1') "throw 'fixture promotion must not execute'`n"
+    Write-Utf8 (Join-Path $fixture 'scripts\lib\Harness.Protocol.psm1') "throw 'fixture protocol module must not execute'`n"
     Write-Utf8 (Join-Path $fixture 'scripts\receive-otlp-http.ps1') "throw 'fixture collector must not execute'`n"
     Write-Utf8 (Join-Path $fixture 'skills\codex\scripts\invoke_codex.ps1') "throw 'fixture wrapper must not execute'`n"
-    $stub = @'
+$stub = @'
 . (Join-Path $PSScriptRoot 'HostBenchmark.Trial.Real.ps1')
+
+$script:InstalledFixtureWorkspaces = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$script:InstalledFixtureDriftInjected = $false
+function Write-InstalledFixtureEvent([string]$Event) {
+    [IO.File]::AppendAllText($env:HOST_BENCHMARK_TEST_LOG,("installed:$Event`n"),[Text.UTF8Encoding]::new($false))
+}
+function Invoke-InstalledDesktopRolloutPromotion {
+    param([string]$RepoRoot,[string]$Workspace,[string]$EligibilityReportPath,[string]$SourceRevision)
+    Write-InstalledFixtureEvent ("promote:" + (Split-Path -Leaf (Split-Path -Parent $Workspace)))
+    $report = [IO.File]::ReadAllText($EligibilityReportPath,[Text.UTF8Encoding]::new($false,$true)) | ConvertFrom-Json -AsHashtable -Depth 20
+    if ([string]$report.status -cne 'pass' -or [string]$report.source_revision -cne $SourceRevision -or [string]$report.report_digest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'fixture rollout report was not eligible or source-bound' }
+    $script:InstalledFixtureReportDigest = [string]$report.report_digest
+    $fileDigest = 'sha256:' + (Get-FileHash -LiteralPath $EligibilityReportPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    return [ordered]@{status='pass';source_revision=$SourceRevision;report_digest=$script:InstalledFixtureReportDigest;file_digest=$fileDigest}
+}
+function Invoke-InstalledDesktopInstall {
+    param([string]$CodexHome,[string]$Workspace,[string]$RepoRoot)
+    $label = Split-Path -Leaf (Split-Path -Parent $Workspace)
+    Write-InstalledFixtureEvent "install:$label"
+    Write-InstalledFixtureEvent "verify:$label"
+    [void]$script:InstalledFixtureWorkspaces.Add([IO.Path]::GetFullPath($Workspace).TrimEnd('\'))
+    return [ordered]@{install_status='pass';verification_status='pass';hook_installed='verified';auth_unchanged=$true}
+}
+function Invoke-InstalledDesktopRouteProbe {
+    param([string]$Protocol,[string]$Workspace)
+    $label = Split-Path -Leaf (Split-Path -Parent $Workspace)
+    Write-InstalledFixtureEvent "route:$label"
+    if ($Protocol -ceq 'v2') { return [ordered]@{requested_protocol='auto';selected_protocol='v2';detected_protocol='new';reason='eligible-rollout-report';rollout_status='pass';report_digest=$script:InstalledFixtureReportDigest} }
+    return [ordered]@{requested_protocol='auto';selected_protocol='v1';detected_protocol='v1';reason='existing-v1-plan';rollout_status='not-required';report_digest=$null}
+}
+function Test-InstalledDesktopWorkspaceRegistered {
+    param([string]$CodexHome,[string]$Workspace)
+    return $script:InstalledFixtureWorkspaces.Contains([IO.Path]::GetFullPath($Workspace).TrimEnd('\'))
+}
+function Invoke-InstalledDesktopTrialCleanup {
+    param([string]$CodexHome,[string]$Workspace,[string]$RepoRoot)
+    $label = Split-Path -Leaf (Split-Path -Parent $Workspace)
+    Write-InstalledFixtureEvent "cleanup:$label"
+    $mode = [string]$env:HOST_BENCHMARK_TEST_MODE
+    if (-not $script:InstalledFixtureDriftInjected -and $mode -ceq 'installed-cleanup-auth-drift') {
+        $script:InstalledFixtureDriftInjected = $true
+        [IO.File]::WriteAllText((Join-Path $CodexHome 'auth.json'),'{"fixture":"changed"}',[Text.UTF8Encoding]::new($false))
+        throw 'host-benchmark-installed-uninstall-changed-auth'
+    }
+    if (-not $script:InstalledFixtureDriftInjected -and $mode -ceq 'installed-cleanup-config-drift') {
+        $script:InstalledFixtureDriftInjected = $true
+        [IO.File]::WriteAllText((Join-Path $CodexHome 'config.toml'),'model = "changed"',[Text.UTF8Encoding]::new($false))
+    }
+    [void]$script:InstalledFixtureWorkspaces.Remove([IO.Path]::GetFullPath($Workspace).TrimEnd('\'))
+    return $true
+}
 
 function Write-StubUtf8 {
     param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][AllowEmptyString()][string]$Text)
@@ -391,7 +692,20 @@ function Invoke-HostTrial {
     $targetJournal = if ($Protocol -ceq 'v1') { @('alpha','alpha','beta','beta','beta') } else { @() }
     if ($mode -cin @('v1-target','mixed-fail-unavailable') -and $Protocol -ceq 'v1') { $targetJournal = @('alpha','beta','beta','beta','beta') }
     $recordTrial = if ($mode -ceq 'wrong-trial-number' -and $Protocol -ceq 'v2' -and $Trial -eq 1) { 2 } else { $Trial }
-    return [ordered]@{
+    $installedDesktop = $null
+    if ([string]$named.BenchmarkPath -ceq 'installed-desktop-path') {
+        $profileConfig = Get-InstalledDesktopUserConfigBinding -CodexHome ([string]$named.CodexHome)
+        if ($Protocol -ceq 'bare') {
+            $installedDesktop = [ordered]@{benchmark_path='installed-desktop-path';host_surface='codex-cli-host-equivalent';user_config_mode='loaded';protocol_environment='cleared';profile_config=$profileConfig;install_status='not-applicable';verification_status='not-applicable';auth_unchanged=$true;cleanup_status='not-required';hook_installed='not-applicable';hook_trust='unknown';hook_callability='unknown';route_probe=$null;rollout_promotion=$null}
+        } else {
+            $workspace = Join-Path (Join-Path ([string]$named.ScratchRoot) ("$Protocol-$Trial")) 'workspace'
+            $promotion = Invoke-InstalledDesktopRolloutPromotion -RepoRoot ([string]$named.RepoRoot) -Workspace $workspace -EligibilityReportPath ([string]$named.EligibilityReportPath) -SourceRevision $revision
+            $installation = Invoke-InstalledDesktopInstall -CodexHome ([string]$named.CodexHome) -Workspace $workspace -RepoRoot ([string]$named.RepoRoot)
+            $route = Invoke-InstalledDesktopRouteProbe -Protocol $Protocol -Workspace $workspace
+            $installedDesktop = [ordered]@{benchmark_path='installed-desktop-path';host_surface='codex-cli-host-equivalent';user_config_mode='loaded';protocol_environment='cleared';profile_config=$profileConfig;install_status=$installation.install_status;verification_status=$installation.verification_status;auth_unchanged=$installation.auth_unchanged;cleanup_status='passed';hook_installed=$installation.hook_installed;hook_trust='unknown';hook_callability='unknown';route_probe=$route;rollout_promotion=$promotion}
+        }
+    }
+    $record = [ordered]@{
         trial=$recordTrial;workspace_baseline_revision=$baseline;status=$(if($unavailable){'unavailable'}else{'measured'});diagnostic=$(if($unavailable){'otel-trace-missing'}else{$null});completion_passed=(-not $unavailable);outcome='completed';reason_code='completed'
         workflow_contract=$(if($Protocol-ceq'v1'){'confirmed-plan-to-done'}else{'new-task'});workflow_completed=$true;fresh_sessions=$freshSessions
         v1_stage_journal=$journal;v1_target_journal=$targetJournal;v1_validator_passed=$true
@@ -404,6 +718,8 @@ function Invoke-HostTrial {
         artifact_writes=$artifactWrites;runtime_writes=$runtimeWrites;unexpected_writes=0;raw_trace_deleted=$(if($mode-ceq'raw-trace' -and $Protocol-ceq'v2'){$false}else{$true});post_trial_diagnostics=@()
         tokens=[ordered]@{status='measured';input=1;cached_input=0;output=1}
     }
+    if ($null -ne $installedDesktop) { $record['installed_desktop'] = $installedDesktop }
+    return $record
 }
 '@
     Write-Utf8 (Join-Path $fixture 'scripts\host-benchmark\HostBenchmark.Trial.ps1') $stub
@@ -487,6 +803,28 @@ function Invoke-HostTrial {
     Check (@($pass.Report.groups | Where-Object { [bool]$_.source_state_stable -and [bool]$_.source.input_head_binding.start -and [bool]$_.source.input_head_binding.end }).Count -eq 3) 'grouped 3x3 report omitted independent clean source start/end bindings'
     Check ([string]$pass.Report.source.execution_mode -ceq 'clean-commit-clone' -and [string]$pass.Report.source.commit_tree_oid -match '^[0-9a-f]{40,64}$') 'clean report omitted native commit source identity'
     Check ([bool]$pass.Report.source.input_head_binding.start -and [bool]$pass.Report.source.input_head_binding.end) 'clean report did not bind live execution inputs to HEAD blobs'
+
+    $installedEligibilityReport = Join-Path $scratch 'installed-eligible-report.json'
+    Write-Utf8 $installedEligibilityReport (([ordered]@{schema_version='fixture-rollout-report/v1';status='pass';source_revision=$fixtureRevision;report_digest=('sha256:' + ('b' * 64))}) | ConvertTo-Json -Compress)
+    $installedEligibilityFileDigest = 'sha256:' + (Get-FileHash -LiteralPath $installedEligibilityReport -Algorithm SHA256).Hash.ToLowerInvariant()
+    $installedPassProfile = Join-Path $scratch 'installed-runner-pass-profile'
+    $installedPassHome = Join-Path $installedPassProfile '.codex'
+    Write-Utf8 (Join-Path $installedPassHome 'auth.json') '{"fixture":"installed-runner-pass"}'
+    Write-Utf8 (Join-Path $installedPassHome 'config.toml') 'model = "fixture"'
+    $installedPass = Invoke-FixtureRunner -Fixture $fixture -OutputRoot $scratch -Mode 'installed-pass' -Trials 3 -Groups 3 -BenchmarkPath 'installed-desktop-path' -CodexHome $installedPassHome -EligibilityReportPath $installedEligibilityReport
+    Check ($installedPass.ExitCode -eq 2 -and $null -ne $installedPass.Report -and [string]$installedPass.Report.schema_version -ceq 'harness-installed-desktop-benchmark-report/v1' -and [string]$installedPass.Report.qualification.status -ceq 'unavailable' -and [string]$installedPass.Report.status -ceq 'unavailable' -and -not [bool]$installedPass.Report.performance.eligible -and [bool]$installedPass.Report.performance.measurement_passed -and [int]$installedPass.Report.performance.measurement_passed_groups -eq 3 -and [string]$installedPass.Report.execution.host_surface -ceq 'codex-cli-host-equivalent' -and [string]$installedPass.Report.execution.rollout_report_digest -ceq ('sha256:' + ('b' * 64)) -and [string]$installedPass.Report.execution.rollout_report_file_digest -ceq $installedEligibilityFileDigest) 'installed Desktop 3x3 measurement did not remain qualification-unavailable with exact rollout bindings and exit 2'
+    $installedEvents = @($installedPass.Order | Where-Object { $_ -like 'installed:*' })
+    Check (@($installedEvents | Where-Object { $_ -like 'installed:promote:*' }).Count -eq 18 -and @($installedEvents | Where-Object { $_ -like 'installed:install:*' }).Count -eq 18 -and @($installedEvents | Where-Object { $_ -like 'installed:verify:*' }).Count -eq 18 -and @($installedEvents | Where-Object { $_ -like 'installed:route:*' }).Count -eq 18 -and @($installedEvents | Where-Object { $_ -like 'installed:cleanup:*' }).Count -eq 18) 'installed Desktop fixture did not execute the full promotion/install/verify/route/cleanup chain'
+
+    foreach ($driftMode in @('installed-cleanup-auth-drift','installed-cleanup-config-drift')) {
+        $driftProfile = Join-Path $scratch ("$driftMode-profile")
+        $driftHome = Join-Path $driftProfile '.codex'
+        Write-Utf8 (Join-Path $driftHome 'auth.json') ("{`"fixture`":`"$driftMode`"}")
+        Write-Utf8 (Join-Path $driftHome 'config.toml') 'model = "fixture"'
+        $drift = Invoke-FixtureRunner -Fixture $fixture -OutputRoot $scratch -Mode $driftMode -Trials 3 -Groups 3 -BenchmarkPath 'installed-desktop-path' -CodexHome $driftHome -EligibilityReportPath $installedEligibilityReport
+        $driftTrials = @($drift.Order | Where-Object { $_ -match '^(?:bare|v1|v2)\d+$' })
+        Check ($drift.ExitCode -eq 1 -and $null -eq $drift.Report -and ($driftTrials -join ',') -ceq 'bare1,v11' -and @($drift.Order | Where-Object { $_ -like 'installed:cleanup:*' }).Count -eq 1) "$driftMode did not fail and stop before the next installed Desktop trial"
+    }
 
     foreach ($case in @(
         [pscustomobject]@{Mode='wrong-target-bytes';Message='Runner accepted non-exact target bytes reported as complete'},

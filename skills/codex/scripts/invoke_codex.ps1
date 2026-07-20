@@ -59,6 +59,9 @@ param(
 
     [switch]$Isolated,
 
+    [Parameter(DontShow)]
+    [switch]$LoadUserConfig,
+
     [switch]$Help,
 
     [Parameter(DontShow)]
@@ -575,6 +578,11 @@ if ([string]::IsNullOrEmpty($Task) -and -not [string]::IsNullOrEmpty($TaskText))
 $Task = Trim-Whitespace $Task
 if ([string]::IsNullOrEmpty($Task)) { throw 'Request text is empty. Pass a positional arg or -Task.' }
 if ($Session -match '\p{Cc}') { throw 'Session contains a control character and cannot be emitted safely.' }
+if ($LoadUserConfig -and $Isolated) { throw '-LoadUserConfig cannot be combined with -Isolated.' }
+if ($LoadUserConfig) {
+    $selectedCodexHome = [Environment]::GetEnvironmentVariable('CODEX_HOME',[EnvironmentVariableTarget]::Process)
+    if ([string]::IsNullOrWhiteSpace($selectedCodexHome) -or -not [IO.Path]::IsPathRooted($selectedCodexHome) -or -not (Test-Path -LiteralPath $selectedCodexHome -PathType Container)) { throw '-LoadUserConfig requires an explicit absolute CODEX_HOME directory.' }
+}
 if (-not (Test-Path -LiteralPath $Workspace -PathType Container)) { throw "Workspace does not exist: $Workspace" }
 $Workspace = (Resolve-Path -LiteralPath $Workspace).Path
 
@@ -638,7 +646,7 @@ if ($fileBlock) { $prompt += "`nPriority files (read these first before making c
 $codexArgs = [System.Collections.Generic.List[string]]::new()
 if ($ApprovalPolicy) { $codexArgs.Add('-a'); $codexArgs.Add($ApprovalPolicy) }
 $codexArgs.Add('exec')
-$codexArgs.Add('--ignore-user-config')
+if (-not $LoadUserConfig) { $codexArgs.Add('--ignore-user-config') }
 if ($Isolated) {
     foreach ($feature in @('plugins','remote_plugin','apps','browser_use','computer_use','memories','multi_agent','multi_agent_v2','enable_fanout','in_app_browser','image_generation')) {
         $codexArgs.Add('--disable'); $codexArgs.Add($feature)
@@ -887,6 +895,7 @@ if ($TelemetryOutput) {
             digest = $(if ($OutputSchema) { 'sha256:' + (Get-FileHash -LiteralPath $OutputSchema -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null })
         }
     }
+    if ($LoadUserConfig) { $telemetry['user_config_mode'] = 'loaded' }
     if (-not [string]::IsNullOrWhiteSpace($verifiedCodexVersion)) { $telemetry.codex_cli_version = $verifiedCodexVersion }
     Write-Utf8NoBomAtomic -Path $TelemetryOutput -Content ($telemetry | ConvertTo-Json -Depth 8)
 }

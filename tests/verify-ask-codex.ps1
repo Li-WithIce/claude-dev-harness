@@ -589,10 +589,58 @@ $parameters = @{
         [string]$newRecord.ca -ceq $caSentinel -and $newRecord.ca_exists -eq $true -and
         $newContent.Contains($newCase + '-response-1') -and $newContent.Contains($newCase + '-response-3') -and
         -not (Test-Path -LiteralPath $newInjectionMarker) -and -not (Test-Path -LiteralPath $cmdMarker)) {
-        Add-Check 'new session preserves structured special argv, UTF-8 stdin, environment, and complete JSONL output'
+        Add-Check 'new session preserves default --ignore-user-config argv, UTF-8 stdin, environment, and complete JSONL output'
     } else {
         $newRecordText = if ($null -eq $newRecord) { '<missing>' } else { $newRecord | ConvertTo-Json -Depth 8 -Compress }
         Add-Failure "new session behavior mismatch: exit=$($newResult.ExitCode) outer_timeout=$($newResult.OuterTimedOut) record=[$newRecordText] stdout=[$($newResult.StdOut)] stderr=[$($newResult.StdErr)]"
+    }
+
+    $loadUserConfigCase = 'load-user-config'
+    $loadUserConfigOutput = Join-Path $scratchRoot 'outputs\load-user-config.md'
+    $loadUserConfigTelemetry = Join-Path $scratchRoot 'outputs\load-user-config.telemetry.json'
+    $loadUserConfigModel = 'gpt-5.6-sol'
+    $loadUserConfigResult = Invoke-AskCodex -ScriptPath $scriptPath -Arguments @('-Task','load installed user config','-Workspace',$workspace,'-Model',$loadUserConfigModel,'-ReadOnly','-Ephemeral','-LoadUserConfig','-Output',$loadUserConfigOutput,'-TelemetryOutput',$loadUserConfigTelemetry,'-TimeoutSeconds','5') -Environment (New-CaseEnvironment -CaseId $loadUserConfigCase) -WorkingDirectory $callerRoot -Label $loadUserConfigCase
+    $loadUserConfigRecord = Read-MockRecord -CaptureRoot $captureRoot -CaseId $loadUserConfigCase
+    $loadUserConfigTelemetryValue = if (Test-Path -LiteralPath $loadUserConfigTelemetry -PathType Leaf) { Get-Content -LiteralPath $loadUserConfigTelemetry -Raw -Encoding utf8 | ConvertFrom-Json } else { $null }
+    $expectedLoadUserConfigArgs = @('exec','--cd',$workspace,'--skip-git-repo-check','--json','-c','model_reasoning_effort="medium"','--sandbox','read-only','-m',$loadUserConfigModel,'--ephemeral','-')
+    if ($loadUserConfigResult.ExitCode -eq 0 -and $null -ne $loadUserConfigRecord -and
+        (Test-StringSequenceEqual -Actual @($loadUserConfigRecord.argv) -Expected $expectedLoadUserConfigArgs) -and
+        -not (@($loadUserConfigRecord.argv) -contains '--ignore-user-config') -and
+        $null -ne $loadUserConfigTelemetryValue -and [string]$loadUserConfigTelemetryValue.user_config_mode -ceq 'loaded') {
+        Add-Check 'LoadUserConfig omits --ignore-user-config and records loaded telemetry'
+    } else {
+        Add-Failure "LoadUserConfig contract failed: exit=$($loadUserConfigResult.ExitCode) record=[$($loadUserConfigRecord | ConvertTo-Json -Depth 8 -Compress)] telemetry=[$($loadUserConfigTelemetryValue | ConvertTo-Json -Depth 8 -Compress)] stderr=[$($loadUserConfigResult.StdErr)]"
+    }
+
+    foreach ($missingCodexHomeCase in @(
+        [pscustomobject]@{ Id = 'load-user-config-codex-home-removed'; Value = $null; Label = 'removed' },
+        [pscustomobject]@{ Id = 'load-user-config-codex-home-empty'; Value = ''; Label = 'empty' }
+    )) {
+        $missingCodexHomeOutput = Join-Path $scratchRoot ("outputs\$($missingCodexHomeCase.Id).md")
+        $missingCodexHomeEnvironment = New-CaseEnvironment -CaseId $missingCodexHomeCase.Id
+        $missingCodexHomeEnvironment.CODEX_HOME = $missingCodexHomeCase.Value
+        $missingCodexHomeResult = Invoke-AskCodex -ScriptPath $scriptPath -Arguments @('-Task','must reject missing Codex home','-Workspace',$workspace,'-LoadUserConfig','-Output',$missingCodexHomeOutput,'-TimeoutSeconds','5') -Environment $missingCodexHomeEnvironment -WorkingDirectory $callerRoot -Label $missingCodexHomeCase.Id
+        if ($missingCodexHomeResult.ExitCode -ne 0 -and
+            [string]::IsNullOrWhiteSpace($missingCodexHomeResult.StdOut) -and
+            $missingCodexHomeResult.StdErr -match 'LoadUserConfig requires an explicit absolute CODEX_HOME directory' -and
+            -not (Test-Path -LiteralPath $missingCodexHomeOutput) -and
+            $null -eq (Read-MockRecord -CaptureRoot $captureRoot -CaseId $missingCodexHomeCase.Id)) {
+            Add-Check "LoadUserConfig rejects $($missingCodexHomeCase.Label) CODEX_HOME before fake Codex invocation"
+        } else {
+            Add-Failure "LoadUserConfig accepted $($missingCodexHomeCase.Label) CODEX_HOME: exit=$($missingCodexHomeResult.ExitCode) stdout=[$($missingCodexHomeResult.StdOut)] stderr=[$($missingCodexHomeResult.StdErr)]"
+        }
+    }
+
+    $conflictingConfigCase = 'load-user-config-isolated-conflict'
+    $conflictingConfigOutput = Join-Path $scratchRoot 'outputs\load-user-config-isolated-conflict.md'
+    $conflictingConfigResult = Invoke-AskCodex -ScriptPath $scriptPath -Arguments @('-Task','must reject conflicting config modes','-Workspace',$workspace,'-LoadUserConfig','-Isolated','-Output',$conflictingConfigOutput,'-TimeoutSeconds','5') -Environment (New-CaseEnvironment -CaseId $conflictingConfigCase) -WorkingDirectory $callerRoot -Label $conflictingConfigCase
+    if ($conflictingConfigResult.ExitCode -ne 0 -and
+        $conflictingConfigResult.StdErr -match 'LoadUserConfig cannot be combined with -Isolated' -and
+        -not (Test-Path -LiteralPath $conflictingConfigOutput) -and
+        $null -eq (Read-MockRecord -CaptureRoot $captureRoot -CaseId $conflictingConfigCase)) {
+        Add-Check 'LoadUserConfig and Isolated conflict fails before fake Codex invocation'
+    } else {
+        Add-Failure "LoadUserConfig/Isolated conflict was not rejected before backend invocation: exit=$($conflictingConfigResult.ExitCode) stdout=[$($conflictingConfigResult.StdOut)] stderr=[$($conflictingConfigResult.StdErr)]"
     }
 
     $structuredCase = 'structured-telemetry'
@@ -616,10 +664,11 @@ $parameters = @{
         $null -ne $structuredTelemetryValue -and [string]$structuredTelemetryValue.schema_version -ceq 'codex-invocation-telemetry/v2' -and [string]$structuredTelemetryValue.codex_cli_version -ceq '0.144.4' -and
         [string]$structuredTelemetryValue.model -ceq $structuredModel -and [string]$structuredTelemetryValue.reasoning -ceq 'max' -and
         [bool]$structuredTelemetryValue.ephemeral -and [string]$structuredTelemetryValue.sandbox -ceq 'read-only' -and [string]$structuredTelemetryValue.approval_policy -ceq 'never' -and
+        -not ($structuredTelemetryValue.PSObject.Properties.Name -contains 'user_config_mode') -and
         [int]$structuredTelemetryValue.agent_messages -eq 3 -and [string]$structuredTelemetryValue.tokens.status -ceq 'unavailable' -and
         $structuredResult.StdOut -match '(?m)^telemetry_path=' -and
         $structuredContent.Trim() -ceq ($structuredCase + '-response-3')) {
-        Add-Check 'isolated max session preserves structured-output argv and publishes sanitized aggregate telemetry'
+        Add-Check 'isolated max session preserves structured-output argv and the default telemetry keyset'
     } else {
         Add-Failure "structured telemetry contract failed: exit=$($structuredResult.ExitCode) record=[$($structuredRecord | ConvertTo-Json -Depth 8 -Compress)] telemetry=[$($structuredTelemetryValue | ConvertTo-Json -Depth 8 -Compress)] stderr=[$($structuredResult.StdErr)]"
     }

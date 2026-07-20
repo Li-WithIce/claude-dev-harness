@@ -136,11 +136,11 @@ function Get-HostPhysicalPathInfo {
 }
 
 function Test-HostWorkspaceChangePathsSafe {
-    param([Parameter(Mandatory)][string]$Workspace,[Parameter(Mandatory)][string[]]$Paths)
+    param([Parameter(Mandatory)][string]$Workspace,[Parameter(Mandatory)][string[]]$Paths,[Parameter(Mandatory)][object]$PathModule)
     try {
         foreach ($relative in $Paths) {
             if ($relative.StartsWith('__git_index_flag__/',[StringComparison]::Ordinal)) { return $false }
-            $resolved = Resolve-HarnessContainedPath -WorkspaceRoot $Workspace -Path $relative -Label 'host benchmark changed path' -MustExist File
+            $resolved = & $PathModule { param($Root,$Path) Resolve-HarnessContainedPath -WorkspaceRoot $Root -Path $Path -Label 'host benchmark changed path' -MustExist File } $Workspace $relative
             $item = Get-Item -LiteralPath $resolved -Force -ErrorAction Stop
             if ($item.PSIsContainer -or -not [string]::IsNullOrWhiteSpace([string]$item.LinkType)) { return $false }
         }
@@ -177,7 +177,7 @@ function Resolve-HostTrialStatus {
 }
 
 function Assert-HostCodexHomeLayout {
-    param([AllowEmptyString()][string]$Path)
+    param([AllowEmptyString()][string]$Path,[switch]$AllowUserConfig,[switch]$AllowInstalledAssets)
     if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Container)) { throw 'host-benchmark-auth-home-unavailable' }
     $absolute = [IO.Path]::GetFullPath($Path).TrimEnd('\')
     $probe = $absolute
@@ -191,20 +191,44 @@ function Assert-HostCodexHomeLayout {
     $resolved = (Resolve-Path -LiteralPath $absolute).Path.TrimEnd('\')
     $allowedFiles = @('auth.json','models_cache.json','version.json','installation_id','.codex-global-state.json','.codex-global-state.json.bak')
     $allowedDirectories = @('log','tmp','sqlite','cache')
+    if ($AllowUserConfig) {
+        $allowedFiles += @('config.toml','.personality_migration')
+        $allowedDirectories += @('plugins','.claude')
+    }
+    if ($AllowInstalledAssets) {
+        $allowedFiles += @('AGENTS.md','hooks.json','managed_config.toml')
+        $allowedDirectories += '.claude'
+    }
     $stack = [Collections.Generic.Stack[string]]::new()
     foreach ($child in @(Get-ChildItem -LiteralPath $resolved -Force -ErrorAction Stop)) {
-        if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'host-benchmark-auth-home-reparse-point' }
+        if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw 'host-benchmark-auth-home-reparse-point'
+        }
         if (-not $child.PSIsContainer -and -not [string]::IsNullOrWhiteSpace([string]$child.LinkType)) { throw 'host-benchmark-auth-home-linked-credential' }
+        if ($AllowUserConfig -and $child.PSIsContainer -and [string]$child.Name -ceq 'skills') {
+            foreach ($skill in @(Get-ChildItem -LiteralPath $child.FullName -Force -ErrorAction Stop)) {
+                $managedSkill = [string]$skill.Name -cin @('entry-router','orchestrator','plan','implement','review','test','spec')
+                $linked = ($skill.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+                if ([string]$skill.Name -ceq '.system' -and $skill.PSIsContainer -and -not $linked) {
+                    $stack.Push($skill.FullName)
+                } elseif ($AllowInstalledAssets -and $managedSkill -and $skill.PSIsContainer -and $linked) {
+                    continue
+                } else { throw 'host-benchmark-auth-home-not-isolated' }
+            }
+            continue
+        }
         if ($child.PSIsContainer) {
             if ([string]$child.Name -cnotin $allowedDirectories) { throw 'host-benchmark-auth-home-not-isolated' }
             $stack.Push($child.FullName)
-        } elseif ([string]$child.Name -cnotin $allowedFiles -and [string]$child.Name -notmatch '^state_[0-9]+\.sqlite(?:-(?:shm|wal))?$') {
+        } elseif ([string]$child.Name -cnotin $allowedFiles -and [string]$child.Name -notmatch '^(?:state|goals|logs|memories)_[0-9]+\.sqlite(?:-(?:shm|wal))?$') {
             throw 'host-benchmark-auth-home-not-isolated'
         }
     }
     while ($stack.Count -gt 0) {
         foreach ($child in @(Get-ChildItem -LiteralPath $stack.Pop() -Force -ErrorAction Stop)) {
-            if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'host-benchmark-auth-home-reparse-point' }
+            if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw 'host-benchmark-auth-home-reparse-point'
+            }
             if (-not $child.PSIsContainer -and -not [string]::IsNullOrWhiteSpace([string]$child.LinkType)) { throw 'host-benchmark-auth-home-linked-credential' }
             if ($child.PSIsContainer) { $stack.Push($child.FullName) }
         }
@@ -220,9 +244,11 @@ function Assert-HostCodexHome {
     param(
         [AllowEmptyString()][string]$Path,
         [Parameter(Mandatory)][string]$RepoRoot,
-        [Parameter(Mandatory)][string]$ScratchRoot
+        [Parameter(Mandatory)][string]$ScratchRoot,
+        [switch]$AllowUserConfig,
+        [switch]$AllowInstalledAssets
     )
-    $resolved = Assert-HostCodexHomeLayout -Path $Path
+    $resolved = Assert-HostCodexHomeLayout -Path $Path -AllowUserConfig:$AllowUserConfig -AllowInstalledAssets:$AllowInstalledAssets
     $resolvedPhysical = Get-HostPhysicalPathInfo -Path $resolved -RejectLinks
     foreach ($unsafeRoot in @($RepoRoot,$ScratchRoot)) {
         $unsafePhysical = Get-HostPhysicalPathInfo -Path $unsafeRoot -RejectLinks
@@ -247,6 +273,7 @@ function Assert-HostCodexHome {
         }
     }
     $savedHome = [Environment]::GetEnvironmentVariable('USERPROFILE',[EnvironmentVariableTarget]::Process)
+    $savedUnixHome = [Environment]::GetEnvironmentVariable('HOME',[EnvironmentVariableTarget]::Process)
     $savedCodexHome = [Environment]::GetEnvironmentVariable('CODEX_HOME',[EnvironmentVariableTarget]::Process)
     $credentialVariables = @('CODEX_API_KEY','CODEX_ACCESS_TOKEN','OPENAI_API_KEY','CODEX_EXECUTABLE','CODEX_THREAD_ID','CODEX_INTERNAL_ORIGINATOR_OVERRIDE','CODEX_SHELL')
     $savedCredentials = [ordered]@{}
@@ -255,17 +282,246 @@ function Assert-HostCodexHome {
             $savedCredentials[$name] = [Environment]::GetEnvironmentVariable($name,[EnvironmentVariableTarget]::Process)
             [Environment]::SetEnvironmentVariable($name,$null,[EnvironmentVariableTarget]::Process)
         }
-        $env:USERPROFILE = $resolved
+        $env:USERPROFILE = if ($AllowUserConfig -or $AllowInstalledAssets) { [IO.Path]::GetDirectoryName($resolved) } else { $resolved }
+        if ($AllowUserConfig -or $AllowInstalledAssets) { $env:HOME = $env:USERPROFILE }
         $env:CODEX_HOME = $resolved
         $status = @(& codex login status 2>&1 | ForEach-Object { [string]$_ })
         if ($LASTEXITCODE -ne 0) { throw 'host-benchmark-auth-home-not-logged-in' }
-        $null = Assert-HostCodexHomeLayout -Path $resolved
+        $null = Assert-HostCodexHomeLayout -Path $resolved -AllowUserConfig:$AllowUserConfig -AllowInstalledAssets:$AllowInstalledAssets
     } finally {
         [Environment]::SetEnvironmentVariable('USERPROFILE',$savedHome,[EnvironmentVariableTarget]::Process)
+        [Environment]::SetEnvironmentVariable('HOME',$savedUnixHome,[EnvironmentVariableTarget]::Process)
         [Environment]::SetEnvironmentVariable('CODEX_HOME',$savedCodexHome,[EnvironmentVariableTarget]::Process)
         foreach ($entry in $savedCredentials.GetEnumerator()) { [Environment]::SetEnvironmentVariable([string]$entry.Key,$entry.Value,[EnvironmentVariableTarget]::Process) }
     }
     return $resolved
+}
+
+function Get-InstalledDesktopProfileRoot {
+    param([Parameter(Mandatory)][string]$CodexHome)
+    $resolved = [IO.Path]::GetFullPath($CodexHome).TrimEnd('\')
+    if ([IO.Path]::GetFileName($resolved) -cne '.codex') { throw 'host-benchmark-installed-profile-invalid' }
+    $profileRoot = [IO.Path]::GetDirectoryName($resolved)
+    if ([string]::IsNullOrWhiteSpace($profileRoot) -or -not (Test-Path -LiteralPath $profileRoot -PathType Container)) { throw 'host-benchmark-installed-profile-invalid' }
+    $profileItem = Get-Item -LiteralPath $profileRoot -Force -ErrorAction Stop
+    if (($profileItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'host-benchmark-installed-profile-reparse-point' }
+    return $profileRoot
+}
+
+function Get-InstalledDesktopUserConfigBinding {
+    param([Parameter(Mandatory)][string]$CodexHome)
+    $configPath = Join-Path $CodexHome 'config.toml'
+    if (-not (Test-Path -LiteralPath $configPath)) { return [ordered]@{status='absent';digest=$null} }
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { throw 'host-benchmark-installed-config-invalid' }
+    $item = Get-Item -LiteralPath $configPath -Force -ErrorAction Stop
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not [string]::IsNullOrWhiteSpace([string]$item.LinkType) -or $item.Length -gt 1MB) { throw 'host-benchmark-installed-config-invalid' }
+    return [ordered]@{status='present';digest=('sha256:' + (Get-FileHash -LiteralPath $configPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant())}
+}
+
+function Test-InstalledDesktopUserConfigBinding {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Expected,[Parameter(Mandatory)][System.Collections.IDictionary]$Actual)
+    return [string]$Expected.status -ceq [string]$Actual.status -and [string]$Expected.digest -ceq [string]$Actual.digest
+}
+
+function Assert-InstalledDesktopProfileReady {
+    param([Parameter(Mandatory)][string]$CodexHome)
+    $profileRoot = Get-InstalledDesktopProfileRoot -CodexHome $CodexHome
+    $null = Assert-HostCodexHomeLayout -Path $CodexHome -AllowUserConfig
+    $null = Get-InstalledDesktopUserConfigBinding -CodexHome $CodexHome
+    foreach ($relative in @('AGENTS.md','hooks.json','managed_config.toml')) {
+        if (Test-Path -LiteralPath (Join-Path $CodexHome $relative)) { throw 'host-benchmark-installed-profile-not-clean' }
+    }
+    foreach ($container in @((Join-Path $CodexHome '.claude'),(Join-Path $profileRoot '.claude'),(Join-Path $profileRoot '.agents'))) {
+        if (-not (Test-Path -LiteralPath $container)) { continue }
+        if (-not (Test-Path -LiteralPath $container -PathType Container)) { throw 'host-benchmark-installed-profile-not-clean' }
+        $rootItem = Get-Item -LiteralPath $container -Force -ErrorAction Stop
+        if (($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or @((Get-ChildItem -LiteralPath $container -Force -Recurse -ErrorAction Stop) | Where-Object { -not $_.PSIsContainer -or ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 }).Count -ne 0) { throw 'host-benchmark-installed-profile-not-clean' }
+    }
+    $stateRoot = Join-Path $profileRoot '.dev-harness'
+    foreach ($name in @('install-transaction.json','uninstall-transaction.json')) {
+        if (Test-Path -LiteralPath (Join-Path $stateRoot $name) -PathType Leaf) { throw 'host-benchmark-installed-profile-transaction-pending' }
+    }
+    $registryPath = Join-Path $stateRoot 'install-registry.json'
+    if (Test-Path -LiteralPath $registryPath -PathType Leaf) {
+        try { $registry = [IO.File]::ReadAllText($registryPath,[Text.UTF8Encoding]::new($false,$true)) | ConvertFrom-Json -AsHashtable -Depth 50 } catch { throw 'host-benchmark-installed-profile-registry-invalid' }
+        if ($registry -isnot [Collections.IDictionary] -or $registry.workspaces -isnot [Collections.IDictionary] -or @($registry.workspaces.Keys).Count -ne 0) { throw 'host-benchmark-installed-profile-not-clean' }
+    }
+    return $profileRoot
+}
+
+function Test-InstalledDesktopWorkspaceRegistered {
+    param([Parameter(Mandatory)][string]$CodexHome,[Parameter(Mandatory)][string]$Workspace)
+    $profileRoot = Get-InstalledDesktopProfileRoot -CodexHome $CodexHome
+    $registryPath = Join-Path $profileRoot '.dev-harness\install-registry.json'
+    if (-not (Test-Path -LiteralPath $registryPath -PathType Leaf)) { return $false }
+    try { $registry = [IO.File]::ReadAllText($registryPath,[Text.UTF8Encoding]::new($false,$true)) | ConvertFrom-Json -AsHashtable -Depth 50 } catch { throw 'host-benchmark-installed-profile-registry-invalid' }
+    if ($registry -isnot [Collections.IDictionary] -or $registry.workspaces -isnot [Collections.IDictionary]) { throw 'host-benchmark-installed-profile-registry-invalid' }
+    $expected = [IO.Path]::GetFullPath($Workspace).TrimEnd('\')
+    foreach ($entry in @($registry.workspaces.Values)) {
+        if ($entry -isnot [Collections.IDictionary] -or [string]::IsNullOrWhiteSpace([string]$entry.workspace_root)) { throw 'host-benchmark-installed-profile-registry-invalid' }
+        if ([IO.Path]::GetFullPath([string]$entry.workspace_root).TrimEnd('\').Equals($expected,[StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
+}
+
+function Get-InstalledDesktopPendingRecovery {
+    param(
+        [Parameter(Mandatory)][string]$CodexHome,
+        [Parameter(Mandatory)][string]$Workspace,
+        [Parameter(Mandatory)][string]$RepoRoot
+    )
+    $profileRoot = Get-InstalledDesktopProfileRoot -CodexHome $CodexHome
+    $journalPath = Join-Path $profileRoot '.dev-harness\install-transaction.json'
+    if (-not (Test-Path -LiteralPath $journalPath)) { return $null }
+    if (-not (Test-Path -LiteralPath $journalPath -PathType Leaf)) { throw 'host-benchmark-installed-recovery-invalid' }
+    try { $journal = [IO.File]::ReadAllText($journalPath,[Text.UTF8Encoding]::new($false,$true)) | ConvertFrom-Json -AsHashtable -Depth 50 } catch { throw 'host-benchmark-installed-recovery-invalid' }
+    if ($journal -isnot [Collections.IDictionary] -or [string]$journal.schema_version -cne 'install-transaction/v1.1') { throw 'host-benchmark-installed-recovery-invalid' }
+    $expectedProfile = [IO.Path]::GetFullPath($profileRoot).TrimEnd('\')
+    $expectedWorkspace = [IO.Path]::GetFullPath($Workspace).TrimEnd('\')
+    $expectedRepo = [IO.Path]::GetFullPath($RepoRoot).TrimEnd('\')
+    try {
+        $journalProfile = [IO.Path]::GetFullPath([string]$journal.user_profile).TrimEnd('\')
+        $journalWorkspace = [IO.Path]::GetFullPath([string]$journal.workspace_root).TrimEnd('\')
+        $journalRepo = [IO.Path]::GetFullPath([string]$journal.repo_root).TrimEnd('\')
+        $manifestPath = [IO.Path]::GetFullPath([string]$journal.manifest_path)
+    } catch { throw 'host-benchmark-installed-recovery-invalid' }
+    if (-not $journalProfile.Equals($expectedProfile,[StringComparison]::OrdinalIgnoreCase) -or -not $journalWorkspace.Equals($expectedWorkspace,[StringComparison]::OrdinalIgnoreCase) -or -not $journalRepo.Equals($expectedRepo,[StringComparison]::OrdinalIgnoreCase)) { throw 'host-benchmark-installed-recovery-invalid' }
+    $backupRoot = Join-Path $profileRoot '.dev-harness\backups'
+    if (-not (Test-HostPathAtOrBelow -Path $manifestPath -Root $backupRoot) -or (Split-Path -Leaf $manifestPath) -cne 'install-manifest.json' -or -not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'host-benchmark-installed-recovery-invalid' }
+    $manifestPhysical = Get-HostPhysicalPathInfo -Path $manifestPath -RejectLinks
+    $backupPhysical = Get-HostPhysicalPathInfo -Path $backupRoot -RejectLinks
+    if (-not (Test-HostPathAtOrBelow -Path ([string]$manifestPhysical.physical_path) -Root ([string]$backupPhysical.physical_path))) { throw 'host-benchmark-installed-recovery-invalid' }
+    return [ordered]@{manifest_path=$manifestPath}
+}
+
+function Invoke-InstalledDesktopTrialRecovery {
+    param(
+        [Parameter(Mandatory)][string]$CodexHome,
+        [Parameter(Mandatory)][string]$Workspace,
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Recovery
+    )
+    $profileRoot = Get-InstalledDesktopProfileRoot -CodexHome $CodexHome
+    $saved = [ordered]@{}
+    foreach ($name in @('USERPROFILE','HOME','CODEX_HOME')) { $saved[$name] = [Environment]::GetEnvironmentVariable($name,[EnvironmentVariableTarget]::Process) }
+    try {
+        $before = (Get-FileHash -LiteralPath (Join-Path $CodexHome 'auth.json') -Algorithm SHA256 -ErrorAction Stop).Hash
+        $env:USERPROFILE = $profileRoot
+        $env:HOME = $profileRoot
+        $env:CODEX_HOME = $CodexHome
+        $output = @(& pwsh -NoLogo -NoProfile -NonInteractive -File (Join-Path $RepoRoot 'uninstall.ps1') -RecoveryManifestPath ([string]$Recovery.manifest_path) -RepoRoot $RepoRoot 2>&1 | ForEach-Object { [string]$_ })
+        if ($LASTEXITCODE -ne 0) { throw 'host-benchmark-installed-recovery-failed' }
+        $after = (Get-FileHash -LiteralPath (Join-Path $CodexHome 'auth.json') -Algorithm SHA256 -ErrorAction Stop).Hash
+        if ($after -cne $before) { throw 'host-benchmark-installed-recovery-changed-auth' }
+        $null = Assert-InstalledDesktopProfileReady -CodexHome $CodexHome
+        return $true
+    } finally {
+        foreach ($entry in $saved.GetEnumerator()) { [Environment]::SetEnvironmentVariable([string]$entry.Key,$entry.Value,[EnvironmentVariableTarget]::Process) }
+    }
+}
+
+function Invoke-InstalledDesktopTrialCleanup {
+    param(
+        [Parameter(Mandatory)][string]$CodexHome,
+        [Parameter(Mandatory)][string]$Workspace,
+        [Parameter(Mandatory)][string]$RepoRoot
+    )
+    $profileRoot = Get-InstalledDesktopProfileRoot -CodexHome $CodexHome
+    $saved = [ordered]@{}
+    foreach ($name in @('USERPROFILE','HOME','CODEX_HOME')) { $saved[$name] = [Environment]::GetEnvironmentVariable($name,[EnvironmentVariableTarget]::Process) }
+    try {
+        $before = (Get-FileHash -LiteralPath (Join-Path $CodexHome 'auth.json') -Algorithm SHA256 -ErrorAction Stop).Hash
+        $env:USERPROFILE = $profileRoot
+        $env:HOME = $profileRoot
+        $env:CODEX_HOME = $CodexHome
+        $output = @(& pwsh -NoLogo -NoProfile -NonInteractive -File (Join-Path $RepoRoot 'uninstall.ps1') -WorkspaceRoot $Workspace -RepoRoot $RepoRoot 2>&1 | ForEach-Object { [string]$_ })
+        if ($LASTEXITCODE -ne 0) { throw 'host-benchmark-installed-uninstall-failed' }
+        $after = (Get-FileHash -LiteralPath (Join-Path $CodexHome 'auth.json') -Algorithm SHA256 -ErrorAction Stop).Hash
+        if ($after -cne $before) { throw 'host-benchmark-installed-uninstall-changed-auth' }
+        $null = Assert-InstalledDesktopProfileReady -CodexHome $CodexHome
+        return $true
+    } finally {
+        foreach ($entry in $saved.GetEnumerator()) { [Environment]::SetEnvironmentVariable([string]$entry.Key,$entry.Value,[EnvironmentVariableTarget]::Process) }
+    }
+}
+
+function Invoke-InstalledDesktopRolloutPromotion {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$Workspace,
+        [AllowEmptyString()][string]$EligibilityReportPath
+    )
+    if ([string]::IsNullOrWhiteSpace($EligibilityReportPath)) { throw 'host-benchmark-installed-rollout-report-missing' }
+    if (-not [IO.Path]::IsPathRooted($EligibilityReportPath) -or -not (Test-Path -LiteralPath $EligibilityReportPath -PathType Leaf)) { throw 'host-benchmark-installed-rollout-report-unavailable' }
+    $output = @(& pwsh -NoLogo -NoProfile -NonInteractive -File (Join-Path $RepoRoot 'scripts\promote-v2-rollout-report.ps1') -RepoRoot $RepoRoot -WorkspaceRoot $Workspace -ReportPath $EligibilityReportPath 2>&1 | ForEach-Object { [string]$_ })
+    if ($LASTEXITCODE -ne 0) { throw 'host-benchmark-installed-rollout-promotion-failed' }
+    try { $result = ($output -join "`n") | ConvertFrom-Json -AsHashtable -Depth 20 } catch { throw 'host-benchmark-installed-rollout-promotion-invalid' }
+    if ([string]$result.status -cne 'pass' -or [string]$result.source_revision -cnotmatch '^[0-9a-f]{40,64}$' -or [string]$result.report_digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or [string]$result.file_digest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'host-benchmark-installed-rollout-promotion-invalid' }
+    return $result
+}
+
+function Invoke-InstalledDesktopInstall {
+    param(
+        [Parameter(Mandatory)][string]$CodexHome,
+        [Parameter(Mandatory)][string]$Workspace,
+        [Parameter(Mandatory)][string]$RepoRoot
+    )
+    $profileRoot = Get-InstalledDesktopProfileRoot -CodexHome $CodexHome
+    $authPath = Join-Path $CodexHome 'auth.json'
+    $before = (Get-FileHash -LiteralPath $authPath -Algorithm SHA256 -ErrorAction Stop).Hash
+    $configBefore = Get-InstalledDesktopUserConfigBinding -CodexHome $CodexHome
+    $installCommandOutput = @(& pwsh -NoLogo -NoProfile -NonInteractive -File (Join-Path $RepoRoot 'install.ps1') -WorkspaceRoot $Workspace -RepoRoot $RepoRoot -Preset core 2>&1 | ForEach-Object { [string]$_ })
+    $installExit = $LASTEXITCODE
+    try {
+        $afterInstall = (Get-FileHash -LiteralPath $authPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        $configAfterInstall = Get-InstalledDesktopUserConfigBinding -CodexHome $CodexHome
+    } catch { throw 'host-benchmark-installed-install-profile-integrity-failed' }
+    if ($afterInstall -cne $before) { throw 'host-benchmark-installed-install-changed-auth' }
+    if (-not (Test-InstalledDesktopUserConfigBinding -Expected $configBefore -Actual $configAfterInstall)) { throw 'host-benchmark-installed-install-changed-config' }
+    if ($installExit -ne 0) { throw 'host-benchmark-installed-install-failed' }
+    $null = Assert-HostCodexHomeLayout -Path $CodexHome -AllowUserConfig -AllowInstalledAssets
+    $verifyOutput = @(& pwsh -NoLogo -NoProfile -NonInteractive -File (Join-Path $RepoRoot 'tests\verify-installation.ps1') -WorkspaceRoot $Workspace -RepoRoot $RepoRoot -UserProfileRoot $profileRoot -Scope All 2>&1 | ForEach-Object { [string]$_ })
+    $verifyExit = $LASTEXITCODE
+    try {
+        $afterVerify = (Get-FileHash -LiteralPath $authPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        $configAfterVerify = Get-InstalledDesktopUserConfigBinding -CodexHome $CodexHome
+    } catch { throw 'host-benchmark-installed-verification-profile-integrity-failed' }
+    if ($afterVerify -cne $before) { throw 'host-benchmark-installed-verification-changed-auth' }
+    if (-not (Test-InstalledDesktopUserConfigBinding -Expected $configBefore -Actual $configAfterVerify)) { throw 'host-benchmark-installed-verification-changed-config' }
+    if ($verifyExit -ne 0 -or ($verifyOutput -join "`n") -cnotmatch '(?m)^STATUS: PASS\s*$') { throw 'host-benchmark-installed-verification-failed' }
+    return [ordered]@{install_status='pass';verification_status='pass';auth_unchanged=$true}
+}
+
+function Invoke-InstalledDesktopRouteProbe {
+    param(
+        [Parameter(Mandatory)][ValidateSet('v1','v2')][string]$Protocol,
+        [Parameter(Mandatory)][string]$Workspace
+    )
+    foreach ($name in @('HARNESS_PROTOCOL','HARNESS_V2_ELIGIBILITY_REPORT','DEV_HARNESS_WORKSPACE_ROOT','WORKSPACE_ROOT')) {
+        if ($null -ne [Environment]::GetEnvironmentVariable($name,[EnvironmentVariableTarget]::Process)) { throw 'host-benchmark-installed-protocol-environment-leaked' }
+    }
+    $shim = Join-Path $Workspace '.assistant\entry\task.ps1'
+    if (-not (Test-Path -LiteralPath $shim -PathType Leaf)) { throw 'host-benchmark-installed-task-shim-missing' }
+    $arguments = @('-NoLogo','-NoProfile','-NonInteractive','-File',$shim,'protocol','-AsJson')
+    if ($Protocol -ceq 'v1') { $arguments += @('-TaskId','host-benchmark-fixed-workflow') }
+    $output = @(& pwsh @arguments 2>&1 | ForEach-Object { [string]$_ })
+    if ($LASTEXITCODE -ne 0) { throw 'host-benchmark-installed-route-probe-failed' }
+    try { $route = ($output -join "`n") | ConvertFrom-Json -AsHashtable -Depth 20 } catch { throw 'host-benchmark-installed-route-probe-invalid' }
+    $valid = [string]$route.requested_protocol -ceq 'auto'
+    if ($Protocol -ceq 'v2') {
+        $valid = $valid -and [string]$route.detected_protocol -ceq 'new' -and [string]$route.selected_protocol -ceq 'v2' -and [string]$route.reason -ceq 'eligible-rollout-report' -and [string]$route.rollout_eligibility.status -ceq 'pass'
+    } else {
+        $valid = $valid -and [string]$route.detected_protocol -ceq 'v1' -and [string]$route.selected_protocol -ceq 'v1' -and [string]$route.reason -ceq 'existing-v1-plan' -and [string]$route.rollout_eligibility.status -ceq 'not-required'
+    }
+    if (-not $valid) { throw 'host-benchmark-installed-route-probe-mismatch' }
+    return [ordered]@{
+        requested_protocol=[string]$route.requested_protocol
+        detected_protocol=[string]$route.detected_protocol
+        selected_protocol=[string]$route.selected_protocol
+        reason=[string]$route.reason
+        rollout_status=[string]$route.rollout_eligibility.status
+        report_digest=$route.rollout_eligibility.report_digest
+    }
 }
 
 function Initialize-HostWorkspaceBaseline {
@@ -415,8 +671,13 @@ function Invoke-HostTrial {
         [Parameter(Mandatory)][string]$ExpectedCodexVersion,
         [bool]$SourceBindingRequired = $false,
         [string]$SourceRevision = '',
-        [string]$SourceCommitTree = ''
+        [string]$SourceCommitTree = '',
+        [ValidateSet('cognitive-fast-path','installed-desktop-path')][string]$BenchmarkPath = 'cognitive-fast-path',
+        [AllowEmptyString()][string]$EligibilityReportPath = '',
+        [AllowEmptyString()][string]$ExpectedRolloutReportDigest = '',
+        [AllowEmptyString()][string]$ExpectedRolloutFileDigest = ''
     )
+    $installedMode = $BenchmarkPath -ceq 'installed-desktop-path'
     $trialRoot = Join-Path $ScratchRoot ("$Protocol-$Trial")
     $workspace = Join-Path $trialRoot 'workspace'
     $userRoot = Join-Path $trialRoot 'user'
@@ -424,7 +685,20 @@ function Invoke-HostTrial {
     [void][IO.Directory]::CreateDirectory((Join-Path $workspace 'src'))
     [void][IO.Directory]::CreateDirectory($userRoot)
     [void][IO.Directory]::CreateDirectory($resultRoot)
-    $CodexHome = Assert-HostCodexHome -Path $CodexHome -RepoRoot $RepoRoot -ScratchRoot $ScratchRoot
+    if ($installedMode) {
+        $profileRoot = Assert-InstalledDesktopProfileReady -CodexHome $CodexHome
+        $profileConfigBinding = Get-InstalledDesktopUserConfigBinding -CodexHome $CodexHome
+        $profilePhysical = Get-HostPhysicalPathInfo -Path $profileRoot -RejectLinks
+        foreach ($unsafeRoot in @($RepoRoot,$ScratchRoot)) {
+            $unsafePhysical = Get-HostPhysicalPathInfo -Path $unsafeRoot -RejectLinks
+            if ((Test-HostPathAtOrBelow -Path ([string]$profilePhysical.physical_path) -Root ([string]$unsafePhysical.physical_path)) -or (Test-HostPathAtOrBelow -Path ([string]$unsafePhysical.physical_path) -Root ([string]$profilePhysical.physical_path))) { throw 'host-benchmark-installed-profile-unsafe-location' }
+        }
+        $CodexHome = Assert-HostCodexHome -Path $CodexHome -RepoRoot $RepoRoot -ScratchRoot $ScratchRoot -AllowUserConfig
+        if (-not (Get-InstalledDesktopProfileRoot -CodexHome $CodexHome).Equals($profileRoot,[StringComparison]::OrdinalIgnoreCase)) { throw 'host-benchmark-installed-profile-invalid' }
+        $null = Assert-InstalledDesktopProfileReady -CodexHome $CodexHome
+    } else {
+        $CodexHome = Assert-HostCodexHome -Path $CodexHome -RepoRoot $RepoRoot -ScratchRoot $ScratchRoot
+    }
     $sourceBinding = [ordered]@{status='diagnostic';revision=$SourceRevision;commit_tree_oid=$SourceCommitTree;verification='live-dirty-diagnostic';reason='Dirty live source is diagnostic-only and cannot satisfy release eligibility.'}
     if ($SourceBindingRequired) {
         if ($SourceRevision -cnotmatch '^[0-9a-f]{40,64}$' -or $SourceCommitTree -cnotmatch '^[0-9a-f]{40,64}$') { throw 'host-benchmark-source-identity-invalid' }
@@ -441,6 +715,9 @@ function Invoke-HostTrial {
         $CollectorPath = Join-Path $RepoRoot 'scripts\receive-otlp-http.ps1'
         $sourceBinding = [ordered]@{status='pending';revision=$SourceRevision;commit_tree_oid=$SourceCommitTree;verification='git-head-tree-clean/v1';reason='Trial uses an independent exact commit checkout.'}
     }
+    $pathModule = @(Get-Module Harness.Path -All | Select-Object -Last 1)
+    if ($pathModule.Count -ne 1) { throw 'host-benchmark-path-module-unavailable' }
+    $pathModule = $pathModule[0]
     Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1') -Force -ErrorAction Stop
     [IO.File]::WriteAllText((Join-Path $workspace 'src\value.txt'),'alpha',[Text.UTF8Encoding]::new($false))
     [void](Invoke-HostGit -Root $workspace -Arguments @('init','--quiet'))
@@ -452,16 +729,47 @@ Execute the authorized workspace task directly. This workspace intentionally has
         [IO.File]::WriteAllText((Join-Path $workspace 'AGENTS.md'),$bareRules,[Text.UTF8Encoding]::new($false))
     }
     $savedEnvironment = [ordered]@{}
-    foreach ($name in @('USERPROFILE','CODEX_HOME','HARNESS_PROTOCOL','DEV_HARNESS_WORKSPACE_ROOT','WORKSPACE_ROOT','CODEX_API_KEY','CODEX_ACCESS_TOKEN','OPENAI_API_KEY','CODEX_EXECUTABLE','CODEX_THREAD_ID','CODEX_INTERNAL_ORIGINATOR_OVERRIDE','CODEX_SHELL')) {
+    foreach ($name in @('USERPROFILE','HOME','CODEX_HOME','HARNESS_PROTOCOL','HARNESS_V2_ELIGIBILITY_REPORT','DEV_HARNESS_WORKSPACE_ROOT','WORKSPACE_ROOT','CODEX_API_KEY','CODEX_ACCESS_TOKEN','OPENAI_API_KEY','CODEX_EXECUTABLE','CODEX_THREAD_ID','CODEX_INTERNAL_ORIGINATOR_OVERRIDE','CODEX_SHELL')) {
         $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name,[EnvironmentVariableTarget]::Process)
     }
     $collector = $null
     $trialResult = $null
+    $installedDesktop = [ordered]@{
+        benchmark_path=$BenchmarkPath
+        host_surface=$(if($installedMode){'codex-cli-host-equivalent'}else{'codex-cli-isolated'})
+        user_config_mode=$(if($installedMode){'loaded'}else{'ignored'})
+        profile_config=$(if($installedMode){$profileConfigBinding}else{$null})
+        protocol_environment=$(if($installedMode){'cleared'}else{'explicit-or-cleared'})
+        install_status=$(if($installedMode -and $Protocol -cne 'bare'){'pending'}else{'not-applicable'})
+        verification_status=$(if($installedMode -and $Protocol -cne 'bare'){'pending'}else{'not-applicable'})
+        auth_unchanged=$(if($installedMode -and $Protocol -cne 'bare'){$false}else{$null})
+        route_probe=$null
+        rollout_promotion=$null
+        cleanup_status=$(if($installedMode -and $Protocol -cne 'bare'){'pending'}else{'not-required'})
+        hook_installed=$(if($installedMode -and $Protocol -cne 'bare'){'pending'}else{'not-applicable'})
+        hook_trust='unknown'
+        hook_callability='unknown'
+    }
     try {
-        $env:USERPROFILE = $userRoot
-        Remove-Item Env:CODEX_HOME,Env:DEV_HARNESS_WORKSPACE_ROOT,Env:WORKSPACE_ROOT,Env:CODEX_API_KEY,Env:CODEX_ACCESS_TOKEN,Env:OPENAI_API_KEY,Env:CODEX_EXECUTABLE,Env:CODEX_THREAD_ID,Env:CODEX_INTERNAL_ORIGINATOR_OVERRIDE,Env:CODEX_SHELL -ErrorAction SilentlyContinue
-        if ($Protocol -eq 'bare') { Remove-Item Env:HARNESS_PROTOCOL -ErrorAction SilentlyContinue } else { $env:HARNESS_PROTOCOL = $Protocol }
-        if ($Protocol -ne 'bare') {
+        if ($installedMode) {
+            $env:USERPROFILE = $profileRoot
+            $env:HOME = $profileRoot
+            $env:CODEX_HOME = $CodexHome
+            Remove-Item Env:HARNESS_PROTOCOL,Env:HARNESS_V2_ELIGIBILITY_REPORT,Env:DEV_HARNESS_WORKSPACE_ROOT,Env:WORKSPACE_ROOT,Env:CODEX_API_KEY,Env:CODEX_ACCESS_TOKEN,Env:OPENAI_API_KEY,Env:CODEX_EXECUTABLE,Env:CODEX_THREAD_ID,Env:CODEX_INTERNAL_ORIGINATOR_OVERRIDE,Env:CODEX_SHELL -ErrorAction SilentlyContinue
+        } else {
+            $env:USERPROFILE = $userRoot
+            Remove-Item Env:CODEX_HOME,Env:HARNESS_V2_ELIGIBILITY_REPORT,Env:DEV_HARNESS_WORKSPACE_ROOT,Env:WORKSPACE_ROOT,Env:CODEX_API_KEY,Env:CODEX_ACCESS_TOKEN,Env:OPENAI_API_KEY,Env:CODEX_EXECUTABLE,Env:CODEX_THREAD_ID,Env:CODEX_INTERNAL_ORIGINATOR_OVERRIDE,Env:CODEX_SHELL -ErrorAction SilentlyContinue
+            if ($Protocol -eq 'bare') { Remove-Item Env:HARNESS_PROTOCOL -ErrorAction SilentlyContinue } else { $env:HARNESS_PROTOCOL = $Protocol }
+        }
+        if ($installedMode -and $Protocol -ne 'bare') {
+            $installedDesktop.rollout_promotion = Invoke-InstalledDesktopRolloutPromotion -RepoRoot $RepoRoot -Workspace $workspace -EligibilityReportPath $EligibilityReportPath
+            if ([string]$installedDesktop.rollout_promotion.report_digest -cne $ExpectedRolloutReportDigest -or [string]$installedDesktop.rollout_promotion.file_digest -cne $ExpectedRolloutFileDigest) { throw 'host-benchmark-installed-rollout-binding-changed' }
+            $installResult = Invoke-InstalledDesktopInstall -CodexHome $CodexHome -Workspace $workspace -RepoRoot $RepoRoot
+            $installedDesktop.install_status = [string]$installResult.install_status
+            $installedDesktop.verification_status = [string]$installResult.verification_status
+            $installedDesktop.auth_unchanged = [bool]$installResult.auth_unchanged
+            $installedDesktop.hook_installed = 'verified'
+        } elseif (-not $installedMode -and $Protocol -ne 'bare') {
             $installOutput = @(& pwsh -NoLogo -NoProfile -NonInteractive -File (Join-Path $RepoRoot 'install.ps1') -WorkspaceRoot $workspace -RepoRoot $RepoRoot -Preset core 2>&1 | ForEach-Object { [string]$_ })
             if ($LASTEXITCODE -ne 0) { throw "host benchmark install failed for $Protocol" }
         }
@@ -471,8 +779,9 @@ Execute the authorized workspace task directly. This workspace intentionally has
             . $runtimeCommonPath
         }
         $v1Fixture = if ($Protocol -ceq 'v1') { Initialize-V1FixedWorkflowFixture -Workspace $workspace } else { $null }
+        if ($installedMode -and $Protocol -ne 'bare') { $installedDesktop.route_probe = Invoke-InstalledDesktopRouteProbe -Protocol $Protocol -Workspace $workspace }
         $workspaceBaseline = Initialize-HostWorkspaceBaseline -Workspace $workspace
-        $env:CODEX_HOME = $CodexHome
+        if (-not $installedMode) { $env:CODEX_HOME = $CodexHome }
         $collector = Start-OtlpCollector -CollectorPath $CollectorPath -ResultRoot $resultRoot -TimeoutSeconds ([math]::Min(86400,($MaxRoundTrips*$TimeoutSeconds)+120))
         $trialTimer = [Diagnostics.Stopwatch]::StartNew()
         $codexProcessDuration = 0.0
@@ -523,7 +832,12 @@ Work only inside this workspace. The user explicitly authorizes this complete, r
                 )
             }
             $invocationOffsetMs = $trialTimer.Elapsed.TotalMilliseconds
-            $wrapperOutput = @(& pwsh -NoLogo -NoProfile -NonInteractive -File $WrapperPath -Task $task -Workspace $workspace -Model $Model -Reasoning $Reasoning -Sandbox danger-full-access -ApprovalPolicy never -Ephemeral -AgentOutputOnly -Quiet -Isolated -OutputSchema $SchemaPath -Output $responsePath -TelemetryOutput $telemetryPath @otelArguments -TimeoutSeconds $TimeoutSeconds 2>&1 | ForEach-Object { [string]$_ })
+            $wrapperArguments = @('-NoLogo','-NoProfile','-NonInteractive','-File',$WrapperPath,'-Task',$task,'-Workspace',$workspace,'-Model',$Model,'-Reasoning',$Reasoning,'-Sandbox','danger-full-access','-ApprovalPolicy','never','-Ephemeral','-AgentOutputOnly','-Quiet')
+            if ($installedMode) { $wrapperArguments += '-LoadUserConfig' } else { $wrapperArguments += '-Isolated' }
+            $wrapperArguments += @('-OutputSchema',$SchemaPath,'-Output',$responsePath,'-TelemetryOutput',$telemetryPath)
+            $wrapperArguments += $otelArguments
+            $wrapperArguments += @('-TimeoutSeconds',$TimeoutSeconds)
+            $wrapperOutput = @(& pwsh @wrapperArguments 2>&1 | ForEach-Object { [string]$_ })
             $wrapperExit = $LASTEXITCODE
             if ($wrapperExit -ne 0 -or -not (Test-Path -LiteralPath $responsePath -PathType Leaf) -or -not (Test-Path -LiteralPath $telemetryPath -PathType Leaf)) {
                 $invocationUnavailable = $true
@@ -537,7 +851,8 @@ Work only inside this workspace. The user explicitly authorizes this complete, r
                 $observation = $rawObservation | ConvertFrom-Json -AsHashtable -Depth 20
                 $telemetry = [IO.File]::ReadAllText($telemetryPath,[Text.UTF8Encoding]::new($false,$true)) | ConvertFrom-Json -AsHashtable -Depth 20
                 $otelEnabled = [string]$collector.status -ceq 'measured'
-                if ([string]$telemetry.schema_version -cne 'codex-invocation-telemetry/v1' -or [string]$telemetry.model -cne $Model -or [string]$telemetry.reasoning -cne $Reasoning -or -not [bool]$telemetry.ephemeral -or [string]$telemetry.sandbox -cne 'danger-full-access' -or [string]$telemetry.approval_policy -cne 'never' -or [bool]$telemetry.otel_trace.enabled -ne $otelEnabled) { throw 'invalid telemetry identity' }
+                $userConfigIdentityValid = if ($installedMode) { $telemetry.Contains('user_config_mode') -and [string]$telemetry.user_config_mode -ceq 'loaded' } else { -not $telemetry.Contains('user_config_mode') }
+                if ([string]$telemetry.schema_version -cne 'codex-invocation-telemetry/v1' -or [string]$telemetry.model -cne $Model -or [string]$telemetry.reasoning -cne $Reasoning -or -not [bool]$telemetry.ephemeral -or [string]$telemetry.sandbox -cne 'danger-full-access' -or [string]$telemetry.approval_policy -cne 'never' -or -not $userConfigIdentityValid -or [bool]$telemetry.otel_trace.enabled -ne $otelEnabled) { throw 'invalid telemetry identity' }
                 if ($otelEnabled -and ([string]$telemetry.otel_trace.contract -cne 'codex-0.144.4-successful-websocket-send/v2' -or [string]$telemetry.otel_trace.provenance -cne 'verified-owner-pid-start-time/v1')) { throw 'invalid OTel telemetry contract' }
             } catch {
                 $invocationUnavailable = $true
@@ -608,7 +923,7 @@ Work only inside this workspace. The user explicitly authorizes this complete, r
             }
         }
         $changed = @(Get-HostWorkspaceChanges -Workspace $workspace -BaselineRevision $workspaceBaseline)
-        $safeChangedPaths = Test-HostWorkspaceChangePathsSafe -Workspace $workspace -Paths $changed
+        $safeChangedPaths = Test-HostWorkspaceChangePathsSafe -Workspace $workspace -Paths $changed -PathModule $pathModule
         $artifactAllowlist = @('docs/tasks/host-benchmark-fixed-workflow/plan.md','docs/tasks/host-benchmark-fixed-workflow/test.md','docs/tasks/host-benchmark-fixed-workflow/skill-manifest.json')
         $requiredArtifacts = @('docs/tasks/host-benchmark-fixed-workflow/plan.md','docs/tasks/host-benchmark-fixed-workflow/test.md')
         $runtimeAllowlist = @('.assistant/运行时/当前任务.md','.assistant/运行时/恢复索引.md','.assistant/运行时/tasks/host-benchmark-fixed-workflow.md')
@@ -626,10 +941,20 @@ Work only inside this workspace. The user explicitly authorizes this complete, r
         $writeBoundaryPassed = $unexpectedWrites -eq 0 -and $safeChangedPaths
         $directContractPassed = $Protocol -ceq 'v1' -or ($freshSessions -eq 1 -and $hostTurns -eq 1 -and $artifactWrites -eq 0 -and $runtimeWrites -eq 0)
         $v1ContractPassed = $Protocol -cne 'v1' -or ($freshSessions -eq 5 -and $hostTurns -eq 5 -and ($v1StageJournal -join '>') -ceq 'PLAN_REVIEW>IMPLEMENT>CODE_REVIEW>TEST>DONE' -and ($v1TargetJournal -join '>') -ceq 'alpha>alpha>beta>beta>beta' -and $v1ValidatorPassed -and $v1ArtifactBoundaryPassed -and $artifactWrites -in @(2,3) -and $runtimeWrites -eq 3)
+        $installedContractPassed = -not $installedMode -or ($Protocol -ceq 'bare') -or (
+            [string]$installedDesktop.install_status -ceq 'pass' -and
+            [string]$installedDesktop.verification_status -ceq 'pass' -and
+            [bool]$installedDesktop.auth_unchanged -and
+            [string]$installedDesktop.hook_installed -ceq 'verified' -and
+            [string]$installedDesktop.route_probe.requested_protocol -ceq 'auto' -and
+            [string]$installedDesktop.route_probe.selected_protocol -ceq $Protocol
+        )
         if (-not $writeBoundaryPassed -and $null -eq $diagnostic) { $diagnostic = 'write-boundary-violation' }
         elseif (-not $directContractPassed -and $null -eq $diagnostic) { $diagnostic = 'direct-single-session-contract-violation' }
         elseif (-not $v1ContractPassed -and $null -eq $diagnostic) { $diagnostic = 'v1-fixed-workflow-contract-violation' }
-        $complete = $observationComplete -and $targetPassed -and $workflowCompleted -and $writeBoundaryPassed -and $directContractPassed -and $v1ContractPassed
+        elseif (-not $installedContractPassed -and $null -eq $diagnostic) { $diagnostic = 'installed-desktop-contract-violation' }
+        if (-not $installedContractPassed) { $contractFailure = $true }
+        $complete = $observationComplete -and $targetPassed -and $workflowCompleted -and $writeBoundaryPassed -and $directContractPassed -and $v1ContractPassed -and $installedContractPassed
         if ($SourceBindingRequired) {
             $sourceStateAfter = Get-HostGitState -Root $RepoRoot -IncludeIgnored
             if ([string]$sourceStateAfter.revision -ceq $SourceRevision -and [string]$sourceStateAfter.commit_tree_oid -ceq $SourceCommitTree -and -not [bool]$sourceStateAfter.dirty) {
@@ -658,6 +983,7 @@ Work only inside this workspace. The user explicitly authorizes this complete, r
             artifact_writes=$artifactWrites;runtime_writes=$runtimeWrites;unexpected_writes=$unexpectedWrites;raw_trace_deleted=$false;post_trial_diagnostics=@()
             tokens=[ordered]@{status=$tokenStatus;input=$(if($tokenStatus-ceq'measured'){$inputTokens}else{$null});cached_input=$(if($tokenStatus-ceq'measured'){$cachedInputTokens}else{$null});output=$(if($tokenStatus-ceq'measured'){$outputTokens}else{$null})}
         }
+        if ($installedMode) { $trialResult['installed_desktop'] = $installedDesktop }
     } finally {
         if ($null -ne $collector -and $null -ne $collector.process) { [void](Stop-OtlpCollector -Collector $collector) }
         $pendingCleanup = $null
@@ -670,7 +996,15 @@ Work only inside this workspace. The user explicitly authorizes this complete, r
         }
         $finalTraceRemoved = if ($null -eq $collector) { $true } elseif ($null -ne $collector.process) { $false } else { Remove-HostRawTrace -TraceRoot ([string]$collector.trace_root) -ResultRoot $resultRoot -SafetyRoot $trialRoot }
         $authLayoutValid = $true
-        try { $null = Assert-HostCodexHomeLayout -Path $CodexHome } catch { $authLayoutValid = $false }
+        $profileConfigStable = $true
+        try {
+            if ($installedMode -and $Protocol -cne 'bare') { $null = Assert-HostCodexHomeLayout -Path $CodexHome -AllowUserConfig -AllowInstalledAssets }
+            elseif ($installedMode) { $null = Assert-InstalledDesktopProfileReady -CodexHome $CodexHome }
+            else { $null = Assert-HostCodexHomeLayout -Path $CodexHome }
+        } catch { $authLayoutValid = $false }
+        if ($installedMode) {
+            try { $profileConfigStable = Test-InstalledDesktopUserConfigBinding -Expected $profileConfigBinding -Actual (Get-InstalledDesktopUserConfigBinding -CodexHome $CodexHome) } catch { $profileConfigStable = $false }
+        }
         if ($null -ne $trialResult) {
             $trialResult.raw_trace_deleted = $finalTraceRemoved
             $postTrialDiagnostics = [Collections.Generic.List[string]]::new()
@@ -684,10 +1018,19 @@ Work only inside this workspace. The user explicitly authorizes this complete, r
                 $trialResult.completion_passed = $false
             }
             if (-not $authLayoutValid) {
-                $postTrialDiagnostics.Add('isolated-auth-home-changed')
+                $authDiagnostic = if ($installedMode) { 'installed-desktop-profile-changed' } else { 'isolated-auth-home-changed' }
+                $postTrialDiagnostics.Add($authDiagnostic)
                 if ([string]$trialResult.status -cne 'fail') {
                     $trialResult.status = 'unavailable'
-                    $trialResult.diagnostic = 'isolated-auth-home-changed'
+                    $trialResult.diagnostic = $authDiagnostic
+                }
+                $trialResult.completion_passed = $false
+            }
+            if (-not $profileConfigStable) {
+                $postTrialDiagnostics.Add('installed-desktop-config-changed')
+                if ([string]$trialResult.status -cne 'fail') {
+                    $trialResult.status = 'unavailable'
+                    $trialResult.diagnostic = 'installed-desktop-config-changed'
                 }
                 $trialResult.completion_passed = $false
             }
