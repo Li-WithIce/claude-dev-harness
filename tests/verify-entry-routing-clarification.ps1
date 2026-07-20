@@ -77,6 +77,13 @@ foreach ($caseId in @(
 }
 Need-Text $entryContractPath 'Only a detector-selected v1 request loads `entry-router`'
 Need-Text $entryContractPath 'An unresolved Requirement or product decision blocks every write and enters Ask'
+$publicScopeRule = '- A public-contract change found outside confirmed scope stays unresolved until the user explicitly confirms this change; continuation alone enters Ask and authorizes no write.'
+$entryContractText = Read-RepoFile -Path $entryContractPath
+$publicScopePattern = '(?m)^' + [regex]::Escape($publicScopeRule) + '\r?$'
+$commentRelocation = $entryContractText.Replace($publicScopeRule, ('<!-- {0} -->' -f $publicScopeRule))
+if (@([regex]::Matches($entryContractText, $publicScopePattern)).Count -ne 1 -or [regex]::IsMatch($commentRelocation, $publicScopePattern)) {
+    $failures.Add("$entryContractPath must contain one active public-scope Ask bullet and reject comment relocation") | Out-Null
+}
 Need-Text $entryContractPath 'Read-only work performs zero writes'
 Need-Text 'skills/entry-router/SKILL.md' 'route identity does not broaden requested action'
 Need-Text 'skills/entry-router/SKILL.md' 'read-only inspect/status 保持 minimal context 和零写'

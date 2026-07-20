@@ -9,6 +9,7 @@ Canonical workspace bootstrap. A host-global file that natively consumes the res
 - Resolve protocol before workflow routing. For a known task, run `.assistant\entry\task.ps1 protocol -TaskId {task_id}`: v2 `task.json` wins, then v1 `plan.md`. For a new task, `auto` selects v2 only with a current all-pass rollout report and otherwise returns a v1 fallback. Missing, corrupt, conflicting, or stale evidence fails closed.
 - `HARNESS_PROTOCOL=v2` classifies a new task inline before v1 routing. Selected v2 Direct loads no `entry-router`, `orchestrator`, lifecycle skill, Memory, Team, or Provider.
 - An unresolved Requirement or product decision blocks every write and enters Ask. Protected, expanded-scope, or non-Direct results reroute before writes.
+- A public-contract change found outside confirmed scope stays unresolved until the user explicitly confirms this change; continuation alone enters Ask and authorizes no write.
 - Clear Direct hands off to the main Agent: `understand -> edit -> focused verification -> self-review -> report`. Direct writes no task/runtime/current state and creates no lifecycle artifact.
 - Read-only work performs zero writes. Response Evidence contains actual commands/results, self-review, and remaining gaps; `not_run` or unavailable never means pass.
 - Only a detector-selected v1 request loads `entry-router`; missing v1 compatibility rules fail closed. That lazy path may then load `orchestrator` and one current-stage skill.
