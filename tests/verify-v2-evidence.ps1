@@ -11,9 +11,29 @@ $taskScript=Join-Path $RepoRoot 'scripts/task.ps1';$script:passes=[Collections.G
 function Check($Condition,$Pass,$Fail){if($Condition){$script:passes.Add($Pass)}else{$script:failures.Add($Fail)}}
 function Snapshot($Root){$items=@(Get-ChildItem -LiteralPath $Root -Force -Recurse);$entries=[Collections.Generic.List[string]]::new();foreach($item in @($items|Where-Object{$_.PSIsContainer})){$entries.Add('D|'+$item.FullName)};foreach($hash in @($items|Where-Object{-not$_.PSIsContainer}|Get-FileHash -Algorithm SHA256)){$entries.Add('F|'+$hash.Path+'|'+$hash.Hash)};return @($entries|Sort-Object)}
 function Same($Before,$After,$Pass,$Fail){Check (@(Compare-Object @($Before) @($After)).Count -eq 0) $Pass $Fail}
-function Start-Cli($Workspace,[string[]]$Arguments,$Fault='',$FaultBeforeFirstClaim='',$DelayBeforeFirstClaim=''){$old=$env:HARNESS_PROTOCOL;$oldFault=$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_AFTER_STEP;$oldPreclaim=$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_FIRST_CLAIM;$oldDelay=$env:DEV_HARNESS_TEST_TASK_STATE_DELAY_BEFORE_FIRST_CLAIM_MS;try{$env:HARNESS_PROTOCOL='v2';if($Fault){$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_AFTER_STEP=$Fault}else{Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_FAIL_AFTER_STEP -ErrorAction Ignore};if($FaultBeforeFirstClaim){$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_FIRST_CLAIM=$FaultBeforeFirstClaim}else{Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_FIRST_CLAIM -ErrorAction Ignore};if($DelayBeforeFirstClaim){$env:DEV_HARNESS_TEST_TASK_STATE_DELAY_BEFORE_FIRST_CLAIM_MS=$DelayBeforeFirstClaim}else{Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_DELAY_BEFORE_FIRST_CLAIM_MS -ErrorAction Ignore};return Start-RepoProcess -UserProfile $env:USERPROFILE -ScriptPath $taskScript -Arguments ($Arguments+@('-RepoRoot',$RepoRoot,'-WorkspaceRoot',$Workspace))}finally{if($null-eq$old){Remove-Item Env:HARNESS_PROTOCOL -ErrorAction Ignore}else{$env:HARNESS_PROTOCOL=$old};if($null-eq$oldFault){Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_FAIL_AFTER_STEP -ErrorAction Ignore}else{$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_AFTER_STEP=$oldFault};if($null-eq$oldPreclaim){Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_FIRST_CLAIM -ErrorAction Ignore}else{$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_FIRST_CLAIM=$oldPreclaim};if($null-eq$oldDelay){Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_DELAY_BEFORE_FIRST_CLAIM_MS -ErrorAction Ignore}else{$env:DEV_HARNESS_TEST_TASK_STATE_DELAY_BEFORE_FIRST_CLAIM_MS=$oldDelay}}}
+function Start-Cli($Workspace,[string[]]$Arguments,$Fault='',$FaultBeforeFirstClaim='',$PreclaimReadyEvent='',$PreclaimReleaseEvent=''){
+    $old=$env:HARNESS_PROTOCOL
+    $oldFault=$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_AFTER_STEP
+    $oldPreclaim=$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_FIRST_CLAIM
+    $oldReady=[Environment]::GetEnvironmentVariable('DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_READY_EVENT',[EnvironmentVariableTarget]::Process)
+    $oldRelease=[Environment]::GetEnvironmentVariable('DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_RELEASE_EVENT',[EnvironmentVariableTarget]::Process)
+    try{
+        $env:HARNESS_PROTOCOL='v2'
+        if($Fault){$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_AFTER_STEP=$Fault}else{Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_FAIL_AFTER_STEP -ErrorAction Ignore}
+        if($FaultBeforeFirstClaim){$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_FIRST_CLAIM=$FaultBeforeFirstClaim}else{Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_FIRST_CLAIM -ErrorAction Ignore}
+        if($PreclaimReadyEvent){$env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_READY_EVENT=$PreclaimReadyEvent}else{Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_READY_EVENT -ErrorAction Ignore}
+        if($PreclaimReleaseEvent){$env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_RELEASE_EVENT=$PreclaimReleaseEvent}else{Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_RELEASE_EVENT -ErrorAction Ignore}
+        return Start-RepoProcess -UserProfile $env:USERPROFILE -ScriptPath $taskScript -Arguments ($Arguments+@('-RepoRoot',$RepoRoot,'-WorkspaceRoot',$Workspace))
+    }finally{
+        if($null-eq$old){Remove-Item Env:HARNESS_PROTOCOL -ErrorAction Ignore}else{$env:HARNESS_PROTOCOL=$old}
+        if($null-eq$oldFault){Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_FAIL_AFTER_STEP -ErrorAction Ignore}else{$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_AFTER_STEP=$oldFault}
+        if($null-eq$oldPreclaim){Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_FIRST_CLAIM -ErrorAction Ignore}else{$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_FIRST_CLAIM=$oldPreclaim}
+        if($null-eq$oldReady){Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_READY_EVENT -ErrorAction Ignore}else{$env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_READY_EVENT=$oldReady}
+        if($null-eq$oldRelease){Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_RELEASE_EVENT -ErrorAction Ignore}else{$env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_RELEASE_EVENT=$oldRelease}
+    }
+}
 function Complete-Cli($Handle){if(-not$Handle.Process.WaitForExit(30000)){$Handle.Process.Kill($true);throw 'CLI timeout'};$r=[pscustomobject]@{ExitCode=$Handle.Process.ExitCode;StdOut=$Handle.StdOut.GetAwaiter().GetResult().Trim();StdErr=$Handle.StdErr.GetAwaiter().GetResult().Trim()};$Handle.Process.Dispose();return $r}
-function Invoke-Cli($Workspace,[string[]]$Arguments,$Fault='',$FaultBeforeFirstClaim='',$DelayBeforeFirstClaim=''){return Complete-Cli (Start-Cli $Workspace $Arguments $Fault $FaultBeforeFirstClaim $DelayBeforeFirstClaim)}
+function Invoke-Cli($Workspace,[string[]]$Arguments,$Fault='',$FaultBeforeFirstClaim=''){return Complete-Cli (Start-Cli $Workspace $Arguments $Fault $FaultBeforeFirstClaim)}
 function Read-Output($Result){if($Result.StdOut){return $Result.StdOut|ConvertFrom-Json -Depth 50 -DateKind String};return $null}
 
 function Write-Contract($Workspace,$TaskId){
@@ -99,9 +119,63 @@ Check ($replay.ExitCode-eq 0-and(Read-Output $replay).result-ceq'recovered'-and$
 $preclaimEvidence=New-EvidenceFixture $workspace 'preclaim-task' $contracts['preclaim-task'].Digest 'pass';$preclaimFault=Invoke-Cli $workspace @('verify','-TaskId','preclaim-task','-ExpectedVersion','3','-Evidence',$preclaimEvidence.Path,'-AsJson') '' '1';$preclaimMatch=[regex]::Match($preclaimFault.StdErr,'TransactionId=(txn_[0-9a-f]{32})');$preclaimId=$(if($preclaimMatch.Success){$preclaimMatch.Groups[1].Value}else{''});$preclaimClaims=@(Get-ChildItem -LiteralPath (Join-Path $workspace '.assistant/runtime/locks') -Filter 'step_*.json' -File -ErrorAction SilentlyContinue);$preclaimDriftPath=Join-Path $workspace 'preclaim-drift.txt';[IO.File]::WriteAllText($preclaimDriftPath,"later change`n",[Text.UTF8Encoding]::new($false));$preclaimSnap=Snapshot $workspace;$preclaimReplay=$(if($preclaimId){Invoke-Cli $workspace @('replay','-TransactionId',$preclaimId,'-AsJson')}else{$preclaimFault})
 Check ($preclaimFault.ExitCode-eq2-and$preclaimMatch.Success-and$preclaimClaims.Count-eq0-and$preclaimReplay.ExitCode-eq2-and$preclaimReplay.StdErr-match'Evidence .* revision is stale') 'claim-free Evidence replay revalidates the live workspace revision' 'claim-free replay accepted stale Evidence without publication ownership';Same $preclaimSnap (Snapshot $workspace) 'claim-free revision rejection is zero-write' 'claim-free revision rejection wrote state';Remove-Item -LiteralPath $preclaimDriftPath -Force
 
-$writerEvidence=New-EvidenceFixture $workspace 'writer-preclaim-task' $contracts['writer-preclaim-task'].Digest 'pass';$writerPendingBefore=@(Get-ChildItem -LiteralPath (Join-Path $workspace '.assistant/runtime/failed-writes') -Filter 'txn_*.json' -File -ErrorAction SilentlyContinue|Select-Object -ExpandProperty BaseName);$writerHandle=Start-Cli $workspace @('verify','-TaskId','writer-preclaim-task','-ExpectedVersion','3','-Evidence',$writerEvidence.Path,'-AsJson') '' '' '4000';$writerPending=$null;$writerDeadline=[datetime]::UtcNow.AddSeconds(10);while($null-eq$writerPending-and[datetime]::UtcNow-lt$writerDeadline){$writerPending=Get-ChildItem -LiteralPath (Join-Path $workspace '.assistant/runtime/failed-writes') -Filter 'txn_*.json' -File -ErrorAction SilentlyContinue|Where-Object{$writerPendingBefore -notcontains $_.BaseName}|Select-Object -First 1;if($null-eq$writerPending){Start-Sleep -Milliseconds 25}};$writerDriftPath=Join-Path $workspace 'normal-writer-drift.txt';[IO.File]::WriteAllText($writerDriftPath,"drift before first claim`n",[Text.UTF8Encoding]::new($false));$writerResult=Complete-Cli $writerHandle;$writerStatus=Read-Output (Invoke-Cli $workspace @('status','-TaskId','writer-preclaim-task','-AsJson'));$writerClaims=@(Get-ChildItem -LiteralPath (Join-Path $workspace '.assistant/runtime/locks') -Filter 'step_*.json' -File -ErrorAction SilentlyContinue);$writerArtifact=Join-Path $workspace 'docs/tasks/writer-preclaim-task/evidence.json';$writerId=$(if($null-ne$writerPending){$writerPending.BaseName}else{''})
-Check ($null-ne$writerPending-and$writerResult.ExitCode-eq2-and$writerResult.StdErr-match'Evidence .* revision is stale'-and$writerStatus.task.version-eq3-and$writerStatus.task.status-ceq'verifying'-and-not(Test-Path $writerArtifact)-and$writerClaims.Count-eq0) 'normal writer revalidates the live Evidence revision before its first publication claim' 'normal writer published stale Evidence after pre-claim revision drift';Remove-Item -LiteralPath $writerDriftPath -Force;$writerReplay=$(if($writerId){Invoke-Cli $workspace @('replay','-TransactionId',$writerId,'-AsJson')}else{$writerResult});$writerRecovered=Read-Output $writerReplay
-Check ($writerReplay.ExitCode-eq0-and$writerRecovered.result-ceq'recovered'-and$writerRecovered.completed_steps.Count-ge3) 'claim-free writer rejection remains replayable after the live revision is restored' 'pre-claim revision rejection stranded its transaction'
+if($runningOnWindows){
+    $writerEvidence=New-EvidenceFixture $workspace 'writer-preclaim-task' $contracts['writer-preclaim-task'].Digest 'pass'
+    $writerPendingBefore=@(Get-ChildItem -LiteralPath (Join-Path $workspace '.assistant/runtime/failed-writes') -Filter 'txn_*.json' -File -ErrorAction SilentlyContinue|Select-Object -ExpandProperty BaseName)
+    $writerBarrierId=[guid]::NewGuid().ToString('N')
+    $writerReadyName="Local\dev-harness.task-state.preclaim.ready.$writerBarrierId"
+    $writerReleaseName="Local\dev-harness.task-state.preclaim.release.$writerBarrierId"
+    $writerReadyCreated=$false
+    $writerReleaseCreated=$false
+    $writerReadyEvent=$null
+    $writerReleaseEvent=$null
+    $writerHandle=$null
+    $writerDriftPath=Join-Path $workspace 'normal-writer-drift.txt'
+    $writerArtifact=Join-Path $workspace 'docs/tasks/writer-preclaim-task/evidence.json'
+    try{
+        $writerReadyEvent=[Threading.EventWaitHandle]::new($false,[Threading.EventResetMode]::ManualReset,$writerReadyName,[ref]$writerReadyCreated)
+        $writerReleaseEvent=[Threading.EventWaitHandle]::new($false,[Threading.EventResetMode]::ManualReset,$writerReleaseName,[ref]$writerReleaseCreated)
+        if(-not$writerReadyCreated-or-not$writerReleaseCreated-or$writerReadyEvent.WaitOne(0)-or$writerReleaseEvent.WaitOne(0)){throw 'Evidence preclaim barrier events were not created in a fresh unsignaled state'}
+        $writerHandle=Start-Cli $workspace @('verify','-TaskId','writer-preclaim-task','-ExpectedVersion','3','-Evidence',$writerEvidence.Path,'-AsJson') '' '' $writerReadyName $writerReleaseName
+        try{
+            $writerReadyObserved=$writerReadyEvent.WaitOne(30000)
+            $writerExitedBeforeRelease=$writerHandle.Process.HasExited
+            $writerPendingMatches=@(Get-ChildItem -LiteralPath (Join-Path $workspace '.assistant/runtime/failed-writes') -Filter 'txn_*.json' -File -ErrorAction SilentlyContinue|Where-Object{$writerPendingBefore -notcontains $_.BaseName})
+            $writerPendingCount=$writerPendingMatches.Count
+            $writerPending=$(if($writerPendingCount-eq1){$writerPendingMatches[0]}else{$null})
+            $writerJournal=$(if($null-ne$writerPending){Get-Content -LiteralPath $writerPending.FullName -Raw -Encoding utf8|ConvertFrom-Json -AsHashtable -DateKind String}else{$null})
+            $writerJournalPrepared=$null-ne$writerJournal-and[string]$writerJournal.status-ceq'prepared'-and@($writerJournal.completed_steps).Count-eq0
+            $writerClaimsBefore=@(Get-ChildItem -LiteralPath (Join-Path $workspace '.assistant/runtime/locks') -Filter 'step_*.json' -File -ErrorAction SilentlyContinue)
+            $writerArtifactBefore=Test-Path -LiteralPath $writerArtifact
+            if($writerReadyObserved){[IO.File]::WriteAllText($writerDriftPath,"drift before first claim`n",[Text.UTF8Encoding]::new($false))}
+        }finally{
+            [void]$writerReleaseEvent.Set()
+        }
+        $writerResult=Complete-Cli $writerHandle
+        $writerHandle=$null
+        $writerStatus=Read-Output (Invoke-Cli $workspace @('status','-TaskId','writer-preclaim-task','-AsJson'))
+        $writerClaimsAfter=@(Get-ChildItem -LiteralPath (Join-Path $workspace '.assistant/runtime/locks') -Filter 'step_*.json' -File -ErrorAction SilentlyContinue)
+        $writerArtifactAfter=Test-Path -LiteralPath $writerArtifact
+        $writerStaleError=$writerResult.StdErr-match'Evidence .* revision is stale'
+        $writerId=$(if($null-ne$writerPending){$writerPending.BaseName}else{''})
+        $writerDiagnostic="ready=$writerReadyObserved pending_count=$writerPendingCount prepared=$writerJournalPrepared exited_before_release=$writerExitedBeforeRelease artifact_before=$writerArtifactBefore claims_before=$($writerClaimsBefore.Count) writer_exit=$($writerResult.ExitCode) stale_error=$writerStaleError task_version=$($writerStatus.task.version) task_status=$($writerStatus.task.status) artifact_after=$writerArtifactAfter claims_after=$($writerClaimsAfter.Count)"
+        Check ($writerReadyCreated-and$writerReleaseCreated-and$writerReadyObserved-and-not$writerExitedBeforeRelease-and$writerPendingCount-eq1-and$writerJournalPrepared-and-not$writerArtifactBefore-and$writerClaimsBefore.Count-eq0-and$writerResult.ExitCode-eq2-and$writerStaleError-and$writerStatus.task.version-eq3-and$writerStatus.task.status-ceq'verifying'-and-not$writerArtifactAfter-and$writerClaimsAfter.Count-eq0) 'normal writer revalidates the live Evidence revision before its first publication claim' "normal writer pre-claim synchronization or stale rejection failed: $writerDiagnostic"
+        Remove-Item -LiteralPath $writerDriftPath -Force -ErrorAction SilentlyContinue
+        $writerReplay=$(if($writerId){Invoke-Cli $workspace @('replay','-TransactionId',$writerId,'-AsJson')}else{$writerResult})
+        $writerRecovered=Read-Output $writerReplay
+        $writerReplayResult=$(if($null-ne$writerRecovered){[string]$writerRecovered.result}else{''})
+        $writerCompletedSteps=$(if($null-ne$writerRecovered){@($writerRecovered.completed_steps).Count}else{0})
+        Check ($writerReplay.ExitCode-eq0-and$writerReplayResult-ceq'recovered'-and$writerCompletedSteps-ge3) 'claim-free writer rejection remains replayable after the live revision is restored' "pre-claim revision rejection replay failed: replay_exit=$($writerReplay.ExitCode) replay_result=$writerReplayResult completed_steps=$writerCompletedSteps transaction_id_present=$(-not[string]::IsNullOrWhiteSpace($writerId))"
+    }finally{
+        if($null-ne$writerReleaseEvent){[void]$writerReleaseEvent.Set()}
+        if($null-ne$writerHandle){try{[void](Complete-Cli $writerHandle)}catch{}}
+        if($null-ne$writerReleaseEvent){$writerReleaseEvent.Dispose()}
+        if($null-ne$writerReadyEvent){$writerReadyEvent.Dispose()}
+        Remove-Item -LiteralPath $writerDriftPath -Force -ErrorAction SilentlyContinue
+    }
+}else{
+    $script:unavailable.Add('normal writer pre-claim synchronization requires Windows named events')
+}
 
 if(-not[string]::IsNullOrWhiteSpace($volumeAlias)){$aliasEvidence=New-EvidenceFixture $workspace 'alias-task' $contracts['alias-task'].Digest 'pass';$aliasFault=Invoke-Cli $workspace @('verify','-TaskId','alias-task','-ExpectedVersion','3','-Evidence',$aliasEvidence.Path,'-AsJson') '' '1';$aliasMatch=[regex]::Match($aliasFault.StdErr,'TransactionId=(txn_[0-9a-f]{32})');$aliasId=$(if($aliasMatch.Success){$aliasMatch.Groups[1].Value}else{''});$aliasReplay=$(if($aliasId){Invoke-Cli $volumeAlias @('replay','-TransactionId',$aliasId,'-AsJson')}else{$aliasFault});$aliasStatus=Read-Output (Invoke-Cli $workspace @('status','-TaskId','alias-task','-AsJson'));Check ($aliasFault.ExitCode-eq2-and$aliasMatch.Success-and$aliasReplay.ExitCode-eq0-and(Read-Output $aliasReplay).result-ceq'recovered'-and$aliasStatus.task.status-ceq'done') 'claim-free Evidence replay accepts a volume-GUID spelling of the same physical workspace' "volume-GUID Evidence replay failed: faultExit=$($aliasFault.ExitCode) fault=[$($aliasFault.StdErr)] replayExit=$($aliasReplay.ExitCode) replay=[$($aliasReplay.StdErr)]"}
 

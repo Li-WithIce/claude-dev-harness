@@ -1446,9 +1446,27 @@ function Invoke-TaskStateTransaction {
     $faultBeforeClaimRelease = 0
     [void][int]::TryParse([System.Environment]::GetEnvironmentVariable('DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_CLAIM_RELEASE'),[ref]$faultBeforeClaimRelease)
     try {
-        $delayBeforeFirstClaim = 0
-        [void][int]::TryParse([System.Environment]::GetEnvironmentVariable('DEV_HARNESS_TEST_TASK_STATE_DELAY_BEFORE_FIRST_CLAIM_MS'),[ref]$delayBeforeFirstClaim)
-        if ($delayBeforeFirstClaim -gt 0) { Start-Sleep -Milliseconds ([Math]::Min($delayBeforeFirstClaim,5000)) }
+        $preclaimReadyEventName = [System.Environment]::GetEnvironmentVariable('DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_READY_EVENT',[System.EnvironmentVariableTarget]::Process)
+        $preclaimReleaseEventName = [System.Environment]::GetEnvironmentVariable('DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_RELEASE_EVENT',[System.EnvironmentVariableTarget]::Process)
+        $hasPreclaimReadyEvent = -not [string]::IsNullOrWhiteSpace($preclaimReadyEventName)
+        $hasPreclaimReleaseEvent = -not [string]::IsNullOrWhiteSpace($preclaimReleaseEventName)
+        if ($hasPreclaimReadyEvent -xor $hasPreclaimReleaseEvent) {
+            throw 'task-state preclaim test barrier requires both DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_READY_EVENT and DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_RELEASE_EVENT'
+        }
+        if ($hasPreclaimReadyEvent) {
+            if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) { throw 'task-state preclaim test barrier requires Windows named events' }
+            $preclaimReadyEvent = $null
+            $preclaimReleaseEvent = $null
+            try {
+                $preclaimReadyEvent = [System.Threading.EventWaitHandle]::OpenExisting($preclaimReadyEventName)
+                $preclaimReleaseEvent = [System.Threading.EventWaitHandle]::OpenExisting($preclaimReleaseEventName)
+                [void]$preclaimReadyEvent.Set()
+                if (-not $preclaimReleaseEvent.WaitOne(30000)) { throw 'task-state preclaim test barrier release timed out after 30000 ms' }
+            } finally {
+                if ($null -ne $preclaimReleaseEvent) { $preclaimReleaseEvent.Dispose() }
+                if ($null -ne $preclaimReadyEvent) { $preclaimReadyEvent.Dispose() }
+            }
+        }
         Assert-TransactionReplayInputs -WorkspaceRoot $WorkspaceRoot -Journal $Journal
         if ([System.Environment]::GetEnvironmentVariable('DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_FIRST_CLAIM') -ceq '1') {
             throw 'injected task-state fault before first publication claim'
