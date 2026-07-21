@@ -1057,6 +1057,11 @@ Execute the authorized workspace task directly. This workspace intentionally has
             . $runtimeCommonPath
         }
         $v1Fixture = if ($Protocol -ceq 'v1') { Initialize-V1FixedWorkflowFixture -Workspace $workspace } else { $null }
+        $v1ArtifactAllowlist = @('docs/tasks/host-benchmark-fixed-workflow/plan.md','docs/tasks/host-benchmark-fixed-workflow/test.md','docs/tasks/host-benchmark-fixed-workflow/skill-manifest.json')
+        $v1RequiredArtifacts = @('docs/tasks/host-benchmark-fixed-workflow/plan.md','docs/tasks/host-benchmark-fixed-workflow/test.md')
+        $v1RuntimeAllowlist = @('.assistant/运行时/当前任务.md','.assistant/运行时/恢复索引.md','.assistant/运行时/tasks/host-benchmark-fixed-workflow.md')
+        $v1AllowedWritePaths = @('src/value.txt') + $v1ArtifactAllowlist + $v1RuntimeAllowlist
+        $v1AllowedWritePathText = @($v1AllowedWritePaths | ForEach-Object { "'$_'" }) -join ', '
         if ($installedMode -and $Protocol -ne 'bare') { $installedDesktop.route_probe = Invoke-InstalledDesktopRouteProbe -Protocol $Protocol -Workspace $workspace }
         $workspaceBaseline = Initialize-HostWorkspaceBaseline -Workspace $workspace
         if (-not $installedMode) { $env:CODEX_HOME = $CodexHome }
@@ -1110,8 +1115,13 @@ Execute the authorized workspace task directly. This workspace intentionally has
             } else {
                 'Change only src/value.txt from exactly alpha to exactly beta, then verify that its exact bytes are beta.'
             }
+            $writeBoundaryContract = if ($Protocol -ceq 'v1') {
+                "The only paths this fixed comparator may change are $v1AllowedWritePathText. Do not create or change any other path, including temporary, log, backup, or verification files."
+            } else {
+                "Change no path other than 'src/value.txt'. Do not create task, runtime, artifact, temporary, log, backup, or verification files."
+            }
             $task = @"
-Work only inside this workspace. The user explicitly authorizes this complete, reversible, private one-file task and all normal harness stage transitions needed to finish it. $routeContext $taskAction Do not ask about scope, acceptance, rollback, or authorization: they are fully confirmed here. Do not change another user file; harness-required task/runtime records are allowed. Return only schema-valid JSON. Set task_completed and verification_passed true only after the exact file check required for this turn has actually passed and, for the fixed v1 comparator, its plan stage is DONE.
+Work only inside this workspace. The user explicitly authorizes this complete, reversible, private one-file task and all normal harness stage transitions needed to finish it. $routeContext $taskAction Do not ask about scope, acceptance, rollback, or authorization: they are fully confirmed here. $writeBoundaryContract Return only schema-valid JSON. Set task_completed and verification_passed true only after the exact file check required for this turn has actually passed and, for the fixed v1 comparator, its plan stage is DONE.
 "@
             $otelArguments = @()
             if ([string]$collector.status -ceq 'measured') {
@@ -1214,16 +1224,13 @@ Work only inside this workspace. The user explicitly authorizes this complete, r
         }
         $changed = @(Get-HostWorkspaceChanges -Workspace $workspace -BaselineRevision $workspaceBaseline)
         $safeChangedPaths = Test-HostWorkspaceChangePathsSafe -Workspace $workspace -Paths $changed -PathModule $pathModule
-        $artifactAllowlist = @('docs/tasks/host-benchmark-fixed-workflow/plan.md','docs/tasks/host-benchmark-fixed-workflow/test.md','docs/tasks/host-benchmark-fixed-workflow/skill-manifest.json')
-        $requiredArtifacts = @('docs/tasks/host-benchmark-fixed-workflow/plan.md','docs/tasks/host-benchmark-fixed-workflow/test.md')
-        $runtimeAllowlist = @('.assistant/运行时/当前任务.md','.assistant/运行时/恢复索引.md','.assistant/运行时/tasks/host-benchmark-fixed-workflow.md')
         $artifactChanges = @($changed | Where-Object { $_.StartsWith('docs/tasks/',[StringComparison]::Ordinal) })
         $artifactWrites = $artifactChanges.Count
-        $v1ArtifactBoundaryPassed = $Protocol -cne 'v1' -or (@($artifactChanges | Where-Object { $_ -cnotin $artifactAllowlist }).Count -eq 0 -and @($requiredArtifacts | Where-Object { $_ -cnotin $artifactChanges }).Count -eq 0)
+        $v1ArtifactBoundaryPassed = $Protocol -cne 'v1' -or (@($artifactChanges | Where-Object { $_ -cnotin $v1ArtifactAllowlist }).Count -eq 0 -and @($v1RequiredArtifacts | Where-Object { $_ -cnotin $artifactChanges }).Count -eq 0)
         $runtimeWrites = @($changed | Where-Object { $_.StartsWith('.assistant/runtime/',[StringComparison]::Ordinal) -or $_.StartsWith('.assistant/运行时/',[StringComparison]::Ordinal) }).Count
         $unexpectedWrites = @($changed | Where-Object {
             if ($_ -ceq 'src/value.txt') { return $false }
-            if ($Protocol -ceq 'v1' -and ($_ -cin $artifactAllowlist -or $_ -cin $runtimeAllowlist)) { return $false }
+            if ($Protocol -ceq 'v1' -and $_ -cin $v1AllowedWritePaths) { return $false }
             return $true
         }).Count
         $targetPassed = Test-HostExactUtf8File -Path (Join-Path $workspace 'src\value.txt') -ExpectedText 'beta'

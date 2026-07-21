@@ -7,20 +7,20 @@
 - Claude follows the workspace single-writer model. Multi-step `mode=workflow` start/switch/pause may sync runtime; standalone quick/read-only work does not.
 
 <!-- BEGIN GENERATED ENTRY CONTRACT -->
-<!-- source-sha256: fcb06a5b2be53e1464aae33463c34c9e01ce1b9ae0e17fce2d290fa130157494 -->
+<!-- source-sha256: 73d79051219aaa45de69a28e5924316397cb3f3e1408130a2e4caac11b91c5b0 -->
 # Entry Contract Bootstrap
 
-Canonical workspace bootstrap. A host-global file that natively consumes the resolved workspace entry stays overlay-only; a host without that native workspace entry carries this short bootstrap. Full v1 routing and lifecycle rules stay lazy in `entry-router` and `orchestrator`.
+Bootstrap only; routes/lifecycle stay lazy.
 
 - `protocol_default`: `auto`
 - `auto_resolves_to`: `existing-artifact-or-gated-v2-new`
 - `v2_entry_activation`: `explicit-new-or-existing-v2-or-eligible-auto-new`
 
-- Resolve protocol before workflow routing. For a known task, run `.assistant\entry\task.ps1 protocol -TaskId {task_id}`: v2 `task.json` wins, then v1 `plan.md`. For a new task, `auto` selects v2 only with a current all-pass rollout report and otherwise returns a v1 fallback. Missing, corrupt, conflicting, or stale evidence fails closed.
-- `HARNESS_PROTOCOL=v2` classifies a new task inline before v1 routing. Selected v2 Direct loads no `entry-router`, `orchestrator`, lifecycle skill, Memory, Team, or Provider.
-- An unresolved Requirement or product decision blocks every write and enters Ask. Protected, expanded-scope, or non-Direct results reroute before writes.
+- New identity/artifact-free: use host/user-surfaced `HARNESS_PROTOCOL`; else read its process value once; never guess. `v2` is the first complete routing hop: classify inline; no task `status`/`protocol`, nested shim, or task/runtime/current inspection. Selected v2 Direct loads no `entry-router`, `orchestrator`, lifecycle skill, Memory, Team, or Provider; hand off now.
+- Otherwise resolve once. Known: exactly one `.assistant\entry\task.ps1 protocol -TaskId {task_id}`; v2 `task.json` wins, then v1 `plan.md`. New `auto`: exactly one `.assistant\entry\task.ps1 protocol`; all-pass rollout selects v2, else v1. Detection never fans out to status/nested/runtime/lifecycle. After selection, existing v2 may use scoped status/resume; v1 may load its shim. Invalid evidence fails closed.
+- An unresolved Requirement or product decision blocks every write and enters Ask. Protected/expanded/non-Direct reroute before writes.
 - A public-contract change found outside confirmed scope stays unresolved until the user explicitly confirms this change; continuation alone enters Ask and authorizes no write.
-- Clear Direct hands off to the main Agent: `understand -> edit -> focused verification -> self-review -> report`. Direct writes no task/runtime/current state and creates no lifecycle artifact.
-- Read-only work performs zero writes. Response Evidence contains actual commands/results, self-review, and remaining gaps; `not_run` or unavailable never means pass.
-- Only a detector-selected v1 request loads `entry-router`; missing v1 compatibility rules fail closed. That lazy path may then load `orchestrator` and one current-stage skill.
+- Clear Direct: relevant targets -> minimum edit -> minimum focused checks covering all confirmed acceptance criteria -> one bounded diff/self-review -> report. Stop only when all required checks pass. Expand only after failure/ambiguity. No task/runtime/current/lifecycle writes.
+- Read-only work performs zero writes. Report actual commands/results, self-review, gaps; `not_run`/unavailable is not pass.
+- Only a detector-selected v1 request loads `entry-router`; missing compatibility fails closed; then `orchestrator` + one stage skill.
 <!-- END GENERATED ENTRY CONTRACT -->

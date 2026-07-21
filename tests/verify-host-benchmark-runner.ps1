@@ -6,6 +6,63 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Split-Path -Parent $P
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 $failures=[Collections.Generic.List[string]]::new();$checks=0
 function Check([bool]$Condition,[string]$Message){if($Condition){$script:checks++}else{$script:failures.Add($Message)}}
+function Get-CompactAstText([AllowNull()][Management.Automation.Language.Ast]$Ast){
+    if($null-eq$Ast){return ''}
+    return (($Ast.Extent.Text-replace'\s+',' ').Trim())
+}
+function Get-OwnedAssignmentAst([Management.Automation.Language.FunctionDefinitionAst]$FunctionAst,[string]$Name){
+    $result=[Collections.Generic.List[Management.Automation.Language.AssignmentStatementAst]]::new()
+    foreach($assignment in @($FunctionAst.Body.FindAll({param($node)$node-is[Management.Automation.Language.AssignmentStatementAst]-and$node.Left-is[Management.Automation.Language.VariableExpressionAst]-and$node.Left.VariablePath.UserPath-ceq$Name},$true))){
+        $owner=$assignment.Parent
+        while($null-ne$owner-and$owner-isnot[Management.Automation.Language.FunctionDefinitionAst]){$owner=$owner.Parent}
+        if([object]::ReferenceEquals($owner,$FunctionAst)){$result.Add($assignment)}
+    }
+    return @($result)
+}
+function Test-ExactOwnedAssignment([Management.Automation.Language.FunctionDefinitionAst]$FunctionAst,[string]$Name,[string]$ExpectedRight){
+    $assignments=@(Get-OwnedAssignmentAst -FunctionAst $FunctionAst -Name $Name)
+    return $assignments.Count-eq1-and$assignments[0].Operator-eq[Management.Automation.Language.TokenKind]::Equals-and(Get-CompactAstText $assignments[0].Right)-ceq$ExpectedRight
+}
+function Test-V1WriteBoundaryDataflow([string]$TrialText,[string]$RunnerText){
+    $trialTokens=$null;$trialErrors=$null;$trialAst=[Management.Automation.Language.Parser]::ParseInput($TrialText,[ref]$trialTokens,[ref]$trialErrors)
+    $runnerTokens=$null;$runnerErrors=$null;$runnerAst=[Management.Automation.Language.Parser]::ParseInput($RunnerText,[ref]$runnerTokens,[ref]$runnerErrors)
+    if(@($trialErrors).Count-ne0-or@($runnerErrors).Count-ne0){return $false}
+    $trialFunctions=@($trialAst.FindAll({param($node)$node-is[Management.Automation.Language.FunctionDefinitionAst]-and$node.Name-ceq'Invoke-HostTrial'},$true))
+    $runnerFunctions=@($runnerAst.FindAll({param($node)$node-is[Management.Automation.Language.FunctionDefinitionAst]-and$node.Name-ceq'Test-HostRunnerTrialEvidence'},$true))
+    if($trialFunctions.Count-ne1-or$runnerFunctions.Count-ne1){return $false}
+    $trialFunction=$trialFunctions[0];$runnerFunction=$runnerFunctions[0]
+    $trialExpected=[ordered]@{
+        v1ArtifactAllowlist='@(''docs/tasks/host-benchmark-fixed-workflow/plan.md'',''docs/tasks/host-benchmark-fixed-workflow/test.md'',''docs/tasks/host-benchmark-fixed-workflow/skill-manifest.json'')'
+        v1RequiredArtifacts='@(''docs/tasks/host-benchmark-fixed-workflow/plan.md'',''docs/tasks/host-benchmark-fixed-workflow/test.md'')'
+        v1RuntimeAllowlist='@(''.assistant/运行时/当前任务.md'',''.assistant/运行时/恢复索引.md'',''.assistant/运行时/tasks/host-benchmark-fixed-workflow.md'')'
+        v1AllowedWritePaths='@(''src/value.txt'') + $v1ArtifactAllowlist + $v1RuntimeAllowlist'
+        v1AllowedWritePathText='@($v1AllowedWritePaths | ForEach-Object { "''$_''" }) -join '', '''
+        writeBoundaryContract='if ($Protocol -ceq ''v1'') { "The only paths this fixed comparator may change are $v1AllowedWritePathText. Do not create or change any other path, including temporary, log, backup, or verification files." } else { "Change no path other than ''src/value.txt''. Do not create task, runtime, artifact, temporary, log, backup, or verification files." }'
+        task='@" Work only inside this workspace. The user explicitly authorizes this complete, reversible, private one-file task and all normal harness stage transitions needed to finish it. $routeContext $taskAction Do not ask about scope, acceptance, rollback, or authorization: they are fully confirmed here. $writeBoundaryContract Return only schema-valid JSON. Set task_completed and verification_passed true only after the exact file check required for this turn has actually passed and, for the fixed v1 comparator, its plan stage is DONE. "@'
+        unexpectedWrites='@($changed | Where-Object { if ($_ -ceq ''src/value.txt'') { return $false } if ($Protocol -ceq ''v1'' -and $_ -cin $v1AllowedWritePaths) { return $false } return $true }).Count'
+    }
+    $runnerExpected=[ordered]@{
+        artifactAllowlist='@(''docs/tasks/host-benchmark-fixed-workflow/plan.md'',''docs/tasks/host-benchmark-fixed-workflow/test.md'',''docs/tasks/host-benchmark-fixed-workflow/skill-manifest.json'')'
+        requiredArtifacts='@(''docs/tasks/host-benchmark-fixed-workflow/plan.md'',''docs/tasks/host-benchmark-fixed-workflow/test.md'')'
+        runtimeAllowlist='@(''.assistant/运行时/当前任务.md'',''.assistant/运行时/恢复索引.md'',''.assistant/运行时/tasks/host-benchmark-fixed-workflow.md'')'
+        allowed='@(''src/value.txt'') + $artifactAllowlist + $runtimeAllowlist'
+    }
+    foreach($name in $trialExpected.Keys){if(-not(Test-ExactOwnedAssignment -FunctionAst $trialFunction -Name $name -ExpectedRight $trialExpected[$name])){return $false}}
+    foreach($name in $runnerExpected.Keys){if(-not(Test-ExactOwnedAssignment -FunctionAst $runnerFunction -Name $name -ExpectedRight $runnerExpected[$name])){return $false}}
+    $trialOrder=@('v1ArtifactAllowlist','v1RequiredArtifacts','v1RuntimeAllowlist','v1AllowedWritePaths','v1AllowedWritePathText','writeBoundaryContract','task','unexpectedWrites')|ForEach-Object{(Get-OwnedAssignmentAst -FunctionAst $trialFunction -Name $_)[0].Extent.StartOffset}
+    for($index=1;$index-lt$trialOrder.Count;$index++){if($trialOrder[$index]-le$trialOrder[$index-1]){return $false}}
+    $runnerRejection='if (@($changed | Where-Object { $_ -cnotin $allowed }).Count -ne 0 -or @($requiredArtifacts | Where-Object { $_ -cnotin $artifactChanges }).Count -ne 0 -or $artifactChanges.Count -notin @(2,3) -or $runtimeChanges.Count -ne 3) { return $false }'
+    $runnerRejectionNodes=@($runnerFunction.Body.FindAll({param($node)$node-is[Management.Automation.Language.IfStatementAst]-and(Get-CompactAstText $node)-ceq$runnerRejection},$true))
+    if($runnerRejectionNodes.Count-ne1){return $false}
+    $runnerOrder=@('artifactAllowlist','requiredArtifacts','runtimeAllowlist','allowed')|ForEach-Object{(Get-OwnedAssignmentAst -FunctionAst $runnerFunction -Name $_)[0].Extent.StartOffset}
+    $runnerOrder+=@($runnerRejectionNodes[0].Extent.StartOffset)
+    for($index=1;$index-lt$runnerOrder.Count;$index++){if($runnerOrder[$index]-le$runnerOrder[$index-1]){return $false}}
+    $outer=$runnerRejectionNodes[0].Parent
+    while($null-ne$outer-and$outer-isnot[Management.Automation.Language.IfStatementAst]){$outer=$outer.Parent}
+    return $null-ne$outer-and$outer.Clauses.Count-eq2-and$null-eq$outer.ElseClause-and
+        (Get-CompactAstText $outer.Clauses[0].Item1)-ceq"`$Protocol -ceq 'v1'"-and
+        (Get-CompactAstText $outer.Clauses[1].Item1)-ceq'$changed.Count -ne 1 -or $artifactChanges.Count -ne 0 -or $runtimeChanges.Count -ne 0'
+}
 function Get-ExactCommandAst {
     param([AllowNull()][Management.Automation.Language.Ast]$Ast,[Parameter(Mandatory)][string]$Name)
     if ($null -eq $Ast) { return @() }
@@ -243,7 +300,20 @@ $qualificationAggregateBlock=if($qualificationAggregateStart-ge0-and$qualificati
 Check ($trialSetBlock-match'promotion\.report_digest'-and$trialSetBlock-match'promotion\.file_digest'-and$qualificationAggregateBlock-match'rollout.*report_digest'-and$qualificationAggregateBlock-match'rollout.*file_digest'-and$runnerText-match'rollout_report_digest'-and$runnerText-match'rollout_report_consistent') 'installed qualification does not bind every non-bare trial and group to one rollout report digest'
 Check ($text-notmatch '\$env:USERPROFILE = \[string\]\$savedEnvironment\[''USERPROFILE''\]') 'model invocation still restores the real user profile'
 Check ($trialText-match'Initialize-HostWorkspaceBaseline'-and$trialText-match"core.hooksPath','NUL"-and$trialText-match'--force'-and$trialText-match'Get-HostWorkspaceChanges'-and$trialText-match'\$BaselineRevision'-and$trialText-match'--ignored'-and$trialText-match"ls-files','-v'"-and$trialText-match'__git_index_flag__/'-and$trialText-match'Test-HostWorkspaceChangePathsSafe'-and$trialText-match'Test-HostExactUtf8File') 'native workspace baseline/diff, index-flag, path-link, hook, or exact-byte verification is missing'
-Check ($text-match'Get-HostGitState -Root \$trialSourceRoot -IncludeIgnored'-and$text-match'Get-HostGitState -Root \$RepoRoot -IncludeIgnored'-and$text-match"artifactAllowlist = @\('docs/tasks/host-benchmark-fixed-workflow/plan.md','docs/tasks/host-benchmark-fixed-workflow/test.md','docs/tasks/host-benchmark-fixed-workflow/skill-manifest.json'\)"-and$text-match'v1ArtifactBoundaryPassed') 'ignored source or exact v1 artifact boundary is missing'
+Check (Test-V1WriteBoundaryDataflow -TrialText $trialText -RunnerText $runnerText) 'v1 prompt, Trial classification, and independent runner do not share the exact fail-closed seven-path boundary'
+$v1BoundaryMutations=@(
+    $trialText.Replace('$writeBoundaryContract Return only schema-valid JSON.','Do not change another user file; harness-required task/runtime records are allowed. Return only schema-valid JSON.'),
+    $trialText.Replace("`$v1RuntimeAllowlist = @('.assistant/运行时/当前任务.md','.assistant/运行时/恢复索引.md','.assistant/运行时/tasks/host-benchmark-fixed-workflow.md')","`$v1RuntimeAllowlist = @('.assistant/运行时/当前任务.md','.assistant/运行时/恢复索引.md','.assistant/运行时/tasks/host-benchmark-fixed-workflow.md','verification.txt')"),
+    $trialText.Replace("if (`$Protocol -ceq 'v1' -and `$_ -cin `$v1AllowedWritePaths)","if (`$Protocol -ceq 'v1' -and `$_ -cin `$v1ArtifactAllowlist)"),
+    $trialText.Replace("`$v1RuntimeAllowlist = @('.assistant/运行时/当前任务.md','.assistant/运行时/恢复索引.md','.assistant/运行时/tasks/host-benchmark-fixed-workflow.md')","`$v1RuntimeAllowlist = @('.assistant/运行时/当前任务.md','.assistant/运行时/恢复索引.md','.assistant/运行时/tasks/host-benchmark-fixed-workflow.md')`n        `$v1RuntimeAllowlist += @('verification.txt')")
+)
+foreach($mutation in $v1BoundaryMutations){Check ($mutation-cne$trialText-and-not(Test-V1WriteBoundaryDataflow -TrialText $mutation -RunnerText $runnerText)) 'v1 write-boundary verifier accepted a broad prompt, extra/duplicate path, or weakened Trial classification mutation'}
+$runnerBoundaryMutation=$runnerText.Replace("`$allowed = @('src/value.txt') + `$artifactAllowlist + `$runtimeAllowlist","`$allowed = @('*')")
+Check ($runnerBoundaryMutation-cne$runnerText-and-not(Test-V1WriteBoundaryDataflow -TrialText $trialText -RunnerText $runnerBoundaryMutation)) 'v1 write-boundary verifier accepted a widened independent runner allowlist'
+$runnerOrderNeedle="            `$allowed = @('src/value.txt') + `$artifactAllowlist + `$runtimeAllowlist`n            if (@(`$changed | Where-Object { `$_ -cnotin `$allowed }).Count -ne 0 -or @(`$requiredArtifacts | Where-Object { `$_ -cnotin `$artifactChanges }).Count -ne 0 -or `$artifactChanges.Count -notin @(2,3) -or `$runtimeChanges.Count -ne 3) { return `$false }"
+$runnerOrderMutation=$runnerText.Replace($runnerOrderNeedle,(@($runnerOrderNeedle-split"`n")[1]+"`n"+@($runnerOrderNeedle-split"`n")[0]))
+Check ($runnerOrderMutation-cne$runnerText-and-not(Test-V1WriteBoundaryDataflow -TrialText $trialText -RunnerText $runnerOrderMutation)) 'v1 write-boundary verifier accepted a runner consumer before its allowed-path producer'
+Check ($text-match'Get-HostGitState -Root \$trialSourceRoot -IncludeIgnored'-and$text-match'Get-HostGitState -Root \$RepoRoot -IncludeIgnored'-and$text-match'v1ArtifactBoundaryPassed') 'ignored source or exact v1 artifact boundary is missing'
 Check ($runnerText-match'function Test-HostTrialContract'-and$runnerText-match'function Test-HostRunnerTrialEvidence'-and$runnerText-match'Get-HostRunnerWorkspaceChanges'-and$runnerText-match"diff','--cached'"-and$runnerText-match"ls-files','-v'"-and$runnerText-match'__git_index_flag__/'-and$runnerText-match'Resolve-HarnessContainedPath'-and$runnerText-match'LinkType'-and$runnerText-match'runner_evidence_passed'-and$runnerText-match'runner_contract_failures'-and$runnerText-match'raw_trace_deleted'-and$runnerText-match'artifact_writes -ne 0'-and$runnerText-match'v1_stage_journal'-and$runnerText-match'RequireSourceBinding') 'Runner does not independently recheck trial and release contracts'
 Check ($text-match'New-HostUnavailableTrial'-and$text-match'Get-SanitizedHostTrialDiagnostic'-and$text-match"return 'trial-exception'") 'trial exceptions are not converted to sanitized unavailable records'
 Check ($runnerText-match"\.assistant\\运行时\\release-qualification"-and$runnerText-match'New-HarnessContainedDirectory'-and$runnerText-match'Resolve-HarnessContainedPath'-and$runnerText-match'Refusing to remove unsafe host benchmark scratch path') 'writable-root isolation or safe cleanup contract missing'

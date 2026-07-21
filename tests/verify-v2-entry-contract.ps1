@@ -94,6 +94,35 @@ function Test-MinimumEntryReduction {
     return ($CurrentBytes * 4) -le ($BaselineBytes * 3) -and ($CurrentLines * 4) -le ($BaselineLines * 3)
 }
 
+function Test-ExplicitNewV2FastPath {
+    param([AllowEmptyString()][string]$Text)
+
+    $fastMarker = '- New identity/artifact-free:'
+    $otherwiseMarker = '- Otherwise resolve once.'
+    $fastStart = $Text.IndexOf($fastMarker, [System.StringComparison]::Ordinal)
+    $otherwiseStart = $Text.IndexOf($otherwiseMarker, [System.StringComparison]::Ordinal)
+    if ($fastStart -lt 0 -or $otherwiseStart -le $fastStart) { return $false }
+    $fastBlock = $Text.Substring($fastStart, $otherwiseStart - $fastStart)
+    foreach ($fragment in @(
+            'host/user-surfaced `HARNESS_PROTOCOL`',
+            'else read its process value once',
+            'never guess',
+            'first complete routing hop',
+            'no task `status`/`protocol`, nested shim, or task/runtime/current inspection',
+            'Selected v2 Direct loads no `entry-router`, `orchestrator`, lifecycle skill',
+            'hand off now'
+        )) {
+        if (-not $fastBlock.Contains($fragment, [System.StringComparison]::Ordinal)) { return $false }
+    }
+    return $Text.Contains('Known: exactly one `.assistant\entry\task.ps1 protocol -TaskId {task_id}`', [System.StringComparison]::Ordinal) -and
+        $Text.Contains('New `auto`: exactly one `.assistant\entry\task.ps1 protocol`', [System.StringComparison]::Ordinal) -and
+        $Text.Contains('Detection never fans out to status/nested/runtime/lifecycle.', [System.StringComparison]::Ordinal) -and
+        $Text.Contains('After selection, existing v2 may use scoped status/resume; v1 may load its shim.', [System.StringComparison]::Ordinal) -and
+        $Text.Contains('minimum focused checks covering all confirmed acceptance criteria', [System.StringComparison]::Ordinal) -and
+        $Text.Contains('Stop only when all required checks pass', [System.StringComparison]::Ordinal) -and
+        $Text.Contains('Expand only after failure/ambiguity.', [System.StringComparison]::Ordinal)
+}
+
 function Get-ManagedBlock {
     param([string]$Path)
 
@@ -184,7 +213,27 @@ try {
     $canonicalHasBom = $canonicalBytes.Length -ge 3 -and $canonicalBytes[0] -eq 0xEF -and $canonicalBytes[1] -eq 0xBB -and $canonicalBytes[2] -eq 0xBF
     Assert-True -Condition (-not $canonicalHasBom -and -not $canonicalText.Contains("`r")) -Success 'canonical entry contract is deterministic LF UTF-8 without BOM' -Failure 'canonical entry contract encoding is not deterministic'
     Assert-True -Condition ($canonicalText -match '`protocol_default`:\s*`auto`' -and $canonicalText -match '`auto_resolves_to`:\s*`existing-artifact-or-gated-v2-new`' -and $canonicalText -match '`v2_entry_activation`:\s*`explicit-new-or-existing-v2-or-eligible-auto-new`') -Success 'auto is artifact-first and requires an eligible report for a new v2 task' -Failure 'entry contract protocol detector rollout is invalid'
-    Assert-True -Condition ($canonicalText -match '`HARNESS_PROTOCOL=v2` classifies a new task inline before v1 routing' -and $canonicalText -match 'Selected v2 Direct loads no `entry-router`, `orchestrator`, lifecycle skill') -Success 'explicit v2 Direct resolves before v1 router or lifecycle skill loading' -Failure 'entry contract leaves explicit v2 Direct vulnerable to v1 routing overhead'
+    Assert-True -Condition (Test-ExplicitNewV2FastPath -Text $canonicalText) -Success 'explicit new v2 Direct is the first complete hop with one-shot fallback and a bounded stop condition' -Failure 'entry contract leaves explicit new v2 Direct vulnerable to discovery fan-out or unbounded post-action work'
+    foreach ($fragment in @(
+            'host/user-surfaced `HARNESS_PROTOCOL`',
+            'else read its process value once',
+            'never guess',
+            'first complete routing hop',
+            'no task `status`/`protocol`, nested shim, or task/runtime/current inspection',
+            'Detection never fans out to status/nested/runtime/lifecycle.',
+            'After selection, existing v2 may use scoped status/resume; v1 may load its shim.',
+            'minimum focused checks covering all confirmed acceptance criteria',
+            'Stop only when all required checks pass'
+        )) {
+        $mutation = $canonicalText.Replace($fragment, '')
+        Assert-True -Condition (-not (Test-ExplicitNewV2FastPath -Text $mutation)) -Success ("fast-path mutation is rejected when removing: {0}" -f $fragment) -Failure ("fast-path verifier survived removal of: {0}" -f $fragment)
+    }
+    $fastLine = @($canonicalText -split "`n" | Where-Object { $_.StartsWith('- New identity/artifact-free', [System.StringComparison]::Ordinal) })
+    $otherwiseLine = @($canonicalText -split "`n" | Where-Object { $_.StartsWith('- Otherwise resolve once', [System.StringComparison]::Ordinal) })
+    $reorderedMutation = if ($fastLine.Count -eq 1 -and $otherwiseLine.Count -eq 1) {
+        $canonicalText.Replace($fastLine[0], '__FAST_PATH__').Replace($otherwiseLine[0], $fastLine[0]).Replace('__FAST_PATH__', $otherwiseLine[0])
+    } else { $canonicalText }
+    Assert-True -Condition (-not (Test-ExplicitNewV2FastPath -Text $reorderedMutation)) -Success 'fast-path verifier rejects moving Otherwise before explicit new v2' -Failure 'fast-path verifier accepts reordered slow-path precedence'
     Assert-True -Condition ($canonicalText -match 'Only a detector-selected v1 request loads `entry-router`' -and $canonicalText -notmatch '\|\s*`new-readonly`\s*\|' -and $canonicalText -notmatch 'Ask exit criteria|Clarification ledger|resume-current/readonly|inbox-first') -Success 'default bootstrap delegates full v1 routing, Ask, Inbox, and Recovery rules to the lazy v1 path' -Failure 'default bootstrap still preloads detailed v1 routing or does not fail closed to the v1 router'
     Assert-True -Condition ($canonicalText -notmatch '\{(?:REPO_ROOT|VAULT_PATH|CODEX_HOME)\}' -and $canonicalText -notmatch '`auto_resolves_to`:\s*`v2`') -Success 'canonical body is host-neutral and never enables unconditional auto=v2' -Failure 'canonical body contains a host token or unconditional v2 default'
 
@@ -283,6 +332,8 @@ try {
     Assert-True -Condition ($managedBlocks.Count -eq 3 -and @($managedBlocks | Select-Object -Unique).Count -eq 1) -Success 'workspace, Claude, and lazy v1 shim carry one byte-identical managed bootstrap' -Failure 'allowlisted generated bootstraps are not identical'
     $codexOverlay = Get-Content -LiteralPath (Join-Path $RepoRoot 'agent-configs\codex\AGENTS.md.template') -Raw -Encoding utf8
     Assert-True -Condition ($codexOverlay -notmatch 'BEGIN GENERATED ENTRY CONTRACT|`protocol_default`|\|\s*`new-readonly`\s*\|') -Success 'Codex global entry contains only a host overlay' -Failure 'Codex global entry still preloads shared or v1 routing rules'
+    $workspaceOverlay = (Get-ManagedBlock -Path (Join-Path $RepoRoot 'agent-configs\workspace\AGENTS.md.template')).Overlay
+    Assert-True -Condition ($workspaceOverlay -match 'task\.ps1 status` only for an explicit recovery/status request' -and $workspaceOverlay -match 'Only a detector-selected v1 workflow reads the executable' -and $workspaceOverlay -notmatch 'Use `\.assistant\\entry\\task\.ps1 status` for a read-only v2 recovery view|The executable workspace entry shim remains') -Success 'workspace overlay keeps status and nested entry lazy outside selected v2 Direct' -Failure 'workspace overlay still invites selected v2 Direct into status or nested entry discovery'
     $claudeOverlay = (Get-ManagedBlock -Path (Join-Path $RepoRoot 'agent-configs\claude\CLAUDE.md.template')).Overlay
     Assert-True -Condition ($claudeOverlay -notmatch '(?m)^- Call `/entry-router` at the start of each conversation\.$') -Success 'Claude overlay has no unconditional entry-router first-hop rule' -Failure 'Claude overlay still forces entry-router before v2 Direct classification'
     Assert-True -Condition ($claudeOverlay -match '(?m)^- `/entry-router`: selected v1 only; never v2 Direct\.$') -Success 'Claude overlay limits entry-router to selected v1 requests' -Failure 'Claude overlay does not preserve the v1-only entry-router boundary'
