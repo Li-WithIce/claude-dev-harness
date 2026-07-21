@@ -311,8 +311,12 @@ foreach($mutation in $v1BoundaryMutations){Check ($mutation-cne$trialText-and-no
 $runnerBoundaryMutation=$runnerText.Replace("`$allowed = @('src/value.txt') + `$artifactAllowlist + `$runtimeAllowlist","`$allowed = @('*')")
 Check ($runnerBoundaryMutation-cne$runnerText-and-not(Test-V1WriteBoundaryDataflow -TrialText $trialText -RunnerText $runnerBoundaryMutation)) 'v1 write-boundary verifier accepted a widened independent runner allowlist'
 $runnerOrderNeedle="            `$allowed = @('src/value.txt') + `$artifactAllowlist + `$runtimeAllowlist`n            if (@(`$changed | Where-Object { `$_ -cnotin `$allowed }).Count -ne 0 -or @(`$requiredArtifacts | Where-Object { `$_ -cnotin `$artifactChanges }).Count -ne 0 -or `$artifactChanges.Count -notin @(2,3) -or `$runtimeChanges.Count -ne 3) { return `$false }"
-$runnerOrderMutation=$runnerText.Replace($runnerOrderNeedle,(@($runnerOrderNeedle-split"`n")[1]+"`n"+@($runnerOrderNeedle-split"`n")[0]))
-Check ($runnerOrderMutation-cne$runnerText-and-not(Test-V1WriteBoundaryDataflow -TrialText $trialText -RunnerText $runnerOrderMutation)) 'v1 write-boundary verifier accepted a runner consumer before its allowed-path producer'
+$runnerOrderLf=$runnerText-replace"`r`n?","`n"
+foreach($runnerOrderInput in @($runnerOrderLf,($runnerOrderLf-replace"`n","`r`n"))){
+    $runnerOrderSource=$runnerOrderInput-replace"`r`n?","`n"
+    $runnerOrderMutation=$runnerOrderSource.Replace($runnerOrderNeedle,(@($runnerOrderNeedle-split"`n")[1]+"`n"+@($runnerOrderNeedle-split"`n")[0]))
+    Check ($runnerOrderMutation-cne$runnerOrderSource-and-not(Test-V1WriteBoundaryDataflow -TrialText $trialText -RunnerText $runnerOrderMutation)) 'v1 write-boundary verifier accepted a runner consumer before its allowed-path producer'
+}
 Check ($text-match'Get-HostGitState -Root \$trialSourceRoot -IncludeIgnored'-and$text-match'Get-HostGitState -Root \$RepoRoot -IncludeIgnored'-and$text-match'v1ArtifactBoundaryPassed') 'ignored source or exact v1 artifact boundary is missing'
 Check ($runnerText-match'function Test-HostTrialContract'-and$runnerText-match'function Test-HostRunnerTrialEvidence'-and$runnerText-match'Get-HostRunnerWorkspaceChanges'-and$runnerText-match"diff','--cached'"-and$runnerText-match"ls-files','-v'"-and$runnerText-match'__git_index_flag__/'-and$runnerText-match'Resolve-HarnessContainedPath'-and$runnerText-match'LinkType'-and$runnerText-match'runner_evidence_passed'-and$runnerText-match'runner_contract_failures'-and$runnerText-match'raw_trace_deleted'-and$runnerText-match'artifact_writes -ne 0'-and$runnerText-match'v1_stage_journal'-and$runnerText-match'RequireSourceBinding') 'Runner does not independently recheck trial and release contracts'
 Check ($text-match'New-HostUnavailableTrial'-and$text-match'Get-SanitizedHostTrialDiagnostic'-and$text-match"return 'trial-exception'") 'trial exceptions are not converted to sanitized unavailable records'
