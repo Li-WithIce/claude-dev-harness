@@ -83,6 +83,11 @@ function Test-HarnessApprovalSchema {
     if (-not $valid) { throw "$Label failed schema validation" }
 }
 
+function Assert-HarnessApprovalIdentityFields {
+    param([System.Collections.IDictionary]$Approval,[string]$Label)
+    if([string]::IsNullOrWhiteSpace([string]$Approval.approver)){throw "$Label approver must not be blank"}
+}
+
 function Read-HarnessApprovalJson {
     param([string]$WorkspaceRoot,[string]$Path,[string]$Label)
     $fullPath = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $Path -Label $Label -MustExist File
@@ -115,6 +120,7 @@ function Resolve-HarnessApprovalInputCore {
         [Parameter(Mandatory)][datetimeoffset]$AsOf
     )
     $loaded = Read-HarnessApprovalJson -WorkspaceRoot $WorkspaceRoot -Path $ApprovalPath -Label 'Approval input';$approval=$loaded.Document
+    Assert-HarnessApprovalIdentityFields -Approval $approval -Label 'Approval input'
     Test-HarnessApprovalSchema -RepoRoot $RepoRoot -Value $approval -Label 'Approval input'
     if ([string]$approval.task_id -cne $TaskId) { throw 'Approval task_id does not match TaskId' }
     if ([int]$approval.task_version -ne $TargetTaskVersion) { throw "Approval task_version must bind the post-import version: expected=$TargetTaskVersion actual=$($approval.task_version)" }
@@ -155,6 +161,7 @@ function Assert-HarnessTaskApprovalCore {
     foreach ($approvalId in @($Task.approvals)) {
         $path = ".assistant/runtime/tasks/$($Task.task_id)/approvals/$approvalId.json"
         $loaded = Read-HarnessApprovalJson -WorkspaceRoot $WorkspaceRoot -Path $path -Label 'task Approval';$approval=$loaded.Document
+        Assert-HarnessApprovalIdentityFields -Approval $approval -Label 'task Approval'
         Test-HarnessApprovalSchema -RepoRoot $RepoRoot -Value $approval -Label 'task Approval'
         if ([string]$approval.approval_id -cne [string]$approvalId -or [string]$approval.task_id -cne [string]$Task.task_id) { throw 'task Approval identity is invalid' }
         if ([string]$approval.status -cne 'granted' -or (Test-HarnessApprovalExpiry -Approval $approval -AsOf $AsOf)) { continue }

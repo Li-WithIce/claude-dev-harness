@@ -31,7 +31,7 @@
       "uniqueItems": true,
       "items": { "type": "string", "minLength": 1 }
     },
-    "approver": { "type": "string", "minLength": 1 },
+    "approver": { "type": "string", "minLength": 1, "pattern": "\\S" },
     "approved_at": { "type": "string", "format": "date-time" },
     "expires_at": {
       "oneOf": [

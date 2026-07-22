@@ -19,6 +19,12 @@ function Read-HarnessEvidenceJson {
     return [pscustomobject]@{Document=$value;Path=(Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path $fullPath)}
 }
 
+function Assert-HarnessEvidenceActorFields {
+    param([System.Collections.IDictionary]$Actor,[string]$Label)
+    foreach($field in @('host','model')){if([string]::IsNullOrWhiteSpace([string]$Actor[$field])){throw "$Label $field must not be blank"}}
+    foreach($field in @('backend','actor_id','context_id')){if($Actor.Contains($field)-and[string]::IsNullOrWhiteSpace([string]$Actor[$field])){throw "$Label $field must not be blank"}}
+}
+
 function Test-HarnessEvidenceExcludedPath {
     param([string]$Path,[string[]]$ExactPaths)
     $comparison = if ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT) {
@@ -186,6 +192,8 @@ function Resolve-HarnessEvidenceCore {
     )
     $WorkspaceRoot=Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
     $loaded=Read-HarnessEvidenceJson -WorkspaceRoot $WorkspaceRoot -Path $EvidencePath;$document=$loaded.Document
+    foreach($record in @($document.records)){if($record -is [System.Collections.IDictionary]-and$record.Contains('actor')){if($record.actor-isnot[System.Collections.IDictionary]){throw 'Evidence record actor must be an object'};Assert-HarnessEvidenceActorFields -Actor $record.actor -Label 'Evidence record actor'}}
+    if($document.Contains('dry_run')){if($document.dry_run -isnot [System.Collections.IDictionary]-or$document.dry_run.actor-isnot[System.Collections.IDictionary]){throw 'dry-run actor must be an object'};Assert-HarnessEvidenceActorFields -Actor $document.dry_run.actor -Label 'dry-run actor'}
     try{$valid=Test-Json -Json ($document|ConvertTo-Json -Depth 50 -Compress) -SchemaFile (Join-Path $RepoRoot 'schemas\evidence.schema.json') -ErrorAction Stop -WarningAction SilentlyContinue}catch{throw "Evidence schema validation failed: $($_.Exception.Message)"}
     if(-not$valid){throw 'Evidence failed schema validation'}
     if([string]$document.task_id -cne $TaskId){throw 'Evidence task_id does not match TaskId'}

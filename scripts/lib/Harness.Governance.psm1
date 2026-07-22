@@ -72,6 +72,7 @@ function Resolve-HarnessAuditArtifact {
     if ($recordMatches.Count -ne 1) { throw 'independent audit must contain exactly one machine record' }
     try { $record = $recordMatches[0].Groups['json'].Value | ConvertFrom-HarnessJson -ErrorAction Stop }
     catch { throw "independent audit record is not valid JSON: $($_.Exception.Message)" }
+    foreach($field in @('implementer_actor_id','reviewer_actor_id','reviewer_context_id','reviewer_base_model')){if([string]::IsNullOrWhiteSpace([string]$record[$field])){throw "independent audit $field must not be blank"}}
     try { $valid = Test-Json -Json ($record | ConvertTo-Json -Depth 20 -Compress) -SchemaFile (Join-Path $RepoRoot 'schemas\audit-record.schema.json') -ErrorAction Stop -WarningAction SilentlyContinue }
     catch { throw "independent audit record schema validation failed: $($_.Exception.Message)" }
     if (-not $valid) { throw 'independent audit record failed schema validation' }

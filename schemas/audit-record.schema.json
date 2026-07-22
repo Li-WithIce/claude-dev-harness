@@ -13,10 +13,10 @@
     "evidence_digest"
   ],
   "properties": {
-    "implementer_actor_id": { "type": "string", "minLength": 1 },
-    "reviewer_actor_id": { "type": "string", "minLength": 1 },
-    "reviewer_context_id": { "type": "string", "minLength": 1 },
-    "reviewer_base_model": { "type": "string", "minLength": 1 },
+    "implementer_actor_id": { "type": "string", "minLength": 1, "pattern": "\\S" },
+    "reviewer_actor_id": { "type": "string", "minLength": 1, "pattern": "\\S" },
+    "reviewer_context_id": { "type": "string", "minLength": 1, "pattern": "\\S" },
+    "reviewer_base_model": { "type": "string", "minLength": 1, "pattern": "\\S" },
     "independence_level": {
       "type": "string",
       "enum": ["isolated-context", "different-actor"]
