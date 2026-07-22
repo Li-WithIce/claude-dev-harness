@@ -37,7 +37,11 @@ try {
         throw '-EvidenceSatisfied was removed; use verify -Evidence'
     }
 
-    if ($Command -ceq 'protocol') {
+    if ($Command -cin @('enable-v2','reset-auto','disable-v2')) {
+        Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1') -Force -ErrorAction Stop
+        $protocolValue=switch($Command){'enable-v2'{'v2'}'disable-v2'{'v1'}default{'auto'}}
+        $result=Set-HarnessWorkspaceProtocolConfig -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -NewTaskProtocol $protocolValue
+    } elseif ($Command -ceq 'protocol') {
         Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1') -Force -ErrorAction Stop
         $result = Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId
     } elseif ($Command -ceq 'inspect') {
@@ -107,12 +111,19 @@ try {
         Write-Output ("requirement_state: {0}" -f $result.requirement_state)
         Write-Output ("blocking_decisions: {0}" -f @($result.blocking_decisions).Count)
         Write-Output ("contract_digest: {0}" -f $(if ($null -eq $result.contract) { 'none' } else { $result.contract.digest }))
+    } elseif ($Command -cin @('enable-v2','reset-auto','disable-v2')) {
+        Write-Output ("operation: {0}" -f $result.operation)
+        Write-Output ("action: {0}" -f $result.action)
+        Write-Output ("new_task_protocol: {0}" -f $result.new_task_protocol)
+        Write-Output ("path: {0}" -f $result.path)
     } elseif ($Command -ceq 'protocol') {
         Write-Output ("task_id: {0}" -f $(if ($null -eq $result.task_id) { 'none' } else { $result.task_id }))
         Write-Output ("requested_protocol: {0}" -f $result.requested_protocol)
         Write-Output ("detected_protocol: {0}" -f $result.detected_protocol)
         Write-Output ("selected_protocol: {0}" -f $result.selected_protocol)
+        Write-Output ("preference_source: {0}" -f $result.preference_source)
         Write-Output ("reason: {0}" -f $result.reason)
+        Write-Output ("workspace_config: {0}" -f $result.workspace_config.new_task_protocol)
         Write-Output ("rollout_status: {0}" -f $result.rollout_eligibility.status)
         if (-not [string]::IsNullOrWhiteSpace([string]$result.warning)) { Write-Output ("warning: {0}" -f $result.warning) }
         Write-Output 'runtime_writes: 0'

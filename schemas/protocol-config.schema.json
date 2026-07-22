@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/protocol-config.schema.json",
+  "title": "Harness workspace protocol config v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "new_task_protocol"],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["harness-protocol-config/v1"] },
+    "new_task_protocol": { "type": "string", "enum": ["auto", "v1", "v2"] }
+  }
+}

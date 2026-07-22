@@ -289,6 +289,41 @@ function Test-ManifestIncludesPath {
         }).Count -eq 1
 }
 
+function New-ProtocolConfigSentinel {
+    param($Fixture,[ValidateSet('auto','v1','v2')][string]$Protocol = 'v2')
+
+    $path = Join-Path $Fixture.Workspace '.assistant\config\protocol.json'
+    [void][System.IO.Directory]::CreateDirectory((Split-Path -Parent $path))
+    $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes((@{
+        schema_version = 'harness-protocol-config/v1'
+        new_task_protocol = $Protocol
+    } | ConvertTo-Json -Compress) + "`n")
+    [System.IO.File]::WriteAllBytes($path,$bytes)
+    return [pscustomobject]@{Path=$path;Bytes=$bytes}
+}
+
+function Assert-ProtocolConfigPreserved {
+    param($Fixture,$Sentinel,$Manifest,[string]$Label)
+
+    $path = [string]$Sentinel.Path
+    $exact = Test-Path -LiteralPath $path -PathType Leaf
+    if ($exact) {
+        $actual = [System.IO.File]::ReadAllBytes($path)
+        $exact = ($actual.Length -eq $Sentinel.Bytes.Length)
+        if ($exact) {
+            for ($index=0;$index -lt $actual.Length;$index++) {
+                if ($actual[$index] -ne $Sentinel.Bytes[$index]) { $exact = $false; break }
+            }
+        }
+    }
+    $unclaimed = $null -eq $Manifest -or (Test-ManifestExcludesPath -Manifest $Manifest -Path $path)
+    if ($exact -and $unclaimed) {
+        Add-Check "$Label preserves exact user protocol config bytes without claiming ownership"
+    } else {
+        Add-Failure "$Label changed, removed, or claimed the user protocol config"
+    }
+}
+
 function Assert-InstalledTaskShim {
     param($Fixture,$Manifest,[string]$Label)
 
@@ -1643,6 +1678,7 @@ try {
     }
 
     $governedFixture = New-PresetFixture -Name 'governed'
+    $governedProtocolConfig = New-ProtocolConfigSentinel -Fixture $governedFixture
     $governedInstall = Invoke-Install -Fixture $governedFixture -ExtraArguments @('-Preset','governed')
     Assert-InstallExit $governedInstall 'governed'
     if ($governedInstall.ExitCode -eq 0) {
@@ -1650,6 +1686,7 @@ try {
         Assert-ManifestPreset $governedManifest 'governed' 'preset' $governedFeatures $governedSkills $coreHooks 'minimal'
         Assert-InstalledTaskShim $governedFixture $governedManifest 'governed install'
         Assert-InstalledTaskProtocol $governedFixture 'governed install'
+        Assert-ProtocolConfigPreserved $governedFixture $governedProtocolConfig $governedManifest 'governed install'
         if ((Test-Path -LiteralPath (Join-Path $governedFixture.User '.codex\skills\planning')) -and
             (Test-Path -LiteralPath (Join-Path $governedFixture.User '.codex\skills\audit')) -and
             -not (Test-Path -LiteralPath (Join-Path $governedFixture.User '.codex\skills\obsidian-memory'))) {
@@ -1664,6 +1701,7 @@ try {
             Assert-ManifestPreset $governedUpdateManifest 'governed' 'manifest-preserve' $governedFeatures $governedSkills $coreHooks 'minimal'
             Assert-InstalledTaskShim $governedFixture $governedUpdateManifest 'governed update'
             Assert-InstalledTaskProtocol $governedFixture 'governed update'
+            Assert-ProtocolConfigPreserved $governedFixture $governedProtocolConfig $governedUpdateManifest 'governed update'
             if ((Test-Path -LiteralPath (Join-Path $governedFixture.User '.codex\skills\planning')) -and
                 (Test-Path -LiteralPath (Join-Path $governedFixture.User '.codex\skills\audit')) -and
                 -not (Test-Path -LiteralPath (Join-Path $governedFixture.User '.codex\skills\obsidian-memory'))) {
@@ -1674,6 +1712,7 @@ try {
         }
         Assert-UninstallExit (Invoke-Uninstall $governedFixture) 'governed'
         Assert-TaskShimRemoved $governedFixture 'governed uninstall'
+        Assert-ProtocolConfigPreserved $governedFixture $governedProtocolConfig $null 'governed uninstall'
     }
 
     $governedAutoFixture = New-PresetFixture -Name 'governed-with-legacy-auto'
@@ -1700,11 +1739,13 @@ try {
     }
 
     $presetCoreFixture = New-PresetFixture -Name 'preset-core-absent-rollout'
+    $presetCoreProtocolConfig = New-ProtocolConfigSentinel -Fixture $presetCoreFixture
     $presetCoreInstall = Invoke-Install -Fixture $presetCoreFixture -ExtraArguments @('-Preset','core')
     Assert-InstallExit $presetCoreInstall 'explicit core without rollout report'
     if ($presetCoreInstall.ExitCode -eq 0) {
         Assert-RolloutAbsent $presetCoreFixture 'core install'
         $presetCoreManifest = Get-LatestManifest $presetCoreFixture
+        Assert-ProtocolConfigPreserved $presetCoreFixture $presetCoreProtocolConfig $presetCoreManifest 'core install'
         $presetCoreRolloutSentinel = Join-Path $presetCoreFixture.Workspace '.assistant\runtime\rollout\v2-eligibility.json'
         if (Test-ManifestExcludesPath $presetCoreManifest $presetCoreRolloutSentinel) { Add-Check 'core install does not claim an absent canonical rollout report' } else { Add-Failure 'core install claimed an absent canonical rollout report' }
         $presetCoreRolloutBytes = [System.Text.UTF8Encoding]::new($false).GetBytes('{"installer_owned":false,"arrival":"after-core-install"}')
@@ -1714,9 +1755,11 @@ try {
         Assert-InstallExit $presetCoreUpdate 'explicit core update without rollout report'
         if ($presetCoreUpdate.ExitCode -eq 0) {
             $presetCoreUpdateManifest = Get-LatestManifest $presetCoreFixture
+            Assert-ProtocolConfigPreserved $presetCoreFixture $presetCoreProtocolConfig $presetCoreUpdateManifest 'core update'
             if (([System.IO.File]::ReadAllBytes($presetCoreRolloutSentinel) -join ',') -ceq ($presetCoreRolloutBytes -join ',') -and (Test-ManifestExcludesPath $presetCoreUpdateManifest $presetCoreRolloutSentinel)) { Add-Check 'core update preserves and does not claim a rollout report created after install' } else { Add-Failure 'core update changed or claimed a rollout report created after install' }
         }
         Assert-UninstallExit (Invoke-Uninstall $presetCoreFixture) 'explicit core without rollout report'
+        Assert-ProtocolConfigPreserved $presetCoreFixture $presetCoreProtocolConfig $null 'core uninstall'
         if ((Test-Path -LiteralPath $presetCoreRolloutSentinel -PathType Leaf) -and ([System.IO.File]::ReadAllBytes($presetCoreRolloutSentinel) -join ',') -ceq ($presetCoreRolloutBytes -join ',')) { Add-Check 'core uninstall preserves a rollout report created after install' } else { Add-Failure 'core uninstall removed or changed a rollout report created after install' }
     }
 
@@ -1730,6 +1773,7 @@ try {
     }
 
     $fullFixture = New-PresetFixture -Name 'legacy-full-preserve'
+    $fullProtocolConfig = New-ProtocolConfigSentinel -Fixture $fullFixture
     $fullRolloutSentinel=Join-Path $fullFixture.Workspace '.assistant\runtime\rollout\v2-eligibility.json';New-Item -ItemType Directory -Path (Split-Path -Parent $fullRolloutSentinel) -Force|Out-Null;$fullRolloutBytes=[System.Text.UTF8Encoding]::new($false).GetBytes('{"installer_owned":false,"preset":"full"}');[System.IO.File]::WriteAllBytes($fullRolloutSentinel,$fullRolloutBytes)
     $fullInstall = Invoke-Install -Fixture $fullFixture -ExtraArguments @('-VaultProfile','full')
     Assert-InstallExit $fullInstall 'legacy full'
@@ -1738,6 +1782,7 @@ try {
         Assert-ManifestPreset $fullInstallManifest 'full' 'vault-profile:full' $fullFeatures $fullSkills $fullHooks 'full'
         Assert-InstalledTaskShim $fullFixture $fullInstallManifest 'full install'
         Assert-InstalledTaskProtocol $fullFixture 'full install'
+        Assert-ProtocolConfigPreserved $fullFixture $fullProtocolConfig $fullInstallManifest 'full install'
         if ($fullInstall.Output -match 'VaultProfile is deprecated') { Add-Check 'legacy full emits migration warning' } else { Add-Failure 'legacy full did not emit migration warning' }
         if (([System.IO.File]::ReadAllBytes($fullRolloutSentinel)-join',') -ceq ($fullRolloutBytes-join',') -and (Test-ManifestExcludesPath $fullInstallManifest $fullRolloutSentinel)) { Add-Check 'full fresh install preserves and does not claim the canonical rollout report' } else { Add-Failure 'full fresh install changed or claimed the canonical rollout report' }
         $preserveInstall = Invoke-Install -Fixture $fullFixture
@@ -1747,6 +1792,7 @@ try {
             Assert-ManifestPreset $preserveManifest 'full' 'manifest-preserve' $fullFeatures $fullSkills $fullHooks 'full'
             Assert-InstalledTaskShim $fullFixture $preserveManifest 'full update'
             Assert-InstalledTaskProtocol $fullFixture 'full update'
+            Assert-ProtocolConfigPreserved $fullFixture $fullProtocolConfig $preserveManifest 'full update'
             if (([System.IO.File]::ReadAllBytes($fullRolloutSentinel)-join',') -ceq ($fullRolloutBytes-join',') -and (Test-ManifestExcludesPath $preserveManifest $fullRolloutSentinel)) { Add-Check 'full update preserves and does not claim the canonical rollout report' } else { Add-Failure 'full update changed or claimed the canonical rollout report' }
             if ((Test-Path -LiteralPath (Join-Path $fullFixture.User '.codex\skills\obsidian-memory')) -and
                 (Test-Path -LiteralPath (Join-Path $fullFixture.User '.codex\skills\workflow-team')) -and
@@ -1757,6 +1803,7 @@ try {
             }
             Assert-UninstallExit (Invoke-Uninstall $fullFixture) 'preserved full update'
             Assert-TaskShimRemoved $fullFixture 'full uninstall'
+            Assert-ProtocolConfigPreserved $fullFixture $fullProtocolConfig $null 'full uninstall'
             if ((Test-Path -LiteralPath $fullRolloutSentinel -PathType Leaf) -and ([System.IO.File]::ReadAllBytes($fullRolloutSentinel)-join',') -ceq ($fullRolloutBytes-join',')) { Add-Check 'full uninstall preserves canonical rollout evidence' } else { Add-Failure 'full uninstall removed or changed canonical rollout evidence' }
         }
     }

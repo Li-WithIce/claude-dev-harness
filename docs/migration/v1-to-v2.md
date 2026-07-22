@@ -4,9 +4,11 @@ The v1 and v2 task protocols coexist. Existing task artifacts select the protoco
 
 1. `.assistant/runtime/tasks/{task_id}/task.json` selects v2.
 2. Otherwise, a legal `docs/tasks/{task_id}/plan.md` selects v1.
-3. With neither artifact, `auto` resolves a rollout report in fixed priority order: explicit `EligibilityReportPath`, `HARNESS_V2_ELIGIBILITY_REPORT`, then `.assistant/runtime/rollout/v2-eligibility.json`. It selects v2 only when the chosen workspace-contained, revision-bound report has every required gate at `pass`; a selected higher-priority missing or invalid path does not fall through. Otherwise it selects v1 with a diagnostic reason. Explicit `HARNESS_PROTOCOL=v2` is the public opt-in for a new task; it does not change the ordinary `auto` desktop default before Default Promotion.
+3. With neither artifact, an explicit maintenance override or `HARNESS_PROTOCOL` selects `v1|v2|auto`; `v1` is the immediate stop-loss.
+4. Without that override, strict workspace-local `.assistant/config/protocol.json` selects `auto|v1|v2`. `pwsh -File .assistant/entry/task.ps1 enable-v2` is the public project opt-in; `reset-auto` and `disable-v2` undo it without touching task artifacts.
+5. Only a new task still resolved as `auto` evaluates a rollout report in fixed priority order: explicit `EligibilityReportPath`, `HARNESS_V2_ELIGIBILITY_REPORT`, then `.assistant/runtime/rollout/v2-eligibility.json`. It selects v2 only when the chosen workspace-contained, revision-bound report has every required gate at `pass`; a selected higher-priority missing or invalid path does not fall through. Otherwise it selects v1 with a diagnostic reason.
 
-Use `pwsh -File scripts/task.ps1 protocol -TaskId {task_id} -WorkspaceRoot {workspace}` for a read-only resolution. An explicit protocol that conflicts with an existing artifact fails closed. Promotion of external release evidence is explicit, offline, and separate from task migration; it never converts an existing v1 task. `HARNESS_PROTOCOL=v1` remains the rollback switch and never converts or deletes a task. See `docs/release/compatibility-policy.md` for report generation, promotion, default gating, deprecation, and retirement conditions.
+Use `pwsh -File scripts/task.ps1 protocol -TaskId {task_id} -WorkspaceRoot {workspace}` for a read-only resolution. An existing artifact wins even when a new-task environment/config preference conflicts; preferences never convert or downgrade a task. Promotion of external release evidence is explicit, offline, and separate from task migration. `disable-v2` and `HARNESS_PROTOCOL=v1` remain rollback switches for new tasks and never convert or delete a task. Workspace opt-in is not Default Promotion; see `docs/release/compatibility-policy.md` for report generation, promotion, default gating, deprecation, and retirement conditions.
 
 ## Frozen v1 path
 
@@ -51,4 +53,4 @@ The original v1 `plan.md` is never rewritten, moved, or deleted. After successfu
 
 - Before successful publication: fix the reported issue and rerun the dry-run; no v1 artifact needs restoration.
 - After successful publication: preserve the v2 task as read-only evidence. Do not delete it to reactivate v1 implicitly.
-- For unrelated or unmigrated work, set `HARNESS_PROTOCOL=v1` to force the v1 path. A conflicting v2 task still fails closed rather than being opened by v1 tooling.
+- For unrelated or unmigrated new work, run `disable-v2` or set `HARNESS_PROTOCOL=v1` to force the v1 path. An existing v2 task still selects v2 by artifact and cannot be opened by v1 tooling.

@@ -48,7 +48,7 @@ try{
     foreach($file in @($protocolPath,$generatorPath,$script:promotionPath,$PSCommandPath)){$tokens=$null;$errors=$null;[Management.Automation.Language.Parser]::ParseFile($file,[ref]$tokens,[ref]$errors)|Out-Null;Check (@($errors).Count-eq0) "$(Split-Path -Leaf $file) parses" "$(Split-Path -Leaf $file) parse failed";Check (Test-FileHasUtf8Bom $file) "$(Split-Path -Leaf $file) has UTF-8 BOM" "$(Split-Path -Leaf $file) lacks UTF-8 BOM"}
     $script:protocolModule=Import-Module $protocolPath -Force -PassThru;$script:atomicModule=Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.AtomicWrite.psm1') -Force -PassThru
     $exports=@($script:protocolModule.ExportedFunctions.Keys)
-    Check ($exports.Count-eq1-and$exports[0]-ceq'Get-HarnessProtocolResolution') 'Protocol keeps one public function' 'Protocol exposed rollout internals'
+    Check (@(Compare-Object @($exports|Sort-Object) @('Get-HarnessProtocolResolution','Get-HarnessWorkspaceProtocolConfig','Set-HarnessWorkspaceProtocolConfig')).Count-eq0) 'Protocol exports only resolution and workspace config operations' 'Protocol exposed rollout internals or omitted config operations'
     $sourcePaths=@(& $script:protocolModule {param($Root) Get-HarnessRolloutSourcePaths -RepoRoot $Root} $RepoRoot)
     Check ($sourcePaths-ccontains'runtime-hooks/core/pretooluse.ps1'-and$sourcePaths-ccontains'scripts/migrate-task-v1-to-v2.ps1'-and$sourcePaths-ccontains'scripts/run-validation.ps1'-and$sourcePaths-ccontains'tests/verify-v2-approval.ps1') 'rollout source digest covers runtime, migration, validation, and hard-safety tests' 'rollout source digest omits a safety execution surface'
     $generator=Get-Content -LiteralPath $generatorPath -Raw -Encoding utf8
@@ -68,6 +68,13 @@ try{
 
     $pass=New-Report (New-Gates);$passPath=Write-Report $workspace 'pass' $pass;$eligible=Resolve-Protocol $workspace $passPath
     Check ($eligible.selected_protocol-ceq'v2'-and$eligible.reason-ceq'eligible-rollout-report'-and$eligible.rollout_eligibility.status-ceq'pass'-and$null-eq$eligible.warning) 'current all-pass report flips only a new auto task to v2' 'all-pass current report did not select v2'
+    $configV1=& $script:protocolModule {param($Root,$Work) Set-HarnessWorkspaceProtocolConfig -RepoRoot $Root -WorkspaceRoot $Work -NewTaskProtocol v1} $RepoRoot $workspace;$workspaceV1=Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $workspace -TaskId 'workspace-v1' -EligibilityReportPath $passPath
+    $configV2=& $script:protocolModule {param($Root,$Work) Set-HarnessWorkspaceProtocolConfig -RepoRoot $Root -WorkspaceRoot $Work -NewTaskProtocol v2} $RepoRoot $workspace;$workspaceV2=Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $workspace -TaskId 'workspace-v2' -EligibilityReportPath $passPath
+    $configAuto=& $script:protocolModule {param($Root,$Work) Set-HarnessWorkspaceProtocolConfig -RepoRoot $Root -WorkspaceRoot $Work -NewTaskProtocol auto} $RepoRoot $workspace;$workspaceAuto=Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $workspace -TaskId 'workspace-auto' -EligibilityReportPath $passPath
+    Check ($configV1.new_task_protocol-ceq'v1'-and$workspaceV1.selected_protocol-ceq'v1'-and$workspaceV1.preference_source-ceq'workspace-config'-and$workspaceV1.rollout_eligibility.status-ceq'not-required') 'workspace v1 stop-loss outranks an eligible rollout report' 'eligible rollout overrode workspace v1'
+    Check ($configV2.new_task_protocol-ceq'v2'-and$workspaceV2.selected_protocol-ceq'v2'-and$workspaceV2.preference_source-ceq'workspace-config'-and$workspaceV2.rollout_eligibility.status-ceq'not-required') 'workspace v2 opt-in outranks rollout and fallback for a new task' 'workspace v2 did not outrank rollout resolution'
+    Check ($configAuto.new_task_protocol-ceq'auto'-and$workspaceAuto.selected_protocol-ceq'v2'-and$workspaceAuto.rollout_eligibility.status-ceq'pass') 'workspace auto delegates to the eligible rollout report' 'workspace auto bypassed rollout qualification'
+    Remove-Item -LiteralPath (Join-Path $workspace '.assistant\config\protocol.json') -Force
     $canonicalPath=Join-Path $workspace '.assistant\runtime\rollout\v2-eligibility.json';[void][IO.Directory]::CreateDirectory((Split-Path -Parent $canonicalPath));[IO.File]::WriteAllText($canonicalPath,($pass|ConvertTo-Json -Depth 30),[Text.UTF8Encoding]::new($false))
     Check (Test-Path -LiteralPath $canonicalPath -PathType Leaf) 'canonical report fixture exists at the fixed workspace path' 'canonical report fixture was not created'
     $deliveryRoot=Join-Path $temp 'release-input';[void][IO.Directory]::CreateDirectory($deliveryRoot);$deliveryPath=Join-Path $deliveryRoot 'eligible.json';[IO.File]::WriteAllText($deliveryPath,(($pass|ConvertTo-Json -Depth 30)+"`n`n"),[Text.UTF8Encoding]::new($false));$deliveryBytes=[IO.File]::ReadAllBytes($deliveryPath);Remove-Item -LiteralPath $canonicalPath -Force
@@ -98,7 +105,7 @@ try{
     $ineligiblePreserved=$ineligibleResult.ExitCode-eq2;if($ineligiblePreserved){$ineligiblePreserved=Test-ExactBytes $canonicalBeforeRejection ([IO.File]::ReadAllBytes($canonicalPath))};Check $ineligiblePreserved 'promotion rejects an ineligible report without changing canonical bytes' 'ineligible promotion changed canonical bytes or returned the wrong exit code'
     $tamperedPromotion=New-Report (New-Gates);$tamperedPromotion.report_digest='sha256:'+('f'*64);$tamperedPromotionPath=Join-Path $deliveryRoot 'tampered.json';[IO.File]::WriteAllText($tamperedPromotionPath,($tamperedPromotion|ConvertTo-Json -Depth 30),[Text.UTF8Encoding]::new($false));$tamperedPromotionResult=Invoke-Promotion $workspace $tamperedPromotionPath
     $tamperedPreserved=$tamperedPromotionResult.ExitCode-eq2;if($tamperedPreserved){$tamperedPreserved=Test-ExactBytes $canonicalBeforeRejection ([IO.File]::ReadAllBytes($canonicalPath))};Check $tamperedPreserved 'promotion rejects a tampered report without changing canonical bytes' 'tampered promotion changed canonical bytes or returned the wrong exit code'
-    $rollbackRepo=Join-Path $temp 'post-publish-rollback-repo';$activeGitDir=$env:GIT_DIR;$activeGitWorkTree=$env:GIT_WORK_TREE
+    $rollbackFixtureRoot=Join-Path $RepoRoot '.assistant\runtime\test-fixtures';$rollbackRepo=Join-Path $rollbackFixtureRoot ('post-publish-rollback-repo-'+[guid]::NewGuid().ToString('N'));$activeGitDir=$env:GIT_DIR;$activeGitWorkTree=$env:GIT_WORK_TREE
     try{
         Remove-Item Env:GIT_DIR,Env:GIT_WORK_TREE -ErrorAction SilentlyContinue;$null=@(&git clone --quiet --no-hardlinks -- $shadowRepo $rollbackRepo 2>&1);if($LASTEXITCODE-ne0){throw 'post-publish rollback clone failed'}
         $rollbackCanonical=Join-Path $rollbackRepo '.assistant\runtime\rollout\v2-eligibility.json';[void][IO.Directory]::CreateDirectory((Split-Path -Parent $rollbackCanonical));$rollbackPreimage=[Text.UTF8Encoding]::new($false).GetBytes('{"sentinel":"preserve"}');[IO.File]::WriteAllBytes($rollbackCanonical,$rollbackPreimage)
@@ -112,6 +119,8 @@ try{
         Check $missingRollbackClean 'post-publish failure removes a newly created canonical report and its empty parents' ("missing-preimage rollback failed: "+$missingRollbackResult.Output)
     }finally{
         if($null-eq$activeGitDir){Remove-Item Env:GIT_DIR -ErrorAction SilentlyContinue}else{$env:GIT_DIR=$activeGitDir};if($null-eq$activeGitWorkTree){Remove-Item Env:GIT_WORK_TREE -ErrorAction SilentlyContinue}else{$env:GIT_WORK_TREE=$activeGitWorkTree}
+        Remove-DirectoryWithRetry -Path $rollbackRepo
+        if((Test-Path -LiteralPath $rollbackFixtureRoot -PathType Container)-and@(Get-ChildItem -LiteralPath $rollbackFixtureRoot -Force).Count-eq0){[IO.Directory]::Delete($rollbackFixtureRoot,$false)}
     }
     $oversizedReportPath='rollout/oversized.json';[IO.File]::WriteAllBytes((Join-Path $workspace $oversizedReportPath),$oversizedTarget)
     $missingExplicit=Resolve-Protocol $workspace 'rollout/missing-explicit.json'

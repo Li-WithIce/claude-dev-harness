@@ -70,9 +70,9 @@ updated: 2026-07-14
 "@
     Write-Utf8Bom -Path $planPath -Content $plan
     $v1=Read-Json (Invoke-Script $taskScript @('protocol','-TaskId',$taskId,'-RepoRoot',$RepoRoot,'-WorkspaceRoot',$workspace,'-AsJson'))
-    $v1Conflict=Invoke-Script $taskScript @('protocol','-TaskId',$taskId,'-RepoRoot',$RepoRoot,'-WorkspaceRoot',$workspace,'-AsJson') 'v2'
+    $v1Conflict=Read-Json (Invoke-Script $taskScript @('protocol','-TaskId',$taskId,'-RepoRoot',$RepoRoot,'-WorkspaceRoot',$workspace,'-AsJson') 'v2')
     Check ($v1.detected_protocol-ceq'v1'-and$v1.selected_protocol-ceq'v1'-and$v1.v1_stage-ceq'PLAN') 'legal v1 plan wins auto detection' 'v1 artifact was not detected'
-    Check ($v1Conflict.ExitCode-eq2-and$v1Conflict.StdErr-match'explicit v1-to-v2 migration') 'explicit v2 cannot override an existing v1 task' 'v1 conflict did not fail closed'
+    Check ($v1Conflict.detected_protocol-ceq'v1'-and$v1Conflict.selected_protocol-ceq'v1'-and$v1Conflict.preference_source-ceq'existing-artifact') 'existing v1 artifact outranks explicit v2 new-task selection' 'explicit v2 overrode an existing v1 artifact'
 
     $args=@('-TaskId',$taskId,'-RepoRoot',$RepoRoot,'-WorkspaceRoot',$workspace,'-VaultRoot',(Join-Path $workspace '.assistant'))
     $stageResults=[System.Collections.Generic.List[object]]::new()
@@ -143,10 +143,10 @@ pass
 
     $v2Id='coexist-v2';$v2Root=Join-Path $workspace ".assistant\runtime\tasks\$v2Id";[void][IO.Directory]::CreateDirectory($v2Root);[IO.File]::WriteAllText((Join-Path $v2Root 'task.json'),((New-V2TaskDocument $v2Id)|ConvertTo-Json -Depth 20 -Compress),[Text.UTF8Encoding]::new($false))
     $v2=Read-Json (Invoke-Script $taskScript @('protocol','-TaskId',$v2Id,'-RepoRoot',$RepoRoot,'-WorkspaceRoot',$workspace,'-AsJson') 'auto')
-    $v2Conflict=Invoke-Script $taskScript @('protocol','-TaskId',$v2Id,'-RepoRoot',$RepoRoot,'-WorkspaceRoot',$workspace,'-AsJson') 'v1'
+    $v2Conflict=Read-Json (Invoke-Script $taskScript @('protocol','-TaskId',$v2Id,'-RepoRoot',$RepoRoot,'-WorkspaceRoot',$workspace,'-AsJson') 'v1')
     $advanceV2=Invoke-Script $advance @('-TaskId',$v2Id,'-ExpectedStage','PLAN','-RepoRoot',$RepoRoot,'-WorkspaceRoot',$workspace) 'auto'
     Check ($v2.detected_protocol-ceq'v2'-and$v2.selected_protocol-ceq'v2') 'v2 task state wins auto detection' 'v2 artifact was not detected'
-    Check ($v2Conflict.ExitCode-eq2-and$v2Conflict.StdErr-match'cannot use the v1 compatibility path') 'explicit v1 cannot override an existing v2 task' 'v2 conflict did not fail closed'
+    Check ($v2Conflict.detected_protocol-ceq'v2'-and$v2Conflict.selected_protocol-ceq'v2'-and$v2Conflict.preference_source-ceq'existing-artifact') 'existing v2 artifact outranks explicit v1 new-task selection' 'explicit v1 downgraded an existing v2 artifact'
     Check ($advanceV2.ExitCode-eq1-and$advanceV2.StdErr-match'v2 task; advance-stage.ps1 is v1-only') 'v2 task is rejected before the v1 stage path runs' 'v2 task reached advance-stage'
 
     $corruptId='corrupt-v2';$corruptPath=Join-Path $workspace ".assistant\runtime\tasks\$corruptId\task.json";[void][IO.Directory]::CreateDirectory($corruptPath)

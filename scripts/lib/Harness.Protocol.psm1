@@ -4,6 +4,93 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot 'Harness.AtomicWrite.psm1') -Force -ErrorAction Stop
 
+$script:ProtocolConfigRelativePath = '.assistant/config/protocol.json'
+
+function Get-HarnessWorkspaceProtocolConfig {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$WorkspaceRoot
+    )
+
+    $WorkspaceRoot = Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
+    $path = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $script:ProtocolConfigRelativePath -Label 'workspace protocol config' -AllowMissing
+    if (-not (Test-Path -LiteralPath $path)) {
+        return [ordered]@{
+            status = 'missing'
+            path = $script:ProtocolConfigRelativePath
+            document = [ordered]@{schema_version='harness-protocol-config/v1';new_task_protocol='auto'}
+            digest = $null
+        }
+    }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw 'workspace protocol config is not a file' }
+
+    $bytes = [System.IO.File]::ReadAllBytes($path)
+    if ($bytes.Length -gt 4096) { throw 'workspace protocol config is too large' }
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        throw 'workspace protocol config must be UTF-8 without BOM'
+    }
+
+    $jsonDocument = $null
+    try {
+        $text = [System.Text.UTF8Encoding]::new($false,$true).GetString($bytes)
+        $jsonDocument = [System.Text.Json.JsonDocument]::Parse($text)
+        if ($jsonDocument.RootElement.ValueKind -cne [System.Text.Json.JsonValueKind]::Object) {
+            throw 'workspace protocol config must be a JSON object'
+        }
+        $propertyNames = @($jsonDocument.RootElement.EnumerateObject() | ForEach-Object { $_.Name })
+        if ($propertyNames.Count -ne 2 -or
+            @($propertyNames | Select-Object -Unique).Count -ne 2 -or
+            $propertyNames -cnotcontains 'schema_version' -or
+            $propertyNames -cnotcontains 'new_task_protocol') {
+            throw 'workspace protocol config keys are invalid'
+        }
+        $document = $text | ConvertFrom-HarnessJson -ErrorAction Stop
+    } catch {
+        throw "workspace protocol config is not strict UTF-8 JSON: $($_.Exception.Message)"
+    } finally {
+        if ($null -ne $jsonDocument) { $jsonDocument.Dispose() }
+    }
+
+    $schemaPath = Join-Path $RepoRoot 'schemas/protocol-config.schema.json'
+    try {
+        $valid = Test-Json -Json ($document | ConvertTo-Json -Depth 10 -Compress) -SchemaFile $schemaPath -ErrorAction Stop -WarningAction SilentlyContinue
+    } catch {
+        throw "workspace protocol config schema validation failed: $($_.Exception.Message)"
+    }
+    if (-not $valid) { throw 'workspace protocol config failed schema validation' }
+    return [ordered]@{
+        status = 'present'
+        path = $script:ProtocolConfigRelativePath
+        document = $document
+        digest = Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $path
+    }
+}
+
+function Set-HarnessWorkspaceProtocolConfig {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$WorkspaceRoot,
+        [Parameter(Mandatory)][ValidateSet('auto','v1','v2')][string]$NewTaskProtocol
+    )
+
+    $WorkspaceRoot = Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
+    [void](Resolve-Path -LiteralPath (Join-Path $RepoRoot 'schemas/protocol-config.schema.json') -ErrorAction Stop)
+    [void](Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $script:ProtocolConfigRelativePath -Label 'workspace protocol config' -AllowMissing)
+    $document = [ordered]@{schema_version='harness-protocol-config/v1';new_task_protocol=$NewTaskProtocol}
+    $content = ($document | ConvertTo-Json -Depth 10) + "`n"
+    $digest = Write-HarnessAtomicText -WorkspaceRoot $WorkspaceRoot -Path $script:ProtocolConfigRelativePath -Content $content
+    return [ordered]@{
+        operation = 'protocol-config'
+        action = $(switch ($NewTaskProtocol) {'v2' {'enable-v2'} 'v1' {'disable-v2'} default {'reset-auto'}})
+        path = $script:ProtocolConfigRelativePath
+        new_task_protocol = $NewTaskProtocol
+        digest = $digest
+        side_effects = [ordered]@{config_writes=1;runtime_writes=0;artifact_writes=0}
+    }
+}
+
 function Get-HarnessV1Frontmatter {
     param([Parameter(Mandatory)][string]$Content)
 
@@ -283,13 +370,6 @@ function Get-HarnessProtocolResolution {
     if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Join-Path $PSScriptRoot '..\..' }
     $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
     if (-not [string]::IsNullOrWhiteSpace($TaskId)) { Assert-HarnessTaskId -TaskId $TaskId }
-    $requested = $RequestedProtocol
-    if ([string]::IsNullOrWhiteSpace($requested)) {
-        $requested = [System.Environment]::GetEnvironmentVariable('HARNESS_PROTOCOL',[System.EnvironmentVariableTarget]::Process)
-    }
-    if ([string]::IsNullOrWhiteSpace($requested)) { $requested = 'auto' }
-    if ($requested -cnotin @('auto','v1','v2')) { throw 'HARNESS_PROTOCOL must be auto, v1, or v2' }
-
     $detected = 'new'
     $stage = $null
     $planPath = $null
@@ -320,11 +400,28 @@ function Get-HarnessProtocolResolution {
         }
     }
 
-    if ($detected -ceq 'v1' -and $requested -ceq 'v2') {
-        throw 'existing v1 task cannot be forced to v2; run the explicit v1-to-v2 migration command'
-    }
-    if ($detected -ceq 'v2' -and $requested -ceq 'v1') {
-        throw 'existing v2 task cannot use the v1 compatibility path'
+    $workspaceConfig = [ordered]@{status='not-read';path=$script:ProtocolConfigRelativePath;new_task_protocol=$null;digest=$null}
+    $requested = $detected
+    $preferenceSource = 'existing-artifact'
+    if ($detected -ceq 'new') {
+        $requested = $RequestedProtocol
+        $preferenceSource = 'maintenance-override'
+        if ([string]::IsNullOrWhiteSpace($requested)) {
+            $requested = [Environment]::GetEnvironmentVariable('HARNESS_PROTOCOL',[EnvironmentVariableTarget]::Process)
+            $preferenceSource = 'HARNESS_PROTOCOL'
+        }
+        if ([string]::IsNullOrWhiteSpace($requested)) {
+            $config = Get-HarnessWorkspaceProtocolConfig -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot
+            $workspaceConfig = [ordered]@{
+                status = [string]$config.status
+                path = [string]$config.path
+                new_task_protocol = [string]$config.document.new_task_protocol
+                digest = $config.digest
+            }
+            $requested = [string]$config.document.new_task_protocol
+            $preferenceSource = if ([string]$config.status -ceq 'present') { 'workspace-config' } else { 'default-auto' }
+        }
+        if ($requested -cnotin @('auto','v1','v2')) { throw 'HARNESS_PROTOCOL must be auto, v1, or v2' }
     }
 
     $rollout = [ordered]@{status='not-required';eligible=$false;reason='artifact-or-explicit-selection';report_digest=$null}
@@ -357,9 +454,9 @@ function Get-HarnessProtocolResolution {
     } elseif ($detected -ceq 'v1') {
         'existing-v1-plan'
     } elseif ($requested -ceq 'v2') {
-        'explicit-v2-new-task'
+        $(if ($preferenceSource -ceq 'workspace-config') {'workspace-v2-new-task'} else {'explicit-v2-new-task'})
     } elseif ($requested -ceq 'v1') {
-        'explicit-v1-new-task'
+        $(if ($preferenceSource -ceq 'workspace-config') {'workspace-v1-new-task'} else {'explicit-v1-new-task'})
     } elseif ($rollout.eligible) {
         'eligible-rollout-report'
     } else {
@@ -373,8 +470,10 @@ function Get-HarnessProtocolResolution {
         requested_protocol=$requested
         detected_protocol=$detected
         selected_protocol=$selected
+        preference_source=$preferenceSource
         reason=$reason
         warning=$warning
+        workspace_config=$workspaceConfig
         rollout_eligibility=$rollout
         v1_stage=$stage
         v1_plan_path=$(if ($detected -ceq 'v1') { $planPath } else { $null })
@@ -384,4 +483,4 @@ function Get-HarnessProtocolResolution {
     }
 }
 
-Export-ModuleMember -Function Get-HarnessProtocolResolution
+Export-ModuleMember -Function Get-HarnessWorkspaceProtocolConfig,Set-HarnessWorkspaceProtocolConfig,Get-HarnessProtocolResolution

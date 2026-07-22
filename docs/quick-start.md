@@ -15,7 +15,21 @@ pwsh -File .\install.ps1 `
 
 ## 使用
 
-用 Codex 打开目标工作区，直接描述目标、验收、范围与限制。普通快速开始不要求设置环境变量；在尚无 eligible rollout report 的工作区中，`auto` 会继续选择 v1。需要主动试用 v2 的新任务时，可在启动 Codex Desktop 前显式设置 `HARNESS_PROTOCOL=v2`；已有任务仍按自身 v1 `plan.md` 或 v2 `task.json` 继续原协议。
+用 Codex 打开目标工作区，直接描述目标、验收、范围与限制。当前普通快速开始不要求设置环境变量，默认 `auto` 仍选择 v1。需要让该项目的新任务主动使用 v2 时，执行一次工作区级 opt-in：
+
+```powershell
+# status：只读显示这个工作区的新任务会选择什么协议
+pwsh -File .assistant\entry\task.ps1 protocol
+
+# enable：写入默认不入 Git 的项目配置；之后正常打开 Desktop 即可
+pwsh -File .assistant\entry\task.ps1 enable-v2
+
+# reset：回到证据门控 auto；disable：立即让新任务回到 v1
+pwsh -File .assistant\entry\task.ps1 reset-auto
+pwsh -File .assistant\entry\task.ps1 disable-v2
+```
+
+配置文件是 `.assistant/config/protocol.json`，schema 为 `harness-protocol-config/v1`；它严格只接受 `new_task_protocol=auto|v1|v2`，由用户持有，install/update/uninstall 不接管或删除。已有任务仍按自身 v1 `plan.md` 或 v2 `task.json` 继续原协议，并且永远优先于环境变量和工作区配置。项目级 `enable-v2` 是当前公共显式 opt-in，不代表 Default Promotion 或零配置 Auto 默认 v2 已完成。
 
 进入 v2 后，Harness 会把请求归入：
 
@@ -60,7 +74,7 @@ pwsh -File D:\data\dev-harness\install.ps1 `
 
 ## 回滚
 
-`HARNESS_PROTOCOL=v1` 让新任务回到 v1 路由，不会删除已有 v2 task。需要移除安装器托管资产时，单独运行：
+`.assistant\entry\task.ps1 disable-v2` 让该工作区的新任务回到 v1 路由；`HARNESS_PROTOCOL=v1` 仍可用于一次性维护止损。它们不会删除已有 v2 task。需要移除安装器托管资产时，单独运行；用户的 `.assistant/config/protocol.json` 会保留：
 
 ```powershell
 pwsh -File .\uninstall.ps1 `
