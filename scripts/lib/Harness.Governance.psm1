@@ -86,6 +86,14 @@ function Resolve-HarnessAuditArtifact {
     }
     if ($actors.Count -ne 1 -or $contexts.Count -ne 1) { throw 'independent audit requires one implementer actor and context in Evidence' }
     $implementerActor = @($actors)[0];$implementerContext = @($contexts)[0]
+    if ($RequiredIndependence -ceq 'different-actor' -and $Evidence.Document.Contains('dry_run')) {
+        $dryRun = $Evidence.Document.dry_run;$dryRunActor = $dryRun.actor
+        if ([string]::IsNullOrWhiteSpace([string]$dryRun.command)) { throw 'Critical dry-run command must not be blank' }
+        foreach ($field in @('host','model','actor_id','context_id')) { if ([string]::IsNullOrWhiteSpace([string]$dryRunActor[$field])) { throw "Critical dry-run executor $field must not be blank" } }
+        if ($dryRunActor.Contains('backend') -and [string]::IsNullOrWhiteSpace([string]$dryRunActor.backend)) { throw 'Critical dry-run executor backend must not be blank' }
+        if ([string]$dryRunActor.actor_id -ceq $implementerActor) { throw 'Critical dry-run executor actor must differ from the implementer actor' }
+        if ([string]$dryRunActor.context_id -ceq $implementerContext) { throw 'Critical dry-run executor context must differ from the implementer context' }
+    }
     if ([string]$record.implementer_actor_id -cne $implementerActor) { throw 'independent audit implementer_actor_id does not match Evidence' }
     if ([string]$record.reviewer_context_id -ceq $implementerContext) { throw 'independent reviewer context must differ from implementer context' }
     if ([string]$record.independence_level -ceq 'different-actor' -and [string]$record.reviewer_actor_id -ceq $implementerActor) { throw 'different-actor audit requires a different reviewer actor' }
@@ -110,6 +118,10 @@ function Assert-HarnessGovernanceReady {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][System.Collections.IDictionary]$Task,[Parameter(Mandatory)][object]$Evidence)
     $plan = $null;$audit = $null
+    $dryRunRequired = if ($Task.policies.Contains('dry_run_required')) { [bool]$Task.policies.dry_run_required } else { [string]$Task.execution_profile -ceq 'critical' }
+    if ($dryRunRequired -and [string]$Evidence.NextStatus -ceq 'done') {
+        if (-not $Evidence.Document.Contains('dry_run') -or [int]$Evidence.Document.dry_run.exit_code -ne 0) { throw 'dry-run Evidence is required before Critical task completion' }
+    }
     if ([bool]$Task.policies.plan_required) { $plan = Assert-HarnessPlanArtifact -WorkspaceRoot $WorkspaceRoot -TaskId ([string]$Task.task_id) -ContractDigest ([string]$Task.contract_digest) }
     if ([bool]$Task.policies.independent_review_required) {
         $requiredIndependence=if([string]$Task.execution_profile-ceq'critical'){'different-actor'}else{'isolated-context'}

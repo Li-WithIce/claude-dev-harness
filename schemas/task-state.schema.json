@@ -43,7 +43,8 @@
         "approval_required": { "type": "boolean" },
         "rollback_required": { "type": "boolean" },
         "independent_review_required": { "type": "boolean" },
-        "verification_required": { "type": "boolean" }
+        "verification_required": { "type": "boolean" },
+        "dry_run_required": { "type": "boolean" }
       }
     },
     "approvals": {

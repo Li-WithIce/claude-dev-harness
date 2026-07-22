@@ -15,7 +15,9 @@ pwsh -File .\install.ps1 `
 
 ## 使用
 
-用 Codex 打开目标工作区，直接描述目标、验收、范围与限制。Harness 会把请求归入：
+用 Codex 打开目标工作区，直接描述目标、验收、范围与限制。普通快速开始不要求设置环境变量；在尚无 eligible rollout report 的工作区中，`auto` 会继续选择 v1。需要主动试用 v2 的新任务时，可在启动 Codex Desktop 前显式设置 `HARNESS_PROTOCOL=v2`；已有任务仍按自身 v1 `plan.md` 或 v2 `task.json` 继续原协议。
+
+进入 v2 后，Harness 会把请求归入：
 
 - Inspect：只读，零写入。
 - Ask：仍有会改变产品、权限、兼容或不可逆结果的未决决定，先澄清。

@@ -162,7 +162,18 @@ function Get-TaskPolicyFlags {
         rollback_required=$selected -ccontains 'rollback_required'
         independent_review_required=$selected -ccontains 'independent_review_required'
         verification_required=$selected -ccontains 'verification_required'
+        dry_run_required=$selected -ccontains 'dry_run_required'
     }
+}
+
+function Get-EffectiveTaskPolicyFlags {
+    param([System.Collections.IDictionary]$Task)
+    $effective = [ordered]@{}
+    foreach ($key in @('plan_required','approval_required','rollback_required','independent_review_required','verification_required')) {
+        $effective[$key] = [bool]$Task.policies[$key]
+    }
+    $effective.dry_run_required = if ($Task.policies.Contains('dry_run_required')) { [bool]$Task.policies.dry_run_required } else { [string]$Task.execution_profile -ceq 'critical' }
+    return $effective
 }
 
 function Assert-TaskStateDocument {
@@ -185,7 +196,7 @@ function Assert-TaskStateDocument {
         $capabilities = @(@('plan_required','approval_required','rollback_required','independent_review_required') | Where-Object { [bool]$Task.policies[$_] })
     }
     $expectedPolicies = Get-TaskPolicyFlags -RepoRoot $RepoRoot -Profile ([string]$Task.execution_profile) -Capabilities $capabilities
-    if (-not (Test-TaskStateValueEqual -Left $Task.policies -Right $expectedPolicies)) {
+    if (-not (Test-TaskStateValueEqual -Left (Get-EffectiveTaskPolicyFlags -Task $Task) -Right $expectedPolicies)) {
         throw 'persisted task state policies do not match its execution profile'
     }
     if ([string]$Task.status -ceq 'blocked') {
@@ -746,7 +757,7 @@ function Assert-TransactionJournal {
             [string]$taskDocument.contract_digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or
             @($taskDocument.approvals).Count -ne 0 -or
             $null -ne $taskDocument.evidence_path -or
-            -not (Test-TaskStateValueEqual -Left $taskDocument.policies -Right $expectedPolicies)) {
+            -not (Test-TaskStateValueEqual -Left (Get-EffectiveTaskPolicyFlags -Task $taskDocument) -Right $expectedPolicies)) {
             throw 'create transaction task-state payload is not canonical'
         }
         foreach ($step in @($Journal.steps)) {

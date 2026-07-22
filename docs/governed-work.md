@@ -12,8 +12,8 @@ Governed 适用于需要持久任务状态、可审计交付、较高风险或�
 2. 创建/恢复唯一的 v2 task state；它是生命周期真相源。
 3. 按策略满足必需能力后实施。Governed 总是需要验证和持久 Evidence；计划、Approval、回滚与独立审查按策略组合。
 4. Critical 在执行和完成前必须具备计划、有效 Approval、回滚方案、独立审查、dry-run、验证与 Evidence。
-5. Evidence 记录真实命令、退出码、覆盖、缺口与结论；未执行项标为 unavailable、manual 或 blocked，不能伪造 pass。
-6. 完成门重新校验任务版本、Requirement digest、仓库修订、Evidence、Approval 和治理记录，再进行合法状态转换。
+5. Evidence 记录真实命令、退出码、覆盖、缺口与结论；Critical 的实际 dry-run 命令使用顶层结构化 `dry_run` command 对象，记录独立受控执行器 actor，并继承同一 Evidence 的 task/version/Contract/revision 绑定。未执行项标为 unavailable、manual 或 blocked，不能伪造 pass。
+6. 完成门重新校验任务版本、Requirement digest、仓库修订、Evidence、Approval 和治理记录，再进行合法状态转换；正常 verify 与 replay 共用同一 Critical dry-run 门禁。
 
 Approval 与 Ask 不同：Approval 缺失是能力阻断，只有产品/授权决定本身不清楚时才 Ask。作用域、任务版本或 Requirement 变化后，旧 Approval 不能继续授权。
 

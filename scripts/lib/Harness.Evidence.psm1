@@ -96,7 +96,10 @@ function Get-HarnessEvidenceRevision {
     $exactExclusions = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
     [void]$exactExclusions.Add($inputRelative);[void]$exactExclusions.Add($outputRelative)
     if ($Evidence.Contains('task_id')) { [void]$exactExclusions.Add("docs/tasks/$([string]$Evidence.task_id)/audit.md") }
-    foreach ($record in @($Evidence.records)) {
+    $revisionRecords = [System.Collections.Generic.List[object]]::new()
+    foreach ($record in @($Evidence.records)) { $revisionRecords.Add($record) }
+    if ($Evidence.Contains('dry_run')) { $revisionRecords.Add($Evidence.dry_run) }
+    foreach ($record in @($revisionRecords)) {
         $recordPath = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path ([string]$record.evidence_path) -Label 'record evidence_path' -MustExist File
         $relative = Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path $recordPath
         $digest = Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $recordPath
@@ -199,6 +202,16 @@ function Resolve-HarnessEvidenceCore {
             if([string]$record.result -ceq 'fail'){$hasFail=$true}elseif([string]$record.result -ceq 'blocked'){$hasBlocked=$true}elseif([string]$record.result -ceq 'partial'){$hasPartial=$true}
         }
         foreach($item in @($record.covers)){[void]$covered.Add([string]$item)}
+    }
+    if($document.Contains('dry_run')){
+        $dryRun=$document.dry_run
+        if([string]::IsNullOrWhiteSpace([string]$dryRun.command)){throw 'dry-run command must not be blank'}
+        foreach($field in @('host','model','actor_id','context_id')){if([string]::IsNullOrWhiteSpace([string]$dryRun.actor[$field])){throw "dry-run executor $field must not be blank"}}
+        if($dryRun.actor.Contains('backend')-and[string]::IsNullOrWhiteSpace([string]$dryRun.actor.backend)){throw 'dry-run executor backend must not be blank'}
+        $dryRunPath=Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path ([string]$dryRun.evidence_path) -Label 'dry-run evidence_path' -MustExist File
+        if((Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $dryRunPath)-cne[string]$dryRun.digest){throw "dry-run Evidence digest mismatch: $($dryRun.evidence_path)"}
+        [void](Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path ([string]$dryRun.cwd) -Label 'dry-run cwd' -MustExist Directory)
+        if([int]$dryRun.exit_code-ne0){$hasFail=$true}
     }
     $buckets=[System.Collections.Generic.Dictionary[string,string]]::new([System.StringComparer]::Ordinal)
     foreach($pair in @(@('satisfied',$document.coverage.satisfied),@('not_verified',$document.coverage.not_verified),@('blocked',$document.coverage.blocked))){

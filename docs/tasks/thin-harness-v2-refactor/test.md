@@ -1,58 +1,66 @@
 # Test Report
 
-> Historical TEST snapshot for revision `a061cacf...`. It is preserved as process evidence and superseded by Master Plan Runs 107-113 for the final public-Harness scope and exact head `acccb30d...`.
+> Current RQ-34 TEST attestation for the public Harness v2 opt-in engineering milestone. This report supersedes the historical `a061cacf...` fail snapshot while preserving that history in the Master Plan. Default Promotion / Stable qualification remains a separate pending milestone and is not represented as pass here.
 
 ## Summary
-- Release Qualification 独立重审已否证当前交付完整性：除真实 Direct host latency 尚缺外，仍存在 CI 报告交付、真实模型 Eval、真实 bare/v1/v2 runner、损坏 v2 artifact、Protected Actions 扩展合同与 CHANGELOG 六项可修复缺口；当前结论为 fail。
+- The final RQ-34 dirty candidate passes the approved public opt-in engineering scope: Critical structured dry-run completion and replay enforcement, v1/v2 coexistence, install/update/uninstall compatibility, maintained documentation, and process-record consistency are supported by focused, full-suite, lifecycle, and isolated-review evidence.
 
 ## Scope
-- PR-00 至 PR-14 的代码、测试、迁移/兼容、rollout gate、声明 artifact 与总体 Definition of Done。
+- RQ-34 delivery-milestone reconciliation on top of completed PR-00 through PR-14: public v2 explicit opt-in, Critical dry-run closure, v1 compatibility and rollback, current docs/process artifacts, and local ordinary-engineering verification.
+- Excluded from this pass: Model40, real cognitive/installed Host 3×3, current-head performance qualification, Installed Desktop Gate, eligible rollout promotion, Auto default flip, Canary/Stable, Ready/merge, and physical v1 removal.
 
 ## Inputs Reviewed
 - `docs/tasks/thin-harness-v2-refactor/plan.md`
-- base diff `codex/harness-distribution...a061cacf3a9c32b3b96d0fb32810085fc3031064`
-- Release workflow、rollout generator、protocol detector、deterministic Eval、benchmark、Protected Actions、README 与 release/testing 文档。
+- `docs/tasks/thin-harness-v2-refactor/release-gap-checklist.md`
+- `README.md`, `CHANGELOG.md`, `docs/quick-start.md`, `docs/governed-work.md`, `docs/migration/v1-to-v2.md`
+- `schemas/evidence.schema.json`, `schemas/task-state.schema.json`
+- `scripts/lib/Harness.Evidence.psm1`, `scripts/lib/Harness.Governance.psm1`, `scripts/lib/Harness.TaskState.psm1`
+- related policy, Evidence, Governance, TaskState, Approval, coexistence, migration, install, entry, and workflow verifiers
 
 ## Test Approach
-- 重新读取 Master Plan、base diff 与 Release Qualification 相关实现面。
-- 用单条只读审计命令检查报告持久化、真实模型调用、真实 host runner、损坏 v2 artifact 识别、policy extension contract 与 CHANGELOG 交付。
-- 保留 local fixture replay 与真实 Direct host trace 的证据边界，不用模拟或本地解析耗时替代发布性能证据。
+- Ran the final `Suite all` with verbose output and a 900-second per-check timeout; verified its raw log hash, RUN/PASS accounting, explicit SKIP, dynamic SUBST UNAVAILABLE, zero FAIL markers, and final status.
+- Ran isolated core, governed, and full lifecycle smokes sequentially through install, verify, update, second verify, uninstall, and cleanup.
+- Ran focused Policy, Evidence, Governance, and TaskState verification after the Run 7 whitespace counterexample; retained the initial six-failure Policy attempt as failed evidence, corrected the exact schema hunk, and reran successfully.
+- Used three fresh isolated read-only CODE_REVIEW contexts across the two revise loops and final pass. Run 8 independently replayed schema, Evidence-runtime, and Governance-runtime whitespace counterexamples and found no P0/P1/evidenced P2 or blocking overengineering.
+- Bound this report to a canonical JSON digest containing HEAD plus SHA-256 digests of unstaged, staged, and untracked candidate state, with this tracked `test.md` self-excluded so the report does not invalidate its own revision.
 
 ## Findings
-- `.github/workflows/validation.yml` 只把 rollout report 写入 `RUNNER_TEMP`，没有 artifact upload 或其他持久发布步骤，安装/工作区也没有默认发现链路。
-- `tests/run-scenario-evals.ps1` 明确把 external model 标为 unavailable，未把 paraphrase 交给全新 Codex 会话；`scripts/benchmark-harness.ps1` 只读取 fixture observation 并测量本地 JSON replay，没有真实 bare/v1/v2 host runner。
-- `Harness.Protocol.psm1` 仅凭 `task.json` 路径存在就判定 v2，未在 detector 中校验 UTF-8、schema 与 task identity；损坏 artifact 会被当作 existing-v2。
-- `Harness.ProtectedAction.psm1` 把两条内置 rule id 写死为精确全集，既无项目级 overlay，也没有正式 core-only extension contract。
-- `CHANGELOG.md` 相对 base 没有更新；README 与现有发布文档也未覆盖真实模型 Eval、报告安装/发现和完整故障排查。
-- 以上均为当前分支可修复缺陷，因此不能继续用 environment-blocked 表达；应返回 IMPLEMENT。真实 Direct 性能仍须在修复 runner 后实测，未测前仍不得翻转默认。
+- Critical tasks persist or compatibly derive `dry_run_required`; an explicit false downgrade is rejected. A successful, task/version/Contract/revision-bound dry-run with a contained output/digest/cwd and independent controlled-executor actor/context is required before `done` in ordinary, current replay, and legacy replay paths.
+- Whitespace-only dry-run command and executor identity values are rejected by schema and runtime checks with zero writes; ordinary Evidence actor/command contracts remain unchanged.
+- v1 tasks still execute the five-stage lifecycle to DONE; explicit v1 rollback, explicit v2 opt-in, artifact-first existing tasks, migration safety, and core/governed/full install lifecycles remain intact.
+- Documentation consistently distinguishes public v2 opt-in engineering completion from pending Default Promotion / Stable qualification. Auto without eligible evidence remains v1; release-job skips and unavailable evidence are not pass.
+- Final isolated Code Review Run 8 reports `findings: none` and four-dimensional scores `96/95/97/97`.
 
 ## Evidence
-- command: `pwsh -NoProfile -NonInteractive -Command '<release qualification six-gap read-only audit>'`
-- exit_code: 1
-- executed_at: 2026-07-15T09:24:03+08:00
-- revision: a061cacf3a9c32b3b96d0fb32810085fc3031064
+- command: `pwsh -NoLogo -NoProfile -NonInteractive -File scripts\run-validation.ps1 -Suite all -CheckTimeoutSeconds 900 -VerboseOutput; pwsh -NoLogo -NoProfile -NonInteractive -File scripts\run-isolated-install-smoke.ps1 -RepoRoot D:\data\dev-harness -Preset core; pwsh -NoLogo -NoProfile -NonInteractive -File scripts\run-isolated-install-smoke.ps1 -RepoRoot D:\data\dev-harness -Preset governed; pwsh -NoLogo -NoProfile -NonInteractive -File scripts\run-isolated-install-smoke.ps1 -RepoRoot D:\data\dev-harness -Preset full`
+- exit_code: 0
+- executed_at: 2026-07-22T14:36:04+08:00
+- revision: dirty:db7eda21b667252ddee9454a0152de8e4d4a24069657642e6e8a72dc7932cff8
 - evidence_path: `docs/tasks/thin-harness-v2-refactor/test.md`
 
 ## Risks / Gaps
-- 尚未捕获同模型、Max、同语义任务、新隔离会话的 bare/v1/v2 Direct host latency、turns 与 tool calls。
-- 尚未创建 Draft PR 或运行远程 pr-core、changed-optional、release-full；不能把本地历史结果当作远程 CI pass。
-- v1 必须继续处于 deprecation-without-removal；返修不得删除、自动迁移或破坏即时回滚路径。
+- Final Suite log `D:\data\dev-harness-validation-temp\rq34-whitespace-final-suite-all-20260722.log` (SHA-256 `402c3911f9ac324dfb73995e284e7d8e60acd7dfdcb1d0b11dfd6fa68142c373`) has 68 RUN entries, 67 timed verifier passes plus timed `git diff --check`, zero FAIL, one explicit no-WorkspaceRoot install SKIP, one dynamic SUBST UNAVAILABLE, and final PASS. The three isolated lifecycle logs provide real install/update/uninstall evidence for the skipped aggregate install entry; dynamic SUBST remains unavailable, not pass.
+- Exact-head ordinary CI is impossible before the final commit and remains required after push. Starting-head run `29818578961` passed ordinary PR gates at `4ff92a3...`; its release jobs were skipped and are not current-candidate release evidence.
+- Model40, real Host 3×3, performance ratios, Installed Desktop Gate, eligible report, promotion, Auto flip, Canary/Stable, Ready/merge, and v1 removal were not executed. They remain later, separately authorized qualification or retirement work.
+- Public Harness actor identity is cooperative and non-cryptographic. Structured actor/context separation and bound Evidence do not invent enterprise principal authentication; PreToolUse remains a guardrail rather than an unbypassable security boundary.
 
 ## Conclusion
-fail
+pass
 
 ## Handoff
-- delivery: PR-00 至 PR-14 的既有实现和历史验证保留；本轮新增的是独立 Release Qualification 六项失败证据，没有伪造修复或远程验证结果。
-- follow_up: 用正式 stage advancement 返回 IMPLEMENT，按 release-gap checklist 最小修复；完成真实模型 Eval/性能、rollout delivery、文档与健壮性后重新审查和 TEST。
-- artifact: 既有 Plan artifact 保留；RQ checklist 尚待在 IMPLEMENT 作为现有任务附件生成，不能成为第二 Master Plan。
-- drift: 当前新增 drift 为 RQ 六项实现/交付缺口；base branch、v1 源码和既有 task artifact 未修改。
-- follow_up_decision: 不拆新任务；Release Qualification 是当前 Master Plan 的交付闭环。
-- memory_spec_update: none；用户未授权写入外部 memory，Master Plan 仍是唯一真相源。
-- current_state: TEST fail；实现 HEAD 为 `a061cacf3a9c32b3b96d0fb32810085fc3031064`，等待正式推进到 IMPLEMENT。
+- delivery: Public Harness v2 opt-in engineering and RQ-34 consistency closure pass local TEST, including the existing Plan/process documents, Critical dry-run fixes, compatibility evidence, user documentation, and final isolated review.
+- follow_up: Advance TEST to DONE, create the one required local commit, ordinary-push the existing branch, refresh Draft PR #1, and wait for exact-head ordinary CI. Keep release jobs/skips and pending promotion truthfully separated; do not Ready, merge, promote, flip Auto, delete v1, or create a new login session.
+- artifact: Required v2 code, schema, tests, architecture/migration/user docs, Master Plan, release checklist, skill manifest, and this canonical test report exist. The authorized tracked task-directory exception freezes after DONE except for final delivery metadata already required by RQ-34.
+- drift: The TEST candidate contains only the declared RQ-34 documentation/process and Critical dry-run closure surfaces. Normal and Quality validators pass; their historical advisory artifact-drift warnings do not override direct repo-root existence/diff inspection. Staged and untracked counts are zero.
+- follow_up_decision: Do not create a second task or Master Plan for RQ-34. Default Promotion / Stable and post-Stable v1 retirement remain separate future decisions requiring explicit authorization.
+- memory_spec_update: none; no external memory/spec write is needed or authorized, and `plan.md` remains the sole Master Plan.
+- current_state: TEST pass on `codex/thin-harness-v2-refactor`, based on HEAD `4ff92a325e4956150ad7e4ad4a0aa69c3fb3f542` plus the recorded dirty candidate; awaiting canonical `TEST -> DONE`, final commit/push, Draft PR refresh, and exact-head ordinary CI.
 - key_decisions:
-  - decision: 不把 deterministic Eval、local fixture replay 或临时 CI 文件当作真实模型、真实 Direct 性能或已交付 rollout report。
-    why: Release Qualification 要求独立新会话、measured host trace 与可发现的持久报告，且所有 unavailable 必须 fail closed。
+  - decision: Treat public v2 opt-in engineering completion separately from Default Promotion / Stable qualification.
+    why: Current code, compatibility, docs, and ordinary verification pass, while external performance/release evidence remains explicitly unavailable or unexecuted and must not block or masquerade as the public Harness milestone.
+  - decision: Keep v1 installed and executable after DONE.
+    why: Existing tasks, immediate rollback, migration safety, and post-Stable retirement authorization remain hard compatibility boundaries.
 - next_actions:
-  - 正式推进 `TEST -> IMPLEMENT`，生成并执行 release-gap checklist。
-  - 修复六项缺口并完成本地、远程、模型、性能和独立审查证据。
-  - 重新进入 TEST；全部 gate 真实 pass 后才推进 DONE，始终禁止 merge 与删除 v1。
+  - Run artifact validators, then use the canonical stage driver for `TEST -> DONE`.
+  - Stage the exact intended tracked files, inspect the cached diff, and commit once as `thin-v2(RQ-34): reconcile delivery milestone and task truth`.
+  - Ordinary-push `codex/thin-harness-v2-refactor`, update Draft PR #1 without changing Draft state, and wait for exact-head ordinary PR CI.

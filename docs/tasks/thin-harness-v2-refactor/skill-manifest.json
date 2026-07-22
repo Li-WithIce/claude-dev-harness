@@ -1,1 +1,1 @@
-{"version":1,"task_id":"thin-harness-v2-refactor","stage":"IMPLEMENT","tool":"codex","available_commands":[{"name":"implement","description":"Use when the task is in IMPLEMENT and code plus fresh implementation evidence must be appended to `plan.md`."}],"generated_at":"2026-07-16T12:24:39.5512338Z"}
+{"version":1,"task_id":"thin-harness-v2-refactor","stage":"DONE","tool":"none","available_commands":[],"generated_at":"2026-07-22T06:37:27.3988946Z"}

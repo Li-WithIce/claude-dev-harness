@@ -2,6 +2,13 @@
 
 Windows 优先的轻量工程 harness。新任务先经过 Requirement Gate，再按风险选择 Ask、Direct、Governed 或 Critical；清晰低风险工作直接修改并验证，高风险工作才按需增加持久状态、Evidence、Approval、回滚和独立审查。既有 v1 `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST` 任务继续按 artifact 自动识别、恢复和完成，不会被隐式迁移或删除。
 
+## 当前交付状态
+
+- **v2 opt-in implementation complete**：Requirement Gate、执行 profile、v2 Task State / Evidence / Approval / Audit、v1/v2 共存与迁移，以及 `core` / `governed` / `full` 生命周期已进入公共工程交付范围。
+- **v2 default promotion qualification pending**：当前 HEAD 的正式 Model40、真实 cognitive/installed Host 3×3、`v2/bare <= 1.25`、Installed Desktop Gate、eligible rollout promotion、Auto 默认翻转和 Canary / Stable 均未完成，也不计为通过；v1 物理删除是 Stable 之后还需另行授权的 retirement 里程碑。
+- 没有合格 rollout report 时，`HARNESS_PROTOCOL=auto` 对新任务继续 fail-closed 到 v1；需要主动试用的新任务可显式设置 `HARNESS_PROTOCOL=v2`。已有任务始终按现有 v2 `task.json` 或 v1 `plan.md` artifact 继续原协议，不会被隐式迁移。
+- 入口和架构已经瘦身；当前 HEAD 尚未重新完成正式性能资格测量，因此不声明性能已接近 Bare。
+
 ## 快速开始
 
 ### 1. 安装默认 core preset
@@ -17,7 +24,7 @@ pwsh -File .\install.ps1 `
 
 ### 2. 用 Codex 桌面打开项目
 
-用 Codex 桌面直接打开 `D:\my-project`。正常使用不需要设置 `HARNESS_PROTOCOL`、指定 rollout report、运行 `task.ps1` 或手工选择 execution profile。
+默认兼容用法可直接用 Codex 桌面打开 `D:\my-project`，无需设置 `HARNESS_PROTOCOL`、指定 rollout report、运行 `task.ps1` 或手工选择 execution profile；没有 eligible report 时，这条 `auto` 路径会进入 v1。要主动试用 v2，请在启动 Codex Desktop 前显式设置 `HARNESS_PROTOCOL=v2`，再打开项目。
 
 ### 3. 直接描述需求
 
@@ -38,7 +45,7 @@ pwsh -File .\install.ps1 `
 
 ## Evidence、Approval 与受保护动作
 
-Evidence 记录真实执行过的验证、覆盖与缺口，并绑定任务版本和仓库修订；没有执行的检查不能写成通过。Approval 是对确定版本、Requirement Contract 与作用域的授权，缺失、过期或作用域变化会阻断受保护动作；它不是要求澄清的 Ask。
+Evidence 记录真实执行过的验证、覆盖与缺口，并绑定任务版本和仓库修订；没有执行的检查不能写成通过。Critical 的 dry-run 必须作为顶层结构化 `dry_run` command 对象进入同一份 Evidence，记录独立受控执行器 actor；正常 verify 与 replay 都会在进入 `done` 前重新校验，Hook 的 `-DryRun` 布尔值本身不能替代这份持久证据。Approval 是对确定版本、Requirement Contract 与作用域的授权，缺失、过期或作用域变化会阻断受保护动作；它不是要求澄清的 Ask。
 
 Core 只内置有限的受保护动作规则：生产破坏性数据库命令，以及 `auth` / `permissions` / `rbac` 路径变更。项目特有风险必须通过严格的 `protected-actions-overlay/v1` 增加，不能靠提示词放宽 core。安装器把 Codex `PreToolUse` 合并到普通用户 `hooks.json`，不写信任记录，也不覆盖企业 `hooks=false` / managed-only 策略；经用户正常信任并启用后，`Bash` 只把 command text 送入 core policy。Codex 0.144.4 的 Hook payload 不绑定工具实际采用的 environment identity/cwd，remote primary 还可能把 Hook `cwd` 回退为本机旧 cwd；因此 Bash 中的 `apply_patch` / `applypatch` 和所有 direct `apply_patch` 都在 adapter 层 fail closed，不能用一个看似本地的 `cwd` 冒充执行环境。只有宿主以后提供可信的实际 environment identity/cwd 后，才能恢复按 patch 路径做细粒度放行。该版本真实 `permission_mode` 只有 `default` / `bypassPermissions`，不代表 Plan 协作模式；adapter 不从它臆造只读保证。
 

@@ -64,10 +64,10 @@ The current pointer is optional and singular. Background tasks do not steal it. 
 
 ## Evidence, Approval, and governance
 
-- `evidence/v1` binds task id/version, Requirement Contract digest, the full current commit or a dirty digest, command exit codes, records, coverage, and conclusion. Unsafe Git index flags fail closed instead of hiding tracked changes.
+- `evidence/v1` binds task id/version, Requirement Contract digest, the full current commit or a dirty digest, command exit codes, records, coverage, and conclusion. Its optional top-level `dry_run` command object has its own contained path, digest, cwd, exit code, timestamp and controlled-executor actor, while inheriting the Evidence envelope's task/version/Contract/revision binding. `dry_run_required` is an invariant of the Critical profile: new task state persists it explicitly, while older task state without the optional flag derives it from `execution_profile=critical`. Critical can reach `done` only when the bound dry-run is successful. Unsafe Git index flags fail closed instead of hiding tracked changes.
 - pass plus nonzero exit, stale digest/revision, path escape, or incomplete coverage cannot complete a task.
 - Approval binds the exact task version, contract digest, type, scope, approver, time, expiry, and status. `approved_at` cannot be later than the authorization boundary, and a non-null expiry must be later than approval while still unexpired. Scope or version change makes it stale.
-- Required audit binds implementer/reviewer actor and context plus the Evidence digest. A pass audit cannot contain a P0/P1 blocking finding.
+- Required audit binds implementer/reviewer actor and context plus the Evidence digest. A pass audit cannot contain a P0/P1 blocking finding. Normal verify and transaction replay invoke the same governance gate, so replay cannot bypass the Critical dry-run requirement.
 
 These records are prerequisites to a state transition; they never overwrite `task.json` as a second truth source.
 

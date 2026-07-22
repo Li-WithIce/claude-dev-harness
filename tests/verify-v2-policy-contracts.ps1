@@ -155,6 +155,20 @@ $passingEvidenceWithGap = ($evidenceCase.valid | ConvertTo-Json -Depth 30 -Compr
 $passingEvidenceWithGap.gaps = @([pscustomobject]@{ id = 'AC-2'; status = 'not-verified'; reason = 'No environment' })
 Assert-True -Condition (-not (Test-AgainstSchema -Document $passingEvidenceWithGap -SchemaPath (Join-Path $schemaRoot 'evidence.schema.json'))) -Success 'Evidence pass rejects unresolved gaps' -Failure 'Evidence pass accepted an unresolved gap'
 
+$evidenceWithDryRun = ($evidenceCase.valid | ConvertTo-Json -Depth 30 -Compress) | ConvertFrom-Json
+$evidenceWithDryRun | Add-Member -NotePropertyName dry_run -NotePropertyValue ([pscustomobject]@{type='command';command='fixture --dry-run';cwd='.';exit_code=0;executed_at='2026-07-22T00:00:00Z';evidence_path='.harness/evidence/dry-run.txt';digest=('sha256:'+('1'*64));covers=@();actor=[pscustomobject]@{host='controlled-executor';model='inherit';actor_id='executor-fixture';context_id='execution-fixture'}})
+Assert-True -Condition (Test-AgainstSchema -Document $evidenceWithDryRun -SchemaPath (Join-Path $schemaRoot 'evidence.schema.json')) -Success 'Evidence accepts a strict actor-bound dry-run object' -Failure 'valid structured dry-run Evidence failed schema validation'
+$dryRunWithoutIdentity = ($evidenceWithDryRun | ConvertTo-Json -Depth 30 -Compress) | ConvertFrom-Json
+$dryRunWithoutIdentity.dry_run.actor.PSObject.Properties.Remove('actor_id')
+Assert-True -Condition (-not (Test-AgainstSchema -Document $dryRunWithoutIdentity -SchemaPath (Join-Path $schemaRoot 'evidence.schema.json'))) -Success 'dry-run Evidence requires executor identity' -Failure 'dry-run Evidence accepted a missing executor identity'
+foreach ($field in @('command','host','backend','model','actor_id','context_id')) {
+    $dryRunWithWhitespace = ($evidenceWithDryRun | ConvertTo-Json -Depth 30 -Compress) | ConvertFrom-Json
+    if ($field -ceq 'command') { $dryRunWithWhitespace.dry_run.command = ' ' }
+    elseif ($field -ceq 'backend') { $dryRunWithWhitespace.dry_run.actor | Add-Member -NotePropertyName backend -NotePropertyValue "`t" }
+    else { $dryRunWithWhitespace.dry_run.actor.$field = "`t" }
+    Assert-True -Condition (-not (Test-AgainstSchema -Document $dryRunWithWhitespace -SchemaPath (Join-Path $schemaRoot 'evidence.schema.json'))) -Success "dry-run Evidence rejects whitespace-only $field" -Failure "dry-run Evidence accepted whitespace-only $field"
+}
+
 $allContractText = @(Get-ChildItem -LiteralPath $policyRoot,$schemaRoot -Filter '*.json' -File | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding utf8 }) -join [Environment]::NewLine
 Assert-True -Condition ($allContractText -notmatch '"(?:task/v2|evidence/v2|risk-rules/v1|execution-profiles/v1)"') -Success 'contracts contain no conflicting or unauthorized public versions' -Failure 'contracts contain a conflicting or unauthorized public version'
 

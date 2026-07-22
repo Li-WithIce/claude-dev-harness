@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Make Requirement-Safe Thin Harness v2 the primary user path: install Core, open the workspace in Codex Desktop, and describe the requirement directly.
+- Add the public Requirement-Safe Thin Harness v2 opt-in path: install Core, explicitly set `HARNESS_PROTOCOL=v2` before starting Codex Desktop, open the workspace, and describe the requirement directly. The variable-free `auto` path continues to select v1 without an eligible rollout report until the separate Default Promotion milestone passes.
 - Add Requirement Gate routing for Ask/Direct/Governed/Critical with version-bound task state, Evidence, Approval, protected actions, and fail-closed recovery.
 - Add a transparent ordinary-user Codex `PreToolUse` guard for Windows environment-shell runners: preserve lossless third-party hook data (including exact BigInteger/decimal values) and enterprise/trust authority, transactionally retire only registry-proven legacy Harness managed policy, and fail closed on shell-form or direct `apply_patch` while the pinned host lacks a trustworthy execution-environment binding, without hiding or encoding the launcher.
 - Preserve artifact-first v1 compatibility, explicit `HARNESS_PROTOCOL=v1` rollback, isolated linked-worktree bootstrap, and core/governed/full install-update-uninstall ownership.
