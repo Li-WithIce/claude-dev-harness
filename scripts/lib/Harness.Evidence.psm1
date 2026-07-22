@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 
 Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot 'Harness.AtomicWrite.psm1') -Force -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot 'Harness.Approval.psm1') -Force -ErrorAction Stop
 
 function ConvertTo-HarnessEvidenceJson {
     param([Parameter(Mandatory)][object]$Value)
@@ -190,9 +191,15 @@ function Resolve-HarnessEvidenceCore {
     if([string]$document.task_id -cne $TaskId){throw 'Evidence task_id does not match TaskId'}
     if([int]$document.task_version -ne $TaskVersion){throw "Evidence task_version is stale: expected=$TaskVersion actual=$($document.task_version)"}
     if([string]$document.contract_digest -cne $ContractDigest){throw 'Evidence contract_digest is stale'}
+    $protectedOperation=$null
+    if($document.Contains('protected_operation')){$protectedOperation=Resolve-HarnessProtectedOperation -TaskVersion $TaskVersion -ContractDigest $ContractDigest -Operation $document.protected_operation -Label 'Evidence protected_operation'}
     $outputRelative="docs/tasks/$TaskId/evidence.json";[void](Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $outputRelative -Label 'evidence output' -AllowMissing)
     $covered=[System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal);$hasFail=$false;$hasBlocked=$false;$hasPartial=$false
     foreach($record in @($document.records)){
+        if($record.Contains('operation_identity')){
+            if($null-eq$protectedOperation){throw 'Evidence record operation_identity requires protected_operation'}
+            if([string]$record.operation_identity-cne[string]$protectedOperation.identity){throw 'Evidence record operation_identity does not match protected_operation'}
+        }
         $recordPath=Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path ([string]$record.evidence_path) -Label 'record evidence_path' -MustExist File
         if((Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $recordPath)-cne[string]$record.digest){throw "Evidence record digest mismatch: $($record.evidence_path)"}
         if([string]$record.type -ceq 'command'){
@@ -208,6 +215,12 @@ function Resolve-HarnessEvidenceCore {
         if([string]::IsNullOrWhiteSpace([string]$dryRun.command)){throw 'dry-run command must not be blank'}
         foreach($field in @('host','model','actor_id','context_id')){if([string]::IsNullOrWhiteSpace([string]$dryRun.actor[$field])){throw "dry-run executor $field must not be blank"}}
         if($dryRun.actor.Contains('backend')-and[string]::IsNullOrWhiteSpace([string]$dryRun.actor.backend)){throw 'dry-run executor backend must not be blank'}
+        if($null-ne$protectedOperation-and@($dryRun.covers).Count-eq0){throw 'dry-run covers must not be empty for protected_operation'}
+        if($dryRun.Contains('operation_identity')){
+            if($null-eq$protectedOperation){throw 'dry-run operation_identity requires protected_operation'}
+            if([string]$dryRun.operation_identity-cne[string]$protectedOperation.identity){throw 'dry-run operation_identity does not match protected_operation'}
+            if(@($dryRun.covers)-cnotcontains[string]$protectedOperation.identity){throw 'dry-run covers does not include protected_operation identity'}
+        }
         $dryRunPath=Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path ([string]$dryRun.evidence_path) -Label 'dry-run evidence_path' -MustExist File
         if((Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $dryRunPath)-cne[string]$dryRun.digest){throw "dry-run Evidence digest mismatch: $($dryRun.evidence_path)"}
         [void](Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path ([string]$dryRun.cwd) -Label 'dry-run cwd' -MustExist Directory)
@@ -233,7 +246,7 @@ function Resolve-HarnessEvidenceCore {
     }
     $content=ConvertTo-HarnessEvidenceJson -Value $document
     $nextStatus=switch($derived){'pass'{'done'}'fail'{'running'}'blocked'{'paused'}default{'verifying'}}
-    return [pscustomobject]@{Document=$document;InputPath=$loaded.Path;OutputPath=$outputRelative;Content=$content;Digest=(Get-HarnessSha256Text -Content $content);Conclusion=$derived;NextStatus=$nextStatus;ExpectedRevision=$expectedRevision}
+    return [pscustomobject]@{Document=$document;InputPath=$loaded.Path;OutputPath=$outputRelative;Content=$content;Digest=(Get-HarnessSha256Text -Content $content);Conclusion=$derived;NextStatus=$nextStatus;ExpectedRevision=$expectedRevision;ProtectedOperation=$protectedOperation}
 }
 
 function Resolve-HarnessEvidence {

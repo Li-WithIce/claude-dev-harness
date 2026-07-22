@@ -113,9 +113,9 @@ function Assert-HarnessProtectedAction {
     )
     $WorkspaceRoot=Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
     if($SessionMode-ceq'read-only'-and$ActionMode-ceq'write'){throw 'read-only session cannot invoke a write tool'}
-    if($ActionMode-ceq'read'){return [ordered]@{allowed=$true;protected=$false;matched_rules=@();required_scopes=@();approval_id=$null}}
+    if($ActionMode-ceq'read'){return [ordered]@{allowed=$true;protected=$false;matched_rules=@();required_scopes=@();approval_id=$null;operation_identity=$null;protected_operation=$null}}
     $policy=Read-HarnessProtectedPolicy -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot
-    $normalizedPaths=[Collections.Generic.List[string]]::new();foreach($path in $ChangedPaths){$resolved=Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $path -Label 'protected action path' -AllowMissing;$normalizedPaths.Add((Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path $resolved))}
+    $normalizedPaths=[Collections.Generic.List[string]]::new();foreach($path in $ChangedPaths){$resolved=Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $path -Label 'protected action path' -AllowMissing;$normalizedPaths.Add((Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path $resolved).Replace('\','/'))}
     $matched=[Collections.Generic.List[object]]::new();$scopes=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     foreach($rule in @($policy.rules)){
         $isMatch=$true;$matchingPaths=[Collections.Generic.List[string]]::new()
@@ -133,7 +133,7 @@ function Assert-HarnessProtectedAction {
         foreach($path in $matchingPaths){[void]$scopes.Add("path:$path")}
         if($rule.requires_dry_run-eq$true){[void]$scopes.Add('dry-run:true')}
     }
-    if($matched.Count-eq0){return [ordered]@{allowed=$true;protected=$false;matched_rules=@();required_scopes=@();approval_id=$null}}
+    if($matched.Count-eq0){return [ordered]@{allowed=$true;protected=$false;matched_rules=@();required_scopes=@();approval_id=$null;operation_identity=$null;protected_operation=$null}}
     $requiredTypes=@($matched|ForEach-Object{[string]$_.requires_approval}|Where-Object{$_-cne'none'}|Sort-Object -Unique)
     if($requiredTypes.Count-gt1){throw 'matched protected rules require conflicting Approval types'}
     $requiredType=$(if($requiredTypes.Count-eq1){[string]$requiredTypes[0]}else{''})
@@ -144,8 +144,9 @@ function Assert-HarnessProtectedAction {
     $rank=@{governed=1;critical=2};$requiredRank=1
     foreach($rule in $matched){$requiredRank=[math]::Max($requiredRank,[int]$rank[[string]$rule.requires_profile]);if($rule.requires_independent_review-eq$true-and-not[bool]$task.policies.independent_review_required){throw 'protected write requires independent review policy'};if($rule.requires_dry_run-eq$true-and-not$DryRun){throw 'protected write requires dry-run'}}
     if(-not$rank.ContainsKey([string]$task.execution_profile)-or[int]$rank[[string]$task.execution_profile]-lt$requiredRank){throw 'protected write task profile is insufficient'}
-    $approval=$null;if(-not[string]::IsNullOrWhiteSpace($requiredType)){if(-not[bool]$task.policies.approval_required){throw 'protected write requires approval policy'};$approval=Assert-HarnessTaskApproval -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Task $task -RequiredType $requiredType -RequiredScopes @($scopes|Sort-Object)}
-    return [ordered]@{allowed=$true;protected=$true;matched_rules=@($matched|ForEach-Object{[string]$_.id});required_scopes=@($scopes|Sort-Object);approval_id=$(if($null-ne$approval){[string]$approval.Document.approval_id}else{$null})}
+    $operation=New-HarnessProtectedOperation -TaskVersion ([int]$task.version) -ContractDigest ([string]$task.contract_digest) -Environment $(if([string]::IsNullOrWhiteSpace($Environment)){'workspace'}else{$Environment}) -ActionCategory protected-write -Targets $(if($normalizedPaths.Count){@($normalizedPaths)}else{@('workspace')}) -ApprovalType $(if([string]::IsNullOrWhiteSpace($requiredType)){'none'}else{$requiredType}) -ApprovalScope @($scopes)
+    $approval=$null;if(-not[string]::IsNullOrWhiteSpace($requiredType)){if(-not[bool]$task.policies.approval_required){throw 'protected write requires approval policy'};$approval=Assert-HarnessTaskApproval -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Task $task -RequiredOperation $operation}
+    return [ordered]@{allowed=$true;protected=$true;matched_rules=@($matched|ForEach-Object{[string]$_.id});required_scopes=@($scopes|Sort-Object);approval_id=$(if($null-ne$approval){[string]$approval.Document.approval_id}else{$null});operation_identity=[string]$operation.identity;protected_operation=$operation}
 }
 
 Export-ModuleMember -Function Assert-HarnessProtectedAction

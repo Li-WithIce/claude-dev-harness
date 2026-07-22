@@ -117,17 +117,24 @@ function Resolve-HarnessAuditArtifact {
 function Assert-HarnessGovernanceReady {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][System.Collections.IDictionary]$Task,[Parameter(Mandatory)][object]$Evidence)
-    $plan = $null;$audit = $null
+    $plan = $null;$audit = $null;$protectedOperation=$null
     $dryRunRequired = if ($Task.policies.Contains('dry_run_required')) { [bool]$Task.policies.dry_run_required } else { [string]$Task.execution_profile -ceq 'critical' }
     if ($dryRunRequired -and [string]$Evidence.NextStatus -ceq 'done') {
         if (-not $Evidence.Document.Contains('dry_run') -or [int]$Evidence.Document.dry_run.exit_code -ne 0) { throw 'dry-run Evidence is required before Critical task completion' }
+        if($null-eq$Evidence.ProtectedOperation){throw 'protected_operation is required before Critical task completion'}
+        $protectedOperation=$Evidence.ProtectedOperation;$identity=[string]$protectedOperation.identity;$dryRun=$Evidence.Document.dry_run
+        if([string]$protectedOperation.approval_type-ceq'none'){throw 'Critical protected_operation requires an Approval type'}
+        if(-not$dryRun.Contains('operation_identity')-or[string]$dryRun.operation_identity-cne$identity){throw 'Critical dry-run is not bound to protected_operation'}
+        if(@($dryRun.covers).Count-eq0-or@($dryRun.covers)-cnotcontains$identity){throw 'Critical dry-run covers must include protected_operation identity'}
+        $executionRecords=@($Evidence.Document.records|Where-Object{[string]$_.type-ceq'command'-and[int]$_.exit_code-eq0-and$_.Contains('operation_identity')-and[string]$_.operation_identity-ceq$identity-and@($_.covers)-ccontains$identity})
+        if($executionRecords.Count-eq0){throw 'Critical completion requires successful execution Evidence bound to protected_operation'}
     }
     if ([bool]$Task.policies.plan_required) { $plan = Assert-HarnessPlanArtifact -WorkspaceRoot $WorkspaceRoot -TaskId ([string]$Task.task_id) -ContractDigest ([string]$Task.contract_digest) }
     if ([bool]$Task.policies.independent_review_required) {
         $requiredIndependence=if([string]$Task.execution_profile-ceq'critical'){'different-actor'}else{'isolated-context'}
         $audit = Resolve-HarnessAuditArtifact -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId ([string]$Task.task_id) -TaskVersion ([int]$Task.version) -ContractDigest ([string]$Task.contract_digest) -Evidence $Evidence -RequiredIndependence $requiredIndependence
     }
-    return [pscustomobject]@{Plan=$plan;Audit=$audit}
+    return [pscustomobject]@{Plan=$plan;Audit=$audit;ProtectedOperation=$protectedOperation}
 }
 
 Export-ModuleMember -Function New-HarnessPlanArtifact,Assert-HarnessPlanArtifact,Resolve-HarnessAuditArtifact,Assert-HarnessGovernanceReady

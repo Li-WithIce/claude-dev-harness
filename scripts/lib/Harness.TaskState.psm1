@@ -1316,12 +1316,12 @@ function Assert-TransactionReplayInputs {
             [string]$resolvedEvidence.NextStatus -cne [string]$taskDocument.status) {
             throw 'verify transaction input no longer matches its journal'
         }
-        [void](Assert-HarnessGovernanceReady -RepoRoot $schemaRoot -WorkspaceRoot $WorkspaceRoot -Task $beforeTaskDocument -Evidence $resolvedEvidence)
+        $replayGovernance=Assert-HarnessGovernanceReady -RepoRoot $schemaRoot -WorkspaceRoot $WorkspaceRoot -Task $beforeTaskDocument -Evidence $resolvedEvidence
         if ([bool]$beforeTaskDocument.policies.approval_required -and [string]$resolvedEvidence.NextStatus -ceq 'done') {
             [void](& $script:ApprovalModule {
-                param($Root,$Workspace,$Task,$AsOf)
-                Assert-HarnessTaskApprovalCore -RepoRoot $Root -WorkspaceRoot $Workspace -Task $Task -AsOf $AsOf
-            } $schemaRoot $WorkspaceRoot $beforeTaskDocument $replayAsOf)
+                param($Root,$Workspace,$Task,$Operation,$AsOf)
+                Assert-HarnessTaskApprovalCore -RepoRoot $Root -WorkspaceRoot $Workspace -Task $Task -RequiredOperation $Operation -AsOf $AsOf
+            } $schemaRoot $WorkspaceRoot $beforeTaskDocument $replayGovernance.ProtectedOperation $replayAsOf)
         }
     }
 
@@ -1859,7 +1859,7 @@ function Set-HarnessTaskEvidence {
         if($contract.Digest-cne[string]$task.contract_digest){throw 'task Contract digest is stale'}
         $evidence=Resolve-HarnessEvidence -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -TaskVersion $ExpectedVersion -ContractDigest ([string]$task.contract_digest) -RequiredAcceptanceCount @($contract.Document.acceptance).Count -EvidencePath $EvidencePath
         $governance=Assert-HarnessGovernanceReady -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Task $task -Evidence $evidence
-        $approval=$null;if([bool]$task.policies.approval_required-and[string]$evidence.NextStatus-ceq'done'){$approval=Assert-HarnessTaskApproval -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Task $task}
+        $approval=$null;if([bool]$task.policies.approval_required-and[string]$evidence.NextStatus-ceq'done'){$approval=Assert-HarnessTaskApproval -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Task $task -RequiredOperation $governance.ProtectedOperation}
         $current=Read-CurrentPointer -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Path $paths.Current;$isCurrent=$null-ne$current-and[string]$current.task_id-ceq$TaskId
         if($isCurrent-and[int]$current.task_version-ne$ExpectedVersion){throw 'current pointer version is stale; replay or repair before verify'}
         $next=(ConvertTo-HarnessJsonText -Value $task)|ConvertFrom-HarnessJson;$next.version=$ExpectedVersion+1;$next.status=$evidence.NextStatus;$next.evidence_path=$evidence.OutputPath;$next.updated_at=[datetimeoffset]::UtcNow.ToString('o');Assert-TaskStateDocument -RepoRoot $RepoRoot -Task $next
@@ -1951,12 +1951,12 @@ function Assert-LegacyTransactionReplayInputs {
         $beforeTask.version=[int64]$Journal.expected_version
         $beforeTask.status='verifying'
         $beforeTask.evidence_path=$null
-        [void](Assert-HarnessGovernanceReady -RepoRoot $schemaRoot -WorkspaceRoot $WorkspaceRoot -Task $beforeTask -Evidence $resolvedEvidence)
+        $replayGovernance=Assert-HarnessGovernanceReady -RepoRoot $schemaRoot -WorkspaceRoot $WorkspaceRoot -Task $beforeTask -Evidence $resolvedEvidence
         if([bool]$beforeTask.policies.approval_required-and[string]$resolvedEvidence.NextStatus-ceq'done'){
             [void](& $script:ApprovalModule {
-                param($Root,$Workspace,$Task,$AsOf)
-                Assert-HarnessTaskApprovalCore -RepoRoot $Root -WorkspaceRoot $Workspace -Task $Task -AsOf $AsOf
-            } $schemaRoot $WorkspaceRoot $beforeTask $replayAsOf)
+                param($Root,$Workspace,$Task,$Operation,$AsOf)
+                Assert-HarnessTaskApprovalCore -RepoRoot $Root -WorkspaceRoot $Workspace -Task $Task -RequiredOperation $Operation -AsOf $AsOf
+            } $schemaRoot $WorkspaceRoot $beforeTask $replayGovernance.ProtectedOperation $replayAsOf)
         }
     }
     if(-not$stepsById.Contains('current-pointer')){

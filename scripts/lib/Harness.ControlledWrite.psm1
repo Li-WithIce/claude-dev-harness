@@ -129,13 +129,13 @@ function Invoke-HarnessControlledWrite {
         }elseif(-not[string]::IsNullOrWhiteSpace($TaskId)-or$null-ne$ExpectedVersion-or-not[string]::IsNullOrWhiteSpace($ExecutionProfile)-or-not[string]::IsNullOrWhiteSpace($ContractPath)-or-not[string]::IsNullOrWhiteSpace($ContractDigest)-or-not[string]::IsNullOrWhiteSpace($ApprovalId)){
             throw 'ordinary controlled write must not carry protected governance metadata'
         }
-        if($DryRun-eq$true){Assert-HarnessControlledPreimage -WorkspaceRoot $WorkspaceRoot -Path $target.RelativePath -ExpectedCurrentDigest $ExpectedCurrentDigest;return [ordered]@{written=$false;dry_run=$true;path=$target.RelativePath;digest=$ExpectedSourceDigest;protected=[bool]$guard.protected;matched_rules=@($guard.matched_rules);approval_id=$guard.approval_id}}
+        if($DryRun-eq$true){Assert-HarnessControlledPreimage -WorkspaceRoot $WorkspaceRoot -Path $target.RelativePath -ExpectedCurrentDigest $ExpectedCurrentDigest;return [ordered]@{written=$false;dry_run=$true;path=$target.RelativePath;digest=$ExpectedSourceDigest;protected=[bool]$guard.protected;matched_rules=@($guard.matched_rules);approval_id=$guard.approval_id;operation_identity=$guard.operation_identity;protected_operation=$guard.protected_operation}}
         if((Get-HarnessPhysicalPathIdentity -Path $WorkspaceRoot)-cne$workspaceIdentity){throw 'WorkspaceRoot physical identity changed during controlled write'}
         $finalGuard=Assert-HarnessProtectedAction @guardArgs
         if(($guard|ConvertTo-Json -Depth 20 -Compress)-cne($finalGuard|ConvertTo-Json -Depth 20 -Compress)){throw 'controlled write authorization changed before publish'}
         if([bool]$finalGuard.protected){Assert-HarnessControlledGovernanceBinding -WorkspaceRoot $WorkspaceRoot -TargetRelative $target.RelativePath -TaskId $TaskId -ExpectedVersion $ExpectedVersion -ExecutionProfile $ExecutionProfile -ContractPath $ContractPath -ContractDigest $ContractDigest -ApprovalId $ApprovalId -DryRun $DryRun -Guard $finalGuard}
         $digest=& $script:AtomicWriteModule {param($Root,$Bytes,$TargetPath,$SourceDigest,$CurrentDigest) Write-HarnessAtomicBytes -WorkspaceRoot $Root -SourceBytes $Bytes -Path $TargetPath -ExpectedSourceDigest $SourceDigest -ExpectedCurrentDigest $CurrentDigest} $WorkspaceRoot $sourceBytes $target.RelativePath $ExpectedSourceDigest $ExpectedCurrentDigest
-        return [ordered]@{written=$true;dry_run=$false;path=$target.RelativePath;digest=$digest;protected=[bool]$finalGuard.protected;matched_rules=@($finalGuard.matched_rules);approval_id=$finalGuard.approval_id}
+        return [ordered]@{written=$true;dry_run=$false;path=$target.RelativePath;digest=$digest;protected=[bool]$finalGuard.protected;matched_rules=@($finalGuard.matched_rules);approval_id=$finalGuard.approval_id;operation_identity=$finalGuard.operation_identity;protected_operation=$finalGuard.protected_operation}
     }finally{
         Exit-HarnessControlledMutex -Mutex $taskMutex
         Exit-HarnessControlledMutex -Mutex $writerMutex
