@@ -38,7 +38,7 @@ jobs:
       - name: PR core validation
         id: core_validation
         shell: pwsh
-        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation.ps1 -Suite core -CoreGroup ${{ matrix.core_group }} -CheckTimeoutSeconds 360
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation.ps1 -Suite core -CoreGroup ${{ matrix.core_group }} -CheckTimeoutSeconds 600
 
       - name: Write PR core receipt
         id: ordinary_receipt

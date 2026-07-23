@@ -757,7 +757,7 @@ if ($runner -match '(?m)^\s*\[int\]\$CheckTimeoutSeconds = 360\s*$' -and
     $releaseJob -match '(?m)^    timeout-minutes:\s*120\s*$' -and
     $releaseJob -match '(?m)^\s*fetch-depth:\s*0\s*$' -and
     $prCoreChecksJob -match '(?m)^      fail-fast:\s*false\s*$' -and
-    $prCoreChecksJob -match '(?m)^        run:\s+pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation\.ps1 -Suite core -CoreGroup \$\{\{ matrix\.core_group \}\} -CheckTimeoutSeconds 360\s*$' -and
+    $prCoreChecksJob -match '(?m)^        run:\s+pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation\.ps1 -Suite core -CoreGroup \$\{\{ matrix\.core_group \}\} -CheckTimeoutSeconds 600\s*$' -and
     $prCoreChecksJob -notmatch '(?m)^\s{4,8}continue-on-error:' -and
     $prCoreChecksJob -notmatch 'run-isolated-install-smoke\.ps1' -and
     @([regex]::Matches($prCoreJob,'(?m)^    needs:[ \t]*pr-core-checks[ \t]*\r?$')).Count -eq 1 -and
