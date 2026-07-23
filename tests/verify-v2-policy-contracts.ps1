@@ -107,13 +107,15 @@ $expectedSchemaFiles = @(
     'current-pointer.schema.json',
     'event.schema.json',
     'evidence.schema.json',
+    'ordinary-ci-receipt.schema.json',
     'protected-actions-overlay.schema.json',
     'model-eval-observation.schema.json',
+    'protocol-config.schema.json',
     'requirement-contract.schema.json',
     'task-state.schema.json'
 )
 $actualSchemaFiles = @(Get-ChildItem -LiteralPath $schemaRoot -Filter '*.json' -File | Select-Object -ExpandProperty Name | Sort-Object)
-Assert-True -Condition (@(Compare-Object $expectedSchemaFiles $actualSchemaFiles).Count -eq 0) -Success 'schema set contains canonical contracts plus the project protected-action extension contract' -Failure 'schema set drifted beyond the approved contracts'
+Assert-True -Condition (@(Compare-Object $expectedSchemaFiles $actualSchemaFiles).Count -eq 0) -Success 'schema set contains the canonical and approved extension contracts' -Failure 'schema set drifted beyond the approved contracts'
 
 $catalog = Get-Content -LiteralPath $catalogPath -Raw -Encoding utf8 | ConvertFrom-Json -ErrorAction Stop
 $expectedCases = @('approval', 'audit-record', 'current-pointer', 'event', 'evidence', 'requirement-contract', 'task-state')
