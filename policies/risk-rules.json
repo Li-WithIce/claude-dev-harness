@@ -1,0 +1,35 @@
+{
+  "dimensions": [
+    { "id": "user_visible_behavior", "min_score": 0, "max_score": 3 },
+    { "id": "data_integrity", "min_score": 0, "max_score": 3 },
+    { "id": "authorization_and_security", "min_score": 0, "max_score": 3 },
+    { "id": "external_side_effects", "min_score": 0, "max_score": 3 },
+    { "id": "blast_radius", "min_score": 0, "max_score": 3 },
+    { "id": "rollback", "min_score": 0, "max_score": 3 },
+    { "id": "verification_coverage", "min_score": 0, "max_score": 3 }
+  ],
+  "profile_thresholds": [
+    { "profile": "direct", "min_total": 0, "max_total": 4 },
+    { "profile": "governed", "min_total": 5, "max_total": 8 },
+    { "profile": "critical", "min_total": 9, "max_total": 21 }
+  ],
+  "critical_triggers": [
+    "authorization_or_security_boundary",
+    "money_billing_refund_or_settlement",
+    "production_database_destructive_migration",
+    "irreversible_user_data_change",
+    "production_release_or_infrastructure",
+    "breaking_public_api_change",
+    "sensitive_data_export_or_compliance",
+    "destructive_git_history_operation",
+    "large_scale_automation_without_dry_run",
+    "unverified_production_impact"
+  ],
+  "overrides": {
+    "requirement_blocked_state": "blocked",
+    "read_only_profile": "inspect",
+    "durable_minimum_profile": "governed",
+    "critical_trigger_profile": "critical",
+    "multiple_files_alone_escalate": false
+  }
+}

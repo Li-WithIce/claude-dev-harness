@@ -26,6 +26,7 @@ function New-IsolatedRepoFixture {
     foreach ($relativePath in @(
         'scripts\advance-stage.ps1',
         'scripts\invoke-harness-skill.ps1',
+        'scripts\invoke-harness-skill-dispatcher.ps1',
         'scripts\invoke-harness-skill-supervisor.ps1',
         'scripts\generate-skills-index.ps1',
         'scripts\lite-artifact-parser.ps1',
@@ -163,7 +164,7 @@ function Invoke-PowerShellWithStreams {
     $stderrPath = Join-Path $streamRoot 'stderr.txt'
 
     try {
-        $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $Arguments -Wait -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $Arguments -Wait -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
         $stdout = if (Test-Path -LiteralPath $stdoutPath -PathType Leaf) { [System.IO.File]::ReadAllText($stdoutPath) } else { '' }
         $stderr = if (Test-Path -LiteralPath $stderrPath -PathType Leaf) { [System.IO.File]::ReadAllText($stderrPath) } else { '' }
         if ($null -eq $stdout) { $stdout = '' }
@@ -198,9 +199,8 @@ function Start-PowerShellWithStreams {
     $stderrPath = Join-Path $streamRoot 'stderr.txt'
     $process = Start-Process -FilePath 'powershell.exe' -ArgumentList @(
         '-NoProfile',
-        '-ExecutionPolicy', 'Bypass',
         '-File', $ScriptPath
-    ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+    ) -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
 
     return [pscustomobject]@{
         Process = $process
@@ -249,10 +249,9 @@ function Start-LifecyclePowerShell {
     $psi.UseShellExecute = $false
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
-    $psi.CreateNoWindow = $true
     $psi.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
     $psi.StandardErrorEncoding = [System.Text.UTF8Encoding]::new($false)
-    foreach ($argument in @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath) + @($Arguments)) {
+    foreach ($argument in @('-NoProfile', '-NonInteractive', '-File', $ScriptPath) + @($Arguments)) {
         $psi.ArgumentList.Add([string]$argument)
     }
 
@@ -319,6 +318,61 @@ function Complete-LifecyclePowerShell {
     }
 }
 
+function New-AbandonedNamedMutex {
+    param(
+        [string]$HostPath,
+        [string]$FixturePath,
+        [string]$MutexName,
+        [string]$Label
+    )
+
+    $keeper = [System.Threading.Mutex]::new($false, $MutexName)
+    $readyEventName = 'dev-harness.skill-contract.mutex-ready.' + [guid]::NewGuid().ToString('N')
+    $createdNew = $false
+    $readyEvent = [System.Threading.EventWaitHandle]::new(
+        $false,
+        [System.Threading.EventResetMode]::ManualReset,
+        $readyEventName,
+        [ref]$createdNew
+    )
+    $capture = $null
+
+    try {
+        if (-not $createdNew) {
+            throw "$Label readiness event already existed"
+        }
+
+        $capture = Start-LifecyclePowerShell -HostPath $HostPath -ScriptPath $FixturePath -Arguments @(
+            '-MutexName', $MutexName,
+            '-ReadyEventName', $readyEventName
+        )
+        if (-not $readyEvent.WaitOne(5000)) {
+            try { $capture.Process.Kill() } catch [System.InvalidOperationException] {}
+            $failedResult = Complete-LifecyclePowerShell -Capture $capture -Label $Label -TimeoutMilliseconds 5000
+            $capture = $null
+            throw "$Label did not acquire the named mutex: exit=$($failedResult.ExitCode) stderr=[$($failedResult.StdErr)]"
+        }
+
+        $capture.Process.Kill()
+        $result = Complete-LifecyclePowerShell -Capture $capture -Label $Label -TimeoutMilliseconds 5000
+        $capture = $null
+        if ($result.OuterTimedOut) {
+            throw "$Label did not terminate after acquiring the named mutex"
+        }
+
+        return $keeper
+    } catch {
+        $keeper.Dispose()
+        throw
+    } finally {
+        if ($null -ne $capture) {
+            try { $capture.Process.Kill() } catch [System.InvalidOperationException] {}
+            $null = Complete-LifecyclePowerShell -Capture $capture -Label "$Label cleanup" -TimeoutMilliseconds 5000
+        }
+        $readyEvent.Dispose()
+    }
+}
+
 function Read-LifecycleIdentity {
     param(
         [string]$Path,
@@ -342,6 +396,34 @@ function Read-LifecycleIdentity {
         Start-Sleep -Milliseconds 25
     }
     return $null
+}
+
+function New-DispatchRequestFile {
+    param([object[]]$Parameters = @())
+
+    $path = Join-Path ([System.IO.Path]::GetTempPath()) ('invoke-harness-skill-request-' + [guid]::NewGuid().ToString('N') + '.json')
+    $document = [ordered]@{
+        schema_version = 'invoke-harness-skill-dispatch/v1'
+        parameters = @($Parameters)
+    }
+    [System.IO.File]::WriteAllText($path, ($document | ConvertTo-Json -Depth 6 -Compress), [System.Text.UTF8Encoding]::new($false))
+    return $path
+}
+
+function New-RawDispatchRequestFile {
+    param([Parameter(Mandatory = $true)][string]$Json)
+
+    $path = Join-Path ([System.IO.Path]::GetTempPath()) ('invoke-harness-skill-request-' + [guid]::NewGuid().ToString('N') + '.json')
+    [System.IO.File]::WriteAllText($path, $Json, [System.Text.UTF8Encoding]::new($false))
+    return $path
+}
+
+function Get-DispatchRequestResidue {
+    param([string]$Token)
+
+    return @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'invoke-harness-skill-request-*.json' -File -Force -ErrorAction SilentlyContinue | Where-Object {
+            try { [System.IO.File]::ReadAllText($_.FullName).Contains($Token) } catch { $false }
+        })
 }
 
 function Test-LifecycleProcessAlive {
@@ -389,24 +471,30 @@ function Invoke-Adapter {
         [string]$PayloadJson = '{}'
     )
 
-    $wrapperPath = Join-Path ([System.IO.Path]::GetTempPath()) ('invoke-adapter-wrapper-' + [guid]::NewGuid().ToString('N') + '.ps1')
-    $toolProfileArgument = if ([string]::IsNullOrWhiteSpace($ToolProfileId)) { '' } else { " -ToolProfileId '$ToolProfileId'" }
-    $wrapperContent = @"
-& '$AdapterPath' -TaskId '$TaskId' -Stage '$Stage' -Skill '$Skill' -Tool '$Tool'$toolProfileArgument -WorkspaceRoot '$WorkspaceRoot' -Mode '$Mode' -PayloadJson @'
-$PayloadJson
-'@
-exit `$LASTEXITCODE
-"@
+    $arguments = @(
+        '-TaskId', $TaskId,
+        '-Stage', $Stage,
+        '-Skill', $Skill,
+        '-Tool', $Tool
+    )
+    if (-not [string]::IsNullOrWhiteSpace($ToolProfileId)) {
+        $arguments += @('-ToolProfileId', $ToolProfileId)
+    }
+    $arguments += @(
+        '-WorkspaceRoot', $WorkspaceRoot,
+        '-Mode', $Mode,
+        '-PayloadJson', $PayloadJson
+    )
 
-    try {
-        Write-Utf8Bom -Path $wrapperPath -Content $wrapperContent
-        return Invoke-PowerShellWithStreams -Arguments @(
-            '-NoProfile',
-            '-ExecutionPolicy', 'Bypass',
-            '-File', $wrapperPath
-        )
-    } finally {
-        Remove-Item -LiteralPath $wrapperPath -Force -ErrorAction SilentlyContinue
+    $hostPath = (Get-Command powershell.exe -CommandType Application -ErrorAction Stop).Source
+    $capture = Start-LifecyclePowerShell -HostPath $hostPath -ScriptPath $AdapterPath -Arguments $arguments
+    $result = Complete-LifecyclePowerShell -Capture $capture -Label 'Invoke-Adapter' -TimeoutMilliseconds 1830000
+    $combined = @($result.StdOut, $result.StdErr) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    return [pscustomobject]@{
+        ExitCode = $result.ExitCode
+        StdOut = $result.StdOut
+        StdErr = $result.StdErr
+        Combined = ($combined -join "`n")
     }
 }
 
@@ -417,7 +505,7 @@ function Invoke-Validator {
         [string]$RepoRoot
     )
 
-    $output = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ValidatorPath -TaskId $TaskId -RepoRoot $RepoRoot 2>&1 | ForEach-Object { [string]$_ })
+    $output = @(& powershell.exe -NoProfile -File $ValidatorPath -TaskId $TaskId -RepoRoot $RepoRoot 2>&1 | ForEach-Object { [string]$_ })
     [pscustomobject]@{
         ExitCode = $LASTEXITCODE
         Text = ($output -join "`n")
@@ -435,7 +523,7 @@ function Invoke-GenerateSkillsIndex {
 
     Push-Location $RepoRoot
     try {
-        $output = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ScriptPath -TaskId $TaskId -Stage $Stage -BackendHint $BackendHint 2>&1 | ForEach-Object { [string]$_ })
+        $output = @(& powershell.exe -NoProfile -File $ScriptPath -TaskId $TaskId -Stage $Stage -BackendHint $BackendHint 2>&1 | ForEach-Object { [string]$_ })
     } finally {
         Pop-Location
     }
@@ -453,7 +541,7 @@ function Write-MockCodexSkill {
         [string]$Marker
     )
 
-    $scriptPath = Join-Path $SkillRoot 'codex\scripts\ask_codex.ps1'
+    $scriptPath = Join-Path $SkillRoot 'codex\scripts\invoke_codex.ps1'
     New-Item -ItemType Directory -Path (Split-Path -Parent $scriptPath) -Force | Out-Null
     Write-Utf8Bom -Path (Join-Path (Split-Path -Parent $scriptPath) 'lifecycle-descendant.ps1') -Content @'
 [CmdletBinding()]
@@ -483,19 +571,20 @@ param(
 Set-StrictMode -Version Latest
 `$ErrorActionPreference = 'Stop'
 `$utf8 = [System.Text.UTF8Encoding]::new(`$false)
-`$callerWrapper = [string]`$MyInvocation.ScriptName
+`$callerDispatcher = [string]`$MyInvocation.ScriptName
 `$lifecycleParts = @(`$Task -split '::')
 if (`$lifecycleParts.Count -eq 4 -and `$lifecycleParts[0] -ceq 'outer-natural') {
-    if ([string]::IsNullOrWhiteSpace(`$callerWrapper) -or (Test-Path -LiteralPath `$callerWrapper)) {
-        throw 'parameter wrapper was not deleted before target entry'
+    if ([string]::IsNullOrWhiteSpace(`$callerDispatcher) -or
+        -not (Test-Path -LiteralPath `$callerDispatcher -PathType Leaf) -or
+        (Split-Path -Leaf `$callerDispatcher) -cne 'invoke-harness-skill-dispatcher.ps1') {
+        throw 'target was not entered through the tracked dispatcher'
     }
     `$self = Get-Process -Id `$PID
     try { `$selfStartTicks = `$self.StartTime.ToUniversalTime().Ticks } finally { `$self.Dispose() }
     `$childPsi = [System.Diagnostics.ProcessStartInfo]::new()
     `$childPsi.FileName = (Get-Process -Id `$PID).Path
     `$childPsi.UseShellExecute = `$false
-    `$childPsi.CreateNoWindow = `$true
-    foreach (`$argument in @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path `$PSScriptRoot 'lifecycle-descendant.ps1'), '-MarkerPath', `$lifecycleParts[2], '-Token', `$lifecycleParts[3])) {
+    foreach (`$argument in @('-NoProfile', '-NonInteractive', '-File', (Join-Path `$PSScriptRoot 'lifecycle-descendant.ps1'), '-MarkerPath', `$lifecycleParts[2], '-Token', `$lifecycleParts[3])) {
         `$childPsi.ArgumentList.Add([string]`$argument)
     }
     `$child = [System.Diagnostics.Process]::Start(`$childPsi)
@@ -506,8 +595,8 @@ if (`$lifecycleParts.Count -eq 4 -and `$lifecycleParts[0] -ceq 'outer-natural') 
             root_start_ticks = `$selfStartTicks
             child_pid = `$child.Id
             child_start_ticks = `$child.StartTime.ToUniversalTime().Ticks
-            wrapper_path = `$callerWrapper
-            wrapper_deleted = `$true
+            dispatcher_path = `$callerDispatcher
+            dispatcher_tracked = `$true
             backend_output = `$Output
         }
         [System.IO.File]::WriteAllText(`$lifecycleParts[1], (`$lifecycleIdentity | ConvertTo-Json -Compress), `$utf8)
@@ -516,8 +605,10 @@ if (`$lifecycleParts.Count -eq 4 -and `$lifecycleParts[0] -ceq 'outer-natural') 
     }
 }
 if (`$lifecycleParts.Count -eq 6 -and `$lifecycleParts[0] -ceq 'outer-abort') {
-    if ([string]::IsNullOrWhiteSpace(`$callerWrapper) -or (Test-Path -LiteralPath `$callerWrapper)) {
-        throw 'parameter wrapper was not deleted before target entry'
+    if ([string]::IsNullOrWhiteSpace(`$callerDispatcher) -or
+        -not (Test-Path -LiteralPath `$callerDispatcher -PathType Leaf) -or
+        (Split-Path -Leaf `$callerDispatcher) -cne 'invoke-harness-skill-dispatcher.ps1') {
+        throw 'target was not entered through the tracked dispatcher'
     }
     `$self = Get-Process -Id `$PID
     `$parent = `$null
@@ -539,8 +630,8 @@ if (`$lifecycleParts.Count -eq 6 -and `$lifecycleParts[0] -ceq 'outer-abort') {
         supervisor_start_ticks = `$supervisorStartTicks
         child_pid = 0
         child_start_ticks = 0
-        wrapper_path = `$callerWrapper
-        wrapper_deleted = `$true
+        dispatcher_path = `$callerDispatcher
+        dispatcher_tracked = `$true
         backend_output = `$Output
     }
     [System.IO.File]::WriteAllText(`$lifecycleParts[1], (`$identity | ConvertTo-Json -Compress), `$utf8)
@@ -556,8 +647,7 @@ if (`$lifecycleParts.Count -eq 6 -and `$lifecycleParts[0] -ceq 'outer-abort') {
     `$childPsi = [System.Diagnostics.ProcessStartInfo]::new()
     `$childPsi.FileName = (Get-Process -Id `$PID).Path
     `$childPsi.UseShellExecute = `$false
-    `$childPsi.CreateNoWindow = `$true
-    foreach (`$argument in @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path `$PSScriptRoot 'lifecycle-descendant.ps1'), '-MarkerPath', `$lifecycleParts[4], '-Token', `$lifecycleParts[5])) {
+    foreach (`$argument in @('-NoProfile', '-NonInteractive', '-File', (Join-Path `$PSScriptRoot 'lifecycle-descendant.ps1'), '-MarkerPath', `$lifecycleParts[4], '-Token', `$lifecycleParts[5])) {
         `$childPsi.ArgumentList.Add([string]`$argument)
     }
     `$child = [System.Diagnostics.Process]::Start(`$childPsi)
@@ -584,8 +674,10 @@ if (`$lifecycleParts.Count -eq 6 -and `$lifecycleParts[0] -ceq 'outer-abort') {
     timeout_seconds = `$TimeoutSeconds
     host_major = `$PSVersionTable.PSVersion.Major
     host_version = `$PSVersionTable.PSVersion.ToString()
-    caller_wrapper = `$callerWrapper
-    wrapper_deleted = (-not [string]::IsNullOrWhiteSpace(`$callerWrapper) -and -not (Test-Path -LiteralPath `$callerWrapper))
+    caller_dispatcher = `$callerDispatcher
+    dispatcher_tracked = (-not [string]::IsNullOrWhiteSpace(`$callerDispatcher) -and
+        (Test-Path -LiteralPath `$callerDispatcher -PathType Leaf) -and
+        (Split-Path -Leaf `$callerDispatcher) -ceq 'invoke-harness-skill-dispatcher.ps1')
     frame_probe = if (`$lifecycleParts.Count -eq 4 -and `$lifecycleParts[0] -ceq 'outer-natural') {
         `$builder = [System.Text.StringBuilder]::new(131072)
         for (`$i = 0; `$i -lt 16384; `$i++) { [void]`$builder.Append(('{0:X8}' -f ((`$i * 2654435761L) % 4294967296L))) }
@@ -624,9 +716,14 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent $PSScriptRoot
 }
 $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
+$mutexAbandonFixturePath = Join-Path $RepoRoot 'tests\fixtures\aiteamcode-skill-contract-abandon-mutex.ps1'
+if (-not (Test-Path -LiteralPath $mutexAbandonFixturePath -PathType Leaf)) {
+    throw "Missing mutex-abandon fixture: $mutexAbandonFixturePath"
+}
 $fixtureRoot = New-IsolatedRepoFixture -SourceRoot $RepoRoot
 $advancePath = Join-Path $fixtureRoot 'scripts\advance-stage.ps1'
 $adapterPath = Join-Path $fixtureRoot 'scripts\invoke-harness-skill.ps1'
+$dispatcherPath = Join-Path $fixtureRoot 'scripts\invoke-harness-skill-dispatcher.ps1'
 $supervisorPath = Join-Path $fixtureRoot 'scripts\invoke-harness-skill-supervisor.ps1'
 $liteParserPath = Join-Path $fixtureRoot 'scripts\lite-artifact-parser.ps1'
 $validatorPath = Join-Path $fixtureRoot 'scripts\validate-lite-artifacts.ps1'
@@ -638,29 +735,22 @@ $cleanupPaths = @($fixtureRoot)
 $cleanupIdentities = [System.Collections.Generic.List[object]]::new()
 $lifecycleAssertionsPassed = $false
 $originalUserProfile = $env:USERPROFILE
-if (-not ('LiteMutexAbandonProbe' -as [type])) {
-    Add-Type -TypeDefinition @'
-using System;
-using System.Threading;
-public static class LiteMutexAbandonProbe {
-    public static void Abandon(string name) {
-        Exception failure = null;
-        var thread = new Thread(() => {
-            try {
-                var mutex = new Mutex(false, name);
-                mutex.WaitOne();
-            } catch (Exception ex) {
-                failure = ex;
-            }
-        });
-        thread.Start();
-        thread.Join();
-        if (failure != null) throw new InvalidOperationException("Failed to seed abandoned mutex.", failure);
-    }
+$adapterText = Read-FileUtf8 -Path $adapterPath
+$dispatcherText = Read-FileUtf8 -Path $dispatcherPath
+$supervisorText = Read-FileUtf8 -Path $supervisorPath
+if ($adapterText -notmatch 'invoke-harness-skill-wrapper-' -and
+    $adapterText -notmatch 'ConvertTo-PowerShellLiteral' -and
+    ($adapterText + $supervisorText + $dispatcherText) -notmatch 'ExecutionPolicy|CreateNoWindow|EncodedCommand|Invoke-Expression|ScriptBlock\]::Create' -and
+    $adapterText -match 'invoke-harness-skill-request-' -and $adapterText -match '-RequestPath \$requestPath' -and
+    $dispatcherText -match 'System\.Text\.Json\.JsonDocument.*::Parse' -and
+    $dispatcherText -match 'Assert-RawJsonObjectKeys' -and $dispatcherText -match 'StringComparer\]::Ordinal' -and
+    $dispatcherText -match 'ConvertFrom-Json -AsHashtable' -and $dispatcherText -match 'invoke-harness-skill-dispatch/v1' -and
+    $dispatcherText -match '(?s)Delete\(\$resolvedRequestPath\).*& \$resolvedTargetPath @targetParameters' -and
+    $supervisorText -match 'Base64 is byte framing.*never evaluated or executed') {
+    Add-Check 'tracked dispatcher uses Ordinal raw-key JSON validation and deletes request data before target entry without generated scripts, hidden windows, or executable Base64'
+} else {
+    Add-Failure 'tracked dispatcher transparency contract is incomplete'
 }
-'@
-}
-
 try {
     $ownerRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('skill-contract-owner-' + [guid]::NewGuid().ToString('N'))
     $cleanupPaths += $ownerRoot
@@ -684,6 +774,8 @@ Start-Sleep -Milliseconds 4000
         $markerPath = Join-Path $caseRoot 'late.marker'
         $backendOutputPath = Join-Path $caseRoot 'backend-output.tmp'
         $targetPath = Join-Path $caseRoot 'target.ps1'
+        $ownerRequestPath = New-DispatchRequestFile
+        $cleanupPaths += $ownerRequestPath
         $token = [guid]::NewGuid().ToString('N')
         $identityLiteral = "'" + $identityPath.Replace("'", "''") + "'"
         $markerLiteral = "'" + $markerPath.Replace("'", "''") + "'"
@@ -702,8 +794,7 @@ try { `$selfTicks = `$self.StartTime.ToUniversalTime().Ticks } finally { `$self.
 `$psi = [System.Diagnostics.ProcessStartInfo]::new()
 `$psi.FileName = (Get-Process -Id `$PID).Path
 `$psi.UseShellExecute = `$false
-`$psi.CreateNoWindow = `$true
-foreach (`$argument in @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $childLiteral, '-MarkerPath', $markerLiteral, '-Token', $tokenLiteral)) { `$psi.ArgumentList.Add([string]`$argument) }
+foreach (`$argument in @('-NoProfile', '-NonInteractive', '-File', $childLiteral, '-MarkerPath', $markerLiteral, '-Token', $tokenLiteral)) { `$psi.ArgumentList.Add([string]`$argument) }
 `$child = [System.Diagnostics.Process]::Start(`$psi)
 try {
     `$identity = [ordered]@{ token = $tokenLiteral; root_pid = `$PID; root_start_ticks = `$selfTicks; child_pid = `$child.Id; child_start_ticks = `$child.StartTime.ToUniversalTime().Ticks }
@@ -713,7 +804,7 @@ try {
 $($ownerCase.RootSleep)
 exit 0
 "@
-        $ownerCapture = Start-LifecyclePowerShell -HostPath $ownerHost -ScriptPath $supervisorPath -Arguments @('-TargetScriptPath', $targetPath, '-OutputPath', $backendOutputPath, '-TimeoutSeconds', [string]$ownerCase.TimeoutSeconds)
+        $ownerCapture = Start-LifecyclePowerShell -HostPath $ownerHost -ScriptPath $supervisorPath -Arguments @('-TargetScriptPath', $targetPath, '-RequestPath', $ownerRequestPath, '-OutputPath', $backendOutputPath, '-TimeoutSeconds', [string]$ownerCase.TimeoutSeconds)
         $ownerResult = Complete-LifecyclePowerShell -Capture $ownerCapture -Label ("owner {0}" -f $ownerCase.Name) -TimeoutMilliseconds 10000
         $ownerIdentity = Read-LifecycleIdentity -Path $identityPath
         if ($null -ne $ownerIdentity -and [string]$ownerIdentity.token -ceq $token) {
@@ -727,12 +818,67 @@ exit 0
             -not $ownerResult.OuterTimedOut -and
             $null -ne $ownerIdentity -and [string]$ownerIdentity.token -ceq $token -and
             -not $rootAlive -and -not $childAlive -and
-            -not (Test-Path -LiteralPath $markerPath) -and -not (Test-Path -LiteralPath $backendOutputPath) -and
+            -not (Test-Path -LiteralPath $markerPath) -and -not (Test-Path -LiteralPath $backendOutputPath) -and -not (Test-Path -LiteralPath $ownerRequestPath) -and
             $ownerResult.StdOut -match ('owner-stdout-{0}-' -f $ownerExpectedTail) -and
             $ownerResult.StdErr -match ('owner-stderr-{0}-' -f $ownerExpectedTail)) {
             Add-Check ("owner {0} drains both streams, closes the exact target tree, and preserves bounded exit semantics" -f $ownerCase.Name)
         } else {
             Add-Failure ("owner {0} failed: exit={1} outer_timeout={2} duration_ms={3} root_alive={4} child_alive={5} marker={6} stdout_tail={7} stderr_tail={8}" -f $ownerCase.Name,$ownerResult.ExitCode,$ownerResult.OuterTimedOut,$ownerResult.DurationMilliseconds,$rootAlive,$childAlive,(Test-Path -LiteralPath $markerPath),($ownerResult.StdOut.Substring([Math]::Max(0,$ownerResult.StdOut.Length-120))),($ownerResult.StdErr.Substring([Math]::Max(0,$ownerResult.StdErr.Length-120))))
+        }
+    }
+
+    $rawGuardRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('skill-contract-dispatch-guard-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $rawGuardRoot -Force | Out-Null
+    $cleanupPaths += $rawGuardRoot
+    foreach ($rawGuardName in @('top-duplicate', 'entry-duplicate', 'top-case-variant', 'entry-case-variant', 'parameter-name-case-override')) {
+        $rawGuardCaseRoot = Join-Path $rawGuardRoot $rawGuardName
+        New-Item -ItemType Directory -Path $rawGuardCaseRoot -Force | Out-Null
+        $rawGuardTargetPath = Join-Path $rawGuardCaseRoot 'target.ps1'
+        $rawGuardMarkerPath = Join-Path $rawGuardCaseRoot 'target-entered.marker'
+        $rawGuardOutputPath = Join-Path ([System.IO.Path]::GetTempPath()) ('skill-contract-dispatch-output-' + [guid]::NewGuid().ToString('N') + '.tmp')
+        $rawGuardMarkerLiteral = "'" + $rawGuardMarkerPath.Replace("'", "''") + "'"
+        $rawGuardOutputLiteral = "'" + $rawGuardOutputPath.Replace("'", "''") + "'"
+        Write-Utf8Bom -Path $rawGuardTargetPath -Content @"
+[System.IO.File]::WriteAllText($rawGuardMarkerLiteral, 'entered', [System.Text.UTF8Encoding]::new(`$false))
+[System.IO.File]::WriteAllText($rawGuardOutputLiteral, 'unexpected-output', [System.Text.UTF8Encoding]::new(`$false))
+exit 0
+"@
+        $rawGuardOutputJson = $rawGuardOutputPath | ConvertTo-Json -Compress
+        $rawGuardValidOutputEntry = '{"name":"Output","kind":"string","value":' + $rawGuardOutputJson + '}'
+        $rawGuardJson = switch ($rawGuardName) {
+            'top-duplicate' {
+                '{"schema_version":"invoke-harness-skill-dispatch/v1","schema_version":"invoke-harness-skill-dispatch/v1","parameters":[' + $rawGuardValidOutputEntry + ']}'
+            }
+            'entry-duplicate' {
+                '{"schema_version":"invoke-harness-skill-dispatch/v1","parameters":[{"name":"Output","name":"Output","kind":"string","value":' + $rawGuardOutputJson + '}]}'
+            }
+            'top-case-variant' {
+                '{"Schema_version":"invoke-harness-skill-dispatch/v1","parameters":[' + $rawGuardValidOutputEntry + ']}'
+            }
+            'entry-case-variant' {
+                '{"schema_version":"invoke-harness-skill-dispatch/v1","parameters":[{"Name":"Output","kind":"string","value":' + $rawGuardOutputJson + '}]}'
+            }
+            'parameter-name-case-override' {
+                '{"schema_version":"invoke-harness-skill-dispatch/v1","parameters":[{"name":"Task","kind":"string","value":"trusted"},{"name":"task","kind":"string","value":"override"},' + $rawGuardValidOutputEntry + ']}'
+            }
+        }
+        $rawGuardRequestPath = New-RawDispatchRequestFile -Json $rawGuardJson
+        $cleanupPaths += @($rawGuardRequestPath, $rawGuardOutputPath)
+        $rawGuardCapture = Start-LifecyclePowerShell -HostPath $ownerHost -ScriptPath $supervisorPath -Arguments @(
+            '-TargetScriptPath', $rawGuardTargetPath,
+            '-RequestPath', $rawGuardRequestPath,
+            '-OutputPath', $rawGuardOutputPath,
+            '-TimeoutSeconds', '10'
+        )
+        $rawGuardResult = Complete-LifecyclePowerShell -Capture $rawGuardCapture -Label ("dispatcher guard $rawGuardName") -TimeoutMilliseconds 10000
+        if ($rawGuardResult.ExitCode -ne 0 -and
+            -not $rawGuardResult.OuterTimedOut -and
+            -not (Test-Path -LiteralPath $rawGuardMarkerPath) -and
+            -not (Test-Path -LiteralPath $rawGuardOutputPath) -and
+            -not (Test-Path -LiteralPath $rawGuardRequestPath)) {
+            Add-Check ("dispatcher guard {0} is rejected before target entry and supervisor removes request data" -f $rawGuardName)
+        } else {
+            Add-Failure ("dispatcher guard {0} failed closed contract: exit={1} timeout={2} marker={3} output={4} request={5} stdout=[{6}] stderr=[{7}]" -f $rawGuardName,$rawGuardResult.ExitCode,$rawGuardResult.OuterTimedOut,(Test-Path -LiteralPath $rawGuardMarkerPath),(Test-Path -LiteralPath $rawGuardOutputPath),(Test-Path -LiteralPath $rawGuardRequestPath),$rawGuardResult.StdOut,$rawGuardResult.StdErr)
         }
     }
 
@@ -851,7 +997,7 @@ exit 0
 if (`$?) { exit 0 }
 exit 1
 "@
-    $a6Result = Invoke-PowerShellWithStreams -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $obsoleteWrapperA6)
+    $a6Result = Invoke-PowerShellWithStreams -Arguments @('-NoProfile', '-File', $obsoleteWrapperA6)
     if ($a6Result.ExitCode -ne 0 -and
         $a6Result.Combined -match 'ArtifactRoot' -and
         $planA6Hash -eq (Get-FileHash -LiteralPath $planA6Path -Algorithm SHA256).Hash -and
@@ -1057,7 +1203,8 @@ exit 1
     $b1Plan = Read-FileUtf8 -Path (Join-Path $taskB1Dir 'plan.md')
     $b1TraceCount = [regex]::Matches($b1Plan, '(?m)^- invocation: skill=codex mode=adapter tool=codex ok=True status=delegated\s*$').Count
     $b1BackendTemp = if ($null -eq $b1RecordObject) { '' } else { [string]$b1RecordObject.output }
-    $b1Wrapper = if ($null -eq $b1RecordObject) { '' } else { [string]$b1RecordObject.caller_wrapper }
+    $b1Dispatcher = if ($null -eq $b1RecordObject) { '' } else { [string]$b1RecordObject.caller_dispatcher }
+    $b1RequestResidue = @(Get-DispatchRequestResidue -Token $tokenB1)
     if ($b1Result.ExitCode -eq 0 -and
         $null -ne $b1Json -and
         $b1Json.ok -and
@@ -1072,14 +1219,15 @@ exit 1
         [version]$b1RecordObject.host_version -ge [version]'7.3' -and
         [int]$b1RecordObject.timeout_seconds -eq 1800 -and
         ([string]$b1RecordObject.frame_probe).Length -eq 131072 -and $b1FrameHash -ceq 'A19450B60164270A21FB489E8478D7C1CA99CA07C3190D10977BB77542983BAC' -and
-        $b1RecordObject.wrapper_deleted -eq $true -and
+        $b1RecordObject.dispatcher_tracked -eq $true -and
         $b1TraceCount -eq 1 -and
         $null -ne $identityB1 -and [string]$identityB1.token -ceq $tokenB1 -and
         -not $b1RootAlive -and -not $b1ChildAlive -and
         -not (Test-Path -LiteralPath $markerB1Path) -and
-        -not [string]::IsNullOrWhiteSpace($b1Wrapper) -and -not (Test-Path -LiteralPath $b1Wrapper) -and
+        -not [string]::IsNullOrWhiteSpace($b1Dispatcher) -and $b1Dispatcher -ceq $dispatcherPath -and (Test-Path -LiteralPath $b1Dispatcher -PathType Leaf) -and
+        $b1RequestResidue.Count -eq 0 -and
         -not [string]::IsNullOrWhiteSpace($b1BackendTemp) -and -not (Test-Path -LiteralPath $b1BackendTemp)) {
-        Add-Check 'B1 Windows PowerShell full adapter reaches the PS7 supervisor, closes inherited-pipe descendants, and preserves artifact/trace payload semantics'
+        Add-Check 'B1 Windows PowerShell full adapter reaches the tracked PS7 dispatcher, closes inherited-pipe descendants, removes request data, and preserves artifact/trace semantics'
     } else {
         Add-Failure ("B1 supervisor wiring failed: duration_ms={0} root_alive={1} child_alive={2} marker={3} traces={4} stdout=[{5}] stderr=[{6}] record=[{7}]" -f $timerB1.ElapsedMilliseconds,$b1RootAlive,$b1ChildAlive,(Test-Path -LiteralPath $markerB1Path),$b1TraceCount,$b1Result.StdOut,$b1Result.StdErr,$b1Record)
     }
@@ -1267,22 +1415,24 @@ exit `$LASTEXITCODE
     $readyB6 = $false
     $rootOnlyKilledB6 = $false
     $backendCreatedBeforeKillB6 = $false
+    $requestAbsentBeforeKillB6 = $false
     $supervisorAliveBeforeKillB6 = $false
     $supervisorAliveAfterOuterKillB6 = $false
     $identityB6 = $null
     try {
         $readyB6 = $readyEventB6.WaitOne(10000)
-        $identityB6 = Read-LifecycleIdentity -Path $identityB6Path -RequiredProperties @('token','root_pid','root_start_ticks','supervisor_pid','supervisor_start_ticks','wrapper_path','wrapper_deleted','backend_output')
+        $identityB6 = Read-LifecycleIdentity -Path $identityB6Path -RequiredProperties @('token','root_pid','root_start_ticks','supervisor_pid','supervisor_start_ticks','dispatcher_path','dispatcher_tracked','backend_output')
         $backendCreatedBeforeKillB6 = $null -ne $identityB6 -and
             (Test-Path -LiteralPath ([string]$identityB6.backend_output) -PathType Leaf) -and
             (Read-FileUtf8 -Path ([string]$identityB6.backend_output)) -ceq ('sensitive-abort-output-' + $tokenB6)
+        $requestAbsentBeforeKillB6 = @(Get-DispatchRequestResidue -Token $tokenB6).Count -eq 0
         $supervisorAliveBeforeKillB6 = $null -ne $identityB6 -and
             [int]$identityB6.supervisor_pid -ne $captureB6.Process.Id -and
             (Test-LifecycleProcessAlive -ProcessId ([int]$identityB6.supervisor_pid) -StartTicks ([long]$identityB6.supervisor_start_ticks))
         if ($readyB6 -and $null -ne $identityB6 -and
-            [string]$identityB6.token -ceq $tokenB6 -and $identityB6.wrapper_deleted -eq $true -and
-            -not (Test-Path -LiteralPath ([string]$identityB6.wrapper_path)) -and
-            $backendCreatedBeforeKillB6 -and $supervisorAliveBeforeKillB6) {
+            [string]$identityB6.token -ceq $tokenB6 -and $identityB6.dispatcher_tracked -eq $true -and
+            [string]$identityB6.dispatcher_path -ceq $dispatcherPath -and
+            $backendCreatedBeforeKillB6 -and $requestAbsentBeforeKillB6 -and $supervisorAliveBeforeKillB6) {
             $captureB6.Process.Kill()
             $rootOnlyKilledB6 = $captureB6.Process.WaitForExit(5000)
             $supervisorAliveAfterOuterKillB6 = $rootOnlyKilledB6 -and
@@ -1296,7 +1446,7 @@ exit `$LASTEXITCODE
     $outerResultB6 = Complete-LifecyclePowerShell -Capture $captureB6 -Label 'B6 outer abort' -TimeoutMilliseconds 5000
     $identityTimerB6 = [System.Diagnostics.Stopwatch]::StartNew()
     while ($identityTimerB6.ElapsedMilliseconds -lt 5000) {
-        $candidateB6 = Read-LifecycleIdentity -Path $identityB6Path -TimeoutMilliseconds 100 -RequiredProperties @('token','root_pid','root_start_ticks','supervisor_pid','supervisor_start_ticks','child_pid','child_start_ticks','wrapper_path','wrapper_deleted','backend_output')
+        $candidateB6 = Read-LifecycleIdentity -Path $identityB6Path -TimeoutMilliseconds 100 -RequiredProperties @('token','root_pid','root_start_ticks','supervisor_pid','supervisor_start_ticks','child_pid','child_start_ticks','dispatcher_path','dispatcher_tracked','backend_output')
         if ($null -ne $candidateB6 -and [int]$candidateB6.child_pid -gt 0 -and [long]$candidateB6.child_start_ticks -gt 0) {
             $identityB6 = $candidateB6
             break
@@ -1322,7 +1472,8 @@ exit `$LASTEXITCODE
     $rootAliveB6 = $null -ne $identityB6 -and (Test-LifecycleProcessAlive -ProcessId ([int]$identityB6.root_pid) -StartTicks ([long]$identityB6.root_start_ticks))
     $childAliveB6 = $null -ne $identityB6 -and [int]$identityB6.child_pid -gt 0 -and (Test-LifecycleProcessAlive -ProcessId ([int]$identityB6.child_pid) -StartTicks ([long]$identityB6.child_start_ticks))
     $backendTempB6 = if ($null -eq $identityB6) { '' } else { [string]$identityB6.backend_output }
-    $wrapperB6 = if ($null -eq $identityB6) { '' } else { [string]$identityB6.wrapper_path }
+    $dispatcherB6 = if ($null -eq $identityB6) { '' } else { [string]$identityB6.dispatcher_path }
+    $requestResidueB6 = @(Get-DispatchRequestResidue -Token $tokenB6)
     $planB6 = Read-FileUtf8 -Path $planB6Path
     if ($readyB6 -and $rootOnlyKilledB6 -and $backendCreatedBeforeKillB6 -and
         $supervisorAliveBeforeKillB6 -and $supervisorAliveAfterOuterKillB6 -and $supervisorExitedB6 -and
@@ -1330,14 +1481,15 @@ exit `$LASTEXITCODE
         $null -ne $identityB6 -and [string]$identityB6.token -ceq $tokenB6 -and
         [int]$identityB6.child_pid -gt 0 -and -not $rootAliveB6 -and -not $childAliveB6 -and
         -not (Test-Path -LiteralPath $markerB6Path) -and
-        -not [string]::IsNullOrWhiteSpace($wrapperB6) -and -not (Test-Path -LiteralPath $wrapperB6) -and
+        -not [string]::IsNullOrWhiteSpace($dispatcherB6) -and $dispatcherB6 -ceq $dispatcherPath -and (Test-Path -LiteralPath $dispatcherB6 -PathType Leaf) -and
+        $requestResidueB6.Count -eq 0 -and
         -not [string]::IsNullOrWhiteSpace($backendTempB6) -and -not (Test-Path -LiteralPath $backendTempB6) -and
         @(Get-ChildItem -LiteralPath $taskB6Dir -Filter 'codex-*.md' -File -Force).Count -eq 0 -and
         $planB6Hash -eq (Get-FileHash -LiteralPath $planB6Path -Algorithm SHA256).Hash -and
         $planB6 -notmatch '(?m)^- invocation:') {
-        Add-Check 'B6 root-only PS5 abort leaves the orphaned PS7 supervisor to close its target tree and zero-commit residue'
+        Add-Check 'B6 request data is gone while the backend runs, and root-only PS5 abort leaves the orphaned PS7 supervisor to close its target tree with zero-commit residue'
     } else {
-        Add-Failure ("B6 orphan supervisor cleanup failed: ready={0} root_killed={1} output_created={2} supervisor_before={3} supervisor_after_outer={4} supervisor_exited={5} outer_timeout={6} target_alive={7} child_alive={8} marker={9} wrapper=[{10}] backend_temp=[{11}]" -f $readyB6,$rootOnlyKilledB6,$backendCreatedBeforeKillB6,$supervisorAliveBeforeKillB6,$supervisorAliveAfterOuterKillB6,$supervisorExitedB6,$outerResultB6.OuterTimedOut,$rootAliveB6,$childAliveB6,(Test-Path -LiteralPath $markerB6Path),$wrapperB6,$backendTempB6)
+        Add-Failure ("B6 orphan supervisor cleanup failed: ready={0} root_killed={1} output_created={2} request_absent_while_running={3} supervisor_before={4} supervisor_after_outer={5} supervisor_exited={6} outer_timeout={7} target_alive={8} child_alive={9} marker={10} dispatcher=[{11}] request_residue={12} backend_temp=[{13}]" -f $readyB6,$rootOnlyKilledB6,$backendCreatedBeforeKillB6,$requestAbsentBeforeKillB6,$supervisorAliveBeforeKillB6,$supervisorAliveAfterOuterKillB6,$supervisorExitedB6,$outerResultB6.OuterTimedOut,$rootAliveB6,$childAliveB6,(Test-Path -LiteralPath $markerB6Path),$dispatcherB6,$requestResidueB6.Count,$backendTempB6)
     }
     $readyEventB6.Dispose()
     $releaseEventB6.Dispose()
@@ -1350,18 +1502,25 @@ exit `$LASTEXITCODE
 [CmdletBinding()]
 param(
     [string]$TargetScriptPath,
+    [string]$RequestPath,
     [string]$OutputPath,
     [int]$TimeoutSeconds
 )
-$wrapper = [System.IO.File]::ReadAllText($TargetScriptPath)
-if ($wrapper -match 'frame-case=zero') { exit 0 }
-if ($wrapper -match 'frame-case=two') {
+$request = [System.IO.File]::ReadAllText($RequestPath) | ConvertFrom-Json
+$taskEntry = @($request.parameters | Where-Object { [string]$_.name -ceq 'Task' })
+$task = if ($taskEntry.Count -eq 1) { [string]$taskEntry[0].value } else { '' }
+if ($task.StartsWith('frame-case=zero::', [System.StringComparison]::Ordinal)) { exit 0 }
+if ($task.StartsWith('frame-case=two::', [System.StringComparison]::Ordinal)) {
     [Console]::Out.WriteLine('__DEV_HARNESS_BACKEND_OUTPUT_BASE64__=YQ==')
     [Console]::Out.WriteLine('__DEV_HARNESS_BACKEND_OUTPUT_BASE64__=Yg==')
     exit 0
 }
-if ($wrapper -match 'frame-case=invalid') {
+if ($task.StartsWith('frame-case=invalid::', [System.StringComparison]::Ordinal)) {
     [Console]::Out.WriteLine('__DEV_HARNESS_BACKEND_OUTPUT_BASE64__=not-base64')
+    exit 0
+}
+if ($task.StartsWith('frame-case=cleanup::', [System.StringComparison]::Ordinal)) {
+    [System.IO.File]::SetAttributes($RequestPath, [System.IO.FileAttributes]::ReadOnly)
     exit 0
 }
 exit 99
@@ -1370,6 +1529,7 @@ exit 99
             [pscustomobject]@{ Name = 'zero'; Pattern = 'expected exactly one backend output frame, got 0' }
             [pscustomobject]@{ Name = 'two'; Pattern = 'expected exactly one backend output frame, got 2' }
             [pscustomobject]@{ Name = 'invalid'; Pattern = 'backend output frame is not valid Base64' }
+            [pscustomobject]@{ Name = 'cleanup'; Pattern = 'Adapter dispatch request cleanup failed' }
         )) {
         $frameTask = 'skill-contract-frame-' + $frameCase.Name + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
         $frameFixture = New-TaskWorkspace -TaskId $frameTask -PlanContent (New-PlanContent -TaskId $frameTask -Stage 'PLAN_REVIEW' -Tool 'codex' -IncludePlanReviewRun) -Label ('frame-' + $frameCase.Name)
@@ -1379,16 +1539,31 @@ exit 99
         Write-MockCodexSkill -SkillRoot (Join-Path $frameWorkspace '.assistant\skills') -Marker ('frame-' + $frameCase.Name)
         $framePlanPath = Join-Path $frameTaskDir 'plan.md'
         $framePlanHash = (Get-FileHash -LiteralPath $framePlanPath -Algorithm SHA256).Hash
-        $frameResult = Invoke-Adapter -AdapterPath $frameAdapterPath -TaskId $frameTask -Stage 'PLAN_REVIEW' -Skill 'codex' -Tool 'codex' -WorkspaceRoot $frameWorkspace -PayloadJson ('{"task":"frame-case=' + $frameCase.Name + '"}')
+        $framePayloadTask = 'frame-case={0}::{1}' -f $frameCase.Name,[guid]::NewGuid().ToString('N')
+        $frameResult = Invoke-Adapter -AdapterPath $frameAdapterPath -TaskId $frameTask -Stage 'PLAN_REVIEW' -Skill 'codex' -Tool 'codex' -WorkspaceRoot $frameWorkspace -PayloadJson (([ordered]@{ task = $framePayloadTask }) | ConvertTo-Json -Compress)
         $frameJson = Assert-SingleLineJson -JsonText $frameResult.StdOut -Label ('frame ' + $frameCase.Name)
         $framePlan = Read-FileUtf8 -Path $framePlanPath
+        $frameRequestResidue = @(Get-DispatchRequestResidue -Token $framePayloadTask)
+        $frameCleanupStateOk = if ($frameCase.Name -ceq 'cleanup') {
+            $frameRequestResidue.Count -eq 1 -and (($frameRequestResidue[0].Attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0)
+        } else {
+            $frameRequestResidue.Count -eq 0
+        }
         if ($frameResult.ExitCode -eq 1 -and $null -ne $frameJson -and -not $frameJson.ok -and $frameJson.status -eq 'error' -and
             (($frameJson.errors -join ' ') -match [regex]::Escape($frameCase.Pattern)) -and $frameResult.StdErr -match [regex]::Escape($frameCase.Pattern) -and
             @($frameJson.artifact_paths).Count -eq 0 -and @(Get-ChildItem -LiteralPath $frameTaskDir -Filter 'codex-*.md' -File -Force).Count -eq 0 -and
-            $framePlanHash -eq (Get-FileHash -LiteralPath $framePlanPath -Algorithm SHA256).Hash -and $framePlan -notmatch '(?m)^- invocation:') {
+            $frameCleanupStateOk -and $framePlanHash -eq (Get-FileHash -LiteralPath $framePlanPath -Algorithm SHA256).Hash -and $framePlan -notmatch '(?m)^- invocation:') {
             Add-Check ("frame {0} fails closed before artifact/trace commit" -f $frameCase.Name)
         } else {
-            Add-Failure ("frame {0} fail-closed contract failed: exit={1} stdout=[{2}] stderr=[{3}]" -f $frameCase.Name,$frameResult.ExitCode,$frameResult.StdOut,$frameResult.StdErr)
+            Add-Failure ("frame {0} fail-closed contract failed: exit={1} request_residue={2} stdout=[{3}] stderr=[{4}]" -f $frameCase.Name,$frameResult.ExitCode,$frameRequestResidue.Count,$frameResult.StdOut,$frameResult.StdErr)
+        }
+        foreach ($residue in $frameRequestResidue) {
+            try {
+                [System.IO.File]::SetAttributes($residue.FullName, [System.IO.FileAttributes]::Normal)
+                [System.IO.File]::Delete($residue.FullName)
+            } catch {
+                Add-Failure ("frame {0} request residue cleanup failed: {1}" -f $frameCase.Name,$_.Exception.Message)
+            }
         }
     }
 
@@ -1580,8 +1755,12 @@ try {
     $fixtureD5 = New-TaskWorkspace -TaskId $taskD5 -PlanContent (New-PlanContent -TaskId $taskD5 -Stage 'PLAN_REVIEW' -Tool 'codex' -IncludePlanReviewRun) -Label 'd5'
     $workspaceD5 = $fixtureD5.WorkspaceRoot
     $cleanupPaths += $workspaceD5
-    [LiteMutexAbandonProbe]::Abandon((Get-LitePlanMutexName -TaskId $taskD5))
-    $d5Result = Invoke-Adapter -AdapterPath $adapterPath -TaskId $taskD5 -Stage 'PLAN_REVIEW' -Skill 'review' -Tool 'codex' -WorkspaceRoot $workspaceD5
+    $abandonedMutexD5 = New-AbandonedNamedMutex -HostPath $ownerHost -FixturePath $mutexAbandonFixturePath -MutexName (Get-LitePlanMutexName -TaskId $taskD5) -Label 'D5 abandoned mutex fixture'
+    try {
+        $d5Result = Invoke-Adapter -AdapterPath $adapterPath -TaskId $taskD5 -Stage 'PLAN_REVIEW' -Skill 'review' -Tool 'codex' -WorkspaceRoot $workspaceD5
+    } finally {
+        $abandonedMutexD5.Dispose()
+    }
     $d5Json = Assert-SingleLineJson -JsonText $d5Result.StdOut -Label 'D5'
     $d5Plan = Read-FileUtf8 -Path (Join-Path $fixtureD5.TaskDirectory 'plan.md')
     if ($d5Result.ExitCode -ne 0 -and
@@ -1611,8 +1790,12 @@ try {
     exit 1
 }
 "@
-    [LiteMutexAbandonProbe]::Abandon((Get-LitePlanMutexName -TaskId $taskD6))
-    $d6Result = Invoke-PowerShellWithStreams -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $wrapperD6)
+    $abandonedMutexD6 = New-AbandonedNamedMutex -HostPath $ownerHost -FixturePath $mutexAbandonFixturePath -MutexName (Get-LitePlanMutexName -TaskId $taskD6) -Label 'D6 abandoned mutex fixture'
+    try {
+        $d6Result = Invoke-PowerShellWithStreams -Arguments @('-NoProfile', '-File', $wrapperD6)
+    } finally {
+        $abandonedMutexD6.Dispose()
+    }
     $d6Plan = Read-FileUtf8 -Path (Join-Path $taskD6Dir 'plan.md')
     if ($d6Result.ExitCode -eq 0 -and $d6Plan -match '(?m)^stage: IMPLEMENT\s*$') {
         Add-Check 'D6 stage advance recovers an abandoned shared plan mutex on its first attempt'
@@ -1686,7 +1869,7 @@ exit `$LASTEXITCODE
     try {
         if ($backendReadyD8) {
             $advanceD8ToImplement = Invoke-PowerShellWithStreams -Arguments @(
-                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $advancePath,
+                '-NoProfile', '-File', $advancePath,
                 '-TaskId', $taskD8, '-ExpectedStage', 'CODE_REVIEW',
                 '-VaultRoot', $vaultD8, '-RepoRoot', $fixtureRoot, '-WorkspaceRoot', $fixtureRoot
             )
@@ -1708,7 +1891,7 @@ exit `$LASTEXITCODE
                     Exit-LitePlanMutex -Mutex $planMutationMutexD8
                 }
                 $advanceD8ToReview = Invoke-PowerShellWithStreams -Arguments @(
-                    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $advancePath,
+                    '-NoProfile', '-File', $advancePath,
                     '-TaskId', $taskD8, '-ExpectedStage', 'IMPLEMENT',
                     '-VaultRoot', $vaultD8, '-RepoRoot', $fixtureRoot, '-WorkspaceRoot', $fixtureRoot
                 )
@@ -1776,11 +1959,11 @@ exit `$LASTEXITCODE
         $planSkillsIndexDoc -match '# Skills available at PLAN \(backend hint: codex\)' -and
         $planSkillsIndexDoc -match '\*\*plan\*\*' -and
         $planSkillsIndexDoc -match '\*\*entry-router\*\*' -and
-        $planSkillsIndexDoc -match 'Canonical entry router' -and
+        $planSkillsIndexDoc -match 'V1 compatibility entry router' -and
         $planSkillsIndexDoc -notmatch '\*\*using-superpowers\*\*') {
-        Add-Check 'E2 PLAN skills-index uses entry-router as the default entry command'
+        Add-Check 'E2 PLAN skills-index exposes the v1 compatibility entry-router without using-superpowers'
     } else {
-        Add-Failure ("E2 PLAN skills-index should expose entry-router and not using-superpowers, got output=[{0}] doc=[{1}]" -f $e2Result.Text, $planSkillsIndexDoc)
+        Add-Failure ("E2 PLAN skills-index should expose the v1 compatibility entry-router and not using-superpowers, got output=[{0}] doc=[{1}]" -f $e2Result.Text, $planSkillsIndexDoc)
     }
     $lifecycleAssertionsPassed = $script:Failures.Count -eq 0
 } finally {

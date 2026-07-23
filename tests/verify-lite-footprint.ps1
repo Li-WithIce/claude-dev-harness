@@ -302,6 +302,7 @@ $script:Checks = @()
 $script:Failures = @()
 
 $expectedSkills = @(
+    'audit',
     'codex',
     'entry-router',
     'implement',
@@ -309,6 +310,7 @@ $expectedSkills = @(
     'obsidian-memory',
     'orchestrator',
     'plan',
+    'planning',
     'review',
     'spec',
     'test',
@@ -411,7 +413,7 @@ Assert-FileNotContains -Path 'skills/implement/SKILL.md' -Needle '适用：`clau
 Assert-FileNotContains -Path 'skills/review/SKILL.md' -Needle '适用：`claudecode`'
 Assert-PathAbsent -Path 'skills/using-superpowers'
 Assert-PathAbsent -Path ('skills/' + 'gemini-designer' + '-main')
-Assert-FileNotContains -Path 'agent-configs/codex/config.shared.toml.template' -Needle 'using-superpowers'
+Assert-FileNotContains -Path 'agent-configs/codex/hooks.shared.json.template' -Needle 'using-superpowers'
 Assert-NoTrackedAssistantFiles
 Assert-GitIgnoreState -Path '.assistant/' -ShouldBeIgnored $true
 Assert-GitIgnoreState -Path '.assistant/工作流/长会话恢复.md' -ShouldBeIgnored $true
@@ -459,6 +461,7 @@ $bomTargets = @(
 $bomTargets += Get-ChildItem -LiteralPath (Join-Path $script:RepoRoot 'scripts') -Filter '*.ps1' -File | ForEach-Object { Get-RepoRelativePath -TargetPath $_.FullName }
 $bomTargets += Get-ChildItem -LiteralPath (Join-Path $script:RepoRoot 'tests') -Filter '*.ps1' -File | ForEach-Object { Get-RepoRelativePath -TargetPath $_.FullName }
 $bomTargets += Get-ChildItem -LiteralPath (Join-Path $script:RepoRoot 'skills') -Recurse -Filter '*.ps1' -File | ForEach-Object { Get-RepoRelativePath -TargetPath $_.FullName }
+$bomTargets += Get-ChildItem -LiteralPath (Join-Path $script:RepoRoot 'runtime-hooks') -Recurse -Filter '*.ps1' -File | ForEach-Object { Get-RepoRelativePath -TargetPath $_.FullName }
 
 foreach ($bomTarget in ($bomTargets | Sort-Object -Unique)) {
     Assert-Utf8Bom -Path $bomTarget

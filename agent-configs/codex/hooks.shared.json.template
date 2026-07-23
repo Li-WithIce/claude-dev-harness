@@ -1,0 +1,15 @@
+{
+  "PreToolUse": [
+    {
+      "matcher": "^(Bash|apply_patch)$",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "{WINDOWS_POWERSHELL_EXE} -NoLogo -NoProfile -NonInteractive -Command . '{CODEX_PRETOOLUSE_LAUNCHER_PS_LITERAL}'",
+          "timeout": 15,
+          "statusMessage": "Checking Harness protected-action policy"
+        }
+      ]
+    }
+  ]
+}

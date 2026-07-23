@@ -1,0 +1,7 @@
+# Project-local v2 task CLI shim.
+# Delegates every argument while pinning the managed harness and workspace roots.
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+& '{REPO_ROOT}\scripts\task.ps1' @args -RepoRoot '{REPO_ROOT}' -WorkspaceRoot '{WORKSPACE_ROOT}'
+exit $LASTEXITCODE

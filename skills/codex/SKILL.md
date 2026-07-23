@@ -20,19 +20,19 @@ description: Delegate coding tasks to Codex CLI for execution. Invoke this skill
 The script path is:
 
 ```
-~/.claude/skills/codex/scripts/ask_codex.sh
+~/.claude/skills/codex/scripts/invoke_codex.sh
 ```
 
 Minimal invocation:
 
 ```bash
-~/.claude/skills/codex/scripts/ask_codex.sh "Your request in natural language"
+~/.claude/skills/codex/scripts/invoke_codex.sh "Your request in natural language"
 ```
 
 With file context:
 
 ```bash
-~/.claude/skills/codex/scripts/ask_codex.sh "Refactor these components to use the new API" \
+~/.claude/skills/codex/scripts/invoke_codex.sh "Refactor these components to use the new API" \
   --file src/components/UserList.tsx \
   --file src/components/UserDetail.tsx
 ```
@@ -40,7 +40,7 @@ With file context:
 Multi-turn conversation (continue a previous session):
 
 ```bash
-~/.claude/skills/codex/scripts/ask_codex.sh "Also add retry logic with exponential backoff" \
+~/.claude/skills/codex/scripts/invoke_codex.sh "Also add retry logic with exponential backoff" \
   --session <session_id from previous run>
 ```
 
@@ -51,26 +51,26 @@ Use PowerShell 7.3 or newer (`pwsh`). The Windows wrapper fails before doing any
 The script path is:
 
 ```
-~/.claude/skills/codex/scripts/ask_codex.ps1
+~/.claude/skills/codex/scripts/invoke_codex.ps1
 ```
 
 Minimal invocation:
 
 ```powershell
-& "$HOME/.claude/skills/codex/scripts/ask_codex.ps1" "Your request in natural language"
+& "$HOME/.claude/skills/codex/scripts/invoke_codex.ps1" "Your request in natural language"
 ```
 
 With file context:
 
 ```powershell
-& "$HOME/.claude/skills/codex/scripts/ask_codex.ps1" "Refactor these components to use the new API" `
+& "$HOME/.claude/skills/codex/scripts/invoke_codex.ps1" "Refactor these components to use the new API" `
   -File @('src/components/UserList.tsx', 'src/components/UserDetail.tsx')
 ```
 
 Multi-turn conversation (continue a previous session):
 
 ```powershell
-& "$HOME/.claude/skills/codex/scripts/ask_codex.ps1" "Also add retry logic with exponential backoff" `
+& "$HOME/.claude/skills/codex/scripts/invoke_codex.ps1" "Also add retry logic with exponential backoff" `
   -Session <session_id from previous run>
 ```
 
@@ -126,13 +126,19 @@ The Bash wrapper's resume branch forwards the session id, reasoning effort, prom
 - `-File @('<path1>', '<path2>')` / `-f @('<path1>', '<path2>')` — Priority entry-point files; bind the parameter once with a PowerShell array.
 - `-Session <id>` — Resume a previous session.
 - `-Model <name>` — Override model; otherwise use Codex config.
-- `-Reasoning <level>` — `low`, `medium`, or `high` (default: `medium`).
+- `-Reasoning <level>` — `low`, `medium`, `high`, or `max` (default: `medium`). Use `max` only when the selected model exposes that single-subject tier.
 - `-Sandbox <mode>` — `read-only`, `workspace-write`, or `danger-full-access`; no sandbox override is supplied by default.
+- `-ApprovalPolicy <policy>` — `untrusted`, `on-request`, or `never`; emitted as a global Codex option before `exec` and omitted by default.
 - `-ReadOnly` — Read-only mode for new and resumed sessions.
 - `-FullAuto` — Opt in to full-auto for a new session; it is not the Windows default and does not apply to resume.
 - `-Ephemeral` — Do not persist Codex session files.
 - `-TimeoutSeconds <seconds>` — Main-process timeout (default: 1800 seconds); timeout returns nonzero and closes the supported process tree.
 - `-Output <path>` / `-o <path>` — Response path; relative paths use the caller's current directory and successful output is published atomically.
+- `-OutputSchema <path>` — JSON Schema for the final model response; when Codex emits intermediate agent messages, only the last agent message is atomically published as the structured response.
+- `-TelemetryOutput <path>` — Atomic JSON with model/reasoning, sandbox/approval identity, timing, aggregate turn/message/tool/skill counts, and available token usage; it excludes prompts, command text, thread ids, and private paths.
+- `-AgentOutputOnly` — Exclude command summaries from the response file.
+- `-Quiet` — Suppress live command and message previews.
+- `-Isolated` — Disable plugins, apps, browser/computer use, memory, image generation, and multi-agent/fanout features for a fresh single-subject evaluation context.
 
 ## Resume mode limitations
 
@@ -143,5 +149,6 @@ The current Windows wrapper uses the Codex 0.141 resume contract:
 - Resume has no direct `--sandbox` or `--cd` option. Windows `-ReadOnly` is enforced with `-c sandbox_mode="read-only"`; an explicit `-Sandbox` uses the same config key.
 - `-Workspace` sets the wrapper process working directory, but it does not rewrite the original session's stored context.
 - `-FullAuto` applies only to new sessions.
+- When the Microsoft Store app path cannot be started through `ProcessStartInfo`, the wrapper uses the Codex app's user-scoped `.codex/.sandbox-bin/codex.exe`; an explicit `CODEX_EXECUTABLE` can override this only with an existing file.
 
-These resume guarantees are specific to `ask_codex.ps1`. The Bash wrapper is a separate implementation and does not inherit the Windows hardening contract.
+These resume guarantees are specific to `invoke_codex.ps1`. The Bash wrapper is a separate implementation and does not inherit the Windows hardening contract. Existing `ask_codex.ps1` and `ask_codex.sh` commands remain thin compatibility shims.

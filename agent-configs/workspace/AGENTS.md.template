@@ -1,84 +1,27 @@
-# Shared Memory
+# Workspace Host Overlay
 
-- Shared memory vault: `{VAULT_PATH}`
-- Default language: 中文
-- If a task needs recovery, runtime state, long-term preferences, or tool paths, use existing shared memory/runtime docs first; if optional docs are absent, continue from project files and current evidence
-- Do not keep parallel runtime notes outside `.assistant`
-- 新功能开发或功能修改以当前需求和业务正确性为准；不要为了兼容旧测试、旧快照或过期断言而保留或恢复旧行为。若旧测试与新需求冲突，应更新或删除旧测试并说明原因；只有用户明确要求历史兼容时才保留旧测试兼容。
+- Harness runtime lives under `{VAULT_PATH}`; optional Memory features are used only when installed and explicitly needed or authorized.
+- Default to Simplified Chinese for explanations and summaries; keep code identifiers in their native language and never expose secrets or private data.
+- Use `.assistant\entry\task.ps1 status` only for an explicit recovery/status request after protocol selection; a new selected v2 request never calls it, and v1 recovery files remain compatibility inputs only for existing v1 tasks.
+- Use `rg`, file reading, and manual inspection only when directly relevant. Optional providers are never required for core routing.
+- Current requirements and business correctness take precedence over stale tests or snapshots unless historical compatibility is explicitly required.
+- Only a detector-selected v1 workflow reads the executable `.assistant\entry\AGENTS.md` shim; selected v2 never reads it.
 
-## Communication
+<!-- BEGIN GENERATED ENTRY CONTRACT -->
+<!-- source-sha256: 610dc3f056950cb6fbca50b45f5f5448c07e7c3d394aa96d85420d4ad061dc43 -->
+# Entry Contract Bootstrap
 
-- 默认使用简体中文，除非用户明确要求英文。
-- 代码本体保留英文关键字、变量名、函数名、类名、库名。
-- 代码讲解、实现思路、报错分析、方案总结使用中文。
-- 不泄露密码、密钥、Token、凭证、隐私数据等敏感信息。
-- 避免无必要的过程性闲聊；必要进度更新保持简短、事实化。
+Bootstrap only; routes/lifecycle stay lazy.
 
-## Read Order
+- `protocol_default`: `auto`
+- `auto_resolves_to`: `existing-artifact-or-gated-v2-new`
+- `v2_entry_activation`: `explicit-or-workspace-new-or-existing-v2-or-eligible-auto-new`
 
-- Orientation: read existing optional files only if present: `.assistant\首页.md` -> `.assistant\工作流\项目约定.md` -> `.assistant\配置\系统信息.md` -> `.assistant\配置\用户偏好.md` -> `.assistant\配置\工具与组件.md`
-- Resume: first inspect open `[writeback-fallback]` rows in `.assistant\运行时\收件箱.md`; then read existing runtime files only if present: `.assistant\运行时\恢复索引.md` -> `.assistant\运行时\当前任务.md` -> `.assistant\运行时\tasks\<task-id>.md` -> `.assistant\运行时\中断任务.md` -> `.assistant\运行时\上次会话.md`; missing runtime files mean no active recorded state
-
-## Code Understanding
-
-- 修改前先理解仓库结构、已有实现和项目约定。
-- 日常找代码、定位文件/符号、自然语言检索、BM25/关键词检索、上下文候选收集，默认使用 `rg` / 文件阅读 / manual inspection。
-- Provider indexes are opt-in. 只有用户明确要求、或项目存在显式 provider opt-in 时，才使用 CodeGraph、`codedb-mcp` / `codebase-mcp` 或 agentmemory 作为 advisory context provider。
-- 已 opt-in 且已索引当前项目的 `codedb-mcp` / `codebase-mcp` 可以辅助检索；不可用或未索引时，退回 `rg` / 文件阅读，不阻塞任务。
-- 需要 `impact` / `callers` / `callees` / `affected`、跨模块调用链、依赖扩散、架构边界判断等结构化影响分析时，只有在 CodeGraph 已 opt-in 且可用时才使用。
-- 当任务明确需要 CodeGraph 且 `codegraph_explore` MCP 已暴露时，使用 `codegraph_explore`；否则在显式 opt-in 后使用 `codegraph explore "<问题或符号>"`。
-- 不因 MCP 已安装而预加载、探测或访问；仅在用户显式点名、任务必需，或本项目规则要求时使用。
-- 既有项目未初始化 CodeGraph 时，不擅自初始化；先询问用户。
-- CodeGraph 不可用时继续用代码库检索与阅读，并在总结中说明。
-- 含代码修改的任务完成后，提示用户是否需要触发 `codegraph sync`；除非用户明确要求，不自动执行 sync。
-- 检测到 ponytail 插件可用且任务涉及设计、实现或审查时，可以使用它做过度设计审查或最小实现审查；插件不可用时按最小正确 diff 原则人工执行。
-
-## New Project Bootstrap
-
-- 新项目 bootstrap 可以安装/更新基础 harness workflow。
-- Provider indexes are opt-in. Do not initialize CodeGraph, codedb-mcp, or agentmemory unless the user explicitly asks or the project has an explicit provider opt-in.
-- 如果 provider context 会有帮助但没有明确 opt-in，先询问用户；若 provider 不可用，继续使用 `rg` / read / manual inspection 和基础 harness workflow。
-- Provider absence must never block `quick`, `workflow`, or `ask` routing.
-
-## Lazy Loading
-
-- After task recognition, follow `.assistant\entry\AGENTS.md` mode rules.
-- `quick` loads only entry rules, user preferences / necessary config, and the directly relevant skill.
-- `workflow` loads `entry-router`, `orchestrator`, and the current-stage skill.
-- `resume-current` / `switch-existing` reads recovery identity/runtime first; only explicit continue/switch-and-execute loads the current-stage skill or writes runtime. Read-only inspect/status remains minimal and read-only.
-- `ask` is an iterative blocking clarification gate: do not load workflow stage skills, create `docs/tasks/{task_id}/`, edit code, or enter quick/workflow/PLAN/IMPLEMENT until all blocking uncertainties are resolved. Ask one highest-value question at a time by default, then reassess.
-- Clarification-family requests such as 需求澄清 / 需求确认 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认 follow `.assistant\entry\AGENTS.md` and land in existing `PLAN -> Clarification` when they need durable development decisions; they do not create a new stage.
-- Treat unresolved PLAN acceptance, non-goals, impact, rollback/compatibility, or implementation path that cannot guide IMPLEMENT as the same Clarification protocol.
-- In that protocol, answer code/doc-discoverable questions first, keep the base Clarification fields, ask remaining user decisions one at a time with a recommended answer, and keep `User Confirmation` draft while any `clarification_ledger` item is `decision: pending`.
-- Stage principle routing is only a cognitive lens, not a new five-turn workflow: Entry/Clarification=Socrates, PLAN=Osborn/Hegel/First Principles/Occam, PLAN_REVIEW=Hegel+Bayes, IMPLEMENT=Ponytail/surgical change, CODE_REVIEW=Feynman, TEST=Bayes, revise=Debono value preservation.
-- Stage Discipline Matrix lives in `docs/工作流/stage-discipline-matrix.md`; load it only when stage-discipline clarification or stage-behavior review is needed.
-- Do not bulk-load all skills, all historical tasks, Claude compatibility skills, or `workflow-team` unless an explicit trigger requires them.
-
-## Task Workflow
-
-- 小任务直接处理，不额外创建计划文档。
-- Project-scoped development and read-only engineering requests must first pass through `.assistant\entry\AGENTS.md` routing. For new work, route to `quick`, `workflow`, or `ask`.
-- Only `workflow` tasks use the canonical stage chain: `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`.
-- Do not use `REVIEW` or `SUMMARY` as frontmatter stage names; summaries are user-facing responses, not workflow stages.
-- `quick` tasks can be handled directly and summarized without creating task artifacts.
-- `ask` mode only clarifies missing requirements; it cannot exit until the agent can state User goal, Success / acceptance criteria, In scope, Out of scope / non-goals, Affected area, Constraints, Risk level, Expected output, Recommended route: quick or workflow, and Why this route is safe. It does not introduce a frontmatter stage.
-- `workflow` mode uses `docs/tasks/{task_id}/plan.md` and the canonical stages.
-- 任务中断后，继续时先恢复目标、已完成事项、待处理事项和验证状态。
-- 不为简单命令、报错解释、SQL 改写、配置查询创建额外任务目录。
-- 只有 `mode=workflow` 才写入 `docs/tasks/{task_id}/`；standalone quick/read-only 即使较长或多轮也不因此创建任务产物。
-- 任务文档采用追加记录，不覆盖关键历史。
-
-## Memory Writeback
-
-- 非简单任务、跨文件任务、需沿用历史约定时，开始前先检索记忆。
-- 用户提到“之前 / 上次 / 记忆 / 经验 / 约定 / 历史决策”时，必须优先查记忆。
-- 任务结束后，如发现长期有价值的项目约定、架构决策、排查经验或用户偏好，在总结中提示可沉淀；只有用户明确要求时写入记忆。
-- 不写入临时日志、一次性输出、敏感信息。
-- 写入前先搜索相近 key；已有则更新，没有再新增。
-- key 使用小写短横线，如 `agent-memory-mcp-usage-policy`。
-- type 只能用：`architecture`、`pattern`、`feature`、`api`、`bug`、`decision`。
-- 若 agentMemory MCP 未暴露，说明可能尚未重启或配置未加载，并继续完成任务。
-
-## Entry Shim
-
-- The full workspace entry instructions live in `.assistant\entry\AGENTS.md`
+- New identity/artifact-free: use host/user-surfaced `HARNESS_PROTOCOL`; else read its process value once; never guess. `v2` is the first complete routing hop: classify inline; no task `status`/`protocol`, nested shim, or task/runtime/current inspection. Selected v2 Direct loads no `entry-router`, `orchestrator`, lifecycle skill, Memory, Team, or Provider; hand off now.
+- Otherwise resolve once. Known: `.assistant\entry\task.ps1 protocol -TaskId {task_id}`; v2 state, else v1 plan, wins. New: `.assistant\entry\task.ps1 protocol`; config `v1|v2|auto`, then passing rollout or v1 fallback. No status/runtime/lifecycle fan-out. Existing v2 may status/resume; v1 may load its shim. Invalid input fails closed.
+- An unresolved Requirement or product decision blocks every write and enters Ask. Protected/expanded/non-Direct reroute before writes.
+- A public-contract change found outside confirmed scope stays unresolved until the user explicitly confirms this change; continuation alone enters Ask and authorizes no write.
+- Clear Direct: relevant targets -> minimum edit -> minimum focused checks covering all confirmed acceptance criteria -> one bounded diff/self-review -> report. Stop only when all required checks pass. Expand only after failure/ambiguity. No task/runtime/current/lifecycle writes.
+- Read-only work performs zero writes. Report actual commands/results, self-review, gaps; `not_run`/unavailable is not pass.
+- Only a detector-selected v1 request loads `entry-router`; missing compatibility fails closed; then `orchestrator` + one stage skill.
+<!-- END GENERATED ENTRY CONTRACT -->

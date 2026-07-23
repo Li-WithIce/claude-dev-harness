@@ -1,0 +1,27 @@
+# Governed 与 Critical 工作
+
+## 何时使用
+
+Governed 适用于需要持久任务状态、可审计交付、较高风险或受保护范围的工作。Critical 适用于生产、权限/安全、资金、破坏性迁移、不可逆数据变化、公共 API 破坏、敏感数据导出、破坏 Git 历史或缺少 dry-run 的大规模自动化。
+
+文件数量本身不会升级 profile；真正决定因素是风险、持久化要求和受保护动作。
+
+## 最短生命周期
+
+1. 冻结清楚的 Requirement，并选择 Governed 或 Critical。
+2. 创建/恢复唯一的 v2 task state；它是生命周期真相源。
+3. 按策略满足必需能力后实施。Governed 总是需要验证和持久 Evidence；计划、Approval、回滚与独立审查按策略组合。
+4. Critical 在执行和完成前必须具备计划、有效 Approval、回滚方案、独立审查、dry-run、验证与 Evidence。
+5. Evidence 记录真实命令、退出码、覆盖、缺口与结论；Critical 的实际 dry-run 命令使用顶层结构化 `dry_run` command 对象，记录独立受控执行器 actor，并继承同一 Evidence 的 task/version/Contract/revision 绑定。未执行项标为 unavailable、manual 或 blocked，不能伪造 pass。
+6. Critical 的当前 Approval、dry-run 和用于证明执行完成的至少一条成功 command record 必须携带同一 `protected-operation/v1` descriptor/identity，且 `covers` 非空并包含该 identity。运行时使用 domain `dev-harness:protected-operation:v1`，从 task version、Contract digest、规范化 environment/targets、`protected-write` action category、Approval type 与排序后的 scope 重算 SHA-256；调用方不能用任意 opaque digest 代替，输入也不含 secret 或 raw credential。
+7. 完成门重新校验任务版本、Requirement digest、仓库修订、Evidence、Approval、operation identity 和治理记录，再进行合法状态转换；普通 verify、current replay 与 legacy replay 共用同一门禁。空 covers、无关 no-op、不同目标/scope/environment、过期 Approval 或版本/Contract 漂移都在写入前拒绝。旧 Critical Evidence 缺少新绑定时不猜测、不自动补全，只能取得新的 Approval/Evidence；Governed、Direct、v1 和旧非 Critical Evidence 保持兼容。
+
+Approval 与 Ask 不同：Approval 缺失是能力阻断，只有产品/授权决定本身不清楚时才 Ask。作用域、任务版本、Requirement 或受保护操作发生变化后，旧 Approval 不能继续授权。Audit、Approval 与 Evidence 中用于独立性判断的 actor/context/base-model 字段同时经过 schema `\S` 和 runtime `IsNullOrWhiteSpace` 检查；这些是可审计的合作式身份声明，不是密码学认证。
+
+## 中断、恢复与回滚
+
+状态和 Evidence 都保留在工作区内的 canonical v2 路径；current pointer、事件、审计与恢复索引只是绑定记录或派生视图。只读 status/resume 不写状态，只有显式 resume-and-execute 才继续执行。
+
+设置 `HARNESS_PROTOCOL=v1` 只影响新任务路由，不会删除或隐式转换 v2 task。已有 v1 task 继续使用五阶段流程；显式迁移保留原 v1 artifact，回滚也不得靠删除 v2 数据重新激活 v1。
+
+机器状态、Evidence、Approval 与转换规则分别以 `schemas/`、`policies/` 和 `scripts/lib/` 为准；本页只提供操作心智模型。

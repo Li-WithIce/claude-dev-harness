@@ -8,7 +8,7 @@ task_id: <task-id>
 stage: PLAN | PLAN_REVIEW | IMPLEMENT | CODE_REVIEW | TEST | DONE
 tool: claudecode | codex | none
 tool_profile: <optional profile name>
-model: <optional full model id>
+model: <optional inherit or full model id>
 updated: YYYY-MM-DD
 ---
 ```
@@ -56,7 +56,7 @@ single_writer:
 members:
   - role: plan-author
     backend: codex
-    model: gpt-5.5/xhigh
+    model: inherit
     skills_whitelist: [plan, entry-router]
     role_prompt_ref: agent-configs/role-prompts/plan-author.md
 ```

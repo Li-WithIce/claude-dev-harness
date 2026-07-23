@@ -1,0 +1,205 @@
+{
+  "schema_version": "requirement-gate-scenarios/v1",
+  "base_request": {
+    "task_id": "inspect-requirement",
+    "goal": "Inspect a requirement without executing it.",
+    "acceptance": ["The inspection returns a deterministic requirement state."],
+    "in_scope": ["Requirement analysis only"],
+    "out_of_scope": ["Mutation"],
+    "product_constraints": ["Inspection performs no writes."],
+    "source_authority": ["current-user-message"],
+    "decisions": [],
+    "repo_checks": [],
+    "ask": {
+      "style": "dependency-aware",
+      "max_independent_questions_per_turn": 5
+    }
+  },
+  "cases": [
+    {
+      "id": "clear-explicit-product-decision",
+      "expected_state": "clear",
+      "decisions": [
+        {
+          "key": "export_roles",
+          "category": "authorization_semantics",
+          "question": "Which roles may export?",
+          "impact": "Changes who can access exported data.",
+          "options": ["admin-only", "admin-and-analyst"],
+          "recommended": "admin-only",
+          "depends_on": [],
+          "sources": [
+            { "authority": "current-user-message", "source_id": "message-1", "value": "admin-only" }
+          ]
+        }
+      ],
+      "expected": { "blockers": 0, "questions": 0, "product": 1 }
+    },
+    {
+      "id": "blocked-critical-product-semantics",
+      "expected_state": "blocked",
+      "decisions": [
+        { "key": "roles", "category": "authorization_semantics", "question": "Which roles may act?", "impact": "Changes authorization.", "options": ["admin", "admin-and-owner"], "recommended": "admin", "depends_on": [], "sources": [] },
+        { "key": "fee", "category": "money_and_billing", "question": "What fee and currency apply?", "impact": "Changes charged money.", "options": ["none", "fixed"], "recommended": "none", "depends_on": [], "sources": [] },
+        { "key": "transition", "category": "state_transition", "question": "Which state transition is allowed?", "impact": "Changes lifecycle behavior.", "options": ["pending-to-cancelled", "any-to-cancelled"], "recommended": "pending-to-cancelled", "depends_on": [], "sources": [] },
+        { "key": "deletion", "category": "data_retention_and_deletion", "question": "How is data deleted and retained?", "impact": "Changes retention and recovery.", "options": ["soft-delete", "hard-delete"], "recommended": "soft-delete", "depends_on": [], "sources": [] }
+      ],
+      "expected": { "blockers": 4, "questions": 4 }
+    },
+    {
+      "id": "unknown-category-fails-closed",
+      "expected_state": "blocked",
+      "decisions": [
+        { "key": "unknown", "category": "Authorization_Semantics", "question": "Who decides this?", "impact": "Unknown ownership could change behavior.", "options": ["a", "b"], "recommended": "a", "depends_on": [], "sources": [] }
+      ],
+      "expected": { "blockers": 1, "reason": "unknown-decision-category" }
+    },
+    {
+      "id": "agent-choice-and-repo-check",
+      "expected_state": "clear",
+      "decisions": [
+        {
+          "key": "helper",
+          "category": "existing_helper_selection",
+          "question": "Which existing helper should be reused?",
+          "impact": "Only private implementation organization changes.",
+          "options": ["Invoke-ExistingHelper"],
+          "recommended": "Invoke-ExistingHelper",
+          "depends_on": [],
+          "sources": [],
+          "agent_constraints": {
+            "must_be_reversible": true,
+            "must_not_change_external_behavior": true,
+            "must_follow_repo_conventions": true,
+            "must_be_verified": true
+          }
+        }
+      ],
+      "repo_checks": [
+        { "id": "helper-present", "path": "evidence/helper.txt", "contains": "Invoke-ExistingHelper" }
+      ],
+      "expected": { "blockers": 0, "agent": 1, "repo_status": "matched" }
+    },
+    {
+      "id": "peer-approved-conflict",
+      "expected_state": "blocked",
+      "decisions": [
+        {
+          "key": "retention",
+          "category": "data_retention_and_deletion",
+          "question": "Which approved retention value applies?",
+          "impact": "Changes data retention.",
+          "options": ["30-days", "90-days"],
+          "recommended": "90-days",
+          "depends_on": [],
+          "sources": [
+            { "authority": "approved-spec", "source_id": "spec-a", "value": "30-days" },
+            { "authority": "approved-spec", "source_id": "spec-b", "value": "90-days" }
+          ]
+        }
+      ],
+      "expected": { "blockers": 1, "reason": "peer-authority-conflict", "conflicts": 1 }
+    },
+    {
+      "id": "peer-approved-same-value",
+      "expected_state": "clear",
+      "decisions": [
+        {
+          "key": "retention",
+          "category": "data_retention_and_deletion",
+          "question": "Which retention value applies?",
+          "impact": "Changes data retention.",
+          "options": ["90-days"],
+          "recommended": "90-days",
+          "depends_on": [],
+          "sources": [
+            { "authority": "approved-spec", "source_id": "spec-a", "value": "90-days" },
+            { "authority": "approved-spec", "source_id": "spec-b", "value": "90-days" }
+          ]
+        }
+      ],
+      "expected": { "blockers": 0, "product": 1, "conflicts": 0 }
+    },
+    {
+      "id": "current-user-overrides-repo",
+      "expected_state": "clear",
+      "decisions": [
+        {
+          "key": "visibility",
+          "category": "user_visible_behavior",
+          "question": "Which behavior applies?",
+          "impact": "Changes visible behavior.",
+          "options": ["new", "legacy"],
+          "recommended": "new",
+          "depends_on": [],
+          "sources": [
+            { "authority": "repo-evidence", "source_id": "legacy-test", "value": "legacy" },
+            { "authority": "current-user-message", "source_id": "message-1", "value": "new" }
+          ]
+        }
+      ],
+      "expected": { "blockers": 0, "conflict_type": "current-vs-legacy" }
+    },
+    {
+      "id": "dependent-question-deferred",
+      "expected_state": "blocked",
+      "decisions": [
+        { "key": "roles", "category": "authorization_semantics", "question": "Which roles may act?", "impact": "Changes authorization.", "options": ["admin", "owner"], "recommended": "admin", "depends_on": [], "sources": [] },
+        { "key": "transition", "category": "state_transition", "question": "What transition applies to the selected role?", "impact": "Changes lifecycle behavior.", "options": ["pending-to-done"], "recommended": "pending-to-done", "depends_on": ["roles"], "sources": [] }
+      ],
+      "expected": { "blockers": 2, "questions": 1, "deferred": "transition" }
+    },
+    {
+      "id": "repo-only-product-authority",
+      "expected_state": "blocked",
+      "decisions": [
+        {
+          "key": "roles",
+          "category": "authorization_semantics",
+          "question": "Should current repo roles become the new rule?",
+          "impact": "Changes authorization.",
+          "options": ["admin-only"],
+          "recommended": "admin-only",
+          "depends_on": [],
+          "sources": [
+            { "authority": "repo-evidence", "source_id": "current-code", "value": "admin-only" }
+          ]
+        }
+      ],
+      "expected": { "blockers": 1, "reason": "insufficient-authority" }
+    },
+    {
+      "id": "typed-peer-conflict",
+      "expected_state": "blocked",
+      "decisions": [
+        {
+          "key": "fee",
+          "category": "money_and_billing",
+          "question": "Is the fee numeric or textual?",
+          "impact": "Changes billing representation.",
+          "options": ["1", "numeric-1"],
+          "recommended": 1,
+          "depends_on": [],
+          "sources": [
+            { "authority": "approved-spec", "source_id": "spec-a", "value": 1 },
+            { "authority": "approved-spec", "source_id": "spec-b", "value": "1" }
+          ]
+        }
+      ],
+      "expected": { "blockers": 1, "reason": "peer-authority-conflict" }
+    },
+    {
+      "id": "batch-cap-five",
+      "expected_state": "blocked",
+      "decisions": [
+        { "key": "q1", "category": "scope_and_non_goals", "question": "Question 1?", "impact": "Changes scope.", "options": ["a"], "recommended": "a", "depends_on": [], "sources": [] },
+        { "key": "q2", "category": "scope_and_non_goals", "question": "Question 2?", "impact": "Changes scope.", "options": ["a"], "recommended": "a", "depends_on": [], "sources": [] },
+        { "key": "q3", "category": "scope_and_non_goals", "question": "Question 3?", "impact": "Changes scope.", "options": ["a"], "recommended": "a", "depends_on": [], "sources": [] },
+        { "key": "q4", "category": "scope_and_non_goals", "question": "Question 4?", "impact": "Changes scope.", "options": ["a"], "recommended": "a", "depends_on": [], "sources": [] },
+        { "key": "q5", "category": "scope_and_non_goals", "question": "Question 5?", "impact": "Changes scope.", "options": ["a"], "recommended": "a", "depends_on": [], "sources": [] },
+        { "key": "q6", "category": "scope_and_non_goals", "question": "Question 6?", "impact": "Changes scope.", "options": ["a"], "recommended": "a", "depends_on": [], "sources": [] }
+      ],
+      "expected": { "blockers": 6, "questions": 5, "deferred": "q6" }
+    }
+  ]
+}

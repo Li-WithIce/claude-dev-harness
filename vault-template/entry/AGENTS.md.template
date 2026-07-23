@@ -1,41 +1,28 @@
-# Workspace Entry
+# Workspace Entry Host Overlay
 
-Project-local lite workflow entrypoints:
+This installed shim still executes the v1 workflow and delegates to the managed harness repository:
 
-- Stage advance: `pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage>` (Codex-only defaults; add `-Tool <claudecode|codex>` only to switch backend)
-- Explicit workflow new/switch activation: `pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -SyncOnly -ActivateCurrent` (never for read-only inspect/status)
-- Artifact validation: `pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId {task_id}`
-- New task routing: keep `resume-current / switch-existing / new-task / inbox-first` first; when the result is `new-task`, choose `mode: quick | workflow | ask`.
+- Stage advance: `pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage>`; add `-Tool <claudecode|codex>` only to switch backend.
+- Explicit new/switch activation: add `-SyncOnly -ActivateCurrent`; never use it for read-only inspect/status.
+- Artifact validation: `pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId {task_id}`.
+- Harness repo: `{REPO_ROOT}`; shared vault: `{VAULT_PATH}`.
+- `TEST -> DONE` also omits `-Tool`; other stages use the workflow descriptor when no backend is supplied.
 
-These shims delegate to the managed harness repo scripts and always use the installed shared vault:
+<!-- BEGIN GENERATED ENTRY CONTRACT -->
+<!-- source-sha256: 610dc3f056950cb6fbca50b45f5f5448c07e7c3d394aa96d85420d4ad061dc43 -->
+# Entry Contract Bootstrap
 
-- Repo root: `{REPO_ROOT}`
-- Vault root: `{VAULT_PATH}`
+Bootstrap only; routes/lifecycle stay lazy.
 
-`TEST -> DONE` also omits `-Tool`; non-DONE stages use the workflow descriptor when no explicit backend is passed.
+- `protocol_default`: `auto`
+- `auto_resolves_to`: `existing-artifact-or-gated-v2-new`
+- `v2_entry_activation`: `explicit-or-workspace-new-or-existing-v2-or-eligible-auto-new`
 
-Mode routing precedence: resolve active/incomplete task identity first; route identity does not broaden requested action. Non-project requests stay host-native. For project-scoped `new-task`, standalone project-scoped read-only work with clear target, scope, and output uses `quick` without task artifacts; mixed mutation uses the existing low-risk quick vs high-risk/cross-module workflow gate; explicit durable workflow/staged evidence uses `workflow`; ambiguous read/write or identity uses `ask` as Deep Clarification Mode without inbox write. Review/test/plan nouns alone never select workflow. Clarification-family requests stay quick when pure read-only/no-edit and use existing `PLAN -> Clarification` only for durable development decisions or follow-up implementation.
-
-For project-scoped development and read-only engineering requests, entry-router is the default first hop. Do not invoke other workflow skills before routing; after routing, load only the context required by the selected mode.
-
-Clarification trigger rule: unresolved PLAN acceptance, non-goals, impact, rollback/compatibility, or implementation path that cannot guide IMPLEMENT also enters the Clarification protocol.
-
-Clarification ledger rule: answer code/doc-discoverable questions first, keep the base Clarification fields, ask remaining user decisions one at a time with a recommended answer, and keep `User Confirmation` draft while any `clarification_ledger` item is `decision: pending`.
-
-Stage principle routing: use these as cognitive lenses only, not a new five-turn workflow: Entry/Clarification=Socrates, PLAN=Osborn/Hegel/First Principles/Occam, PLAN_REVIEW=Hegel+Bayes, IMPLEMENT=Ponytail/surgical change, CODE_REVIEW=Feynman, TEST=Bayes, revise=Debono value preservation.
-
-Stage Discipline Matrix: the managed harness repo keeps the full advisory matrix at `docs/工作流/stage-discipline-matrix.md`; load it only when the task requires stage-discipline clarification or stage-behavior review.
-
-Implementation rule: 新功能开发或功能修改以当前需求和业务正确性为准；不要为了兼容旧测试、旧快照或过期断言而保留或恢复旧行为。若旧测试与新需求冲突，应更新或删除旧测试并说明原因；只有用户明确要求历史兼容时才保留旧测试兼容。
-
-Lazy loading:
-
-- `quick`: load only entry rules, user preferences / necessary config, and the directly relevant skill or reference.
-- `workflow`: load `entry-router`, `orchestrator`, then exactly one current-stage skill (`plan`, `review`, `implement`, or `test`).
-- `resume-current` / `switch-existing`: read identity/runtime/artifacts first. Only explicit continue/switch-and-execute may process fallback, reconcile/activate, and load the current-stage skill; read-only inspect/status does none of those writes or stage loads. Missing runtime files mean no active recorded state.
-- `ask`: iterative blocking clarification gate; do not load workflow stage skills, enter quick/workflow/stages, create task artifacts, edit code, or initialize providers. Remain in ask until all blocking uncertainties are resolved.
-- Do not bulk-load all skills, all historical `docs/tasks/*`, Claude compatibility skills, or `workflow-team` unless an explicit backend, stage, or team-mode trigger requires it.
-
-Ask exit criteria: ask cannot exit until the agent can state User goal, Success / acceptance criteria, In scope, Out of scope / non-goals, Affected area, Constraints, Risk level, Expected output, Recommended route: quick or workflow, and Why this route is safe. If any item is materially unknown and affects the work, remain in ask.
-
-Ask response format: state why you remain in ask, list what is already understood, name the current blocker, ask one high-value question, include a recommended default answer when useful, and say you will reassess quick vs workflow after confirmation.
+- New identity/artifact-free: use host/user-surfaced `HARNESS_PROTOCOL`; else read its process value once; never guess. `v2` is the first complete routing hop: classify inline; no task `status`/`protocol`, nested shim, or task/runtime/current inspection. Selected v2 Direct loads no `entry-router`, `orchestrator`, lifecycle skill, Memory, Team, or Provider; hand off now.
+- Otherwise resolve once. Known: `.assistant\entry\task.ps1 protocol -TaskId {task_id}`; v2 state, else v1 plan, wins. New: `.assistant\entry\task.ps1 protocol`; config `v1|v2|auto`, then passing rollout or v1 fallback. No status/runtime/lifecycle fan-out. Existing v2 may status/resume; v1 may load its shim. Invalid input fails closed.
+- An unresolved Requirement or product decision blocks every write and enters Ask. Protected/expanded/non-Direct reroute before writes.
+- A public-contract change found outside confirmed scope stays unresolved until the user explicitly confirms this change; continuation alone enters Ask and authorizes no write.
+- Clear Direct: relevant targets -> minimum edit -> minimum focused checks covering all confirmed acceptance criteria -> one bounded diff/self-review -> report. Stop only when all required checks pass. Expand only after failure/ambiguity. No task/runtime/current/lifecycle writes.
+- Read-only work performs zero writes. Report actual commands/results, self-review, gaps; `not_run`/unavailable is not pass.
+- Only a detector-selected v1 request loads `entry-router`; missing compatibility fails closed; then `orchestrator` + one stage skill.
+<!-- END GENERATED ENTRY CONTRACT -->

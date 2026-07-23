@@ -560,6 +560,35 @@ if ($stateReparseProcess.Process.HasExited -and
 $stateReparseProcess.Process.Dispose()
 Remove-Item -LiteralPath $stateReparsePath -Force -ErrorAction SilentlyContinue
 
+$nestedVaultReparseRoot = Join-Path $scratchRoot 'minimal-vault-nested-reparse-is-write-free'
+$nestedVaultReparseUser = Join-Path $nestedVaultReparseRoot 'user'
+$nestedVaultReparseWorkspace = Join-Path $nestedVaultReparseRoot 'workspace'
+$nestedVaultReparseVictim = Join-Path $nestedVaultReparseRoot 'victim'
+$nestedVaultTasksParent = Join-Path $nestedVaultReparseWorkspace '.assistant\运行时'
+$nestedVaultTasksPath = Join-Path $nestedVaultTasksParent 'tasks'
+New-Item -ItemType Directory -Path $nestedVaultReparseUser,$nestedVaultTasksParent,$nestedVaultReparseVictim -Force | Out-Null
+$nestedVaultVictimFile = Join-Path $nestedVaultReparseVictim '.gitkeep'
+[System.IO.File]::WriteAllText($nestedVaultVictimFile,"victim sentinel`n",(New-Object System.Text.UTF8Encoding($false)))
+$nestedVaultVictimHash = (Get-FileHash -LiteralPath $nestedVaultVictimFile -Algorithm SHA256).Hash
+New-Item -ItemType Junction -Path $nestedVaultTasksPath -Target $nestedVaultReparseVictim | Out-Null
+$nestedVaultReparseProcess = Start-RepoProcess -UserProfile $nestedVaultReparseUser -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @('-WorkspaceRoot',$nestedVaultReparseWorkspace,'-RepoRoot',$RepoRoot,'-Preset','core')
+[void]$nestedVaultReparseProcess.Process.WaitForExit(30000)
+$nestedVaultVictimItems = @(Get-ChildItem -LiteralPath $nestedVaultReparseVictim -Force)
+if ($nestedVaultReparseProcess.Process.HasExited -and
+    $nestedVaultReparseProcess.Process.ExitCode -ne 0 -and
+    $nestedVaultVictimItems.Count -eq 1 -and
+    (Get-FileHash -LiteralPath $nestedVaultVictimFile -Algorithm SHA256).Hash -eq $nestedVaultVictimHash -and
+    -not (Test-Path -LiteralPath (Join-Path $nestedVaultReparseWorkspace '.assistant\entry\AGENTS.md')) -and
+    -not (Test-Path -LiteralPath (Join-Path $nestedVaultReparseWorkspace 'AGENTS.md')) -and
+    -not (Test-Path -LiteralPath (Join-Path $nestedVaultReparseUser '.dev-harness')) -and
+    -not (Test-Path -LiteralPath (Join-Path $nestedVaultReparseUser '.claude'))) {
+    $checks.Add('core install rejects a nested runtime tasks junction without changing the external victim or retaining partial state') | Out-Null
+} else {
+    $failures.Add('minimal vault .gitkeep must use the managed reparse-safe transaction path') | Out-Null
+}
+$nestedVaultReparseProcess.Process.Dispose()
+Remove-Item -LiteralPath $nestedVaultTasksPath -Force -ErrorAction SilentlyContinue
+
 $vanishedPointerUser = Join-Path $scratchRoot 'vanished-pointer-user'
 $vanishedPointerPath = Join-Path $scratchRoot 'vanished-pointer\active-install.json'
 New-Item -ItemType Directory -Path (Split-Path -Parent $vanishedPointerPath),$vanishedPointerUser -Force | Out-Null
@@ -727,6 +756,7 @@ $global:LASTEXITCODE = 73
 $foreignInstallResult = Invoke-RepoScript -UserProfile $legacyForeignUserProfile -ScriptPath (Join-Path $legacyRepoRoot 'install.ps1') -Arguments @{
     WorkspaceRoot = $legacyForeignWorkspace
     RepoRoot      = $legacyRepoRoot
+    VaultProfile  = 'full'
 }
 $foreignInstallRestoredExitCode = Get-LastExitCodeOrZero
 $global:LASTEXITCODE = 0
@@ -742,12 +772,38 @@ Copy-Item -LiteralPath $foreignModernBackupRoot -Destination $legacyPointerBacku
 $legacyPointerManifestPath = Join-Path $legacyPointerBackupRoot 'install-manifest.json'
 $legacyPointerManifest = Get-Content -LiteralPath $legacyPointerManifestPath -Raw -Encoding utf8 | ConvertFrom-Json
 $legacyPointerManifest.installed_at = '2026-01-01T00:00:00+00:00'
+$foreignCodexHooksPath = Get-NormalizedPath -Path (Join-Path $legacyForeignUserProfile '.codex\hooks.json')
+$foreignManagedConfigPath = Get-NormalizedPath -Path (Join-Path $legacyForeignUserProfile '.codex\managed_config.toml')
+$foreignHookRecords = @($legacyPointerManifest.backups | Where-Object {
+        (Get-NormalizedPath -Path $_.path) -eq $foreignCodexHooksPath
+    })
+$foreignManagedConfigRecords = @($legacyPointerManifest.backups | Where-Object {
+        (Get-NormalizedPath -Path $_.path) -eq $foreignManagedConfigPath
+    })
+if ($foreignHookRecords.Count -ne 1 -or
+    $foreignManagedConfigRecords.Count -ne 0 -or
+    [bool]$foreignHookRecords[0].existed -or
+    [string]$foreignHookRecords[0].item_type -ne 'missing') {
+    throw 'foreign legacy pointer fixture requires one missing-state Codex hook record and no managed_config record'
+}
+$foreignHookRecords[0].path = $foreignManagedConfigPath
+if (@($legacyPointerManifest.backups | Where-Object {
+            (Get-NormalizedPath -Path $_.path) -eq $foreignCodexHooksPath
+        }).Count -ne 0 -or
+    @($legacyPointerManifest.backups | Where-Object {
+            (Get-NormalizedPath -Path $_.path) -eq $foreignManagedConfigPath
+        }).Count -ne 1) {
+    throw 'foreign legacy pointer fixture did not replace its Codex hook record with managed_config'
+}
 $legacyPointerUserGlobalRecords = @($legacyPointerManifest.backups | Where-Object { $_.scope -eq 'user-global' } | Select-Object -First 6)
 $legacyPointerWorkspaceRecords = @($legacyPointerManifest.backups | Where-Object { $_.scope -eq 'workspace' } | Select-Object -First 2)
 if ($foreignInstallResult.ExitCode -ne 0 -or
     $foreignInstallRestoredExitCode -ne 73 -or
     $legacyPointerUserGlobalRecords.Count -ne 6 -or
-    $legacyPointerWorkspaceRecords.Count -ne 2) {
+    $legacyPointerWorkspaceRecords.Count -ne 2 -or
+    @($legacyPointerUserGlobalRecords | Where-Object {
+            (Get-NormalizedPath -Path $_.path) -eq $foreignManagedConfigPath
+        }).Count -ne 1) {
     throw 'foreign legacy pointer fixture requires one successful install, exact LASTEXITCODE restoration, six global records, and two workspace records'
 }
 $checks.Add('Invoke-RepoScript restores the exact preexisting global LASTEXITCODE value') | Out-Null
@@ -762,7 +818,7 @@ foreach ($legacyPointerRecord in @($legacyPointerManifest.backups)) {
         [void]$legacyPointerRecord.PSObject.Properties.Remove($pointerRecordField)
     }
 }
-foreach ($pointerManifestField in @('schema_version','postimage_identity_contract','transaction_status','backup_payload_integrity_contract','managed_backup_targets','registry_path','registry_preimage_sha256')) {
+foreach ($pointerManifestField in @('schema_version','postimage_identity_contract','transaction_status','backup_payload_integrity_contract','managed_backup_targets','registry_path','registry_preimage_sha256','requested_preset','effective_preset','preset_source','feature_ownership','user_profile','codex_hook_pwsh_executable','released_backup_targets','released_backup_manifest_paths')) {
     [void]$legacyPointerManifest.PSObject.Properties.Remove($pointerManifestField)
 }
 [System.IO.File]::WriteAllText(
@@ -774,6 +830,7 @@ Remove-Item -LiteralPath $legacyForeignUserProfile,$legacyForeignWorkspace -Recu
 $legacyWarmupResult = Invoke-RepoScript -UserProfile $legacyUserProfile -ScriptPath (Join-Path $legacyRepoRoot 'install.ps1') -Arguments @{
     WorkspaceRoot = $legacyWorkspace
     RepoRoot      = $legacyRepoRoot
+    VaultProfile  = 'full'
 }
 $legacyEarliestExactPath = Join-Path $legacyWorkspace 'AGENTS.md'
 $legacyEarliestExactContent = 'legacy earliest exact sentinel'
@@ -787,6 +844,7 @@ $legacyLayerResults = @(1..3 | ForEach-Object {
         Invoke-RepoScript -UserProfile $legacyUserProfile -ScriptPath (Join-Path $legacyRepoRoot 'install.ps1') -Arguments @{
             WorkspaceRoot = $legacyWorkspace
             RepoRoot      = $legacyRepoRoot
+            VaultProfile  = 'full'
         }
     })
 $legacySeedResults = @($legacyWarmupResult) + @($legacyLayerResults)
@@ -801,13 +859,53 @@ $legacyWarmupManifestPath = $legacyAllCurrentManifestPaths[0]
 $legacyManifestPaths = @($legacyAllCurrentManifestPaths | Select-Object -Skip 1)
 $legacyWorkspaceEntry.manifests = $legacyManifestPaths
 $legacyRegistry.global_manifest_history = $legacyManifestPaths
+$legacyCodexHooksPath = Get-NormalizedPath -Path (Join-Path $legacyUserProfile '.codex\hooks.json')
+$legacyManagedConfigPath = Get-NormalizedPath -Path (Join-Path $legacyUserProfile '.codex\managed_config.toml')
+$legacyManagedConfigBaselineContent = "# external Codex policy before Harness ownership`r`n[features]`r`nhooks = false`r`n"
+$legacyManagedConfigContent = "# Managed by install.ps1`r`nallow_managed_hooks_only = true`r`n[features]`r`nhooks = true`r`n"
+$legacyManagedConfigUserContent = "# user changed Codex policy after Harness release`r`n[features]`r`nhooks = false`r`n"
+if (-not (Test-Path -LiteralPath $legacyCodexHooksPath -PathType Leaf) -or
+    (Test-Path -LiteralPath $legacyManagedConfigPath)) {
+    throw 'legacy rebaseline fixture requires one current Codex hooks file and no managed_config target before conversion'
+}
+Remove-Item -LiteralPath $legacyCodexHooksPath -Force
+[System.IO.File]::WriteAllText(
+    $legacyManagedConfigPath,
+    $legacyManagedConfigContent,
+    (New-Object System.Text.UTF8Encoding($false)))
 
 $legacyManifestDocuments = @()
 for ($manifestIndex = 0; $manifestIndex -lt $legacyManifestPaths.Count; $manifestIndex++) {
     $legacyManifest = Get-Content -LiteralPath $legacyManifestPaths[$manifestIndex] -Raw -Encoding utf8 | ConvertFrom-Json
     $legacyManifest.schema_version = 'install-manifest/v1.1'
     $legacyManifest.installed_at = ([datetimeoffset]'2026-01-01T00:00:01+00:00').AddSeconds($manifestIndex).ToString('o')
-    foreach ($legacyManifestField in @('postimage_identity_contract','transaction_status','backup_payload_integrity_contract','managed_backup_targets','registry_preimage_sha256')) {
+    $legacyHookRecords = @($legacyManifest.backups | Where-Object {
+            (Get-NormalizedPath -Path $_.path) -eq $legacyCodexHooksPath
+        })
+    $legacyManagedConfigRecords = @($legacyManifest.backups | Where-Object {
+            (Get-NormalizedPath -Path $_.path) -eq $legacyManagedConfigPath
+        })
+    if ($legacyHookRecords.Count -ne 1 -or
+        $legacyManagedConfigRecords.Count -ne 0 -or
+        -not [bool]$legacyHookRecords[0].existed -or
+        [string]$legacyHookRecords[0].item_type -ne 'file' -or
+        -not (Test-Path -LiteralPath ([string]$legacyHookRecords[0].backup_path) -PathType Leaf)) {
+        throw 'legacy rebaseline fixture requires one restorable Codex hook record and no managed_config record per active manifest'
+    }
+    $legacyHookRecords[0].path = $legacyManagedConfigPath
+    [System.IO.File]::WriteAllText(
+        [string]$legacyHookRecords[0].backup_path,
+        $(if ($manifestIndex -eq 0) { $legacyManagedConfigBaselineContent } else { $legacyManagedConfigContent }),
+        (New-Object System.Text.UTF8Encoding($false)))
+    if (@($legacyManifest.backups | Where-Object {
+                (Get-NormalizedPath -Path $_.path) -eq $legacyCodexHooksPath
+            }).Count -ne 0 -or
+        @($legacyManifest.backups | Where-Object {
+                (Get-NormalizedPath -Path $_.path) -eq $legacyManagedConfigPath
+            }).Count -ne 1) {
+        throw 'legacy rebaseline fixture did not replace its Codex hook record with managed_config'
+    }
+    foreach ($legacyManifestField in @('postimage_identity_contract','transaction_status','backup_payload_integrity_contract','managed_backup_targets','registry_preimage_sha256','requested_preset','effective_preset','preset_source','feature_ownership','user_profile','codex_hook_pwsh_executable','released_backup_targets','released_backup_manifest_paths')) {
         [void]$legacyManifest.PSObject.Properties.Remove($legacyManifestField)
     }
     foreach ($legacyBackupRecord in @($legacyManifest.backups)) {
@@ -857,7 +955,7 @@ if ($legacyExpectedSyntheticRecordCount -eq 0 -or
     throw 'legacy rebaseline fixture requires three current-profile manifests with one stable ordered target contract'
 }
 $legacyRegistry.schema_version = 'install-registry/v1.0'
-foreach ($modernRegistryField in @('transaction_status_contract','history_ownership_contract','manifest_integrity_contract','retired_manifest_history','manifest_digests')) {
+foreach ($modernRegistryField in @('transaction_status_contract','history_ownership_contract','manifest_integrity_contract','retired_manifest_history','manifest_digests','released_target_history')) {
     [void]$legacyRegistry.PSObject.Properties.Remove($modernRegistryField)
 }
 [System.IO.File]::WriteAllText(
@@ -921,7 +1019,7 @@ $legacyRegisteredPointerContent = [ordered]@{
 [System.IO.File]::WriteAllText($legacyPointerPath, $legacySameProfilePointerContent, (New-Object System.Text.UTF8Encoding($false)))
 $legacyInactiveManifestPaths = @($legacyWarmupManifestPath + $legacyManifestPaths + $legacyPointerManifestPath + $sameProfilePointerManifestPath)
 
-$legacyTargetPaths = @($legacyManifestDocuments | ForEach-Object { @($_.backups).path } | Sort-Object -Unique)
+$legacyTargetPaths = @($legacyManifestDocuments | ForEach-Object { @($_.backups).path }) + @($legacyCodexHooksPath) | Sort-Object -Unique
 $legacyInstallStateRoot = Join-Path $legacyUserProfile '.dev-harness'
 $legacyBackupsRoot = Join-Path $legacyUserProfile '.dev-harness\backups'
 $legacyRepoBackupsRoot = Join-Path $legacyRepoRoot 'backups'
@@ -1083,6 +1181,9 @@ $modernActiveManifests = @($modernActiveManifestPaths | ForEach-Object {
     })
 $syntheticManifests = @($modernActiveManifests | Where-Object { $null -ne $_.PSObject.Properties['legacy_rebaseline_receipt'] })
 $syntheticReceipt = if ($syntheticManifests.Count -eq 1) { $syntheticManifests[0].legacy_rebaseline_receipt } else { $null }
+$modernReleasedManagedConfigEntries = @($modernRegistry.released_target_history | Where-Object {
+        (Get-NormalizedPath -Path $_.path) -eq $legacyManagedConfigPath
+    })
 $modernHistoryContainsLegacy = @($modernActiveManifestPaths + $modernGlobalManifestPaths | Where-Object { $legacyInactiveManifestPaths -contains $_ }).Count -ne 0
 $modernRegistryFields = @($modernRegistry.PSObject.Properties.Name)
 $modernHistoryValid =
@@ -1092,6 +1193,7 @@ $modernHistoryValid =
     $modernRegistry.manifest_integrity_contract -eq 'sha256-v1' -and
     $modernRegistryFields -contains 'retired_manifest_history' -and
     $modernRegistryFields -contains 'manifest_digests' -and
+    $modernReleasedManagedConfigEntries.Count -eq 1 -and
     (ConvertTo-Json -InputObject $modernActiveManifestPaths -Compress) -eq (ConvertTo-Json -InputObject $modernGlobalManifestPaths -Compress) -and
     -not $modernHistoryContainsLegacy -and
     @($modernActiveManifests | Where-Object {
@@ -1117,11 +1219,18 @@ if ($legacyApplyResult.ExitCode -eq 0 -and
     $legacyApplyCountsMatch -and
     $modernHistoryValid -and
     $syntheticReceiptValid -and
+    (Test-Path -LiteralPath $legacyCodexHooksPath -PathType Leaf) -and
+    (Test-Path -LiteralPath $legacyManagedConfigPath -PathType Leaf) -and
+    ([System.IO.File]::ReadAllText($legacyManagedConfigPath) -ceq $legacyManagedConfigBaselineContent) -and
     $legacyMarkerContentAfterApply -eq [string]$syntheticReceipt.legacy_pointer_sha256) {
-    $checks.Add('digest-bound rebaseline publishes one modern synthetic receipt and continues normal install without legacy active history') | Out-Null
+    $checks.Add('digest-bound rebaseline publishes one modern synthetic receipt, releases legacy managed_config, and installs Codex hooks') | Out-Null
 } else {
-    $failures.Add(("digest-bound rebaseline should publish the synthetic receipt, skip foreign pointer records, and continue install; exit={0}; counts={1}; history={2}; receipt={3}; output={4}" -f $legacyApplyResult.ExitCode,$legacyApplyCountsMatch,$modernHistoryValid,$syntheticReceiptValid,($legacyApplyResult.Output -replace '\r?\n',' | '))) | Out-Null
+    throw ("digest-bound rebaseline should publish the synthetic receipt, release managed_config, install Codex hooks, skip foreign pointer records, and continue install; exit={0}; counts={1}; history={2}; receipt={3}; output={4}" -f $legacyApplyResult.ExitCode,$legacyApplyCountsMatch,$modernHistoryValid,$syntheticReceiptValid,($legacyApplyResult.Output -replace '\r?\n',' | '))
 }
+[System.IO.File]::WriteAllText(
+    $legacyManagedConfigPath,
+    $legacyManagedConfigUserContent,
+    (New-Object System.Text.UTF8Encoding($false)))
 
 $legacyTargetStateAfterApply = & $getLegacyTargetState
 $legacyBackupRootCountAfterApply = @(Get-ChildItem -LiteralPath $legacyBackupsRoot -Directory -Force).Count
@@ -1295,18 +1404,23 @@ $legacyExactAfterUninstall = if (Test-Path -LiteralPath $legacyEarliestExactPath
 $legacyMarkerContentAfterUninstall = if (Test-Path -LiteralPath $legacyMarkerPath -PathType Leaf) {
     [System.IO.File]::ReadAllText($legacyMarkerPath).Trim()
 } else { '' }
+$legacyManagedConfigAfterUninstall = if (Test-Path -LiteralPath $legacyManagedConfigPath -PathType Leaf) {
+    [System.IO.File]::ReadAllText($legacyManagedConfigPath)
+} else { $null }
 if ($legacyUninstallResult.ExitCode -eq 0 -and
     $legacyExactAfterUninstall -ceq $legacyEarliestExactContent -and
     -not (Test-Path -LiteralPath $legacyEarliestMissingPath) -and
+    -not (Test-Path -LiteralPath $legacyCodexHooksPath) -and
+    $legacyManagedConfigAfterUninstall -ceq $legacyManagedConfigUserContent -and
     $null -ne $legacySettingsAfterUninstall -and
     [string]$legacySettingsAfterUninstall.lifecycle_user_sentinel -eq 'preserve-me' -and
     -not (Test-Path -LiteralPath $legacyRegistryPath) -and
     -not (Test-Path -LiteralPath $legacyInstallJournalPath) -and
     -not (Test-Path -LiteralPath $legacyUninstallJournalPath) -and
     $legacyMarkerContentAfterUninstall -eq $legacyPointerDigestAfterApply) {
-    $checks.Add('resumed synthetic full uninstall rebuilds its marker from the receipt, restores safe baselines, and converges journals') | Out-Null
+    $checks.Add('resumed synthetic full uninstall removes Codex hooks, preserves released managed_config, restores safe baselines, and converges journals') | Out-Null
 } else {
-    $failures.Add(("synthetic full uninstall should restore its oldest safe baseline and leave a reusable pointer marker; exit={0}; exact={1}; missing={2}; semantic={3}; registry={4}; install_journal={5}; uninstall_journal={6}; marker={7}; output={8}" -f $legacyUninstallResult.ExitCode,($legacyExactAfterUninstall -ceq $legacyEarliestExactContent),(-not (Test-Path -LiteralPath $legacyEarliestMissingPath)),($null -ne $legacySettingsAfterUninstall -and [string]$legacySettingsAfterUninstall.lifecycle_user_sentinel -eq 'preserve-me'),(Test-Path -LiteralPath $legacyRegistryPath),(Test-Path -LiteralPath $legacyInstallJournalPath),(Test-Path -LiteralPath $legacyUninstallJournalPath),($legacyMarkerContentAfterUninstall -eq $legacyPointerDigestAfterApply),($legacyUninstallResult.Output -replace '\r?\n',' | '))) | Out-Null
+    $failures.Add(("synthetic full uninstall should remove Codex hooks, preserve released managed_config, restore its oldest safe baseline, and leave a reusable pointer marker; exit={0}; exact={1}; missing={2}; hooks={3}; managed_config={4}; semantic={5}; registry={6}; install_journal={7}; uninstall_journal={8}; marker={9}; output={10}" -f $legacyUninstallResult.ExitCode,($legacyExactAfterUninstall -ceq $legacyEarliestExactContent),(-not (Test-Path -LiteralPath $legacyEarliestMissingPath)),(-not (Test-Path -LiteralPath $legacyCodexHooksPath)),($legacyManagedConfigAfterUninstall -ceq $legacyManagedConfigUserContent),($null -ne $legacySettingsAfterUninstall -and [string]$legacySettingsAfterUninstall.lifecycle_user_sentinel -eq 'preserve-me'),(Test-Path -LiteralPath $legacyRegistryPath),(Test-Path -LiteralPath $legacyInstallJournalPath),(Test-Path -LiteralPath $legacyUninstallJournalPath),($legacyMarkerContentAfterUninstall -eq $legacyPointerDigestAfterApply),($legacyUninstallResult.Output -replace '\r?\n',' | '))) | Out-Null
 }
 
 $legacyFreshInstallResult = Invoke-RepoScriptProcess `
@@ -1320,12 +1434,15 @@ $legacyFreshRegistry = if (Test-Path -LiteralPath $legacyRegistryPath -PathType 
 if ($legacyFreshInstallResult.ExitCode -eq 0 -and
     $null -ne $legacyFreshRegistry -and
     [string]$legacyFreshRegistry.schema_version -eq 'install-registry/v1.1' -and
+    (Test-Path -LiteralPath $legacyCodexHooksPath -PathType Leaf) -and
+    (Test-Path -LiteralPath $legacyManagedConfigPath -PathType Leaf) -and
+    ([System.IO.File]::ReadAllText($legacyManagedConfigPath) -ceq $legacyManagedConfigUserContent) -and
     -not (Test-Path -LiteralPath $legacyInstallJournalPath) -and
     -not (Test-Path -LiteralPath $legacyUninstallJournalPath) -and
     (Test-LegacyPointerMigrationMarked -UserProfile $legacyUserProfile -PointerPath $legacyPointerPath)) {
-    $checks.Add('fresh reinstall succeeds after synthetic uninstall by reusing the durable pointer marker') | Out-Null
+    $checks.Add('fresh reinstall reuses the durable pointer marker, reinstalls Codex hooks, and preserves released managed_config') | Out-Null
 } else {
-    $failures.Add(("fresh reinstall should not reactivate the retired legacy pointer; exit={0}; registry={1}; install_journal={2}; uninstall_journal={3}; output={4}" -f $legacyFreshInstallResult.ExitCode,($null -ne $legacyFreshRegistry),(Test-Path -LiteralPath $legacyInstallJournalPath),(Test-Path -LiteralPath $legacyUninstallJournalPath),($legacyFreshInstallResult.Output -replace '\r?\n',' | '))) | Out-Null
+    $failures.Add(("fresh reinstall should not reactivate the retired legacy pointer or reclaim managed_config; exit={0}; registry={1}; hooks={2}; managed_config={3}; install_journal={4}; uninstall_journal={5}; output={6}" -f $legacyFreshInstallResult.ExitCode,($null -ne $legacyFreshRegistry),(Test-Path -LiteralPath $legacyCodexHooksPath -PathType Leaf),((Test-Path -LiteralPath $legacyManagedConfigPath -PathType Leaf) -and ([System.IO.File]::ReadAllText($legacyManagedConfigPath) -ceq $legacyManagedConfigUserContent)),(Test-Path -LiteralPath $legacyInstallJournalPath),(Test-Path -LiteralPath $legacyUninstallJournalPath),($legacyFreshInstallResult.Output -replace '\r?\n',' | '))) | Out-Null
 }
 
 $caseRoot = Join-Path $scratchRoot 'host-only-system-skill-does-not-pollute-repo'

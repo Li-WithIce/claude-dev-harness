@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/protected-actions-overlay.schema.json",
+  "title": "Protected Actions Workspace Overlay",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "rules"],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["protected-actions-overlay/v1"] },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/rule" }
+    }
+  },
+  "definitions": {
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "match", "requires_profile", "requires_approval", "requires_dry_run", "requires_independent_review"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+        "match": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "command_regex": { "type": "string", "minLength": 1 },
+            "environment": { "type": "string", "minLength": 1 },
+            "path_globs": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "requires_profile": { "type": "string", "enum": ["governed", "critical"] },
+        "requires_approval": { "type": "string", "enum": ["none", "product", "architecture", "production"] },
+        "requires_dry_run": { "type": "boolean" },
+        "requires_independent_review": { "type": "boolean" }
+      }
+    }
+  }
+}

@@ -20,7 +20,7 @@ single_writer:
 members:
   - role: plan-author
     backend: codex
-    model: gpt-5.5/xhigh
+    model: inherit
     skills_whitelist: [plan, entry-router]
     role_prompt_ref: agent-configs/role-prompts/plan-author.md
 ```

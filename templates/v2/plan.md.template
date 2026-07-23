@@ -1,0 +1,24 @@
+# Governed Plan
+
+- task_id: {{TASK_ID}}
+- contract_digest: {{CONTRACT_DIGEST}}
+
+## Goal
+
+<fill-goal>
+
+## Scope
+
+<fill-scope>
+
+## Implementation
+
+<fill-implementation>
+
+## Verification
+
+<fill-verification>
+
+## Rollback
+
+<fill-rollback>

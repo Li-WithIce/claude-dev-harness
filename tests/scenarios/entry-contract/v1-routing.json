@@ -1,0 +1,195 @@
+{
+  "schema_version": "thin-harness-entry-routing/v1",
+  "protocol": {
+    "default": "auto",
+    "auto_resolves_to": "existing-artifact-or-gated-v2-new",
+    "v2_entry_activation": "explicit-or-workspace-new-or-existing-v2-or-eligible-auto-new"
+  },
+  "baseline": {
+    "commit": "aee525f6b3b0638f11bf6ab278482aa5b8c79d11",
+    "invariants": [
+      {
+        "id": "project-first-hop",
+        "source_path": "vault-template/entry/AGENTS.md.template",
+        "baseline_contains": "For project-scoped development and read-only engineering requests, entry-router is the default first hop. Do not invoke other workflow skills before routing; after routing, load only the context required by the selected mode.",
+        "lazy_source_path": "skills/entry-router/SKILL.md",
+        "lazy_required_contains": [
+          "Entry-router is the default first hop for project-scoped development and read-only engineering requests. Do not invoke other workflow skills before routing. After routing, load only the minimum skill/context set required by the selected mode."
+        ]
+      },
+      {
+        "id": "ask-zero-write-gate",
+        "source_path": "vault-template/entry/AGENTS.md.template",
+        "baseline_contains": "`ask`: iterative blocking clarification gate; do not load workflow stage skills, enter quick/workflow/stages, create task artifacts, edit code, or initialize providers. Remain in ask until all blocking uncertainties are resolved.",
+        "lazy_source_path": "skills/entry-router/SKILL.md",
+        "lazy_required_contains": [
+          "Ask mode is an iterative blocking clarification gate",
+          "`ask`：不加载 workflow stage skill；不进入 quick、workflow、PLAN、IMPLEMENT 或后续阶段；不创建 `docs/tasks/{task_id}/`、不改代码、不写共享 runtime/inbox、不初始化 provider。",
+          "Remain in ask until all blocking uncertainties are resolved."
+        ]
+      },
+      {
+        "id": "ask-exit-criteria",
+        "source_path": "vault-template/entry/AGENTS.md.template",
+        "baseline_contains": "Ask exit criteria: ask cannot exit until the agent can state User goal, Success / acceptance criteria, In scope, Out of scope / non-goals, Affected area, Constraints, Risk level, Expected output, Recommended route: quick or workflow, and Why this route is safe.",
+        "lazy_source_path": "skills/entry-router/SKILL.md",
+        "lazy_required_contains": [
+          "ask cannot exit until the agent can state:",
+          "If any item is materially unknown and affects the work, remain in ask."
+        ],
+        "lazy_numbered_section_heading": "Ask exit criteria",
+        "lazy_expected_numbered_items": [
+          "User goal:",
+          "Success / acceptance criteria:",
+          "In scope:",
+          "Out of scope / non-goals:",
+          "Affected area:",
+          "Constraints:",
+          "Risk level:",
+          "Expected output:",
+          "Recommended route: quick or workflow",
+          "Why this route is safe:"
+        ]
+      },
+      {
+        "id": "clarification-ledger",
+        "source_path": "vault-template/entry/AGENTS.md.template",
+        "baseline_contains": "Clarification ledger rule: answer code/doc-discoverable questions first, keep the base Clarification fields, ask remaining user decisions one at a time with a recommended answer, and keep `User Confirmation` draft while any `clarification_ledger` item is `decision: pending`.",
+        "lazy_source_path": "skills/entry-router/SKILL.md",
+        "lazy_required_contains": [
+          "`clarification_ledger` 沉淀问题 / 证据 / 推荐答案 / 决策 / 影响",
+          "任一 `clarification_ledger` 条目仍为 `decision: pending` 时，`## User Confirmation` 必须保持 `draft`。",
+          "可查问题先自查，剩余用户决策一次一个并给推荐答案。"
+        ]
+      },
+      {
+        "id": "readonly-resume-no-stage",
+        "source_path": "vault-template/entry/AGENTS.md.template",
+        "baseline_contains": "read-only inspect/status does none of those writes or stage loads",
+        "lazy_source_path": "skills/entry-router/SKILL.md",
+        "lazy_required_contains": [
+          "read-only inspect/status 保持 minimal context 和零写",
+          "只读 status/review 不 replay、不 sync、不加载 stage skill。",
+          "只读检查 inactive task 不改 current/mirror。"
+        ]
+      },
+      {
+        "id": "missing-runtime-is-empty-state",
+        "source_path": "vault-template/entry/AGENTS.md.template",
+        "baseline_contains": "Missing runtime files mean no active recorded state.",
+        "lazy_source_path": "skills/entry-router/SKILL.md",
+        "lazy_required_contains": [
+          "只读取实际存在的上述运行时文件；缺失表示没有已记录的活动状态，不是错误或阻断。"
+        ]
+      },
+      {
+        "id": "fallback-recovery",
+        "source_path": "skills/entry-router/SKILL.md",
+        "baseline_contains": "只读恢复查询不重放，明确继续执行时才按 `task_id / expected_stage / operation / failed_step` 和对应 `plan.md` frontmatter 判断是否需要 `-SyncOnly`",
+        "lazy_source_path": "skills/entry-router/SKILL.md",
+        "lazy_required_contains": [
+          "只读恢复查询不重放",
+          "`task_id / expected_stage / operation / failed_step`",
+          "判断是否需要 `-SyncOnly`"
+        ]
+      },
+      {
+        "id": "inbox-machine-contracts",
+        "source_path": "skills/entry-router/SKILL.md",
+        "baseline_contains": "`open inbox + existing docs/tasks/{task_id}/plan.md -> switch-existing`; `quick success -> exact triage`; `new workflow -> validator -> background SyncOnly -> exact triage`; `ask/pending/failure -> inbox row remains open`; `create/triage crash -> inbox row remains open`; `unknown inbox row -> deterministic route_task_id; task_plan_exists -> switch-existing, otherwise new-task`.",
+        "lazy_source_path": "skills/entry-router/SKILL.md",
+        "lazy_required_contains": [
+          "`open inbox + existing docs/tasks/{task_id}/plan.md -> switch-existing`",
+          "`quick success -> exact triage`",
+          "`new workflow -> validator -> background SyncOnly -> exact triage`",
+          "`ask/pending/failure -> inbox row remains open`",
+          "`create/triage crash -> inbox row remains open`",
+          "`unknown inbox row -> deterministic route_task_id; task_plan_exists -> switch-existing, otherwise new-task`"
+        ]
+      },
+      {
+        "id": "plan-frontmatter-stage-truth",
+        "source_path": "agent-configs/codex/AGENTS.md.template",
+        "baseline_contains": "must not bypass `plan.md` frontmatter stage truth",
+        "lazy_source_path": "skills/orchestrator/SKILL.md",
+        "lazy_required_contains": [
+          "唯一阶段真相源：`docs/tasks/{task_id}/plan.md` frontmatter",
+          "如果 `plan.md` 已存在，直接读 frontmatter 决定当前 `stage` 和 `tool`",
+          "`-ExpectedStage` 是调用方提供的 compare-and-swap 前置条件；不匹配时零写入"
+        ]
+      }
+    ]
+  },
+  "cases": [
+    {
+      "case_id": "non-project",
+      "condition": "request is not project-scoped",
+      "route": "host-native",
+      "writes": "none",
+      "stage_skill": "none"
+    },
+    {
+      "case_id": "new-readonly",
+      "condition": "clear standalone project read-only request",
+      "route": "quick",
+      "writes": "none",
+      "stage_skill": "none"
+    },
+    {
+      "case_id": "new-bounded-mutation",
+      "condition": "clear low-risk bounded mutation",
+      "route": "quick",
+      "writes": "requested-scope",
+      "stage_skill": "none"
+    },
+    {
+      "case_id": "new-durable-risky",
+      "condition": "durable, high-risk, cross-module, or staged-evidence mutation",
+      "route": "workflow",
+      "writes": "authorized-scope",
+      "stage_skill": "current-v1"
+    },
+    {
+      "case_id": "new-ambiguous",
+      "condition": "read/write intent or route identity is ambiguous",
+      "route": "ask",
+      "writes": "none",
+      "stage_skill": "none"
+    },
+    {
+      "case_id": "bare-resume",
+      "condition": "resume request lacks execute intent",
+      "route": "ask",
+      "writes": "none",
+      "stage_skill": "none"
+    },
+    {
+      "case_id": "active-status",
+      "condition": "status or read-only review of the current task",
+      "route": "resume-current/readonly",
+      "writes": "none",
+      "stage_skill": "none"
+    },
+    {
+      "case_id": "resume-execute",
+      "condition": "explicit resume-and-execute of the current task",
+      "route": "resume-current/workflow",
+      "writes": "authorized-scope",
+      "stage_skill": "current-v1"
+    },
+    {
+      "case_id": "inactive-status",
+      "condition": "status or read-only review of an inactive task",
+      "route": "switch-existing/readonly",
+      "writes": "none",
+      "stage_skill": "none"
+    },
+    {
+      "case_id": "durable-unowned",
+      "condition": "authorized actionable durable item lacks task identity",
+      "route": "inbox-first",
+      "writes": "inbox-row-only",
+      "stage_skill": "none"
+    }
+  ]
+}

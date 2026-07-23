@@ -1,0 +1,19 @@
+# Governed Audit
+
+- task_id: {{TASK_ID}}
+- task_version: {{TASK_VERSION}}
+- contract_digest: {{CONTRACT_DIGEST}}
+- verdict: {{VERDICT}}
+- reviewer_participated: {{REVIEWER_PARTICIPATED}}
+
+<!-- harness-audit-record:start -->
+{{AUDIT_RECORD_JSON}}
+<!-- harness-audit-record:end -->
+
+## Findings
+
+{{FINDINGS}}
+
+## Evidence
+
+{{EVIDENCE}}

@@ -12,8 +12,8 @@ lite workflow 不维护自动推导矩阵；`tool` 仍是当前 stage 的显式 
 
 默认 profile 描述符位于 `agent-configs/profiles/`：
 
-- `harness-default-claude`：`backend: claudecode`
-- `harness-default-codex`：`backend: codex`
+- `harness-default-claude`：`backend: claudecode`、`model: inherit`
+- `harness-default-codex`：`backend: codex`、`model: inherit`
 
 可选 workflow descriptor 位于 `agent-configs/workflows/harness-lite.yaml`，每个 stage 只声明：
 
@@ -25,10 +25,10 @@ lite workflow 不维护自动推导矩阵；`tool` 仍是当前 stage 的显式 
 
 规则：
 
-- `plan.md` 可选写 `tool_profile: <name>` 和 `model: <full-model-id>`
+- `plan.md` 可选写 `tool_profile: <name>` 和 `model: inherit | <full-model-id>`
 - 存在 `tool_profile` 时，`tool` 必须等于 profile 描述符里的 `backend`
 - 当前 stage 的 `tool_profile/model` 只是活跃记录，不会作为下一 stage 的黏性 fallback
-- `model` 必须是完整模型 ID，不写 `opus`、`pro`、`latest` 这类短别名
+- `model` 可为 `inherit`；显式覆盖必须是完整模型 ID，不写 `opus`、`pro`、`latest` 这类短别名
 
 ## 规则
 

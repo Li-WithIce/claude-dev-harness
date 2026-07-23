@@ -1,0 +1,42 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "outcome",
+    "task_completed",
+    "verification_executed",
+    "verification_passed",
+    "reason_code"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": ["host-benchmark-observation/v1"]
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["completed", "in_progress", "blocked", "failed"]
+    },
+    "task_completed": {
+      "type": "boolean"
+    },
+    "verification_executed": {
+      "type": "boolean"
+    },
+    "verification_passed": {
+      "type": "boolean"
+    },
+    "reason_code": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "stage_boundary",
+        "missing_decision",
+        "capability_block",
+        "execution_failed",
+        "verification_failed"
+      ]
+    }
+  }
+}

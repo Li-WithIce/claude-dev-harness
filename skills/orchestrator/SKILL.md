@@ -23,7 +23,7 @@ task_id: <task-id>
 stage: PLAN | PLAN_REVIEW | IMPLEMENT | CODE_REVIEW | TEST | DONE
 tool: claudecode | codex | none
 tool_profile: <optional profile name>
-model: <optional full model id>
+model: <optional inherit or full model id>
 updated: YYYY-MM-DD
 ---
 ```
@@ -35,14 +35,14 @@ updated: YYYY-MM-DD
 - `tool` 表示“当前 stage 由哪个工具继续”，仍是显式 backend 字段
 - `tool_profile` 与 `model` 是 opt-in；存在 `tool_profile` 时，profile 的 `backend` 必须等于 `tool`
 - 当前 stage 的 `tool_profile` 只是活跃 profile 记录，不会作为下一 stage 的黏性 fallback
-- `model` 必须写完整模型 ID，不写 `opus`、`pro` 这类短别名
+- `model` 可写 `inherit` 交给宿主解析；显式覆盖必须写完整模型 ID，不写 `opus`、`pro` 这类短别名
 
 ## 入口规则
 
 1. 先判断请求是 `resume-current`、`switch-existing`、`new-task` 还是 `inbox-first`
 2. 只有 `new-task mode=workflow` 才进入 orchestrator；`mode=quick` 由入口 agent 直接处理并验证；`mode=ask` 是 iterative blocking clarification gate，必须停留在入口层 until all blocking requirements are resolved，然后重新判断并 route to `quick` or `workflow`
 3. `new-task` 的 read-only / mutation / durable / ambiguous precedence 只由 `entry-router` 判定；`review` / `test` 等名词本身不把请求送入 orchestrator
-4. 进入 workflow 后先定 `task_id`；未显式指定时，当前 `PLAN` 默认写 `tool: codex`、`tool_profile: harness-default-codex`、`model: gpt-5.5/xhigh`
+4. 进入 workflow 后先定 `task_id`；未显式指定时，当前 `PLAN` 默认写 `tool: codex`、`tool_profile: harness-default-codex`、`model: inherit`
 5. 如果 `plan.md` 已存在，直接读 frontmatter 决定当前 `stage` 和 `tool`
 6. 输入不足时才创建 `docs/tasks/{task_id}/spec.md`
 7. 不再维护 `current-flow.md`、`handoff.md`、`implementation-notes.md`、`review.md`
@@ -81,7 +81,7 @@ stage 只通过下面这条命令推进：
 # Codex-only 默认路径：ExpectedStage 必须是调用方刚读取的 frontmatter stage
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage>
 # 可选：同时绑定下一阶段 profile/model
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Tool <codex> -Profile harness-default-codex -Model gpt-5.5/xhigh
+pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Tool <codex> -Profile harness-default-codex -Model <full-model-id>
 # 可选：只传 profile，backend 从 profile.backend 解析
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Profile harness-default-codex
 # 可选：显式切到其他合法 backend

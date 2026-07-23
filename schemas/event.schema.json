@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/event.schema.json",
+  "title": "Task Event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "event_id", "task_id", "task_version", "type", "actor", "occurred_at", "payload"],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["event/v1"] },
+    "event_id": { "type": "string", "pattern": "^[A-Za-z0-9._:-]{8,64}$" },
+    "task_id": { "type": "string", "pattern": "^(?!(?:none|idle|unknown)$)[a-z0-9][a-z0-9-]{0,63}$" },
+    "task_version": { "type": "integer", "minimum": 1 },
+    "type": {
+      "type": "string",
+      "enum": [
+        "task.created",
+        "requirement.blocked",
+        "requirement.resolved",
+        "contract.frozen",
+        "profile.selected",
+        "approval.requested",
+        "approval.granted",
+        "approval.invalidated",
+        "execution.started",
+        "execution.paused",
+        "verification.started",
+        "verification.recorded",
+        "audit.recorded",
+        "task.completed",
+        "task.failed",
+        "task.cancelled"
+      ]
+    },
+    "actor": { "$ref": "#/definitions/actor" },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "payload": { "type": "object" }
+  },
+  "definitions": {
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "model"],
+      "properties": {
+        "host": { "type": "string", "minLength": 1 },
+        "backend": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "actor_id": { "type": "string", "minLength": 1 },
+        "context_id": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

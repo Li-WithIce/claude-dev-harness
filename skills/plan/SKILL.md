@@ -41,7 +41,7 @@ task_id: <task-id>
 stage: PLAN
 tool: codex
 tool_profile: harness-default-codex
-model: gpt-5.5/xhigh
+model: inherit
 updated: 2026-04-09
 ---
 # <Task Title>
