@@ -30,11 +30,12 @@ $workflowPath = Join-Path $RepoRoot '.github\workflows\validation.yml'
 $validationPath = Join-Path $RepoRoot 'scripts\run-validation.ps1'
 $rolloutGeneratorPath = Join-Path $RepoRoot 'scripts\generate-v2-rollout-report.ps1'
 $runnerBoundaryPath = Join-Path $RepoRoot 'scripts\assert-release-runner-boundary.ps1'
+$receiptWriterPath = Join-Path $RepoRoot 'scripts\write-ordinary-ci-receipt.ps1'
 $scenarioDocPath = Join-Path $RepoRoot 'docs\testing\scenario-evals.md'
 $compatibilityPolicyPath = Join-Path $RepoRoot 'docs\release\compatibility-policy.md'
 $readmePath = Join-Path $RepoRoot 'README.md'
 
-foreach ($path in @($script:router,$runner,$runnerBoundaryPath,$PSCommandPath)) {
+foreach ($path in @($script:router,$runner,$runnerBoundaryPath,$receiptWriterPath,$PSCommandPath)) {
     $tokens=$null;$errors=$null
     [void][System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
     Check (@($errors).Count -eq 0) "$(Split-Path -Leaf $path) parses" "$(Split-Path -Leaf $path) has parse errors"
@@ -76,6 +77,7 @@ $releaseHostBlock = Get-WorkflowJobBlock -Text $workflow -JobId 'release-host'
 $releaseBlock = Get-WorkflowJobBlock -Text $workflow -JobId 'release-full'
 $prCoreChecksJob = $prCoreChecksBlock.Value
 $prCoreJob = $prCoreBlock.Value
+$changedOptionalJob = $changedOptionalBlock.Value
 $releaseModelJob = $releaseModelBlock.Value
 $releaseHostJob = $releaseHostBlock.Value
 $releaseJob = $releaseBlock.Value
@@ -99,13 +101,28 @@ foreach ($producer in @($releaseModelJob,$releaseHostJob)) {
 }
 Check ($workflow -match '(?m)^\s*schedule:\s*$' -and $workflow -match '(?m)^\s*workflow_dispatch:\s*$') 'CI exposes nightly and manual release validation' 'CI lacks nightly or manual release validation'
 Check (@($prCoreChecksBlock,$prCoreBlock,$changedOptionalBlock,$releaseModelBlock,$releaseHostBlock,$releaseBlock | Where-Object Count -eq 1).Count -eq 6) 'CI declares each PR and release job exactly once' 'CI job layering is missing or duplicated'
-Check (@([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($checkoutAction)))).Count -eq 6 -and @([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($uploadAction)))).Count -eq 3 -and @([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($downloadAction)))).Count -eq 2 -and $workflow -notmatch '(?m)^\s*uses:\s*actions/(?:checkout|upload-artifact|download-artifact)@v\d+') 'every GitHub Action dependency is pinned to a verified full commit SHA' 'GitHub Action dependencies are movable or not pinned to the approved commits'
+Check (@([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($checkoutAction)))).Count -eq 6 -and @([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($uploadAction)))).Count -eq 6 -and @([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($downloadAction)))).Count -eq 2 -and $workflow -notmatch '(?m)^\s*uses:\s*actions/(?:checkout|upload-artifact|download-artifact)@v\d+') 'every GitHub Action dependency is pinned to a verified full commit SHA' 'GitHub Action dependencies are movable or not pinned to the approved commits'
 $expectedCoreGroups = @('entry-lifecycle','evaluation-release','install-evidence','governance-approval','harness-contracts')
 $matrixPattern = '(?m)^    strategy:[ \t]*\r?\n^      fail-fast:[ \t]*false[ \t]*\r?\n^      matrix:[ \t]*\r?\n^        core_group:[ \t]*\r?\n(?<items>(?:^          - (?<group>[a-z0-9-]+)[ \t]*\r?(?:\n|\z))+)(?=^    runs-on:[ \t])'
 $matrixMatches = [regex]::Matches($prCoreChecksJob,$matrixPattern)
 $matrixGroups = if($matrixMatches.Count -eq 1){@($matrixMatches[0].Groups['group'].Captures | ForEach-Object Value)}else{@()}
 Check ($matrixMatches.Count -eq 1 -and ($matrixGroups -join '|') -ceq ($expectedCoreGroups -join '|') -and @($matrixGroups | Sort-Object -CaseSensitive -Unique).Count -eq 5 -and $prCoreChecksJob -notmatch '(?m)^\s{4,8}continue-on-error:') 'PR core matrix runs five exact groups without fail-fast or masked failures' 'PR core matrix groups, fail-fast, or failure semantics are unsafe'
 Check ($prCoreChecksJob -match '(?m)^        run:\s+pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation\.ps1 -Suite core -CoreGroup \$\{\{ matrix\.core_group \}\} -CheckTimeoutSeconds 360\s*$' -and $prCoreChecksJob -notmatch 'run-isolated-install-smoke\.ps1' -and $prCoreJob -notmatch 'run-validation\.ps1 -Suite core') 'core shards and rollback gate delegate only their assigned work' 'core validation or rollback work is duplicated across jobs'
+$ordinaryJobs = @($prCoreChecksJob,$prCoreJob,$changedOptionalJob)
+$exactHeadJobs = @($ordinaryJobs | Where-Object {
+    $_ -match '(?m)^\s*ref:\s*\$\{\{\s*github\.event\.pull_request\.head\.sha\s*\}\}\s*$' -and
+    $_ -match '(?m)^\s*persist-credentials:\s*false\s*$'
+})
+$receiptJobs = @($ordinaryJobs | Where-Object {
+    $_ -match 'scripts/write-ordinary-ci-receipt\.ps1' -and
+    $_ -match '-ExpectedHeadSha \$env:PR_HEAD_SHA' -and
+    $_ -match '-BaseSha \$env:PR_BASE_SHA' -and
+    $_ -match '(?m)^\s*path:\s*\$\{\{ env\.ORDINARY_RECEIPT_ROOT \}\}/ordinary-ci-receipt\.json\s*$' -and
+    $_ -match '(?m)^\s*if-no-files-found:\s*error\s*$' -and
+    $_ -match '(?m)^\s*retention-days:\s*14\s*$'
+})
+Check ($exactHeadJobs.Count -eq 3) 'every ordinary PR job checks out the exact pull request head without persisted credentials' 'an ordinary PR job validates a merge ref, another revision, or persisted credentials'
+Check ($receiptJobs.Count -eq 3 -and @([regex]::Matches($workflow,'scripts/write-ordinary-ci-receipt\.ps1')).Count -eq 3 -and $workflow -match 'thin-v2-pr-core-\$\{\{ matrix\.core_group \}\}-\$\{\{ github\.event\.pull_request\.head\.sha \}\}' -and $workflow -match 'thin-v2-pr-core-aggregate-\$\{\{ github\.event\.pull_request\.head\.sha \}\}' -and $workflow -match 'thin-v2-pr-changed-optional-\$\{\{ github\.event\.pull_request\.head\.sha \}\}') 'ordinary PR jobs upload one fixed exact-head machine receipt without raw logs' 'ordinary PR receipt generation, naming, or upload scope is unsafe'
 $guardPattern = '(?ms)^    steps:[ \t]*\r?\n^      - name: Require all core groups to pass[ \t]*\r?\n^        shell: pwsh[ \t]*\r?\n^        env:[ \t]*\r?\n^          CORE_CHECKS_RESULT: \$\{\{[ \t]*needs\.pr-core-checks\.result[ \t]*\}\}[ \t]*\r?\n^        run: \|[ \t]*\r?\n^          if \(\$env:CORE_CHECKS_RESULT -cne ''success''\) \{[ \t]*\r?\n^              throw "PR core checks did not succeed: \$env:CORE_CHECKS_RESULT"[ \t]*\r?\n^          \}[ \t]*\r?\n(?:^[ \t]*\r?\n)?(?=^      - name: Check out repository[ \t]*\r?$)'
 $guardMatches = [regex]::Matches($prCoreJob,$guardPattern)
 $guardIndex = $prCoreJob.IndexOf('Require all core groups to pass',[StringComparison]::Ordinal)
@@ -143,11 +160,11 @@ $validation = Get-Content -LiteralPath $validationPath -Raw -Encoding utf8
 $validationTokens=$null;$validationErrors=$null
 $validationAst=[System.Management.Automation.Language.Parser]::ParseFile($validationPath,[ref]$validationTokens,[ref]$validationErrors)
 $expectedCoreScripts = @(
-    'verify-adversarial-review-gate.ps1','verify-entry-routing-clarification.ps1','verify-v2-entry-contract.ps1','verify-v2-direct-no-artifacts.ps1',
+    'verify-adversarial-review-gate.ps1','verify-entry-routing-clarification.ps1','verify-v2-entry-contract.ps1','verify-v2-protocol-config.ps1','verify-v2-direct-no-artifacts.ps1',
     'verify-v2-requirement-gate.ps1','verify-v2-json-compat.ps1','verify-v2-task-state.ps1','verify-v2-model-neutrality.ps1',
     'verify-v1-v2-coexistence.ps1','verify-v1-to-v2-migration.ps1','verify-v2-default-flip.ps1','verify-v2-runtime-memory-decoupling.ps1',
     'run-scenario-evals.ps1','verify-model-eval-runner.ps1','verify-rollout-evidence.ps1','verify-host-benchmark-runner.ps1',
-    'verify-host-benchmark-otel.ps1','verify-host-benchmark-qualification.ps1','verify-release-runner-boundary.ps1','verify-v2-ci-routing.ps1',
+    'verify-host-benchmark-otel.ps1','verify-host-benchmark-qualification.ps1','verify-release-runner-boundary.ps1','verify-ordinary-ci-receipt.ps1','verify-v2-ci-routing.ps1',
     'verify-v2-install-presets.ps1','verify-v2-evidence.ps1',
     'verify-v2-governed-audit.ps1','verify-v2-approval.ps1','verify-v2-readonly-zero-write.ps1',
     'verify-harness-entry.ps1','verify-lite-artifact-validator.ps1','verify-lite-footprint.ps1','verify-minimal-safe-change-policy.ps1',
@@ -155,7 +172,7 @@ $expectedCoreScripts = @(
     'verify-shared-memory-layers.ps1','verify-stage-discipline-matrix.ps1','verify-release-validation.ps1','verify-runtime-state-contract.ps1',
     'verify-skill-manifest.ps1','verify-task-artifact-drift-audit.ps1','verify-tool-profile.ps1'
 )
-$expectedGroupSizes = [ordered]@{'entry-lifecycle'=12;'evaluation-release'=8;'install-evidence'=2;'governance-approval'=3;'harness-contracts'=15}
+$expectedGroupSizes = [ordered]@{'entry-lifecycle'=13;'evaluation-release'=9;'install-evidence'=2;'governance-approval'=3;'harness-contracts'=15}
 $coreGroupAssignments = @($validationAst.FindAll({param($node)$node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -ceq '$coreScriptGroups'},$true))
 $coreGroupNames=[Collections.Generic.List[string]]::new();$coreGroupSizes=[Collections.Generic.List[int]]::new();$actualCoreScripts=[Collections.Generic.List[string]]::new();$coreShapeValid=$validationErrors.Count -eq 0 -and $coreGroupAssignments.Count -eq 1
 if($coreShapeValid){
@@ -199,7 +216,7 @@ if($coreGroupValidateSet.Count -eq 1){
 }
 $coreGroupDefault = if($coreGroupParameters.Count -eq 1){$coreGroupParameters[0].DefaultValue.SafeGetValue()}else{''}
 $optionalNames = @('verify-ask-codex.ps1','verify-codex-entry-autoload.ps1','verify-code-intel-provider-boundary.ps1','verify-context-provider-boundary.ps1','verify-context-provider-install-isolation.ps1','verify-memory-provider-boundary.ps1','verify-md-html-review-renderer.ps1','verify-provider-usage-recording.ps1','verify-render-review-html.ps1','verify-aiteamcode-skill-contract.ps1')
-Check ($coreShapeValid -and ($coreGroupNames -join '|') -ceq (@($expectedGroupSizes.Keys) -join '|') -and ($coreGroupSizes -join '|') -ceq (@($expectedGroupSizes.Values) -join '|') -and $actualCoreScripts.Count -eq 40 -and @($actualCoreScripts | Sort-Object -CaseSensitive -Unique).Count -eq 40 -and ($actualCoreScripts -join '|') -ceq ($expectedCoreScripts -join '|') -and @($actualCoreScripts | Where-Object {-not(Test-Path -LiteralPath (Join-Path $RepoRoot "tests\$_") -PathType Leaf)}).Count -eq 0) 'five core groups contain the exact forty unique scripts in legacy order' 'core group shape, boundary, membership, uniqueness, order, or files drifted'
+Check ($coreShapeValid -and ($coreGroupNames -join '|') -ceq (@($expectedGroupSizes.Keys) -join '|') -and ($coreGroupSizes -join '|') -ceq (@($expectedGroupSizes.Values) -join '|') -and $actualCoreScripts.Count -eq 42 -and @($actualCoreScripts | Sort-Object -CaseSensitive -Unique).Count -eq 42 -and ($actualCoreScripts -join '|') -ceq ($expectedCoreScripts -join '|') -and @($actualCoreScripts | Where-Object {-not(Test-Path -LiteralPath (Join-Path $RepoRoot "tests\$_") -PathType Leaf)}).Count -eq 0) 'five core groups contain the exact forty-two unique scripts in legacy order' 'core group shape, boundary, membership, uniqueness, order, or files drifted'
 Check ($flattenValid -and $groupSelectionValid -and $coreGroupDefault -ceq 'all' -and ($coreGroupAllowed -join '|') -ceq ((@('all')+$expectedCoreGroups) -join '|') -and $validation -match "'-CoreGroup',\`$CoreGroup" -and $validation -match "\`$Suite -ne 'core'.*\`$CoreGroup -ne 'all'") 'CoreGroup defaults to the full legacy suite, bridges safely, and rejects non-core use' 'CoreGroup parameter, flattening, bridge, or selection contract drifted'
 Check (@($optionalNames | Where-Object {$actualCoreScripts -ccontains $_}).Count -eq 0) 'core suite excludes changed-path optional modules' 'core suite still runs optional heavy modules unconditionally'
 
