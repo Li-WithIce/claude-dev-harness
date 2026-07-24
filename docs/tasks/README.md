@@ -21,3 +21,5 @@ git 默认只保留本说明文件；具体 `docs/tasks/{task_id}/` 默认被 `.
 `docs/tasks/thin-harness-v2-default-promotion/` 下的 `plan.md`、`dp01-report.md`、`evidence.json` 和 `audit.md` 是用户显式授权提交的 DP-01 资格基线与范围冻结记录。该例外只覆盖这四个文件，不包含本地 Contract、Evidence 输入或 `.assistant/` runtime，也不表示 Default Promotion 已通过。
 
 这些文件固定记录任务 `version 4 / paused`、Evidence `blocked` 的 DP-01 停点；DP-02 及后续阶段仍需单独授权，且不得把这组冻结记录当作 live runtime 或新任务模板。
+
+这四份文件是 pre-archive 历史快照；DP-02 至 DP-05 的唯一当前资格合同是 [`docs/release/default-promotion-gates.md`](../release/default-promotion-gates.md)，它只取代后续依赖与批次定义，不回写历史 Evidence。
