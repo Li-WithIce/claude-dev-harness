@@ -157,7 +157,27 @@ function Resolve-HarnessRolloutPromotionPaths {
             throw 'rollout-promotion-target-overlaps-protected-root'
         }
     }
-    return [ordered]@{source=$source;target=$target;target_relative=$targetRelative;workspace=$workspace;workspace_identity=$workspaceIdentity}
+    $authorizationTargetRelative = '.assistant/runtime/rollout/canary-authorization.json'
+    $authorizationTarget = Resolve-HarnessContainedPath -WorkspaceRoot $workspace -Path $authorizationTargetRelative -Label 'rollout Canary authorization target' -AllowMissing
+    Assert-ReleasePathHasNoReparseAncestor -Path $authorizationTarget
+    if ((Test-Path -LiteralPath $authorizationTarget) -and -not (Test-Path -LiteralPath $authorizationTarget -PathType Leaf)) { throw 'rollout-promotion-authorization-target-not-file' }
+    if (Test-Path -LiteralPath $authorizationTarget -PathType Leaf) {
+        Assert-ReleaseSingleLinkFile -Path $authorizationTarget -Label 'authorization-target'
+        Assert-ReleaseSingleDataStreamFile -Path $authorizationTarget -Label 'authorization-target'
+    }
+    $physicalAuthorizationTarget = Get-HostPhysicalPathInfo -Path $authorizationTarget -AllowMissing -RejectLinks
+    foreach ($root in @(@($gitDirectory,$gitCommonDirectory) + @($ProtectedRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }))) {
+        $physicalRoot = Get-HostPhysicalPathInfo -Path ([IO.Path]::GetFullPath($root)) -AllowMissing
+        if ((Test-ReleasePathAtOrBelow -Path $authorizationTarget -Root $root) -or
+            (Test-ReleasePathAtOrBelow -Path ([string]$physicalAuthorizationTarget.physical_path) -Root ([string]$physicalRoot.physical_path))) {
+            throw 'rollout-promotion-authorization-target-overlaps-protected-root'
+        }
+    }
+    return [ordered]@{
+        source=$source;target=$target;target_relative=$targetRelative
+        authorization_target=$authorizationTarget;authorization_target_relative=$authorizationTargetRelative
+        workspace=$workspace;workspace_identity=$workspaceIdentity
+    }
 }
 
 function Write-HarnessReleaseArtifact {

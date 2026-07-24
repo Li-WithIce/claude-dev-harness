@@ -229,7 +229,9 @@ if (Test-Path -LiteralPath (Join-Path $workspaceRoot '.assistant\工作流') -Pa
 }
 
 $statusWorkspaceBefore = @(Get-TestTreeState -Root $workspaceRoot)
-$statusUserBefore = @(Get-TestTreeState -Root $userProfile)
+# PowerShell updates this host-owned startup cache asynchronously; it is not Harness install state.
+$powerShellStartupProfilePrefix = 'F|AppData\Local\Microsoft\PowerShell\StartupProfileData-'
+$statusUserBefore = @(Get-TestTreeState -Root $userProfile | Where-Object { -not $_.StartsWith($powerShellStartupProfilePrefix, [StringComparison]::OrdinalIgnoreCase) })
 $statusRepoBefore = @(& git -C $RepoRoot status --porcelain --untracked-files=all)
 $statusGitOptionalLocksBefore = [Environment]::GetEnvironmentVariable('GIT_OPTIONAL_LOCKS', [EnvironmentVariableTarget]::Process)
 $statusResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath $statusPath -Arguments @{
@@ -237,7 +239,7 @@ $statusResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath $statusP
     RepoRoot      = $RepoRoot
 }
 $statusWorkspaceAfter = @(Get-TestTreeState -Root $workspaceRoot)
-$statusUserAfter = @(Get-TestTreeState -Root $userProfile)
+$statusUserAfter = @(Get-TestTreeState -Root $userProfile | Where-Object { -not $_.StartsWith($powerShellStartupProfilePrefix, [StringComparison]::OrdinalIgnoreCase) })
 $statusRepoAfter = @(& git -C $RepoRoot status --porcelain --untracked-files=all)
 $statusGitOptionalLocksAfter = [Environment]::GetEnvironmentVariable('GIT_OPTIONAL_LOCKS', [EnvironmentVariableTarget]::Process)
 $statusText = $statusResult.Output -join "`n"

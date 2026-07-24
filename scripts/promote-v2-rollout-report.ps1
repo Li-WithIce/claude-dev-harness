@@ -2,7 +2,8 @@
 param(
     [string]$RepoRoot = '',
     [Parameter(Mandatory)][string]$WorkspaceRoot,
-    [Parameter(Mandatory)][string]$ReportPath
+    [Parameter(Mandatory)][string]$ReportPath,
+    [switch]$AuthorizeCanary
 )
 
 Set-StrictMode -Version Latest
@@ -61,7 +62,6 @@ function Remove-RolloutEmptyParents {
 }
 
 try {
-    $pathModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Path.psm1') -Force -PassThru -ErrorAction Stop
     $protocolModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1') -Force -PassThru -ErrorAction Stop
     $atomicModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.AtomicWrite.psm1') -Force -PassThru -ErrorAction Stop
     $evidenceModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.RolloutEvidence.psm1') -Force -PassThru -ErrorAction Stop
@@ -85,24 +85,48 @@ try {
     $bytes = [IO.File]::ReadAllBytes([string]$paths.source)
     if ($bytes.Length -gt 4MB) { throw 'rollout-promotion-input-too-large' }
     $rawDigest = Get-RolloutRawDigest -Bytes $bytes
-    try {
-        $text = [Text.UTF8Encoding]::new($false,$true).GetString($bytes)
-        $document = & $pathModule { param($Json) $Json | ConvertFrom-HarnessJson -ErrorAction Stop } $text
-    } catch { throw 'rollout-promotion-report-invalid-json' }
+    try { $document = & $protocolModule { param($Bytes) ConvertFrom-HarnessRolloutJsonBytes -Bytes $Bytes -Kind report } $bytes }
+    catch { throw 'rollout-promotion-report-invalid-json' }
     & $protocolModule {
-        param($Root,$Document)
+        param($Root,$Document,$Authorize)
         Assert-HarnessRolloutRepositoryClean -RepoRoot $Root
         Assert-HarnessRolloutReport -RepoRoot $Root -Document $Document
-        if (-not [bool]$Document.eligible) { throw 'rollout-promotion-report-ineligible' }
-    } $RepoRoot $document
+        if ([string]$Document.schema_version -ceq 'rollout-eligibility/v1') { throw 'rollout-promotion-v1-historical-only' }
+        if ([string]$Document.phase -ceq 'canary-candidate' -and -not $Authorize) { throw 'rollout-promotion-canary-authorization-required' }
+        if ([string]$Document.phase -ceq 'final-default' -and $Authorize) { throw 'rollout-promotion-final-does-not-use-canary-authorization' }
+    } $RepoRoot $document ([bool]$AuthorizeCanary)
+
+    $authorizationDocument = $null
+    $authorizationBytes = $null
+    if ([string]$document.phase -ceq 'canary-candidate') {
+        $authorizationDocument = & $protocolModule {
+            param($Root,$Workspace,$Report) New-HarnessCanaryAuthorizationDocument -RepoRoot $Root -WorkspaceRoot $Workspace -Report $Report
+        } $RepoRoot $WorkspaceRoot $document
+        $authorizationBytes = [Text.UTF8Encoding]::new($false).GetBytes(($authorizationDocument | ConvertTo-Json -Depth 30 -Compress))
+    }
+
+    $publications = [Collections.Generic.List[object]]::new()
+    $publications.Add([ordered]@{
+        name='report';target=[string]$paths.target;relative=[string]$paths.target_relative
+        bytes=$bytes;digest=$rawDigest;limit=4MB;published=$false;published_digest=$null
+    })
+    if ($null -ne $authorizationDocument) {
+        $publications.Add([ordered]@{
+            name='authorization';target=[string]$paths.authorization_target;relative=[string]$paths.authorization_target_relative
+            bytes=$authorizationBytes;digest=(Get-RolloutRawDigest -Bytes $authorizationBytes);limit=64KB;published=$false;published_digest=$null
+        })
+    }
 
     $successOutput = [ordered]@{
         operation = 'promote-v2-rollout-report'
         status = 'pass'
+        phase = [string]$document.phase
         target = [string]$paths.target_relative
         report_digest = [string]$document.report_digest
         file_digest = [string]$rawDigest
         source_revision = [string]$document.source_revision
+        authorization_target = $(if ($null -eq $authorizationDocument) { $null } else { [string]$paths.authorization_target_relative })
+        authorization_digest = $(if ($null -eq $authorizationDocument) { $null } else { [string]$authorizationDocument.authorization_digest })
     } | ConvertTo-Json -Depth 5 -Compress
     $mutexIdentity = [string]$paths.workspace_identity
     $mutexBytes = [Text.UTF8Encoding]::new($false).GetBytes($mutexIdentity)
@@ -118,33 +142,39 @@ try {
         } $RepoRoot $WorkspaceRoot $ReportPath @($protectedRoots)
         if (-not ([string]$lockedPaths.source).Equals([string]$paths.source,[StringComparison]::OrdinalIgnoreCase) -or
             -not ([string]$lockedPaths.target).Equals([string]$paths.target,[StringComparison]::OrdinalIgnoreCase) -or
+            -not ([string]$lockedPaths.authorization_target).Equals([string]$paths.authorization_target,[StringComparison]::OrdinalIgnoreCase) -or
             [string]$lockedPaths.workspace_identity -cne $mutexIdentity) { throw 'rollout-promotion-path-changed' }
 
         $createdParents=[Collections.Generic.List[string]]::new();$parentCursor=[IO.Path]::GetDirectoryName([string]$paths.target)
         while(-not(Test-Path -LiteralPath $parentCursor)){$createdParents.Add($parentCursor);$nextParent=[IO.Path]::GetDirectoryName($parentCursor);if([string]::IsNullOrWhiteSpace($nextParent)-or$nextParent-ceq$parentCursor){throw 'rollout-promotion-parent-unavailable'};$parentCursor=$nextParent}
-        $preimageExists = Test-Path -LiteralPath $paths.target -PathType Leaf
-        if ($preimageExists) {
-            $preimageInfo = Get-Item -LiteralPath $paths.target -Force -ErrorAction Stop
-            if ($preimageInfo.Length -gt 4MB) { throw 'rollout-promotion-target-too-large' }
-            $preimageBytes = [IO.File]::ReadAllBytes([string]$paths.target)
-            if ($preimageBytes.Length -gt 4MB) { throw 'rollout-promotion-target-too-large' }
-        } else {
-            $preimageBytes = [byte[]]::new(0)
+        foreach ($record in $publications) {
+            $record['preimage_exists'] = Test-Path -LiteralPath ([string]$record.target) -PathType Leaf
+            if ([bool]$record.preimage_exists) {
+                $preimageInfo = Get-Item -LiteralPath ([string]$record.target) -Force -ErrorAction Stop
+                if ($preimageInfo.Length -gt [long]$record.limit) { throw "rollout-promotion-$($record.name)-target-too-large" }
+                $preimageBytes = [IO.File]::ReadAllBytes([string]$record.target)
+                if ($preimageBytes.Length -gt [long]$record.limit) { throw "rollout-promotion-$($record.name)-target-too-large" }
+            } else { $preimageBytes = [byte[]]::new(0) }
+            $record['preimage_bytes'] = $preimageBytes
+            $record['preimage_digest'] = if ([bool]$record.preimage_exists) { Get-RolloutRawDigest -Bytes $preimageBytes } else { 'missing' }
         }
-        $preimageDigest = if ($preimageExists) { Get-RolloutRawDigest -Bytes $preimageBytes } else { 'missing' }
-        $published = $false
         try {
-            $publishedDigest = Write-RolloutAtomicBytes -AtomicModule $atomicModule -Workspace $WorkspaceRoot -Bytes $bytes -Target ([string]$paths.target_relative) -SourceDigest $rawDigest -CurrentDigest $preimageDigest
-            $published = $true
+            foreach ($record in $publications) {
+                $record.published_digest = Write-RolloutAtomicBytes -AtomicModule $atomicModule -Workspace $WorkspaceRoot -Bytes ([byte[]]$record.bytes) -Target ([string]$record.relative) -SourceDigest ([string]$record.digest) -CurrentDigest ([string]$record.preimage_digest)
+                $record.published = $true
+            }
             $publishedPaths = & $evidenceModule {
                 param($Root,$Workspace,$InputPath,$Protected)
                 Resolve-HarnessRolloutPromotionPaths -RepoRoot $Root -WorkspaceRoot $Workspace -ReportPath $InputPath -ProtectedRoots $Protected
             } $RepoRoot $WorkspaceRoot $ReportPath @($protectedRoots)
             if (-not ([string]$publishedPaths.source).Equals([string]$paths.source,[StringComparison]::OrdinalIgnoreCase) -or
                 -not ([string]$publishedPaths.target).Equals([string]$paths.target,[StringComparison]::OrdinalIgnoreCase) -or
+                -not ([string]$publishedPaths.authorization_target).Equals([string]$paths.authorization_target,[StringComparison]::OrdinalIgnoreCase) -or
                 [string]$publishedPaths.workspace_identity -cne $mutexIdentity) { throw 'rollout-promotion-published-path-changed' }
-            $targetBytes = [IO.File]::ReadAllBytes([string]$paths.target)
-            if ($publishedDigest -cne $rawDigest -or -not (Test-RolloutBytesEqual -Left $bytes -Right $targetBytes)) { throw 'rollout-promotion-byte-verification-failed' }
+            foreach ($record in $publications) {
+                $targetBytes = [IO.File]::ReadAllBytes([string]$record.target)
+                if ([string]$record.published_digest -cne [string]$record.digest -or -not (Test-RolloutBytesEqual -Left ([byte[]]$record.bytes) -Right $targetBytes)) { throw "rollout-promotion-$($record.name)-byte-verification-failed" }
+            }
             $sourceStateEnd = Get-HarnessReleaseSourceState -RepoRoot $RepoRoot
             if (-not (Test-HarnessReleaseSourceStable -Start $sourceStateStart -End $sourceStateEnd)) { throw 'rollout-promotion-source-changed' }
 
@@ -160,15 +190,19 @@ try {
                 if ($hadReportEnvironment) { [Environment]::SetEnvironmentVariable('HARNESS_V2_ELIGIBILITY_REPORT',$priorReportEnvironment,[EnvironmentVariableTarget]::Process) }
                 else { Remove-Item Env:HARNESS_V2_ELIGIBILITY_REPORT -ErrorAction SilentlyContinue }
             }
-            if ([string]$resolution.selected_protocol -cne 'v2' -or [string]$resolution.rollout_eligibility.status -cne 'pass' -or
+            $expectedStatus = if ([string]$document.phase -ceq 'canary-candidate') { 'canary-authorized' } else { 'pass' }
+            if ([string]$resolution.selected_protocol -cne 'v2' -or [string]$resolution.rollout_eligibility.status -cne $expectedStatus -or
+                [string]$resolution.rollout_eligibility.phase -cne [string]$document.phase -or
                 [string]$resolution.rollout_eligibility.report_digest -cne [string]$document.report_digest) { throw 'rollout-promotion-canonical-verification-failed' }
         } catch {
             $publishError = $_
-            if ($published) {
-                Restore-RolloutTarget -AtomicModule $atomicModule -Workspace $WorkspaceRoot -Target ([string]$paths.target_relative) -PreimageExists $preimageExists -PreimageBytes $preimageBytes -PreimageDigest $preimageDigest -PublishedDigest $rawDigest -CreatedParents @($createdParents)
-            } else {
-                Remove-RolloutEmptyParents -Directories @($createdParents)
+            for ($index = $publications.Count - 1; $index -ge 0; $index--) {
+                $record = $publications[$index]
+                if ([bool]$record.published) {
+                    Restore-RolloutTarget -AtomicModule $atomicModule -Workspace $WorkspaceRoot -Target ([string]$record.relative) -PreimageExists ([bool]$record.preimage_exists) -PreimageBytes ([byte[]]$record.preimage_bytes) -PreimageDigest ([string]$record.preimage_digest) -PublishedDigest ([string]$record.digest) -CreatedParents @($createdParents)
+                }
             }
+            Remove-RolloutEmptyParents -Directories @($createdParents)
             throw $publishError
         }
     } finally {

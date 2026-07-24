@@ -34,13 +34,47 @@ DP-02 must add `rollout-eligibility/v2` as a new schema. Its formal Gate set mus
 
 The G12 row is satisfied by the v2 report envelope, strict schema/source validation, and independent review; the report does not recursively embed its own digest as an input Gate. DP-02 must not extend `rollout-eligibility/v1` in place or change the meaning of any existing v1 field.
 
-After the v2 qualification path exists, a `rollout-eligibility/v1` report is historical diagnostic evidence only. A consumer may parse it and display its historical reasons, but it must not:
+The DP-02A core path now treats a `rollout-eligibility/v1` report as historical diagnostic evidence only. A consumer may parse it and display its historical reasons, but it must not:
 
 - authorize Default Promotion;
 - make a new task resolve from `auto` to v2; or
 - be accepted by Promotion as a new Canonical default basis.
 
-The current machine implementation still accepts the old five-Gate `rollout-eligibility/v1` report. That behavior is an explicit DP-02 blocker, so Default Promotion remains prohibited until the v2 producer, consumers, Promotion entry, resolver, and deterministic negative coverage are complete. Missing, old-version, unknown-schema, stale, dirty, tampered, failed, blocked, simulated, or unavailable rollout evidence must select v1.
+Resolver and Promotion no longer accept the old five-Gate `rollout-eligibility/v1` report as authorization. Default Promotion nevertheless remains prohibited: DP-02A implements only the v2 core contract and deterministic consumers, while DP-02B/DP-02C must still wire and validate the distinct real producers, lifecycle inputs and release routing. Missing, old-version, unknown-schema, stale, dirty, tampered, failed, blocked, simulated or unavailable rollout evidence selects v1.
+
+### DP-02A machine boundary
+
+`rollout-eligibility/v2` has exactly two phases:
+
+- `canary-candidate` requires G00-G07, G09-G11, G14 and G18-G20 to be `pass`; G13, G15 and G16 must be `not_run`; `eligible` is exactly `false`.
+- `final-default` requires every blocking Gate to be `pass`; `eligible` is exactly `true`.
+
+Both reports contain all 19 blocking Gate identifiers. The normalized `rollout-evidence-set/v1` Generator input contains the other 18 Gate records; G12 is generated only by the report envelope with contract `rollout-eligibility-v2-envelope/v1` and the current `rollout-eligibility-v2.schema.json` digest. This prevents a caller from supplying a recursive or self-asserted G12 input. Every Gate record has exactly `status`, `evidence_contract`, `evidence_digest` and `source_revision`, and every source revision must equal the clean report revision.
+
+The fixed Gate-to-contract bindings are:
+
+| Gate | evidence_contract |
+| --- | --- |
+| G00 | `thin-harness-exact-head-engineering-evidence/v1` |
+| G01 | `harness-model-eval-report/v2` |
+| G02, G05, G06 | `harness-host-benchmark-report/v2` |
+| G03, G07 | `harness-installed-desktop-benchmark-report/v1` |
+| G04 | `harness-release-isolation-report/v1` |
+| G09 | `harness-release-model-receipt/v1` |
+| G10 | `harness-release-host-receipt/v1` |
+| G11 | `harness-release-full-receipt/v1` |
+| G12 | `rollout-eligibility-v2-envelope/v1` |
+| G13 | `harness-canary-promotion-receipt/v1` |
+| G14 | `harness-v1-stop-loss-report/v1` |
+| G15 | `harness-canary-observation-report/v1` |
+| G16 | `harness-stable-decision/v1` |
+| G18, G19, G20 | `harness-preset-lifecycle-report/v1` |
+
+These identifiers are strict aggregation entry points, not claims that their real Producers exist or have passed. DP-02A does not implement Installed Desktop authority, formal lifecycle aggregation or release receipts. A later adapter may create a normalized Evidence Set only after validating the named raw contract; it cannot substitute fixtures, rename a contract or mark unavailable evidence as pass.
+
+The report Host binding is also exact: `product=codex-cli-service`, `observed_version=0.144.4`, `hook_contract=codex-0.144.4-environment-shell-hook/v1`, `invocation_telemetry_contract=codex-invocation-telemetry/v2`, and `request_send_contract=codex-0.144.4-successful-websocket-send/v2`. Any missing or different value fails closed. The Hook identifier binds the qualified 0.144.4 environment-shell input shape; it is not a claim of Host trust or callability.
+
+A Candidate never authorizes ordinary Auto by itself. `promote-v2-rollout-report.ps1 -AuthorizeCanary` is the only DP-02A entry that creates the separate `rollout-canary-authorization/v1` artifact. It binds the Candidate schema, phase, report digest, source revision and a SHA-256 digest of the target's physical volume/file identity. Promotion publishes Report and Authorization under one physical-Workspace mutex with per-file CAS and exact-preimage rollback. Resolver accepts the Candidate only in that physical Workspace; missing, copied, stale or tampered authorization selects v1. This is a scoped cooperative machine authorization, not production identity authentication or approval.
 
 ## Host version qualification
 
@@ -153,6 +187,8 @@ Cancelled, skipped, neutral, pending, unavailable, or missing checks and receipt
 - Completion: every required producer/input/gate is independently runnable and fail-closed on the current branch; no eligible report is required to run Installed Desktop qualification.
 - Maximum estimated runtime: 90 minutes.
 - Failure stop: stop and report a policy/environment blocker if authoritative machine observation would require a generic Writer, security platform, production identity system, or an authoritative host API that does not exist.
+
+DP-02A stops at the Rollout v2 core boundary above. It does not satisfy the full DP-02 completion criterion: distinct Installed Desktop authority/Producer, formal core/governed/full lifecycle aggregation, current-branch release routing and real release inputs remain separately authorized DP-02B/DP-02C work.
 
 ### DP-03 — Produce real qualification evidence
 

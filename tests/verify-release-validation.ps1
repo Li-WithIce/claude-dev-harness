@@ -764,12 +764,11 @@ if ($runner -match '(?m)^\s*\[int\]\$CheckTimeoutSeconds = 360\s*$' -and
     @([regex]::Matches($prCoreJob,'(?m)^    if:[ \t]*\$\{\{[ \t]*always\(\)[ \t]*&&[ \t]*github\.event_name[ \t]*==[ \t]*''pull_request''[ \t]*\}\}[ \t]*\r?$')).Count -eq 1 -and
     $prCoreGuardValid -and $prCoreJob -notmatch '(?m)^\s{4,8}continue-on-error:' -and
     $prCoreJob -notmatch 'run-validation\.ps1 -Suite core' -and
-    $rolloutGenerator -match 'run-validation\.ps1 -Suite all -CheckTimeoutSeconds 360 -VerboseOutput' -and
-    $rolloutGenerator -match '\(\?m\)\^\\\[UNAVAILABLE\\\]\\s\+' -and
+    $rolloutGenerator -match 'GateEvidencePath' -and
+    $rolloutGenerator -match 'rollout-v1-evidence-inputs-are-historical-only' -and
     $changedOptionalJob -match '(?m)^        run:\s+pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-changed-optional-validation\.ps1 -RepoRoot \$PWD -ChangedPathsFile changed-paths\.txt\s*$' -and
     $prCoreJob -match '(?m)^        run:\s+pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-isolated-install-smoke\.ps1 -RepoRoot \$PWD -Preset core\s*$' -and
-    $rolloutGenerator -match 'run-isolated-install-smoke\.ps1 -Preset core' -and
-    $rolloutGenerator -match 'run-isolated-install-smoke\.ps1 -Preset full' -and
+    $rolloutGenerator -notmatch 'run-isolated-install-smoke\.ps1 -Preset (?:core|governed|full)' -and
     $workflow -notmatch 'verify-installation\.ps1' -and
     $workflow -notmatch '(?m)^\s*&\s+\.\\uninstall\.ps1' -and
     $readme -match '`pr-core-checks` 的每个 matrix leg 与最终 `pr-core` job 上限均为 45 分钟') {
@@ -835,11 +834,13 @@ if ($releaseJob -match '(?ms)^\s*needs:\s*\r?\n\s*- release-model\s*\r?\n\s*- re
     $releaseJob -match 'GITHUB_RUN_ID-\$env:GITHUB_RUN_ATTEMPT\\aggregate' -and
     $rolloutGenerator -match 'ModelEvalReportPath' -and
     $rolloutGenerator -match 'HostBenchmarkReportPath' -and
+    $rolloutGenerator -match 'rollout-v1-evidence-inputs-are-historical-only' -and
+    $rolloutGenerator -match 'ConvertFrom-HarnessRolloutJsonBytes -Bytes \$Bytes -Kind evidence-set' -and
     $rolloutGenerator -notmatch 'run-scenario-evals\.ps1 -Suite core' -and
     $rolloutGenerator -notmatch 'benchmark-harness\.ps1 -Compare bare,v1,v2') {
-    Add-Check 'rollout generator consumes real evidence instead of deterministic or fixture proxies'
+    Add-Check 'legacy release-full wiring fails closed until a later batch supplies the strict v2 evidence set'
 } else {
-    Add-Failure 'rollout generator must bind real model and host reports'
+    Add-Failure 'DP-02A must not let the legacy two-report release-full path authorize rollout v2'
 }
 
 if ($modelUpload -match [regex]::Escape($uploadAction) -and $modelUpload -match '(?m)^\s*path:\s*\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/model-eval\.json\s*$' -and $modelUpload -match '(?m)^\s*if-no-files-found:\s*error\s*$' -and
