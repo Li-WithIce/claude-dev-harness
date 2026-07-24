@@ -1,0 +1,73 @@
+{
+  "schema_version": "evidence/v1",
+  "task_id": "thin-harness-v2-default-promotion",
+  "task_version": 3,
+  "contract_digest": "sha256:912ccf5de9935865e847754821e83e73b8e311c3cf69b0e705cde9d4dc319aaf",
+  "revision": "d9a095fe177c4206e97db6785464ef9ea4a12101",
+  "records": [
+    {
+      "type": "inspection",
+      "method": "Independent-source DP-01 synthesis of Git state, Harness runtime, runner/workflow/schema implementation, focused verifier exits and explicit non-execution boundaries.",
+      "result": "blocked",
+      "executed_at": "2026-07-24T01:58:17.6704074+00:00",
+      "evidence_path": "docs/tasks/thin-harness-v2-default-promotion/dp01-report.md",
+      "digest": "sha256:409c01a04327fde0ac023780902e6044b3b239766f9612b0617e847c71b42a2a",
+      "covers": [
+        "AC-1",
+        "AC-2",
+        "AC-3",
+        "AC-4",
+        "AC-5",
+        "AC-6",
+        "AC-7",
+        "DP-01",
+        "DEFAULT-PROMOTION-ELIGIBILITY"
+      ],
+      "actor": {
+        "host": "codex",
+        "backend": "codex",
+        "model": "gpt-5.6-sol",
+        "actor_id": "codex-primary",
+        "context_id": "dp01-primary-context"
+      }
+    }
+  ],
+  "coverage": {
+    "satisfied": [
+      "AC-1",
+      "AC-2",
+      "AC-3",
+      "AC-4",
+      "AC-5",
+      "AC-6",
+      "AC-7"
+    ],
+    "not_verified": [],
+    "blocked": [
+      "DEFAULT-PROMOTION-ELIGIBILITY"
+    ]
+  },
+  "gaps": [
+    {
+      "id": "installed-desktop-authority",
+      "status": "blocked",
+      "reason": "The current installed Desktop path is intentionally qualification-unavailable and cannot authoritatively observe runtime protocol/profile/lifecycle or Hook trust/callability."
+    },
+    {
+      "id": "release-routing-and-rollout-gate",
+      "status": "blocked",
+      "reason": "The current branch is excluded from release jobs and the rollout generator has no distinct installed Desktop gate/input."
+    },
+    {
+      "id": "formal-model-host-evidence",
+      "status": "unavailable",
+      "reason": "No real Model40, cognitive 3x3, installed Desktop 3x3 or release-full evidence was run; dedicated Codex Home and release runner configuration are absent."
+    },
+    {
+      "id": "canary-stable-policy",
+      "status": "manual",
+      "reason": "Canary cohort, duration, abort metrics, owner and Stable decision contract require a later explicit policy decision."
+    }
+  ],
+  "conclusion": "blocked"
+}
