@@ -835,7 +835,9 @@ if ($releaseJob -match '(?ms)^\s*needs:\s*\r?\n\s*- release-model\s*\r?\n\s*- re
     $rolloutGenerator -match 'ModelEvalReportPath' -and
     $rolloutGenerator -match 'HostBenchmarkReportPath' -and
     $rolloutGenerator -match 'rollout-v1-evidence-inputs-are-historical-only' -and
-    $rolloutGenerator -match 'ConvertFrom-HarnessRolloutJsonBytes -Bytes \$Bytes -Kind evidence-set' -and
+    $rolloutGenerator -match 'Read-RolloutInputDocument -Path \$GateEvidencePath -Kind evidence-set' -and
+    $rolloutGenerator -match 'Assert-HarnessRolloutEvidenceSetProvenance' -and
+    $rolloutGenerator -match 'rollout-evidence-provenance-unverified' -and
     $rolloutGenerator -notmatch 'run-scenario-evals\.ps1 -Suite core' -and
     $rolloutGenerator -notmatch 'benchmark-harness\.ps1 -Compare bare,v1,v2') {
     Add-Check 'legacy release-full wiring fails closed until a later batch supplies the strict v2 evidence set'

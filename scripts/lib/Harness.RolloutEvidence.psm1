@@ -2,6 +2,7 @@
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop
+$script:RolloutAtomicModule = Import-Module (Join-Path $PSScriptRoot 'Harness.AtomicWrite.psm1') -Force -PassThru -ErrorAction Stop
 . (Join-Path $PSScriptRoot '..\host-benchmark\HostBenchmark.Trial.ps1')
 
 function Get-ReleaseSha256Bytes {
@@ -140,43 +141,264 @@ function Resolve-HarnessRolloutPromotionPaths {
         }
     }
 
-    $targetRelative = '.assistant/runtime/rollout/v2-eligibility.json'
-    $target = Resolve-HarnessContainedPath -WorkspaceRoot $workspace -Path $targetRelative -Label 'rollout promotion target' -AllowMissing
-    Assert-ReleasePathHasNoReparseAncestor -Path $target
-    if ((Test-Path -LiteralPath $target) -and -not (Test-Path -LiteralPath $target -PathType Leaf)) { throw 'rollout-promotion-target-not-file' }
-    if (Test-Path -LiteralPath $target -PathType Leaf) {
-        Assert-ReleaseSingleLinkFile -Path $target -Label 'target'
-        Assert-ReleaseSingleDataStreamFile -Path $target -Label 'target'
+    $targetDefinitions = [ordered]@{
+        final = '.assistant/runtime/rollout/v2-eligibility.json'
+        candidate = '.assistant/runtime/rollout/v2-canary-candidate.json'
+        authorization = '.assistant/runtime/rollout/v2-canary-authorization.json'
     }
-    $physicalTarget = Get-HostPhysicalPathInfo -Path $target -AllowMissing -RejectLinks
-    if ([string]$physicalSource.volume -ceq [string]$physicalTarget.volume -and [string]$physicalSource.file_id -ceq [string]$physicalTarget.file_id) { throw 'rollout-promotion-input-overlaps-target' }
-    foreach ($root in @(@($gitDirectory,$gitCommonDirectory) + @($ProtectedRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }))) {
-        $physicalRoot = Get-HostPhysicalPathInfo -Path ([IO.Path]::GetFullPath($root)) -AllowMissing
-        if ((Test-ReleasePathAtOrBelow -Path $target -Root $root) -or
-            (Test-ReleasePathAtOrBelow -Path ([string]$physicalTarget.physical_path) -Root ([string]$physicalRoot.physical_path))) {
-            throw 'rollout-promotion-target-overlaps-protected-root'
+    $targets = [ordered]@{}
+    foreach ($name in $targetDefinitions.Keys) {
+        $relative = [string]$targetDefinitions[$name]
+        $target = Resolve-HarnessContainedPath -WorkspaceRoot $workspace -Path $relative -Label "rollout $name target" -AllowMissing
+        Assert-ReleasePathHasNoReparseAncestor -Path $target
+        if ((Test-Path -LiteralPath $target) -and -not (Test-Path -LiteralPath $target -PathType Leaf)) { throw "rollout-promotion-$name-target-not-file" }
+        if (Test-Path -LiteralPath $target -PathType Leaf) {
+            Assert-ReleaseSingleLinkFile -Path $target -Label "$name-target"
+            Assert-ReleaseSingleDataStreamFile -Path $target -Label "$name-target"
         }
-    }
-    $authorizationTargetRelative = '.assistant/runtime/rollout/canary-authorization.json'
-    $authorizationTarget = Resolve-HarnessContainedPath -WorkspaceRoot $workspace -Path $authorizationTargetRelative -Label 'rollout Canary authorization target' -AllowMissing
-    Assert-ReleasePathHasNoReparseAncestor -Path $authorizationTarget
-    if ((Test-Path -LiteralPath $authorizationTarget) -and -not (Test-Path -LiteralPath $authorizationTarget -PathType Leaf)) { throw 'rollout-promotion-authorization-target-not-file' }
-    if (Test-Path -LiteralPath $authorizationTarget -PathType Leaf) {
-        Assert-ReleaseSingleLinkFile -Path $authorizationTarget -Label 'authorization-target'
-        Assert-ReleaseSingleDataStreamFile -Path $authorizationTarget -Label 'authorization-target'
-    }
-    $physicalAuthorizationTarget = Get-HostPhysicalPathInfo -Path $authorizationTarget -AllowMissing -RejectLinks
-    foreach ($root in @(@($gitDirectory,$gitCommonDirectory) + @($ProtectedRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }))) {
-        $physicalRoot = Get-HostPhysicalPathInfo -Path ([IO.Path]::GetFullPath($root)) -AllowMissing
-        if ((Test-ReleasePathAtOrBelow -Path $authorizationTarget -Root $root) -or
-            (Test-ReleasePathAtOrBelow -Path ([string]$physicalAuthorizationTarget.physical_path) -Root ([string]$physicalRoot.physical_path))) {
-            throw 'rollout-promotion-authorization-target-overlaps-protected-root'
+        $physicalTarget = Get-HostPhysicalPathInfo -Path $target -AllowMissing -RejectLinks
+        if ([string]$physicalSource.volume -ceq [string]$physicalTarget.volume -and [string]$physicalSource.file_id -ceq [string]$physicalTarget.file_id) { throw "rollout-promotion-input-overlaps-$name-target" }
+        foreach ($root in @(@($gitDirectory,$gitCommonDirectory) + @($ProtectedRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }))) {
+            $physicalRoot = Get-HostPhysicalPathInfo -Path ([IO.Path]::GetFullPath($root)) -AllowMissing
+            if ((Test-ReleasePathAtOrBelow -Path $target -Root $root) -or
+                (Test-ReleasePathAtOrBelow -Path ([string]$physicalTarget.physical_path) -Root ([string]$physicalRoot.physical_path))) {
+                throw "rollout-promotion-$name-target-overlaps-protected-root"
+            }
         }
+        $targets[$name] = [ordered]@{relative=$relative;path=$target}
     }
     return [ordered]@{
-        source=$source;target=$target;target_relative=$targetRelative
-        authorization_target=$authorizationTarget;authorization_target_relative=$authorizationTargetRelative
+        source=$source
+        final_target=[string]$targets.final.path;final_target_relative=[string]$targets.final.relative
+        candidate_target=[string]$targets.candidate.path;candidate_target_relative=[string]$targets.candidate.relative
+        authorization_target=[string]$targets.authorization.path;authorization_target_relative=[string]$targets.authorization.relative
         workspace=$workspace;workspace_identity=$workspaceIdentity
+    }
+}
+
+function Read-HarnessRolloutEvidenceArtifact {
+    param(
+        [Parameter(Mandatory)][string]$ArtifactPath,
+        [AllowEmptyString()][string]$ExpectedDigest = '',
+        [string[]]$ProtectedRoots = @(),
+        [long]$MaximumBytes = 16MB
+    )
+    if (-not [IO.Path]::IsPathRooted($ArtifactPath)) { throw 'rollout-evidence-artifact-path-must-be-absolute' }
+    $path = [IO.Path]::GetFullPath($ArtifactPath)
+    foreach ($root in @($ProtectedRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+        if (Test-ReleasePathAtOrBelow -Path $path -Root ([IO.Path]::GetFullPath($root))) { throw 'rollout-evidence-artifact-overlaps-protected-root' }
+    }
+    Assert-ReleasePathHasNoReparseAncestor -Path $path
+    Assert-ReleaseSingleLinkFile -Path $path -Label 'evidence-artifact'
+    Assert-ReleaseSingleDataStreamFile -Path $path -Label 'evidence-artifact'
+    $info = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+    if ($info.Length -gt $MaximumBytes) { throw 'rollout-evidence-artifact-too-large' }
+    $bytes = [IO.File]::ReadAllBytes($path)
+    if ($bytes.Length -gt $MaximumBytes) { throw 'rollout-evidence-artifact-too-large' }
+    $digest = Get-ReleaseSha256Bytes -Bytes $bytes
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedDigest) -and $digest -cne $ExpectedDigest) { throw 'rollout-evidence-artifact-digest-mismatch' }
+    return [ordered]@{path=$path;bytes=$bytes;digest=$digest}
+}
+
+function Assert-HarnessRolloutEvidenceSetProvenance {
+    param(
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Gates,
+        [string[]]$ProtectedRoots = @()
+    )
+    foreach ($name in @($Gates.Keys | Sort-Object)) {
+        $gate = $Gates[$name]
+        if ($gate -isnot [System.Collections.IDictionary] -or
+            [string]::IsNullOrWhiteSpace([string]$gate.artifact_path) -or
+            [string]::IsNullOrWhiteSpace([string]$gate.producer_identity) -or
+            [string]$gate.evidence_digest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'rollout-evidence-provenance-unverified' }
+        [void](Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$gate.artifact_path) -ExpectedDigest ([string]$gate.evidence_digest) -ProtectedRoots $ProtectedRoots)
+        throw "rollout-evidence-provenance-unwired-$name"
+    }
+    throw 'rollout-evidence-provenance-unverified'
+}
+
+function Test-HarnessRolloutPromotionPathSnapshot {
+    param([System.Collections.IDictionary]$Left,[System.Collections.IDictionary]$Right)
+    foreach ($name in @('source','final_target','candidate_target','authorization_target','workspace','workspace_identity')) {
+        if (-not ([string]$Left[$name]).Equals([string]$Right[$name],[StringComparison]::OrdinalIgnoreCase)) { return $false }
+    }
+    return $true
+}
+
+function Test-HarnessRolloutBytesEqual {
+    param([byte[]]$Left,[byte[]]$Right)
+    if ($Left.Length -ne $Right.Length) { return $false }
+    for ($index = 0; $index -lt $Left.Length; $index++) { if ($Left[$index] -ne $Right[$index]) { return $false } }
+    return $true
+}
+
+function Get-HarnessRolloutPublicationPreimage {
+    param([string]$Path,[long]$Limit,[string]$Name)
+    $exists = Test-Path -LiteralPath $Path -PathType Leaf
+    $bytes = if ($exists) {
+        $info = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        if ($info.Length -gt $Limit) { throw "rollout-promotion-$Name-target-too-large" }
+        $value = [IO.File]::ReadAllBytes($Path)
+        if ($value.Length -gt $Limit) { throw "rollout-promotion-$Name-target-too-large" }
+        $value
+    } else { [byte[]]::new(0) }
+    return [ordered]@{exists=$exists;bytes=$bytes;digest=$(if($exists){Get-ReleaseSha256Bytes -Bytes $bytes}else{'missing'})}
+}
+
+function Write-HarnessRolloutPublicationBytes {
+    param([string]$WorkspaceRoot,[string]$Path,[byte[]]$Bytes,[string]$SourceDigest,[string]$CurrentDigest)
+    return & $script:RolloutAtomicModule {
+        param($Root,$Target,$Value,$ExpectedSource,$ExpectedCurrent)
+        Write-HarnessAtomicBytes -WorkspaceRoot $Root -Path $Target -SourceBytes $Value -ExpectedSourceDigest $ExpectedSource -ExpectedCurrentDigest $ExpectedCurrent
+    } $WorkspaceRoot $Path $Bytes $SourceDigest $CurrentDigest
+}
+
+function Remove-HarnessRolloutPublicationFile {
+    param([string]$WorkspaceRoot,[string]$Path,[string]$ExpectedDigest)
+    return & $script:RolloutAtomicModule {
+        param($Root,$Target,$Digest)
+        Remove-HarnessFileIfDigestAtomic -WorkspaceRoot $Root -Path $Target -ExpectedDigest $Digest
+    } $WorkspaceRoot $Path $ExpectedDigest
+}
+
+function Restore-HarnessRolloutPublicationRecord {
+    param([string]$WorkspaceRoot,[System.Collections.IDictionary]$Record)
+    $exists = Test-Path -LiteralPath ([string]$Record.path) -PathType Leaf
+    if ([bool]$Record.preimage.exists) {
+        $currentDigest = if ($exists) { Get-ReleaseFileDigest -Path ([string]$Record.path) } else { 'missing' }
+        [void](Write-HarnessRolloutPublicationBytes -WorkspaceRoot $WorkspaceRoot -Path ([string]$Record.relative) -Bytes ([byte[]]$Record.preimage.bytes) -SourceDigest ([string]$Record.preimage.digest) -CurrentDigest $currentDigest)
+    } elseif ($exists) {
+        [void](Remove-HarnessRolloutPublicationFile -WorkspaceRoot $WorkspaceRoot -Path ([string]$Record.relative) -ExpectedDigest (Get-ReleaseFileDigest -Path ([string]$Record.path)))
+    }
+}
+
+function Remove-HarnessRolloutCreatedParents {
+    param([string]$WorkspaceRoot,[string[]]$Directories)
+    $workspace = [IO.Path]::GetFullPath($WorkspaceRoot).TrimEnd('\')
+    foreach ($directory in @($Directories | Sort-Object Length -Descending -Unique)) {
+        try {
+            $full = [IO.Path]::GetFullPath($directory).TrimEnd('\')
+            if ($full.StartsWith($workspace + '\',[StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $full -PathType Container) -and @(Get-ChildItem -LiteralPath $full -Force).Count -eq 0) { [IO.Directory]::Delete($full,$false) }
+        } catch { }
+    }
+}
+
+function Invoke-HarnessRolloutPublicationTransaction {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$WorkspaceRoot,
+        [Parameter(Mandatory)][string]$ReportPath,
+        [Parameter(Mandatory)][ValidateSet('canary-candidate','final-default')][string]$Phase,
+        [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$ReportBytes,
+        [AllowEmptyCollection()][byte[]]$AuthorizationBytes = [byte[]]::new(0),
+        [string[]]$ProtectedRoots = @(),
+        [System.Collections.IDictionary]$SourceStateStart = $null,
+        [AllowNull()][System.Collections.IDictionary]$ObservedHostContext = $null,
+        $ProtocolModule = $null,
+        [int]$FaultAfterMutation = 0,
+        [switch]$SkipCanonicalResolutionForStructuralTest
+    )
+    if ($Phase -ceq 'canary-candidate' -and $AuthorizationBytes.Length -eq 0) { throw 'rollout-promotion-canary-authorization-required' }
+    $paths = Resolve-HarnessRolloutPromotionPaths -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -ReportPath $ReportPath -ProtectedRoots $ProtectedRoots
+    $sourceBytes = [IO.File]::ReadAllBytes([string]$paths.source)
+    if (-not (Test-HarnessRolloutBytesEqual -Left $sourceBytes -Right $ReportBytes)) { throw 'rollout-promotion-input-bytes-changed' }
+    $workspace = [string]$paths.workspace
+    $mutexHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.UTF8Encoding]::new($false).GetBytes([string]$paths.workspace_identity))).ToLowerInvariant()
+    $mutex = [Threading.Mutex]::new($false,"Global\dev-harness.rollout-promotion.$mutexHash")
+    $acquired = $false
+    $createdParents = [Collections.Generic.List[string]]::new()
+    $mutated = [Collections.Generic.List[object]]::new()
+    try {
+        try { $acquired = $mutex.WaitOne(10000) } catch [Threading.AbandonedMutexException] { $acquired = $true }
+        if (-not $acquired) { throw 'rollout-promotion-lock-timeout' }
+        $locked = Resolve-HarnessRolloutPromotionPaths -RepoRoot $RepoRoot -WorkspaceRoot $workspace -ReportPath $ReportPath -ProtectedRoots $ProtectedRoots
+        if (-not (Test-HarnessRolloutPromotionPathSnapshot -Left $paths -Right $locked)) { throw 'rollout-promotion-path-changed' }
+        if (-not (Test-HarnessRolloutBytesEqual -Left ([IO.File]::ReadAllBytes([string]$locked.source)) -Right $ReportBytes)) { throw 'rollout-promotion-input-bytes-changed' }
+        $records = [ordered]@{
+            final = [ordered]@{name='final';path=[string]$paths.final_target;relative=[string]$paths.final_target_relative;limit=4MB;preimage=$null}
+            candidate = [ordered]@{name='candidate';path=[string]$paths.candidate_target;relative=[string]$paths.candidate_target_relative;limit=4MB;preimage=$null}
+            authorization = [ordered]@{name='authorization';path=[string]$paths.authorization_target;relative=[string]$paths.authorization_target_relative;limit=64KB;preimage=$null}
+        }
+        foreach ($record in $records.Values) {
+            $record.preimage = Get-HarnessRolloutPublicationPreimage -Path ([string]$record.path) -Limit ([long]$record.limit) -Name ([string]$record.name)
+        }
+        if ($Phase -ceq 'canary-candidate' -and [bool]$records.final.preimage.exists) { throw 'rollout-promotion-final-already-canonical' }
+        foreach ($record in $records.Values) {
+            $cursor = [IO.Path]::GetDirectoryName([string]$record.path)
+            while (-not (Test-Path -LiteralPath $cursor)) {
+                $createdParents.Add($cursor)
+                $parent = [IO.Path]::GetDirectoryName($cursor)
+                if ([string]::IsNullOrWhiteSpace($parent) -or $parent -ceq $cursor) { throw 'rollout-promotion-parent-unavailable' }
+                $cursor = $parent
+            }
+        }
+        $operations = if ($Phase -ceq 'canary-candidate') {
+            @(
+                [ordered]@{record=$records.candidate;action='write';bytes=$ReportBytes},
+                [ordered]@{record=$records.authorization;action='write';bytes=$AuthorizationBytes}
+            )
+        } else {
+            @(
+                [ordered]@{record=$records.final;action='write';bytes=$ReportBytes},
+                [ordered]@{record=$records.candidate;action='delete';bytes=[byte[]]::new(0)},
+                [ordered]@{record=$records.authorization;action='delete';bytes=[byte[]]::new(0)}
+            )
+        }
+        $mutationCount = 0
+        try {
+            foreach ($operation in $operations) {
+                $record = $operation.record
+                if ([string]$operation.action -ceq 'write') {
+                    $digest = Get-ReleaseSha256Bytes -Bytes ([byte[]]$operation.bytes)
+                    [void](Write-HarnessRolloutPublicationBytes -WorkspaceRoot $workspace -Path ([string]$record.relative) -Bytes ([byte[]]$operation.bytes) -SourceDigest $digest -CurrentDigest ([string]$record.preimage.digest))
+                    $record['published_digest'] = $digest
+                    $mutated.Add($record)
+                    $mutationCount++
+                } elseif ([bool]$record.preimage.exists) {
+                    [void](Remove-HarnessRolloutPublicationFile -WorkspaceRoot $workspace -Path ([string]$record.relative) -ExpectedDigest ([string]$record.preimage.digest))
+                    $record['published_digest'] = 'missing'
+                    $mutated.Add($record)
+                    $mutationCount++
+                }
+                if ($FaultAfterMutation -gt 0 -and $mutationCount -eq $FaultAfterMutation) { throw 'rollout-promotion-structural-test-fault' }
+            }
+            $published = Resolve-HarnessRolloutPromotionPaths -RepoRoot $RepoRoot -WorkspaceRoot $workspace -ReportPath $ReportPath -ProtectedRoots $ProtectedRoots
+            if (-not (Test-HarnessRolloutPromotionPathSnapshot -Left $paths -Right $published)) { throw 'rollout-promotion-published-path-changed' }
+            if ($Phase -ceq 'canary-candidate') {
+                if ((Get-ReleaseFileDigest -Path ([string]$paths.candidate_target)) -cne (Get-ReleaseSha256Bytes -Bytes $ReportBytes) -or
+                    (Get-ReleaseFileDigest -Path ([string]$paths.authorization_target)) -cne (Get-ReleaseSha256Bytes -Bytes $AuthorizationBytes) -or
+                    (Test-Path -LiteralPath ([string]$paths.final_target))) { throw 'rollout-promotion-candidate-byte-verification-failed' }
+            } elseif ((Get-ReleaseFileDigest -Path ([string]$paths.final_target)) -cne (Get-ReleaseSha256Bytes -Bytes $ReportBytes) -or
+                (Test-Path -LiteralPath ([string]$paths.candidate_target)) -or (Test-Path -LiteralPath ([string]$paths.authorization_target))) { throw 'rollout-promotion-final-state-verification-failed' }
+            if ($null -ne $SourceStateStart) {
+                $sourceStateEnd = Get-HarnessReleaseSourceState -RepoRoot $RepoRoot
+                if (-not (Test-HarnessReleaseSourceStable -Start $SourceStateStart -End $sourceStateEnd)) { throw 'rollout-promotion-source-changed' }
+            }
+            if (-not $SkipCanonicalResolutionForStructuralTest) {
+                if ($null -eq $ProtocolModule -or $null -eq $ObservedHostContext) { throw 'rollout-promotion-canonical-verification-context-missing' }
+                $resolution = & $ProtocolModule {
+                    param($Root,$Workspace,$Context)
+                    Get-HarnessProtocolResolution -RepoRoot $Root -WorkspaceRoot $Workspace -RequestedProtocol auto -ObservedHostContext $Context
+                } $RepoRoot $workspace $ObservedHostContext
+                $expectedStatus = if ($Phase -ceq 'canary-candidate') { 'canary-authorized' } else { 'pass' }
+                if ([string]$resolution.selected_protocol -cne 'v2' -or [string]$resolution.rollout_eligibility.status -cne $expectedStatus) { throw 'rollout-promotion-canonical-verification-failed' }
+            }
+        } catch {
+            $publishError = $_
+            for ($index = $mutated.Count - 1; $index -ge 0; $index--) { Restore-HarnessRolloutPublicationRecord -WorkspaceRoot $workspace -Record $mutated[$index] }
+            Remove-HarnessRolloutCreatedParents -WorkspaceRoot $workspace -Directories @($createdParents)
+            throw $publishError
+        }
+        return [ordered]@{
+            workspace=$workspace;phase=$Phase
+            final_target=[string]$paths.final_target_relative
+            candidate_target=[string]$paths.candidate_target_relative
+            authorization_target=[string]$paths.authorization_target_relative
+        }
+    } finally {
+        if ($null -ne $mutex) {
+            try { if ($acquired) { [void]$mutex.ReleaseMutex() } } finally { $mutex.Dispose() }
+        }
     }
 }
 

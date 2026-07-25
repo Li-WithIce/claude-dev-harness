@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://dev-harness.local/schemas/rollout-eligibility-v2.schema.json",
-  "title": "Thin Harness rollout eligibility v2",
+  "$id": "https://dev-harness.local/schemas/rollout-review-payload.schema.json",
+  "title": "Thin Harness non-authorizing rollout review payload v1",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,38 +12,22 @@
     "generator_digest",
     "generated_at_utc",
     "host",
-    "review_payload_digest",
-    "review_receipt",
-    "provenance_status",
     "gates",
-    "eligible",
-    "report_digest"
+    "provenance_status",
+    "reviewed_payload_digest"
   ],
   "properties": {
-    "schema_version": { "type": "string", "enum": ["rollout-eligibility/v2"] },
+    "schema_version": { "type": "string", "enum": ["rollout-review-payload/v1"] },
     "phase": { "type": "string", "enum": ["canary-candidate", "final-default"] },
     "source_revision": { "$ref": "#/definitions/revision" },
     "source_digest": { "$ref": "#/definitions/digest" },
     "generator_digest": { "$ref": "#/definitions/digest" },
     "generated_at_utc": { "type": "string", "format": "date-time" },
     "host": { "$ref": "#/definitions/host" },
-    "review_payload_digest": { "$ref": "#/definitions/digest" },
-    "review_receipt": { "$ref": "#/definitions/reviewReceipt" },
-    "provenance_status": { "type": "string", "enum": ["verified", "test-only"] },
     "gates": { "$ref": "#/definitions/gates" },
-    "eligible": { "type": "boolean" },
-    "report_digest": { "$ref": "#/definitions/digest" }
+    "provenance_status": { "type": "string", "enum": ["verified", "unverified", "test-only"] },
+    "reviewed_payload_digest": { "$ref": "#/definitions/digest" }
   },
-  "allOf": [
-    {
-      "if": { "properties": { "phase": { "const": "canary-candidate" } } },
-      "then": { "properties": { "eligible": { "const": false } } }
-    },
-    {
-      "if": { "properties": { "phase": { "const": "final-default" } } },
-      "then": { "properties": { "eligible": { "const": true } } }
-    }
-  ],
   "definitions": {
     "revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
@@ -73,47 +57,6 @@
         "producer_identity": { "$ref": "#/definitions/identity" }
       }
     },
-    "reviewReceipt": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "schema_version",
-        "reviewed_payload_digest",
-        "source_revision",
-        "phase",
-        "reviewer_actor_id",
-        "reviewer_context_id",
-        "reviewer_model",
-        "read_only",
-        "verdict",
-        "findings",
-        "created_at_utc",
-        "receipt_digest"
-      ],
-      "properties": {
-        "schema_version": { "type": "string", "enum": ["rollout-report-review-receipt/v1"] },
-        "reviewed_payload_digest": { "$ref": "#/definitions/digest" },
-        "source_revision": { "$ref": "#/definitions/revision" },
-        "phase": { "type": "string", "enum": ["canary-candidate", "final-default"] },
-        "reviewer_actor_id": { "$ref": "#/definitions/identity" },
-        "reviewer_context_id": { "$ref": "#/definitions/identity" },
-        "reviewer_model": { "$ref": "#/definitions/identity" },
-        "read_only": { "type": "boolean", "const": true },
-        "verdict": { "type": "string", "enum": ["pass", "revise"] },
-        "findings": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["p0", "p1", "p2"],
-          "properties": {
-            "p0": { "type": "integer", "minimum": 0 },
-            "p1": { "type": "integer", "minimum": 0 },
-            "p2": { "type": "integer", "minimum": 0 }
-          }
-        },
-        "created_at_utc": { "type": "string", "format": "date-time" },
-        "receipt_digest": { "$ref": "#/definitions/digest" }
-      }
-    },
     "gates": {
       "type": "object",
       "additionalProperties": false,
@@ -129,7 +72,6 @@
         "DP-G09-RELEASE-MODEL",
         "DP-G10-RELEASE-HOST",
         "DP-G11-RELEASE-FULL",
-        "DP-G12-ROLLOUT-ELIGIBILITY-REPORT",
         "DP-G13-PROMOTION-AUTO-PROBE",
         "DP-G14-V1-STOP-LOSS",
         "DP-G15-CANARY",
@@ -150,7 +92,6 @@
         "DP-G09-RELEASE-MODEL": { "$ref": "#/definitions/gate" },
         "DP-G10-RELEASE-HOST": { "$ref": "#/definitions/gate" },
         "DP-G11-RELEASE-FULL": { "$ref": "#/definitions/gate" },
-        "DP-G12-ROLLOUT-ELIGIBILITY-REPORT": { "$ref": "#/definitions/gate" },
         "DP-G13-PROMOTION-AUTO-PROBE": { "$ref": "#/definitions/gate" },
         "DP-G14-V1-STOP-LOSS": { "$ref": "#/definitions/gate" },
         "DP-G15-CANARY": { "$ref": "#/definitions/gate" },

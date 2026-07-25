@@ -5,7 +5,11 @@ Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction 
 Import-Module (Join-Path $PSScriptRoot 'Harness.AtomicWrite.psm1') -Force -ErrorAction Stop
 
 $script:ProtocolConfigRelativePath = '.assistant/config/protocol.json'
-$script:RolloutCanaryAuthorizationRelativePath = '.assistant/runtime/rollout/canary-authorization.json'
+$script:RolloutFinalEligibilityRelativePath = '.assistant/runtime/rollout/v2-eligibility.json'
+$script:RolloutCanaryCandidateRelativePath = '.assistant/runtime/rollout/v2-canary-candidate.json'
+$script:RolloutCanaryAuthorizationRelativePath = '.assistant/runtime/rollout/v2-canary-authorization.json'
+$script:RolloutCanaryMaximumLifetime = [timespan]::FromDays(7)
+$script:RolloutClockSkew = [timespan]::FromMinutes(5)
 $script:RolloutV1GateNames = @('behavior','v1_compatibility','direct_performance','core_install_rollback','full_install_rollback')
 $script:RolloutV1GateCommands = [ordered]@{
     behavior = 'scripts/run-model-evals.ps1 -Model gpt-5.6-sol -Reasoning max'
@@ -26,7 +30,7 @@ $script:RolloutV2GateContracts = [ordered]@{
     'DP-G09-RELEASE-MODEL' = 'harness-release-model-receipt/v1'
     'DP-G10-RELEASE-HOST' = 'harness-release-host-receipt/v1'
     'DP-G11-RELEASE-FULL' = 'harness-release-full-receipt/v1'
-    'DP-G12-ROLLOUT-ELIGIBILITY-REPORT' = 'rollout-eligibility-v2-envelope/v1'
+    'DP-G12-ROLLOUT-ELIGIBILITY-REPORT' = 'rollout-report-review-receipt/v1'
     'DP-G13-PROMOTION-AUTO-PROBE' = 'harness-canary-promotion-receipt/v1'
     'DP-G14-V1-STOP-LOSS' = 'harness-v1-stop-loss-report/v1'
     'DP-G15-CANARY' = 'harness-canary-observation-report/v1'
@@ -236,12 +240,15 @@ function Assert-HarnessStrictJsonElement {
 function ConvertFrom-HarnessRolloutJsonBytes {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes,
-        [Parameter(Mandatory)][ValidateSet('report','evidence-set','canary-authorization')][string]$Kind
+        [Parameter(Mandatory)][ValidateSet('report','evidence-set','canary-authorization','observed-host-context','review-payload','review-receipt')][string]$Kind
     )
     $prefix = switch ($Kind) {
         'report' { 'rollout-report' }
         'evidence-set' { 'rollout-evidence-set' }
-        default { 'rollout-canary-authorization' }
+        'canary-authorization' { 'rollout-canary-authorization' }
+        'observed-host-context' { 'rollout-observed-host-context' }
+        'review-payload' { 'rollout-review-payload' }
+        default { 'rollout-review-receipt' }
     }
     $jsonDocument = $null
     try {
@@ -285,6 +292,152 @@ function Assert-HarnessRolloutUtcTime {
     if ($time.Offset -ne [timespan]::Zero) { throw $ErrorReason }
 }
 
+function Get-HarnessObservedHostContextDigest {
+    param([System.Collections.IDictionary]$Document)
+    $body = [ordered]@{
+        schema_version = $Document.schema_version
+        product = $Document.product
+        cli_version = $Document.cli_version
+        service_version = $Document.service_version
+        hook_contract = $Document.hook_contract
+        invocation_telemetry_contract = $Document.invocation_telemetry_contract
+        request_send_contract = $Document.request_send_contract
+        observed_at_utc = $Document.observed_at_utc
+    }
+    return Get-HarnessSha256Text -Content ($body | ConvertTo-Json -Depth 20 -Compress)
+}
+
+function Assert-HarnessObservedHostContext {
+    param(
+        [string]$RepoRoot,
+        [System.Collections.IDictionary]$Document,
+        [datetimeoffset]$AsOfUtc = [datetimeoffset]::UtcNow
+    )
+    Assert-HarnessRolloutSchema -RepoRoot $RepoRoot -Document $Document -SchemaRelativePath 'schemas/rollout-observed-host-context.schema.json' -ErrorReason 'rollout-observed-host-context-invalid-document'
+    Assert-HarnessRolloutKeys -Value $Document -Expected @('schema_version','product','cli_version','service_version','hook_contract','invocation_telemetry_contract','request_send_contract','observed_at_utc','context_digest') -Label 'observed-host-context'
+    if ([string]$Document.schema_version -cne 'rollout-observed-host-context/v1') { throw 'rollout-observed-host-context-invalid-schema' }
+    Assert-HarnessRolloutUtcTime -Value ([string]$Document.observed_at_utc) -ErrorReason 'rollout-observed-host-context-invalid-time'
+    $observedAt = [datetimeoffset]::Parse([string]$Document.observed_at_utc,[Globalization.CultureInfo]::InvariantCulture)
+    if ($observedAt -gt $AsOfUtc.Add($script:RolloutClockSkew)) { throw 'rollout-observed-host-context-future' }
+    if ([string]$Document.context_digest -cne (Get-HarnessObservedHostContextDigest -Document $Document)) { throw 'rollout-observed-host-context-digest-mismatch' }
+    if ([string]$Document.product -cne 'codex-cli-service') { throw 'rollout-observed-host-context-product-mismatch' }
+    if ([string]$Document.cli_version -cne '0.144.4') { throw 'rollout-observed-host-context-cli-version-mismatch' }
+    if ([string]$Document.service_version -cne '0.144.4') { throw 'rollout-observed-host-context-service-version-mismatch' }
+    if ([string]$Document.hook_contract -cne 'codex-0.144.4-environment-shell-hook/v1') { throw 'rollout-observed-host-context-hook-contract-mismatch' }
+    if ([string]$Document.invocation_telemetry_contract -cne 'codex-invocation-telemetry/v2') { throw 'rollout-observed-host-context-invocation-telemetry-contract-mismatch' }
+    if ([string]$Document.request_send_contract -cne 'codex-0.144.4-successful-websocket-send/v2') { throw 'rollout-observed-host-context-request-send-contract-mismatch' }
+}
+
+function New-HarnessObservedHostContextDocument {
+    param(
+        [string]$RepoRoot,
+        [string]$CliVersion = '0.144.4',
+        [string]$ServiceVersion = '0.144.4',
+        [string]$HookContract = 'codex-0.144.4-environment-shell-hook/v1',
+        [string]$InvocationTelemetryContract = 'codex-invocation-telemetry/v2',
+        [string]$RequestSendContract = 'codex-0.144.4-successful-websocket-send/v2',
+        [datetimeoffset]$ObservedAtUtc = [datetimeoffset]::UtcNow,
+        [switch]$SkipSemanticValidation
+    )
+    $document = [ordered]@{
+        schema_version = 'rollout-observed-host-context/v1'
+        product = 'codex-cli-service'
+        cli_version = $CliVersion
+        service_version = $ServiceVersion
+        hook_contract = $HookContract
+        invocation_telemetry_contract = $InvocationTelemetryContract
+        request_send_contract = $RequestSendContract
+        observed_at_utc = $ObservedAtUtc.ToUniversalTime().ToString('o')
+        context_digest = ''
+    }
+    $document.context_digest = Get-HarnessObservedHostContextDigest -Document $document
+    if (-not $SkipSemanticValidation) { Assert-HarnessObservedHostContext -RepoRoot $RepoRoot -Document $document }
+    return $document
+}
+
+function Get-HarnessRolloutReviewPayloadDigest {
+    param([System.Collections.IDictionary]$Document)
+    $body = [ordered]@{
+        schema_version = $Document.schema_version
+        phase = $Document.phase
+        source_revision = $Document.source_revision
+        source_digest = $Document.source_digest
+        generator_digest = $Document.generator_digest
+        generated_at_utc = $Document.generated_at_utc
+        host = $Document.host
+        gates = $Document.gates
+        provenance_status = $Document.provenance_status
+    }
+    return Get-HarnessSha256Text -Content ($body | ConvertTo-Json -Depth 100 -Compress)
+}
+
+function Get-HarnessRolloutReviewReceiptDigest {
+    param([System.Collections.IDictionary]$Document)
+    $body = [ordered]@{
+        schema_version = $Document.schema_version
+        reviewed_payload_digest = $Document.reviewed_payload_digest
+        source_revision = $Document.source_revision
+        phase = $Document.phase
+        reviewer_actor_id = $Document.reviewer_actor_id
+        reviewer_context_id = $Document.reviewer_context_id
+        reviewer_model = $Document.reviewer_model
+        read_only = $Document.read_only
+        verdict = $Document.verdict
+        findings = $Document.findings
+        created_at_utc = $Document.created_at_utc
+    }
+    return Get-HarnessSha256Text -Content ($body | ConvertTo-Json -Depth 30 -Compress)
+}
+
+function Assert-HarnessRolloutReviewReceipt {
+    param(
+        [string]$RepoRoot,
+        [System.Collections.IDictionary]$Document,
+        [string]$ExpectedPayloadDigest,
+        [string]$ExpectedSourceRevision,
+        [string]$ExpectedPhase
+    )
+    Assert-HarnessRolloutSchema -RepoRoot $RepoRoot -Document $Document -SchemaRelativePath 'schemas/rollout-review-receipt.schema.json' -ErrorReason 'rollout-review-receipt-invalid-document'
+    Assert-HarnessRolloutKeys -Value $Document -Expected @('schema_version','reviewed_payload_digest','source_revision','phase','reviewer_actor_id','reviewer_context_id','reviewer_model','read_only','verdict','findings','created_at_utc','receipt_digest') -Label 'review-receipt'
+    if ([string]$Document.schema_version -cne 'rollout-report-review-receipt/v1') { throw 'rollout-review-receipt-invalid-schema' }
+    Assert-HarnessRolloutUtcTime -Value ([string]$Document.created_at_utc) -ErrorReason 'rollout-review-receipt-invalid-time'
+    if ([string]$Document.receipt_digest -cne (Get-HarnessRolloutReviewReceiptDigest -Document $Document)) { throw 'rollout-review-receipt-digest-mismatch' }
+    if ([string]$Document.reviewed_payload_digest -cne $ExpectedPayloadDigest) { throw 'rollout-review-receipt-payload-mismatch' }
+    if ([string]$Document.source_revision -cne $ExpectedSourceRevision) { throw 'rollout-review-receipt-source-mismatch' }
+    if ([string]$Document.phase -cne $ExpectedPhase) { throw 'rollout-review-receipt-phase-mismatch' }
+    if ($Document.read_only -ne $true) { throw 'rollout-review-receipt-not-read-only' }
+    if ([string]$Document.verdict -cne 'pass') { throw 'rollout-review-receipt-verdict' }
+    if ([int]$Document.findings.p0 -ne 0 -or [int]$Document.findings.p1 -ne 0 -or [int]$Document.findings.p2 -ne 0) { throw 'rollout-review-receipt-findings' }
+}
+
+function New-HarnessRolloutReviewReceiptDocument {
+    param(
+        [string]$RepoRoot,
+        [System.Collections.IDictionary]$Payload,
+        [string]$ReviewerActorId,
+        [string]$ReviewerContextId,
+        [string]$ReviewerModel,
+        [datetimeoffset]$CreatedAtUtc = [datetimeoffset]::UtcNow
+    )
+    $document = [ordered]@{
+        schema_version = 'rollout-report-review-receipt/v1'
+        reviewed_payload_digest = [string]$Payload.reviewed_payload_digest
+        source_revision = [string]$Payload.source_revision
+        phase = [string]$Payload.phase
+        reviewer_actor_id = $ReviewerActorId
+        reviewer_context_id = $ReviewerContextId
+        reviewer_model = $ReviewerModel
+        read_only = $true
+        verdict = 'pass'
+        findings = [ordered]@{p0=0;p1=0;p2=0}
+        created_at_utc = $CreatedAtUtc.ToUniversalTime().ToString('o')
+        receipt_digest = ''
+    }
+    $document.receipt_digest = Get-HarnessRolloutReviewReceiptDigest -Document $document
+    Assert-HarnessRolloutReviewReceipt -RepoRoot $RepoRoot -Document $document -ExpectedPayloadDigest ([string]$Payload.reviewed_payload_digest) -ExpectedSourceRevision ([string]$Payload.source_revision) -ExpectedPhase ([string]$Payload.phase)
+    return $document
+}
+
 function Assert-HarnessRolloutV2Host {
     param([System.Collections.IDictionary]$Binding)
     $expected = Get-HarnessRolloutV2ExpectedHost
@@ -299,22 +452,99 @@ function Assert-HarnessRolloutV2GateSet {
         [System.Collections.IDictionary]$Gates,
         [Parameter(Mandatory)][string]$SourceRevision,
         [Parameter(Mandatory)][ValidateSet('canary-candidate','final-default')][string]$Phase,
-        [switch]$InputOnly
+        [switch]$InputOnly,
+        [switch]$AllowNonAuthorizingStatus
     )
     $contracts = Get-HarnessRolloutV2GateContracts -InputOnly:$InputOnly
     Assert-HarnessRolloutKeys -Value $Gates -Expected @($contracts.Keys) -Label 'gates'
     foreach ($name in $contracts.Keys) {
         $gate = $Gates[$name]
-        Assert-HarnessRolloutKeys -Value $gate -Expected @('status','evidence_contract','evidence_digest','source_revision') -Label "gate-$name"
+        Assert-HarnessRolloutKeys -Value $gate -Expected @('status','evidence_contract','artifact_path','evidence_digest','source_revision','producer_identity') -Label "gate-$name"
         if ([string]$gate.status -cnotin @('pass','fail','blocked','unavailable','simulated','not_run','pending','skipped','manual')) { throw 'rollout-report-invalid-status' }
         if ([string]$gate.evidence_contract -cne [string]$contracts[$name]) { throw "rollout-report-evidence-contract-$name" }
+        if ([string]::IsNullOrWhiteSpace([string]$gate.artifact_path) -or [string]::IsNullOrWhiteSpace([string]$gate.producer_identity)) { throw 'rollout-evidence-provenance-unverified' }
         if ([string]$gate.evidence_digest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'rollout-report-invalid-digest' }
         if ([string]$gate.source_revision -cne $SourceRevision) { throw "rollout-report-evidence-revision-$name" }
     }
-    foreach ($name in $contracts.Keys) {
-        $expectedStatus = if ($Phase -ceq 'canary-candidate' -and [string]$name -cin $script:RolloutV2PostPromotionGates) { 'not_run' } else { 'pass' }
-        if ([string]$Gates[$name].status -cne $expectedStatus) { throw "rollout-report-phase-gate-$name" }
+    if (-not $AllowNonAuthorizingStatus) {
+        foreach ($name in $contracts.Keys) {
+            $expectedStatus = if ($Phase -ceq 'canary-candidate' -and [string]$name -cin $script:RolloutV2PostPromotionGates) { 'not_run' } else { 'pass' }
+            if ([string]$Gates[$name].status -cne $expectedStatus) { throw "rollout-report-phase-gate-$name" }
+        }
     }
+}
+
+function Test-HarnessRolloutEvidenceProvenanceShape {
+    param([System.Collections.IDictionary]$Document)
+    if ($Document -isnot [System.Collections.IDictionary] -or -not $Document.Contains('gates') -or $Document.gates -isnot [System.Collections.IDictionary]) { return $false }
+    foreach ($gate in @($Document.gates.Values)) {
+        if ($gate -isnot [System.Collections.IDictionary]) { return $false }
+        foreach ($name in @('status','evidence_contract','artifact_path','evidence_digest','source_revision','producer_identity')) {
+            if (-not $gate.Contains($name)) { return $false }
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$gate.artifact_path) -or [string]::IsNullOrWhiteSpace([string]$gate.producer_identity)) { return $false }
+    }
+    return $true
+}
+
+function Assert-HarnessRolloutReviewPayload {
+    param([string]$RepoRoot,[System.Collections.IDictionary]$Document)
+    Assert-HarnessRolloutSchema -RepoRoot $RepoRoot -Document $Document -SchemaRelativePath 'schemas/rollout-review-payload.schema.json' -ErrorReason 'rollout-review-payload-invalid-document'
+    Assert-HarnessRolloutKeys -Value $Document -Expected @('schema_version','phase','source_revision','source_digest','generator_digest','generated_at_utc','host','gates','provenance_status','reviewed_payload_digest') -Label 'review-payload'
+    if ([string]$Document.schema_version -cne 'rollout-review-payload/v1') { throw 'rollout-review-payload-invalid-schema' }
+    if ([string]$Document.phase -cnotin @('canary-candidate','final-default')) { throw 'rollout-review-payload-invalid-phase' }
+    if ([string]$Document.provenance_status -cnotin @('verified','unverified','test-only')) { throw 'rollout-review-payload-invalid-provenance' }
+    Assert-HarnessRolloutUtcTime -Value ([string]$Document.generated_at_utc) -ErrorReason 'rollout-review-payload-invalid-time'
+    Assert-HarnessRolloutV2Host -Binding $Document.host
+    Assert-HarnessRolloutV2GateSet -Gates $Document.gates -SourceRevision ([string]$Document.source_revision) -Phase ([string]$Document.phase) -InputOnly -AllowNonAuthorizingStatus:([string]$Document.provenance_status -ceq 'unverified')
+    if ([string]$Document.reviewed_payload_digest -cne (Get-HarnessRolloutReviewPayloadDigest -Document $Document)) { throw 'rollout-review-payload-digest-mismatch' }
+    Assert-HarnessRolloutDistributionClean -RepoRoot $RepoRoot
+    Assert-HarnessRolloutSourceHeadBound -RepoRoot $RepoRoot
+    if ([string]$Document.source_revision -cne (Get-HarnessRolloutRevision -RepoRoot $RepoRoot)) { throw 'rollout-review-payload-stale-revision' }
+    if ([string]$Document.source_digest -cne (Get-HarnessRolloutSourceDigest -RepoRoot $RepoRoot)) { throw 'rollout-review-payload-stale-source' }
+    $generatorDigest = Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path 'scripts/generate-v2-rollout-report.ps1'
+    if ([string]$Document.generator_digest -cne $generatorDigest) { throw 'rollout-review-payload-stale-generator' }
+}
+
+function New-HarnessRolloutReviewPayloadDocument {
+    param(
+        [string]$RepoRoot,
+        [System.Collections.IDictionary]$EvidenceSet,
+        [Parameter(Mandatory)][ValidateSet('verified','unverified','test-only')][string]$ProvenanceStatus
+    )
+    Assert-HarnessRolloutV2EvidenceSet -RepoRoot $RepoRoot -Document $EvidenceSet
+    $gates = [ordered]@{}
+    foreach ($name in (Get-HarnessRolloutV2GateContracts -InputOnly).Keys) {
+        $input = $EvidenceSet.gates[$name]
+        $status = if ($ProvenanceStatus -ceq 'unverified') {
+            if ([string]$EvidenceSet.phase -ceq 'canary-candidate' -and [string]$name -cin $script:RolloutV2PostPromotionGates) { 'not_run' } else { 'unavailable' }
+        } else { [string]$input.status }
+        $gates[$name] = [ordered]@{
+            status = $status
+            evidence_contract = [string]$input.evidence_contract
+            artifact_path = [string]$input.artifact_path
+            evidence_digest = [string]$input.evidence_digest
+            source_revision = [string]$input.source_revision
+            producer_identity = [string]$input.producer_identity
+        }
+    }
+    $hostBinding = [ordered]@{}
+    foreach ($name in (Get-HarnessRolloutV2ExpectedHost).Keys) { $hostBinding[$name] = [string]$EvidenceSet.host[$name] }
+    $document = [ordered]@{
+        schema_version = 'rollout-review-payload/v1'
+        phase = [string]$EvidenceSet.phase
+        source_revision = Get-HarnessRolloutRevision -RepoRoot $RepoRoot
+        source_digest = Get-HarnessRolloutSourceDigest -RepoRoot $RepoRoot
+        generator_digest = Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path 'scripts/generate-v2-rollout-report.ps1'
+        generated_at_utc = [datetimeoffset]::UtcNow.ToString('o')
+        host = $hostBinding
+        gates = $gates
+        provenance_status = $ProvenanceStatus
+        reviewed_payload_digest = ''
+    }
+    $document.reviewed_payload_digest = Get-HarnessRolloutReviewPayloadDigest -Document $document
+    Assert-HarnessRolloutReviewPayload -RepoRoot $RepoRoot -Document $document
+    return $document
 }
 
 function Get-HarnessRolloutSourcePaths {
@@ -407,6 +637,9 @@ function Get-HarnessRolloutV2ReportDigest {
         generator_digest = $Document.generator_digest
         generated_at_utc = $Document.generated_at_utc
         host = $Document.host
+        review_payload_digest = $Document.review_payload_digest
+        review_receipt = $Document.review_receipt
+        provenance_status = $Document.provenance_status
         gates = $Document.gates
         eligible = $Document.eligible
     }
@@ -448,20 +681,56 @@ function Assert-HarnessRolloutV1Report {
     if ([string]$Document.generator_digest -cne $generatorDigest) { throw 'rollout-report-stale-generator' }
 }
 
+function Convert-HarnessRolloutReportToReviewPayload {
+    param([System.Collections.IDictionary]$Document)
+    $gates = [ordered]@{}
+    foreach ($name in (Get-HarnessRolloutV2GateContracts -InputOnly).Keys) {
+        $gate = $Document.gates[$name]
+        $gates[$name] = [ordered]@{
+            status = [string]$gate.status
+            evidence_contract = [string]$gate.evidence_contract
+            artifact_path = [string]$gate.artifact_path
+            evidence_digest = [string]$gate.evidence_digest
+            source_revision = [string]$gate.source_revision
+            producer_identity = [string]$gate.producer_identity
+        }
+    }
+    return [ordered]@{
+        schema_version = 'rollout-review-payload/v1'
+        phase = [string]$Document.phase
+        source_revision = [string]$Document.source_revision
+        source_digest = [string]$Document.source_digest
+        generator_digest = [string]$Document.generator_digest
+        generated_at_utc = [string]$Document.generated_at_utc
+        host = $Document.host
+        gates = $gates
+        provenance_status = [string]$Document.provenance_status
+        reviewed_payload_digest = [string]$Document.review_payload_digest
+    }
+}
+
 function Assert-HarnessRolloutV2Report {
     param([string]$RepoRoot,[System.Collections.IDictionary]$Document)
     Assert-HarnessRolloutSchema -RepoRoot $RepoRoot -Document $Document -SchemaRelativePath 'schemas/rollout-eligibility-v2.schema.json' -ErrorReason 'rollout-report-invalid-document'
-    Assert-HarnessRolloutKeys -Value $Document -Expected @('schema_version','phase','source_revision','source_digest','generator_digest','generated_at_utc','host','gates','eligible','report_digest') -Label 'document'
+    Assert-HarnessRolloutKeys -Value $Document -Expected @('schema_version','phase','source_revision','source_digest','generator_digest','generated_at_utc','host','review_payload_digest','review_receipt','provenance_status','gates','eligible','report_digest') -Label 'document'
     if ([string]$Document.schema_version -cne 'rollout-eligibility/v2') { throw 'rollout-report-invalid-schema' }
     if ([string]$Document.phase -cnotin @('canary-candidate','final-default')) { throw 'rollout-report-invalid-phase' }
-    if ([string]$Document.source_revision -cnotmatch '^[0-9a-f]{40}$' -or [string]$Document.source_digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or [string]$Document.generator_digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or [string]$Document.report_digest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'rollout-report-invalid-digest' }
+    if ([string]$Document.provenance_status -cnotin @('verified','test-only')) { throw 'rollout-report-invalid-provenance' }
+    if ([string]$Document.source_revision -cnotmatch '^[0-9a-f]{40}$' -or [string]$Document.source_digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or [string]$Document.generator_digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or [string]$Document.review_payload_digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or [string]$Document.report_digest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'rollout-report-invalid-digest' }
     Assert-HarnessRolloutUtcTime -Value ([string]$Document.generated_at_utc) -ErrorReason 'rollout-report-invalid-time'
     if ($Document.eligible -isnot [bool]) { throw 'rollout-report-invalid-eligibility' }
     Assert-HarnessRolloutV2Host -Binding $Document.host
     Assert-HarnessRolloutV2GateSet -Gates $Document.gates -SourceRevision ([string]$Document.source_revision) -Phase ([string]$Document.phase)
-    $envelopeGate = $Document.gates['DP-G12-ROLLOUT-ELIGIBILITY-REPORT']
-    $schemaDigest = Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path 'schemas/rollout-eligibility-v2.schema.json'
-    if ([string]$envelopeGate.evidence_digest -cne $schemaDigest) { throw 'rollout-report-envelope-schema-digest' }
+    $payload = Convert-HarnessRolloutReportToReviewPayload -Document $Document
+    Assert-HarnessRolloutReviewPayload -RepoRoot $RepoRoot -Document $payload
+    if ([string]$Document.review_payload_digest -cne [string]$payload.reviewed_payload_digest) { throw 'rollout-report-review-payload-mismatch' }
+    Assert-HarnessRolloutReviewReceipt -RepoRoot $RepoRoot -Document $Document.review_receipt -ExpectedPayloadDigest ([string]$Document.review_payload_digest) -ExpectedSourceRevision ([string]$Document.source_revision) -ExpectedPhase ([string]$Document.phase)
+    $reviewGate = $Document.gates['DP-G12-ROLLOUT-ELIGIBILITY-REPORT']
+    if ([string]$reviewGate.status -cne 'pass' -or
+        [string]$reviewGate.evidence_contract -cne 'rollout-report-review-receipt/v1' -or
+        [string]$reviewGate.evidence_digest -cne [string]$Document.review_receipt.receipt_digest -or
+        [string]$reviewGate.producer_identity -cne [string]$Document.review_receipt.reviewer_actor_id -or
+        [string]::IsNullOrWhiteSpace([string]$reviewGate.artifact_path)) { throw 'rollout-report-review-binding-mismatch' }
     $expectedEligible = [string]$Document.phase -ceq 'final-default'
     if ([bool]$Document.eligible -ne $expectedEligible) { throw 'rollout-report-invalid-eligibility' }
     if ([string]$Document.report_digest -cne (Get-HarnessRolloutReportDigest -Document $Document)) { throw 'rollout-report-digest-mismatch' }
@@ -482,53 +751,70 @@ function Assert-HarnessRolloutReport {
 
 function Assert-HarnessRolloutV2EvidenceSet {
     param([string]$RepoRoot,[System.Collections.IDictionary]$Document)
+    if (-not (Test-HarnessRolloutEvidenceProvenanceShape -Document $Document)) { throw 'rollout-evidence-provenance-unverified' }
     Assert-HarnessRolloutSchema -RepoRoot $RepoRoot -Document $Document -SchemaRelativePath 'schemas/rollout-evidence-set.schema.json' -ErrorReason 'rollout-evidence-set-invalid-document'
     Assert-HarnessRolloutKeys -Value $Document -Expected @('schema_version','phase','source_revision','host','gates') -Label 'evidence-set'
     if ([string]$Document.schema_version -cne 'rollout-evidence-set/v1') { throw 'rollout-evidence-set-invalid-schema' }
     if ([string]$Document.phase -cnotin @('canary-candidate','final-default')) { throw 'rollout-evidence-set-invalid-phase' }
     if ([string]$Document.source_revision -cnotmatch '^[0-9a-f]{40}$') { throw 'rollout-evidence-set-invalid-revision' }
     Assert-HarnessRolloutV2Host -Binding $Document.host
-    Assert-HarnessRolloutV2GateSet -Gates $Document.gates -SourceRevision ([string]$Document.source_revision) -Phase ([string]$Document.phase) -InputOnly
+    Assert-HarnessRolloutV2GateSet -Gates $Document.gates -SourceRevision ([string]$Document.source_revision) -Phase ([string]$Document.phase) -InputOnly -AllowNonAuthorizingStatus
     Assert-HarnessRolloutRepositoryClean -RepoRoot $RepoRoot
     Assert-HarnessRolloutSourceHeadBound -RepoRoot $RepoRoot
     if ([string]$Document.source_revision -cne (Get-HarnessRolloutRevision -RepoRoot $RepoRoot)) { throw 'rollout-evidence-set-stale-revision' }
 }
 
 function New-HarnessRolloutV2ReportDocument {
-    param([string]$RepoRoot,[System.Collections.IDictionary]$EvidenceSet)
-    Assert-HarnessRolloutV2EvidenceSet -RepoRoot $RepoRoot -Document $EvidenceSet
-    $sourceRevision = Get-HarnessRolloutRevision -RepoRoot $RepoRoot
+    param(
+        [string]$RepoRoot,
+        [System.Collections.IDictionary]$ReviewPayload,
+        [System.Collections.IDictionary]$ReviewReceipt,
+        [string]$ReviewReceiptArtifactPath,
+        [switch]$TestOnly
+    )
+    Assert-HarnessRolloutReviewPayload -RepoRoot $RepoRoot -Document $ReviewPayload
+    Assert-HarnessRolloutReviewReceipt -RepoRoot $RepoRoot -Document $ReviewReceipt -ExpectedPayloadDigest ([string]$ReviewPayload.reviewed_payload_digest) -ExpectedSourceRevision ([string]$ReviewPayload.source_revision) -ExpectedPhase ([string]$ReviewPayload.phase)
+    if ([string]::IsNullOrWhiteSpace($ReviewReceiptArtifactPath)) { throw 'rollout-review-receipt-artifact-path-required' }
+    if ($TestOnly) {
+        if ([string]$ReviewPayload.provenance_status -cne 'test-only') { throw 'rollout-report-test-only-payload-required' }
+    } elseif ([string]$ReviewPayload.provenance_status -cne 'verified') { throw 'rollout-evidence-provenance-unverified' }
+    $sourceRevision = [string]$ReviewPayload.source_revision
     $gates = [ordered]@{}
     foreach ($name in $script:RolloutV2GateContracts.Keys) {
         if ([string]$name -ceq 'DP-G12-ROLLOUT-ELIGIBILITY-REPORT') {
             $gates[$name] = [ordered]@{
                 status = 'pass'
                 evidence_contract = [string]$script:RolloutV2GateContracts[$name]
-                evidence_digest = Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path 'schemas/rollout-eligibility-v2.schema.json'
+                artifact_path = $ReviewReceiptArtifactPath
+                evidence_digest = [string]$ReviewReceipt.receipt_digest
                 source_revision = $sourceRevision
+                producer_identity = [string]$ReviewReceipt.reviewer_actor_id
             }
             continue
         }
-        $gate = $EvidenceSet.gates[$name]
+        $gate = $ReviewPayload.gates[$name]
         $gates[$name] = [ordered]@{
             status = [string]$gate.status
             evidence_contract = [string]$gate.evidence_contract
+            artifact_path = [string]$gate.artifact_path
             evidence_digest = [string]$gate.evidence_digest
             source_revision = [string]$gate.source_revision
+            producer_identity = [string]$gate.producer_identity
         }
     }
-    $host = [ordered]@{}
-    foreach ($name in (Get-HarnessRolloutV2ExpectedHost).Keys) { $host[$name] = [string]$EvidenceSet.host[$name] }
     $document = [ordered]@{
         schema_version = 'rollout-eligibility/v2'
-        phase = [string]$EvidenceSet.phase
+        phase = [string]$ReviewPayload.phase
         source_revision = $sourceRevision
-        source_digest = Get-HarnessRolloutSourceDigest -RepoRoot $RepoRoot
-        generator_digest = Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path 'scripts/generate-v2-rollout-report.ps1'
-        generated_at_utc = [datetimeoffset]::UtcNow.ToString('o')
-        host = $host
+        source_digest = [string]$ReviewPayload.source_digest
+        generator_digest = [string]$ReviewPayload.generator_digest
+        generated_at_utc = [string]$ReviewPayload.generated_at_utc
+        host = $ReviewPayload.host
+        review_payload_digest = [string]$ReviewPayload.reviewed_payload_digest
+        review_receipt = $ReviewReceipt
+        provenance_status = [string]$ReviewPayload.provenance_status
         gates = $gates
-        eligible = [string]$EvidenceSet.phase -ceq 'final-default'
+        eligible = [string]$ReviewPayload.phase -ceq 'final-default'
         report_digest = ''
     }
     $document.report_digest = Get-HarnessRolloutReportDigest -Document $document
@@ -551,7 +837,13 @@ function Get-HarnessCanaryAuthorizationDigest {
         report_digest = $Document.report_digest
         source_revision = $Document.source_revision
         workspace_identity_digest = $Document.workspace_identity_digest
-        authorized_at_utc = $Document.authorized_at_utc
+        observed_host_context_digest = $Document.observed_host_context_digest
+        authorization_id = $Document.authorization_id
+        authorized_by = $Document.authorized_by
+        issued_at_utc = $Document.issued_at_utc
+        expires_at_utc = $Document.expires_at_utc
+        new_tasks_only = $Document.new_tasks_only
+        status = $Document.status
     }
     return Get-HarnessSha256Text -Content ($body | ConvertTo-Json -Depth 20 -Compress)
 }
@@ -561,32 +853,64 @@ function Assert-HarnessCanaryAuthorization {
         [string]$RepoRoot,
         [string]$WorkspaceRoot,
         [System.Collections.IDictionary]$Report,
-        [System.Collections.IDictionary]$Document
+        [System.Collections.IDictionary]$ObservedHostContext,
+        [System.Collections.IDictionary]$Document,
+        [datetimeoffset]$AsOfUtc = [datetimeoffset]::UtcNow
     )
     Assert-HarnessRolloutSchema -RepoRoot $RepoRoot -Document $Document -SchemaRelativePath 'schemas/rollout-canary-authorization.schema.json' -ErrorReason 'rollout-canary-authorization-invalid-document'
     if ([string]$Report.schema_version -cne 'rollout-eligibility/v2' -or [string]$Report.phase -cne 'canary-candidate' -or [bool]$Report.eligible) { throw 'rollout-canary-authorization-report-phase' }
+    if ([string]$Report.provenance_status -cne 'verified') { throw 'rollout-canary-authorization-report-provenance' }
+    Assert-HarnessObservedHostContext -RepoRoot $RepoRoot -Document $ObservedHostContext -AsOfUtc $AsOfUtc
     if ([string]$Document.report_schema_version -cne [string]$Report.schema_version -or [string]$Document.report_phase -cne [string]$Report.phase -or [string]$Document.report_digest -cne [string]$Report.report_digest -or [string]$Document.source_revision -cne [string]$Report.source_revision) { throw 'rollout-canary-authorization-report-mismatch' }
-    Assert-HarnessRolloutUtcTime -Value ([string]$Document.authorized_at_utc) -ErrorReason 'rollout-canary-authorization-invalid-time'
+    if ([string]$Document.observed_host_context_digest -cne [string]$ObservedHostContext.context_digest) { throw 'rollout-canary-authorization-host-context-mismatch' }
+    if ([string]::IsNullOrWhiteSpace([string]$Document.authorized_by) -or [string]::IsNullOrWhiteSpace([string]$Document.authorization_id)) { throw 'rollout-canary-authorization-owner-required' }
+    if ($Document.new_tasks_only -ne $true) { throw 'rollout-canary-authorization-new-tasks-only' }
+    if ([string]$Document.status -cne 'granted') { throw 'rollout-canary-authorization-status' }
+    Assert-HarnessRolloutUtcTime -Value ([string]$Document.issued_at_utc) -ErrorReason 'rollout-canary-authorization-invalid-time'
+    Assert-HarnessRolloutUtcTime -Value ([string]$Document.expires_at_utc) -ErrorReason 'rollout-canary-authorization-invalid-time'
+    $issuedAt = [datetimeoffset]::Parse([string]$Document.issued_at_utc,[Globalization.CultureInfo]::InvariantCulture)
+    $expiresAt = [datetimeoffset]::Parse([string]$Document.expires_at_utc,[Globalization.CultureInfo]::InvariantCulture)
+    if ($issuedAt -gt $AsOfUtc.Add($script:RolloutClockSkew)) { throw 'rollout-canary-authorization-future-issued' }
+    if ($expiresAt -le $issuedAt) { throw 'rollout-canary-authorization-invalid-expiry' }
+    if (($expiresAt - $issuedAt) -gt $script:RolloutCanaryMaximumLifetime) { throw 'rollout-canary-authorization-duration-exceeded' }
+    if ($expiresAt -le $AsOfUtc) { throw 'rollout-canary-authorization-expired' }
     if ([string]$Document.workspace_identity_digest -cne (Get-HarnessWorkspaceIdentityDigest -WorkspaceRoot $WorkspaceRoot)) { throw 'rollout-canary-authorization-workspace-mismatch' }
     if ([string]$Document.authorization_digest -cne (Get-HarnessCanaryAuthorizationDigest -Document $Document)) { throw 'rollout-canary-authorization-digest-mismatch' }
 }
 
 function New-HarnessCanaryAuthorizationDocument {
-    param([string]$RepoRoot,[string]$WorkspaceRoot,[System.Collections.IDictionary]$Report)
+    param(
+        [string]$RepoRoot,
+        [string]$WorkspaceRoot,
+        [System.Collections.IDictionary]$Report,
+        [System.Collections.IDictionary]$ObservedHostContext,
+        [string]$AuthorizedBy,
+        [datetimeoffset]$ExpiresAtUtc,
+        [datetimeoffset]$IssuedAtUtc = [datetimeoffset]::UtcNow
+    )
     Assert-HarnessRolloutV2Report -RepoRoot $RepoRoot -Document $Report
     if ([string]$Report.phase -cne 'canary-candidate' -or [bool]$Report.eligible) { throw 'rollout-canary-authorization-report-phase' }
+    if ([string]$Report.provenance_status -cne 'verified') { throw 'rollout-canary-authorization-report-provenance' }
+    if ([string]::IsNullOrWhiteSpace($AuthorizedBy)) { throw 'rollout-canary-authorization-owner-required' }
+    Assert-HarnessObservedHostContext -RepoRoot $RepoRoot -Document $ObservedHostContext -AsOfUtc $IssuedAtUtc
     $document = [ordered]@{
         schema_version = 'rollout-canary-authorization/v1'
+        authorization_id = [guid]::NewGuid().ToString('D').ToLowerInvariant()
         report_schema_version = [string]$Report.schema_version
         report_phase = [string]$Report.phase
         report_digest = [string]$Report.report_digest
         source_revision = [string]$Report.source_revision
         workspace_identity_digest = Get-HarnessWorkspaceIdentityDigest -WorkspaceRoot $WorkspaceRoot
-        authorized_at_utc = [datetimeoffset]::UtcNow.ToString('o')
+        observed_host_context_digest = [string]$ObservedHostContext.context_digest
+        authorized_by = $AuthorizedBy.Trim()
+        issued_at_utc = $IssuedAtUtc.ToUniversalTime().ToString('o')
+        expires_at_utc = $ExpiresAtUtc.ToUniversalTime().ToString('o')
+        new_tasks_only = $true
+        status = 'granted'
         authorization_digest = ''
     }
     $document.authorization_digest = Get-HarnessCanaryAuthorizationDigest -Document $document
-    Assert-HarnessCanaryAuthorization -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Report $Report -Document $document
+    Assert-HarnessCanaryAuthorization -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Report $Report -ObservedHostContext $ObservedHostContext -Document $document -AsOfUtc $IssuedAtUtc
     return $document
 }
 
@@ -643,11 +967,21 @@ function Read-HarnessRolloutWorkspaceDocument {
     return ConvertFrom-HarnessRolloutJsonBytes -Bytes $bytes -Kind $jsonKind
 }
 
+function Assert-HarnessRolloutAuthorizingProvenance {
+    param([System.Collections.IDictionary]$Document)
+    if ([string]$Document.provenance_status -cne 'verified') { throw 'rollout-evidence-provenance-unverified' }
+    foreach ($name in (Get-HarnessRolloutV2GateContracts -InputOnly).Keys) {
+        throw "rollout-evidence-provenance-unwired-$name"
+    }
+}
+
 function Get-HarnessRolloutEligibility {
     param(
         [string]$RepoRoot,
         [string]$WorkspaceRoot,
-        [AllowEmptyString()][string]$ReportPath = ''
+        [AllowEmptyString()][string]$ReportPath = '',
+        [AllowNull()][System.Collections.IDictionary]$ObservedHostContext = $null,
+        [datetimeoffset]$AsOfUtc = [datetimeoffset]::UtcNow
     )
     if ([string]::IsNullOrWhiteSpace($ReportPath)) { return [ordered]@{status='missing';eligible=$false;reason='rollout-report-missing';report_digest=$null} }
     try {
@@ -661,17 +995,38 @@ function Get-HarnessRolloutEligibility {
             }
             return [ordered]@{status='historical';eligible=$false;reason='rollout-v1-historical-diagnostic-only';report_digest=[string]$document.report_digest;report_schema_version='rollout-eligibility/v1';phase='historical-v1';report_eligible=[bool]$document.eligible}
         }
+        if ($null -eq $ObservedHostContext) {
+            return [ordered]@{status='unauthorized';eligible=$false;reason='rollout-observed-host-context-missing';report_digest=[string]$document.report_digest;report_schema_version='rollout-eligibility/v2';phase=[string]$document.phase;report_eligible=[bool]$document.eligible;authorization_digest=$null}
+        }
+        try { Assert-HarnessObservedHostContext -RepoRoot $RepoRoot -Document $ObservedHostContext -AsOfUtc $AsOfUtc }
+        catch {
+            $hostReason = [string]$_.Exception.Message
+            if (-not $hostReason.StartsWith('rollout-observed-host-context',[StringComparison]::Ordinal)) { $hostReason = 'rollout-observed-host-context-invalid' }
+            return [ordered]@{status='unauthorized';eligible=$false;reason=$hostReason;report_digest=[string]$document.report_digest;report_schema_version='rollout-eligibility/v2';phase=[string]$document.phase;report_eligible=[bool]$document.eligible;authorization_digest=$null}
+        }
         if ([string]$document.phase -ceq 'final-default') {
+            try { Assert-HarnessRolloutAuthorizingProvenance -Document $document }
+            catch {
+                $provenanceReason = [string]$_.Exception.Message
+                if (-not $provenanceReason.StartsWith('rollout-evidence-provenance',[StringComparison]::Ordinal)) { $provenanceReason = 'rollout-evidence-provenance-unverified' }
+                return [ordered]@{status='unavailable';eligible=$false;reason=$provenanceReason;report_digest=[string]$document.report_digest;report_schema_version='rollout-eligibility/v2';phase='final-default';report_eligible=$true;authorization_digest=$null}
+            }
             return [ordered]@{status='pass';eligible=$true;reason='eligible-rollout-report';report_digest=[string]$document.report_digest;report_schema_version='rollout-eligibility/v2';phase='final-default';report_eligible=$true;authorization_digest=$null}
         }
         try {
             $authorization = Read-HarnessRolloutWorkspaceDocument -WorkspaceRoot $WorkspaceRoot -Path $script:RolloutCanaryAuthorizationRelativePath -Kind canary-authorization
             if ($null -eq $authorization) { throw 'rollout-canary-authorization-missing' }
-            Assert-HarnessCanaryAuthorization -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Report $document -Document $authorization
+            Assert-HarnessCanaryAuthorization -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Report $document -ObservedHostContext $ObservedHostContext -Document $authorization -AsOfUtc $AsOfUtc
         } catch {
             $authorizationReason = [string]$_.Exception.Message
             if (-not $authorizationReason.StartsWith('rollout-canary-authorization',[StringComparison]::Ordinal)) { $authorizationReason = 'rollout-canary-authorization-invalid' }
             return [ordered]@{status='unauthorized';eligible=$false;reason=$authorizationReason;report_digest=[string]$document.report_digest;report_schema_version='rollout-eligibility/v2';phase='canary-candidate';report_eligible=$false;authorization_digest=$null}
+        }
+        try { Assert-HarnessRolloutAuthorizingProvenance -Document $document }
+        catch {
+            $provenanceReason = [string]$_.Exception.Message
+            if (-not $provenanceReason.StartsWith('rollout-evidence-provenance',[StringComparison]::Ordinal)) { $provenanceReason = 'rollout-evidence-provenance-unverified' }
+            return [ordered]@{status='unavailable';eligible=$false;reason=$provenanceReason;report_digest=[string]$document.report_digest;report_schema_version='rollout-eligibility/v2';phase='canary-candidate';report_eligible=$false;authorization_digest=[string]$authorization.authorization_digest}
         }
         return [ordered]@{status='canary-authorized';eligible=$true;reason='authorized-canary-candidate';report_digest=[string]$document.report_digest;report_schema_version='rollout-eligibility/v2';phase='canary-candidate';report_eligible=$false;authorization_digest=[string]$authorization.authorization_digest}
     } catch {
@@ -689,7 +1044,8 @@ function Get-HarnessProtocolResolution {
         [string]$TaskId = '',
         [string]$RequestedProtocol = '',
         [string]$RepoRoot = '',
-        [string]$EligibilityReportPath = ''
+        [string]$EligibilityReportPath = '',
+        [AllowNull()][System.Collections.IDictionary]$ObservedHostContext = $null
     )
 
     $WorkspaceRoot = Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
@@ -761,8 +1117,11 @@ function Get-HarnessProtocolResolution {
                 $reportPathSelected = $true
             }
         }
-        if (-not $reportPathSelected) { $reportPath = '.assistant/runtime/rollout/v2-eligibility.json' }
-        $rollout = Get-HarnessRolloutEligibility -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -ReportPath $reportPath
+        if (-not $reportPathSelected) {
+            $finalTarget = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $script:RolloutFinalEligibilityRelativePath -Label 'rollout final eligibility' -AllowMissing
+            $reportPath = if (Test-Path -LiteralPath $finalTarget -PathType Leaf) { $script:RolloutFinalEligibilityRelativePath } else { $script:RolloutCanaryCandidateRelativePath }
+        }
+        $rollout = Get-HarnessRolloutEligibility -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -ReportPath $reportPath -ObservedHostContext $ObservedHostContext
     }
     $selected = if ($detected -cin @('v1','v2')) {
         $detected
