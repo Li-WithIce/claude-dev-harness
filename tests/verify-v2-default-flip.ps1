@@ -80,10 +80,23 @@ function Assert-AuthorizationReason([Collections.IDictionary]$Report,[Collection
     return Get-Rejection {& $script:protocolModule {param($Root,$Work,$Rep,$Ctx,$Auth,$Now)Assert-HarnessCanaryAuthorization -RepoRoot $Root -WorkspaceRoot $Work -Report $Rep -ObservedHostContext $Ctx -Document $Auth -AsOfUtc $Now} $RepoRoot $Workspace $Report $Context $Authorization $AsOf}
 }
 function Invoke-StructuralTransaction([string]$Workspace,[string]$InputPath,[string]$Phase,[byte[]]$ReportBytes,[byte[]]$AuthorizationBytes,[int]$FaultAfter=0) {
+    $reportDocument=[Text.UTF8Encoding]::new($false,$true).GetString($ReportBytes)|ConvertFrom-Json -AsHashtable -Depth 100
+    $authorizationDigest=if($AuthorizationBytes.Length-eq0){''}else{[string]([Text.UTF8Encoding]::new($false,$true).GetString($AuthorizationBytes)|ConvertFrom-Json -AsHashtable -Depth 100).authorization_digest}
     return & $script:evidenceModule {
-        param($Root,$Work,$ArtifactPath,$Mode,$Report,$Authorization,$SourceState,$Fault)
-        Invoke-HarnessRolloutPublicationTransaction -RepoRoot $Root -WorkspaceRoot $Work -ReportPath $ArtifactPath -Phase $Mode -ReportBytes $Report -AuthorizationBytes $Authorization -SourceStateStart $SourceState -FaultAfterMutation $Fault -SkipCanonicalResolutionForStructuralTest
-    } $RepoRoot $Workspace $InputPath $Phase $ReportBytes $AuthorizationBytes $script:sourceState $FaultAfter
+        param($Root,$Work,$ArtifactPath,$Mode,$Report,$ReportDigest,$Authorization,$AuthorizationDigest,$SourceState,$Fault)
+        Invoke-HarnessRolloutPublicationTransaction -RepoRoot $Root -WorkspaceRoot $Work -ReportPath $ArtifactPath -Phase $Mode -ReportBytes $Report -ExpectedReportDigest $ReportDigest -AuthorizationBytes $Authorization -ExpectedAuthorizationDigest $AuthorizationDigest -SourceStateStart $SourceState -FaultAfterMutation $Fault -SkipCanonicalResolutionForStructuralTest
+    } $RepoRoot $Workspace $InputPath $Phase $ReportBytes ([string]$reportDocument.report_digest) $AuthorizationBytes $authorizationDigest $script:sourceState $FaultAfter
+}
+function New-CanonicalProtocolModule([string]$CanonicalPath,[string]$Phase,[string]$ReportDigest,[AllowEmptyString()][string]$AuthorizationDigest='') {
+    return New-Module -ArgumentList @($CanonicalPath,$Phase,$ReportDigest,$AuthorizationDigest) -ScriptBlock {
+        param($ExpectedPath,$ExpectedPhase,$ExpectedReportDigest,$ExpectedAuthorizationDigest)
+        function Get-HarnessProtocolResolution {
+            [CmdletBinding()]param([string]$RepoRoot,[string]$WorkspaceRoot,[string]$RequestedProtocol,[string]$EligibilityReportPath,[AllowNull()][Collections.IDictionary]$ObservedHostContext)
+            $selectedPath=if($PSBoundParameters.ContainsKey('EligibilityReportPath')){$EligibilityReportPath}else{[Environment]::GetEnvironmentVariable('HARNESS_V2_ELIGIBILITY_REPORT',[EnvironmentVariableTarget]::Process)}
+            $pathMatches=[string]$selectedPath-ceq[string]$ExpectedPath
+            return [ordered]@{selected_protocol='v2';rollout_eligibility=[ordered]@{status=$(if($ExpectedPhase-ceq'canary-candidate'){'canary-authorized'}else{'pass'});phase=$ExpectedPhase;report_digest=$(if($pathMatches){$ExpectedReportDigest}else{'sha256:'+('f'*64)});authorization_digest=$(if($ExpectedPhase-ceq'canary-candidate'){$ExpectedAuthorizationDigest}else{$null})}}
+        }
+    }
 }
 function New-V1Gates {
     $digest='sha256:'+('2'*64)
@@ -232,6 +245,16 @@ try {
     $finalBefore=[IO.File]::ReadAllBytes($finalTarget);$candidateAfterFinalReason=Get-Rejection {Invoke-StructuralTransaction $transactionWorkspace $verifiedCandidate.ReportPath 'canary-candidate' $candidateBytes $authorizationBytes}
     Check ($candidateAfterFinalReason-match'final-already-canonical'-and(Test-ExactBytes $finalBefore ([IO.File]::ReadAllBytes($finalTarget)))-and-not(Test-Path $candidateTarget)-and-not(Test-Path $authorizationTarget)) 'Candidate cannot affect an existing Final' 'Candidate modified or shadowed an existing Final'
 
+    $roundTripWorkspace=Join-Path $temp 'round-trip-workspace';[void][IO.Directory]::CreateDirectory($roundTripWorkspace);$canonicalFinalPath='.assistant/runtime/rollout/v2-eligibility.json';$roundTripModule=New-CanonicalProtocolModule $canonicalFinalPath 'final-default' ([string]$verifiedFinal.Report.report_digest)
+    $oldEligibilityPath=[Environment]::GetEnvironmentVariable('HARNESS_V2_ELIGIBILITY_REPORT',[EnvironmentVariableTarget]::Process)
+    try{[Environment]::SetEnvironmentVariable('HARNESS_V2_ELIGIBILITY_REPORT','.assistant/runtime/rollout/alternate.json',[EnvironmentVariableTarget]::Process);$roundTrip=& $script:evidenceModule {param($Root,$Work,$ArtifactPath,$Bytes,$Digest,$Context,$Protocol)Invoke-HarnessRolloutPublicationTransaction -RepoRoot $Root -WorkspaceRoot $Work -ReportPath $ArtifactPath -Phase final-default -ReportBytes $Bytes -ExpectedReportDigest $Digest -ObservedHostContext $Context -ProtocolModule $Protocol} $RepoRoot $roundTripWorkspace $verifiedFinal.ReportPath $finalBytes ([string]$verifiedFinal.Report.report_digest) $validContext $roundTripModule}finally{[Environment]::SetEnvironmentVariable('HARNESS_V2_ELIGIBILITY_REPORT',$oldEligibilityPath,[EnvironmentVariableTarget]::Process)}
+    Check ($roundTrip.final_target-ceq$canonicalFinalPath-and(Test-ExactBytes $finalBytes ([IO.File]::ReadAllBytes((Join-Path $roundTripWorkspace $canonicalFinalPath))))) 'canonical round-trip binds the exact published path and report digest' 'canonical round-trip followed an alternate report path or digest'
+    $wrongReportWorkspace=Join-Path $temp 'wrong-report-round-trip';[void][IO.Directory]::CreateDirectory($wrongReportWorkspace);$wrongReportModule=New-CanonicalProtocolModule $canonicalFinalPath 'final-default' ('sha256:'+('e'*64));$wrongReportReason=Get-Rejection {& $script:evidenceModule {param($Root,$Work,$ArtifactPath,$Bytes,$Digest,$Context,$Protocol)Invoke-HarnessRolloutPublicationTransaction -RepoRoot $Root -WorkspaceRoot $Work -ReportPath $ArtifactPath -Phase final-default -ReportBytes $Bytes -ExpectedReportDigest $Digest -ObservedHostContext $Context -ProtocolModule $Protocol} $RepoRoot $wrongReportWorkspace $verifiedFinal.ReportPath $finalBytes ([string]$verifiedFinal.Report.report_digest) $validContext $wrongReportModule}
+    $canonicalCandidatePath='.assistant/runtime/rollout/v2-canary-candidate.json';$wrongAuthWorkspace=Join-Path $temp 'wrong-auth-round-trip';[void][IO.Directory]::CreateDirectory($wrongAuthWorkspace);$wrongAuthModule=New-CanonicalProtocolModule $canonicalCandidatePath 'canary-candidate' ([string]$verifiedCandidate.Report.report_digest) ('sha256:'+('d'*64));$wrongAuthReason=Get-Rejection {& $script:evidenceModule {param($Root,$Work,$ArtifactPath,$Report,$ReportDigest,$Authorization,$AuthorizationDigest,$Context,$Protocol)Invoke-HarnessRolloutPublicationTransaction -RepoRoot $Root -WorkspaceRoot $Work -ReportPath $ArtifactPath -Phase canary-candidate -ReportBytes $Report -ExpectedReportDigest $ReportDigest -AuthorizationBytes $Authorization -ExpectedAuthorizationDigest $AuthorizationDigest -ObservedHostContext $Context -ProtocolModule $Protocol} $RepoRoot $wrongAuthWorkspace $verifiedCandidate.ReportPath $candidateBytes ([string]$verifiedCandidate.Report.report_digest) $authorizationBytes ([string]$authorization.authorization_digest) $validContext $wrongAuthModule}
+    Check ($wrongReportReason-match'canonical-verification-failed'-and-not(Test-Path (Join-Path $wrongReportWorkspace $canonicalFinalPath))-and$wrongAuthReason-match'canonical-verification-failed'-and-not(Test-Path (Join-Path $wrongAuthWorkspace $canonicalCandidatePath))-and-not(Test-Path (Join-Path $wrongAuthWorkspace '.assistant/runtime/rollout/v2-canary-authorization.json'))) 'canonical round-trip rejects report or Authorization digest drift and rolls back' 'canonical round-trip accepted a different report or Authorization digest'
+    Remove-Module -ModuleInfo $roundTripModule,$wrongReportModule,$wrongAuthModule -Force
+    $script:protocolModule=Import-Module $protocolPath -Force -PassThru
+
     $rollbackWorkspace=Join-Path $temp 'rollback-workspace';[void][IO.Directory]::CreateDirectory($rollbackWorkspace);$null=Invoke-StructuralTransaction $rollbackWorkspace $verifiedCandidate.ReportPath 'canary-candidate' $candidateBytes $authorizationBytes
     $rollbackCandidate=Join-Path $rollbackWorkspace '.assistant\runtime\rollout\v2-canary-candidate.json';$rollbackAuth=Join-Path $rollbackWorkspace '.assistant\runtime\rollout\v2-canary-authorization.json';$rollbackFinal=Join-Path $rollbackWorkspace '.assistant\runtime\rollout\v2-eligibility.json';$candidatePre=[IO.File]::ReadAllBytes($rollbackCandidate);$authPre=[IO.File]::ReadAllBytes($rollbackAuth)
     $rollbackReason=Get-Rejection {Invoke-StructuralTransaction $rollbackWorkspace $verifiedFinal.ReportPath 'final-default' $finalBytes ([byte[]]::new(0)) 3}
@@ -243,6 +266,18 @@ try {
     $oldCandidateRestored=Test-ExactBytes -Left $oldCandidate -Right ([IO.File]::ReadAllBytes((Join-Path $threeDir 'v2-canary-candidate.json')))
     $oldAuthRestored=Test-ExactBytes -Left $oldAuth -Right ([IO.File]::ReadAllBytes((Join-Path $threeDir 'v2-canary-authorization.json')))
     Check ($threeReason-match'structural-test-fault'-and$oldFinalRestored-and$oldCandidateRestored-and$oldAuthRestored) 'three-path failure restores exact Final/Candidate/Authorization old bytes' 'three-path rollback changed a preimage'
+
+    $casWorkspace=Join-Path $temp 'rollback-cas-workspace';$casDir=Join-Path $casWorkspace '.assistant\runtime\rollout';[void][IO.Directory]::CreateDirectory($casDir)
+    $casExternal=[Text.UTF8Encoding]::new($false).GetBytes('{"external":"new-value"}');$casPublished=[Text.UTF8Encoding]::new($false).GetBytes('{"transaction":"published"}')
+    $casPublishedDigest=& $script:evidenceModule {param($Bytes)Get-ReleaseSha256Bytes -Bytes $Bytes} $casPublished
+    $casRecords=@(
+        [ordered]@{name='final';path=(Join-Path $casDir 'v2-eligibility.json');relative='.assistant/runtime/rollout/v2-eligibility.json';preimage=[ordered]@{exists=$true;bytes=$oldFinal;digest=(& $script:evidenceModule {param($Bytes)Get-ReleaseSha256Bytes -Bytes $Bytes} $oldFinal)};published_digest=$casPublishedDigest},
+        [ordered]@{name='candidate';path=(Join-Path $casDir 'v2-canary-candidate.json');relative='.assistant/runtime/rollout/v2-canary-candidate.json';preimage=[ordered]@{exists=$false;bytes=[byte[]]::new(0);digest='missing'};published_digest=$casPublishedDigest},
+        [ordered]@{name='authorization';path=(Join-Path $casDir 'v2-canary-authorization.json');relative='.assistant/runtime/rollout/v2-canary-authorization.json';preimage=[ordered]@{exists=$true;bytes=$oldAuth;digest=(& $script:evidenceModule {param($Bytes)Get-ReleaseSha256Bytes -Bytes $Bytes} $oldAuth)};published_digest=$casPublishedDigest}
+    )
+    $casPreserved=$true
+    foreach($record in $casRecords){[IO.File]::WriteAllBytes([string]$record.path,$casExternal);$reason=Get-Rejection {& $script:evidenceModule {param($Work,$Value)Restore-HarnessRolloutPublicationRecord -WorkspaceRoot $Work -Record $Value} $casWorkspace $record};if($reason-cnotmatch"rollout-promotion-rollback-cas-mismatch-$($record.name)"-or-not(Test-ExactBytes $casExternal ([IO.File]::ReadAllBytes([string]$record.path)))){$casPreserved=$false}}
+    Check $casPreserved 'rollback CAS preserves lock-external Final/Candidate/Authorization values' 'rollback overwrote or deleted a lock-external value'
 
     $pathWorkspace=Join-Path $temp 'path-workspace';[void][IO.Directory]::CreateDirectory($pathWorkspace);$paths=& $script:evidenceModule {param($Root,$Work,$ArtifactPath)Resolve-HarnessRolloutPromotionPaths -RepoRoot $Root -WorkspaceRoot $Work -ReportPath $ArtifactPath} $RepoRoot $pathWorkspace $verifiedFinal.ReportPath
     Check ($paths.final_target_relative-ceq'.assistant/runtime/rollout/v2-eligibility.json'-and$paths.candidate_target_relative-ceq'.assistant/runtime/rollout/v2-canary-candidate.json'-and$paths.authorization_target_relative-ceq'.assistant/runtime/rollout/v2-canary-authorization.json') 'Promotion paths are three distinct Canonical files' 'Canonical rollout paths are not distinct'
@@ -258,7 +293,7 @@ try {
     Check ($explicitV1.selected_protocol-ceq'v1'-and$explicitV2.selected_protocol-ceq'v2'-and$existingV1.selected_protocol-ceq'v1'-and$existingV2.selected_protocol-ceq'v2'-and$enabled.selected_protocol-ceq'v2'-and$disabled.selected_protocol-ceq'v1') 'v1 stop-loss, explicit/workspace enable-v2, and existing Artifact priority remain unchanged' 'protocol priority regressed'
 
     $doc=Get-Content -LiteralPath (Join-Path $RepoRoot 'docs\release\default-promotion-gates.md') -Raw -Encoding utf8
-    Check ($doc-match'provenance'-and$doc-match'Observed Host Context'-and$doc-match'expires_at_utc'-and$doc-match'v2-canary-candidate\.json'-and$doc-match'Review Payload') 'Canonical documentation names every correction boundary' 'Canonical documentation lacks correction semantics'
+    Check ($doc-match'provenance'-and$doc-match'Observed Host Context'-and$doc-match'expires_at_utc'-and$doc-match'v2-canary-candidate\.json'-and$doc-match'Review Payload'-and$doc-match'artifact_path'-and$doc-match'producer_identity'-and$doc-notmatch'rollout-eligibility-v2-envelope/v1') 'Canonical documentation names every correction boundary without the obsolete G12 envelope' 'Canonical documentation lacks or contradicts correction semantics'
 } catch {
     [Console]::Error.WriteLine("TEST_EXCEPTION: $($_.Exception.Message)`n$($_.ScriptStackTrace)")
     throw

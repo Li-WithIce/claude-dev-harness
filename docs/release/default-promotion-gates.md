@@ -49,7 +49,7 @@ Resolver and Promotion no longer accept the old five-Gate `rollout-eligibility/v
 - `canary-candidate` requires G00-G07, G09-G11, G14 and G18-G20 to be `pass`; G13, G15 and G16 must be `not_run`; `eligible` is exactly `false`.
 - `final-default` requires every blocking Gate to be `pass`; `eligible` is exactly `true`.
 
-Both reports contain all 19 blocking Gate identifiers. The normalized `rollout-evidence-set/v1` Generator input contains the other 18 Gate records; G12 is generated only by the report envelope with contract `rollout-eligibility-v2-envelope/v1` and the current `rollout-eligibility-v2.schema.json` digest. This prevents a caller from supplying a recursive or self-asserted G12 input. Every Gate record has exactly `status`, `evidence_contract`, `evidence_digest` and `source_revision`, and every source revision must equal the clean report revision.
+Both reports contain all 19 blocking Gate identifiers. The normalized `rollout-evidence-set/v1` Generator input contains the other 18 Gate records; G12 is added only after a matching phase/source-bound `rollout-report-review-receipt/v1` is validated. This prevents a caller from supplying a recursive or self-asserted G12 input. Every non-G12 Gate record has exactly `status`, `evidence_contract`, `artifact_path`, `evidence_digest`, `source_revision`, and `producer_identity`; G12 uses the same shape with the Review Receipt Artifact path, strict Receipt digest, and reviewer identity. Every source revision must equal the clean report revision.
 
 The fixed Gate-to-contract bindings are:
 

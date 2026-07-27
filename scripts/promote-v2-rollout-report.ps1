@@ -110,9 +110,9 @@ try {
     }
 
     $transaction = & $evidenceModule {
-        param($Root,$Workspace,$InputPath,$Phase,$ReportBytes,$AuthorizationBytes,$Protected,$SourceState,$Context,$Protocol)
-        Invoke-HarnessRolloutPublicationTransaction -RepoRoot $Root -WorkspaceRoot $Workspace -ReportPath $InputPath -Phase $Phase -ReportBytes $ReportBytes -AuthorizationBytes $AuthorizationBytes -ProtectedRoots $Protected -SourceStateStart $SourceState -ObservedHostContext $Context -ProtocolModule $Protocol
-    } $RepoRoot $WorkspaceRoot $ReportPath ([string]$report.phase) $reportBytes $authorizationBytes @($protectedRoots) $sourceStateStart $observedHostContext $protocolModule
+        param($Root,$Workspace,$InputPath,$Phase,$ReportBytes,$AuthorizationBytes,$Protected,$SourceState,$Context,$Protocol,$Report,$Authorization)
+        Invoke-HarnessRolloutPublicationTransaction -RepoRoot $Root -WorkspaceRoot $Workspace -ReportPath $InputPath -Phase $Phase -ReportBytes $ReportBytes -ExpectedReportDigest ([string]$Report.report_digest) -AuthorizationBytes $AuthorizationBytes -ExpectedAuthorizationDigest $(if($null-eq$Authorization){''}else{[string]$Authorization.authorization_digest}) -ProtectedRoots $Protected -SourceStateStart $SourceState -ObservedHostContext $Context -ProtocolModule $Protocol
+    } $RepoRoot $WorkspaceRoot $ReportPath ([string]$report.phase) $reportBytes $authorizationBytes @($protectedRoots) $sourceStateStart $observedHostContext $protocolModule $report $authorization
 
     [ordered]@{
         operation = 'promote-v2-rollout-report'

@@ -263,12 +263,15 @@ function Remove-HarnessRolloutPublicationFile {
 
 function Restore-HarnessRolloutPublicationRecord {
     param([string]$WorkspaceRoot,[System.Collections.IDictionary]$Record)
+    if (-not $Record.Contains('published_digest')) { throw 'rollout-promotion-rollback-published-digest-missing' }
     $exists = Test-Path -LiteralPath ([string]$Record.path) -PathType Leaf
+    $publishedDigest = [string]$Record.published_digest
+    $currentDigest = if ($exists) { Get-ReleaseFileDigest -Path ([string]$Record.path) } else { 'missing' }
+    if ($currentDigest -cne $publishedDigest) { throw "rollout-promotion-rollback-cas-mismatch-$($Record.name)" }
     if ([bool]$Record.preimage.exists) {
-        $currentDigest = if ($exists) { Get-ReleaseFileDigest -Path ([string]$Record.path) } else { 'missing' }
-        [void](Write-HarnessRolloutPublicationBytes -WorkspaceRoot $WorkspaceRoot -Path ([string]$Record.relative) -Bytes ([byte[]]$Record.preimage.bytes) -SourceDigest ([string]$Record.preimage.digest) -CurrentDigest $currentDigest)
+        [void](Write-HarnessRolloutPublicationBytes -WorkspaceRoot $WorkspaceRoot -Path ([string]$Record.relative) -Bytes ([byte[]]$Record.preimage.bytes) -SourceDigest ([string]$Record.preimage.digest) -CurrentDigest $publishedDigest)
     } elseif ($exists) {
-        [void](Remove-HarnessRolloutPublicationFile -WorkspaceRoot $WorkspaceRoot -Path ([string]$Record.relative) -ExpectedDigest (Get-ReleaseFileDigest -Path ([string]$Record.path)))
+        [void](Remove-HarnessRolloutPublicationFile -WorkspaceRoot $WorkspaceRoot -Path ([string]$Record.relative) -ExpectedDigest $publishedDigest)
     }
 }
 
@@ -290,7 +293,9 @@ function Invoke-HarnessRolloutPublicationTransaction {
         [Parameter(Mandatory)][string]$ReportPath,
         [Parameter(Mandatory)][ValidateSet('canary-candidate','final-default')][string]$Phase,
         [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$ReportBytes,
+        [Parameter(Mandatory)][string]$ExpectedReportDigest,
         [AllowEmptyCollection()][byte[]]$AuthorizationBytes = [byte[]]::new(0),
+        [AllowEmptyString()][string]$ExpectedAuthorizationDigest = '',
         [string[]]$ProtectedRoots = @(),
         [System.Collections.IDictionary]$SourceStateStart = $null,
         [AllowNull()][System.Collections.IDictionary]$ObservedHostContext = $null,
@@ -298,7 +303,10 @@ function Invoke-HarnessRolloutPublicationTransaction {
         [int]$FaultAfterMutation = 0,
         [switch]$SkipCanonicalResolutionForStructuralTest
     )
+    if ($ExpectedReportDigest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'rollout-promotion-expected-report-digest-invalid' }
     if ($Phase -ceq 'canary-candidate' -and $AuthorizationBytes.Length -eq 0) { throw 'rollout-promotion-canary-authorization-required' }
+    if ($Phase -ceq 'canary-candidate' -and $ExpectedAuthorizationDigest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'rollout-promotion-expected-authorization-digest-invalid' }
+    if ($Phase -ceq 'final-default' -and -not [string]::IsNullOrWhiteSpace($ExpectedAuthorizationDigest)) { throw 'rollout-promotion-unexpected-authorization-digest' }
     $paths = Resolve-HarnessRolloutPromotionPaths -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -ReportPath $ReportPath -ProtectedRoots $ProtectedRoots
     $sourceBytes = [IO.File]::ReadAllBytes([string]$paths.source)
     if (-not (Test-HarnessRolloutBytesEqual -Left $sourceBytes -Right $ReportBytes)) { throw 'rollout-promotion-input-bytes-changed' }
@@ -376,17 +384,25 @@ function Invoke-HarnessRolloutPublicationTransaction {
             }
             if (-not $SkipCanonicalResolutionForStructuralTest) {
                 if ($null -eq $ProtocolModule -or $null -eq $ObservedHostContext) { throw 'rollout-promotion-canonical-verification-context-missing' }
+                $canonicalReportPath = if ($Phase -ceq 'canary-candidate') { [string]$paths.candidate_target_relative } else { [string]$paths.final_target_relative }
                 $resolution = & $ProtocolModule {
-                    param($Root,$Workspace,$Context)
-                    Get-HarnessProtocolResolution -RepoRoot $Root -WorkspaceRoot $Workspace -RequestedProtocol auto -ObservedHostContext $Context
-                } $RepoRoot $workspace $ObservedHostContext
+                    param($Root,$Workspace,$Context,$ReportPath)
+                    Get-HarnessProtocolResolution -RepoRoot $Root -WorkspaceRoot $Workspace -RequestedProtocol auto -EligibilityReportPath $ReportPath -ObservedHostContext $Context
+                } $RepoRoot $workspace $ObservedHostContext $canonicalReportPath
                 $expectedStatus = if ($Phase -ceq 'canary-candidate') { 'canary-authorized' } else { 'pass' }
-                if ([string]$resolution.selected_protocol -cne 'v2' -or [string]$resolution.rollout_eligibility.status -cne $expectedStatus) { throw 'rollout-promotion-canonical-verification-failed' }
+                $eligibility = $resolution.rollout_eligibility
+                $authorizationMatches = if ($Phase -ceq 'canary-candidate') { [string]$eligibility.authorization_digest -ceq $ExpectedAuthorizationDigest } else { [string]::IsNullOrWhiteSpace([string]$eligibility.authorization_digest) }
+                if ([string]$resolution.selected_protocol -cne 'v2' -or [string]$eligibility.status -cne $expectedStatus -or [string]$eligibility.phase -cne $Phase -or [string]$eligibility.report_digest -cne $ExpectedReportDigest -or -not $authorizationMatches) { throw 'rollout-promotion-canonical-verification-failed' }
             }
         } catch {
             $publishError = $_
-            for ($index = $mutated.Count - 1; $index -ge 0; $index--) { Restore-HarnessRolloutPublicationRecord -WorkspaceRoot $workspace -Record $mutated[$index] }
+            $rollbackFailures = [Collections.Generic.List[string]]::new()
+            for ($index = $mutated.Count - 1; $index -ge 0; $index--) {
+                try { Restore-HarnessRolloutPublicationRecord -WorkspaceRoot $workspace -Record $mutated[$index] }
+                catch { $rollbackFailures.Add([string]$_.Exception.Message) }
+            }
             Remove-HarnessRolloutCreatedParents -WorkspaceRoot $workspace -Directories @($createdParents)
+            if ($rollbackFailures.Count -gt 0) { throw ('rollout-promotion-rollback-failed: ' + (@($rollbackFailures) -join '; ')) }
             throw $publishError
         }
         return [ordered]@{
