@@ -9,7 +9,6 @@ $script:RolloutFinalEligibilityRelativePath = '.assistant/runtime/rollout/v2-eli
 $script:RolloutCanaryCandidateRelativePath = '.assistant/runtime/rollout/v2-canary-candidate.json'
 $script:RolloutCanaryAuthorizationRelativePath = '.assistant/runtime/rollout/v2-canary-authorization.json'
 $script:RolloutCanaryMaximumLifetime = [timespan]::FromDays(7)
-$script:RolloutClockSkew = [timespan]::FromMinutes(5)
 $script:RolloutV1GateNames = @('behavior','v1_compatibility','direct_performance','core_install_rollback','full_install_rollback')
 $script:RolloutV1GateCommands = [ordered]@{
     behavior = 'scripts/run-model-evals.ps1 -Model gpt-5.6-sol -Reasoning max'
@@ -318,7 +317,7 @@ function Assert-HarnessObservedHostContext {
     if ([string]$Document.schema_version -cne 'rollout-observed-host-context/v1') { throw 'rollout-observed-host-context-invalid-schema' }
     Assert-HarnessRolloutUtcTime -Value ([string]$Document.observed_at_utc) -ErrorReason 'rollout-observed-host-context-invalid-time'
     $observedAt = [datetimeoffset]::Parse([string]$Document.observed_at_utc,[Globalization.CultureInfo]::InvariantCulture)
-    if ($observedAt -gt $AsOfUtc.Add($script:RolloutClockSkew)) { throw 'rollout-observed-host-context-future' }
+    if ($observedAt -gt $AsOfUtc) { throw 'rollout-observed-host-context-future' }
     if ([string]$Document.context_digest -cne (Get-HarnessObservedHostContextDigest -Document $Document)) { throw 'rollout-observed-host-context-digest-mismatch' }
     if ([string]$Document.product -cne 'codex-cli-service') { throw 'rollout-observed-host-context-product-mismatch' }
     if ([string]$Document.cli_version -cne '0.144.4') { throw 'rollout-observed-host-context-cli-version-mismatch' }
@@ -870,7 +869,7 @@ function Assert-HarnessCanaryAuthorization {
     Assert-HarnessRolloutUtcTime -Value ([string]$Document.expires_at_utc) -ErrorReason 'rollout-canary-authorization-invalid-time'
     $issuedAt = [datetimeoffset]::Parse([string]$Document.issued_at_utc,[Globalization.CultureInfo]::InvariantCulture)
     $expiresAt = [datetimeoffset]::Parse([string]$Document.expires_at_utc,[Globalization.CultureInfo]::InvariantCulture)
-    if ($issuedAt -gt $AsOfUtc.Add($script:RolloutClockSkew)) { throw 'rollout-canary-authorization-future-issued' }
+    if ($issuedAt -gt $AsOfUtc) { throw 'rollout-canary-authorization-future-issued' }
     if ($expiresAt -le $issuedAt) { throw 'rollout-canary-authorization-invalid-expiry' }
     if (($expiresAt - $issuedAt) -gt $script:RolloutCanaryMaximumLifetime) { throw 'rollout-canary-authorization-duration-exceeded' }
     if ($expiresAt -le $AsOfUtc) { throw 'rollout-canary-authorization-expired' }

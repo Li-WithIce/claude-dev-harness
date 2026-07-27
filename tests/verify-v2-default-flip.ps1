@@ -189,14 +189,17 @@ try {
     $missingContext=Resolve-Canonical $resolverWorkspace
     $driftContext=& $script:protocolModule {param($Root)New-HarnessObservedHostContextDocument -RepoRoot $Root -CliVersion '0.144.5' -ServiceVersion '0.144.5' -SkipSemanticValidation} $RepoRoot
     $wrongContractContext=& $script:protocolModule {param($Root)New-HarnessObservedHostContextDocument -RepoRoot $Root -HookContract 'wrong-hook/v1' -SkipSemanticValidation} $RepoRoot
+    $futureContext=& $script:protocolModule {param($Root,$Observed)New-HarnessObservedHostContextDocument -RepoRoot $Root -ObservedAtUtc $Observed -SkipSemanticValidation} $RepoRoot ([datetimeoffset]::UtcNow.AddMinutes(1))
     $badDigestContext=Copy-Document $validContext;$badDigestContext.context_digest='sha256:'+('f'*64)
     $driftResolution=Resolve-Canonical $resolverWorkspace $driftContext
     $wrongContractResolution=Resolve-Canonical $resolverWorkspace $wrongContractContext
+    $futureContextResolution=Resolve-Canonical $resolverWorkspace $futureContext
     $badDigestResolution=Resolve-Canonical $resolverWorkspace $badDigestContext
     $validContextResolution=Resolve-Canonical $resolverWorkspace $validContext
     Check ($missingContext.selected_protocol-ceq'v1'-and$missingContext.reason-ceq'rollout-observed-host-context-missing') 'missing actual Host Context falls back to v1' 'Report self-attested Host without actual Context'
     Check ($driftResolution.selected_protocol-ceq'v1'-and$driftResolution.reason-ceq'rollout-observed-host-context-cli-version-mismatch') 'actual Host 0.144.5 falls back to v1' 'Host version drift selected v2'
     Check ($wrongContractResolution.selected_protocol-ceq'v1'-and$wrongContractResolution.reason-ceq'rollout-observed-host-context-hook-contract-mismatch') 'actual Hook contract drift falls back to v1' 'Hook contract drift selected v2'
+    Check ($futureContextResolution.selected_protocol-ceq'v1'-and$futureContextResolution.reason-ceq'rollout-observed-host-context-future') 'one-minute future Host Context falls back to v1' 'near-future Host Context selected v2'
     Check ($badDigestResolution.selected_protocol-ceq'v1'-and$badDigestResolution.reason-ceq'rollout-observed-host-context-digest-mismatch') 'tampered Host Context falls back to v1' 'tampered Host Context selected v2'
     Check ($validContextResolution.selected_protocol-ceq'v1'-and$validContextResolution.reason-ceq'rollout-evidence-provenance-unverified') 'valid Host cannot upgrade test-only Evidence' 'test-only report selected v2'
 
@@ -220,7 +223,7 @@ try {
     $notNew=Copy-Document $authorization;$notNew.new_tasks_only=$false;Set-AuthorizationDigest $notNew;$notNewReason=Assert-AuthorizationReason $verifiedCandidate.Report $validContext $notNew $authorizationWorkspace $now
     Check ($missingOwnerReason-match'invalid-document'-and$missingExpiryReason-match'invalid-document'-and$badStatusReason-match'invalid-document'-and$notNewReason-match'invalid-document') 'missing owner/expiry, non-granted status, and non-new-task scope are rejected' 'a required Canary Authorization field was optional'
     $expired=Copy-Document $authorization;$expired.issued_at_utc=$now.AddHours(-2).ToString('o');$expired.expires_at_utc=$now.AddHours(-1).ToString('o');Set-AuthorizationDigest $expired;$expiredReason=Assert-AuthorizationReason $verifiedCandidate.Report $validContext $expired $authorizationWorkspace $now
-    $future=Copy-Document $authorization;$future.issued_at_utc=$now.AddMinutes(10).ToString('o');$future.expires_at_utc=$now.AddHours(1).ToString('o');Set-AuthorizationDigest $future;$futureReason=Assert-AuthorizationReason $verifiedCandidate.Report $validContext $future $authorizationWorkspace $now
+    $future=Copy-Document $authorization;$future.issued_at_utc=$now.AddMinutes(1).ToString('o');$future.expires_at_utc=$now.AddHours(1).ToString('o');Set-AuthorizationDigest $future;$futureReason=Assert-AuthorizationReason $verifiedCandidate.Report $validContext $future $authorizationWorkspace $now
     $tooLong=Copy-Document $authorization;$tooLong.issued_at_utc=$now.ToString('o');$tooLong.expires_at_utc=$now.AddDays(8).ToString('o');Set-AuthorizationDigest $tooLong;$tooLongReason=Assert-AuthorizationReason $verifiedCandidate.Report $validContext $tooLong $authorizationWorkspace $now
     $secondContext=& $script:protocolModule {param($Root,$Observed)New-HarnessObservedHostContextDocument -RepoRoot $Root -ObservedAtUtc $Observed} $RepoRoot $now.AddSeconds(-1)
     $contextMismatchReason=Assert-AuthorizationReason $verifiedCandidate.Report $secondContext $authorization $authorizationWorkspace $now
