@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/runtime-default-decision.schema.json",
+  "title": "Harness Runtime Default Decision v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "new_task_protocol",
+    "scope",
+    "source_revision",
+    "decision_id",
+    "issued_at_utc",
+    "required_capabilities",
+    "decision_digest"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["harness-runtime-default/v1"] },
+    "new_task_protocol": { "type": "string", "enum": ["v1", "v2"] },
+    "scope": { "type": "string", "enum": ["workspace-canary", "release-default"] },
+    "source_revision": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+    "decision_id": { "type": "string", "pattern": "^rtd_[0-9a-f]{32}$" },
+    "issued_at_utc": { "type": "string", "minLength": 1 },
+    "expires_at_utc": { "type": ["string", "null"], "minLength": 1 },
+    "workspace_identity_digest": {
+      "type": ["string", "null"],
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "required_capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "workspace_protocol_config",
+          "structured_tool_events",
+          "request_send_telemetry",
+          "desktop_profile_isolation",
+          "hook_status_query"
+        ]
+      }
+    },
+    "decision_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+  }
+}

@@ -145,6 +145,7 @@ function Resolve-HarnessRolloutPromotionPaths {
         final = '.assistant/runtime/rollout/v2-eligibility.json'
         candidate = '.assistant/runtime/rollout/v2-canary-candidate.json'
         authorization = '.assistant/runtime/rollout/v2-canary-authorization.json'
+        runtime_default = '.assistant/runtime/protocol-default.json'
     }
     $targets = [ordered]@{}
     foreach ($name in $targetDefinitions.Keys) {
@@ -172,6 +173,7 @@ function Resolve-HarnessRolloutPromotionPaths {
         final_target=[string]$targets.final.path;final_target_relative=[string]$targets.final.relative
         candidate_target=[string]$targets.candidate.path;candidate_target_relative=[string]$targets.candidate.relative
         authorization_target=[string]$targets.authorization.path;authorization_target_relative=[string]$targets.authorization.relative
+        runtime_default_target=[string]$targets.runtime_default.path;runtime_default_target_relative=[string]$targets.runtime_default.relative
         workspace=$workspace;workspace_identity=$workspaceIdentity
     }
 }
@@ -219,7 +221,7 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
 
 function Test-HarnessRolloutPromotionPathSnapshot {
     param([System.Collections.IDictionary]$Left,[System.Collections.IDictionary]$Right)
-    foreach ($name in @('source','final_target','candidate_target','authorization_target','workspace','workspace_identity')) {
+    foreach ($name in @('source','final_target','candidate_target','authorization_target','runtime_default_target','workspace','workspace_identity')) {
         if (-not ([string]$Left[$name]).Equals([string]$Right[$name],[StringComparison]::OrdinalIgnoreCase)) { return $false }
     }
     return $true
@@ -296,9 +298,10 @@ function Invoke-HarnessRolloutPublicationTransaction {
         [Parameter(Mandatory)][string]$ExpectedReportDigest,
         [AllowEmptyCollection()][byte[]]$AuthorizationBytes = [byte[]]::new(0),
         [AllowEmptyString()][string]$ExpectedAuthorizationDigest = '',
+        [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$DecisionBytes,
+        [Parameter(Mandatory)][string]$ExpectedDecisionDigest,
         [string[]]$ProtectedRoots = @(),
         [System.Collections.IDictionary]$SourceStateStart = $null,
-        [AllowNull()][System.Collections.IDictionary]$ObservedHostContext = $null,
         $ProtocolModule = $null,
         [int]$FaultAfterMutation = 0,
         [switch]$SkipCanonicalResolutionForStructuralTest
@@ -307,6 +310,13 @@ function Invoke-HarnessRolloutPublicationTransaction {
     if ($Phase -ceq 'canary-candidate' -and $AuthorizationBytes.Length -eq 0) { throw 'rollout-promotion-canary-authorization-required' }
     if ($Phase -ceq 'canary-candidate' -and $ExpectedAuthorizationDigest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'rollout-promotion-expected-authorization-digest-invalid' }
     if ($Phase -ceq 'final-default' -and -not [string]::IsNullOrWhiteSpace($ExpectedAuthorizationDigest)) { throw 'rollout-promotion-unexpected-authorization-digest' }
+    if ($DecisionBytes.Length -eq 0 -or $ExpectedDecisionDigest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'rollout-promotion-runtime-decision-invalid' }
+    try { $decisionDocument = [Text.UTF8Encoding]::new($false,$true).GetString($DecisionBytes) | ConvertFrom-Json -AsHashtable -Depth 20 -DateKind String }
+    catch { throw 'rollout-promotion-runtime-decision-invalid' }
+    if ($decisionDocument -isnot [Collections.IDictionary] -or [string]$decisionDocument.decision_digest -cne $ExpectedDecisionDigest) {
+        throw 'rollout-promotion-runtime-decision-invalid'
+    }
+    $expectedDecisionBytesDigest = Get-ReleaseSha256Bytes -Bytes $DecisionBytes
     $paths = Resolve-HarnessRolloutPromotionPaths -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -ReportPath $ReportPath -ProtectedRoots $ProtectedRoots
     $sourceBytes = [IO.File]::ReadAllBytes([string]$paths.source)
     if (-not (Test-HarnessRolloutBytesEqual -Left $sourceBytes -Right $ReportBytes)) { throw 'rollout-promotion-input-bytes-changed' }
@@ -326,6 +336,7 @@ function Invoke-HarnessRolloutPublicationTransaction {
             final = [ordered]@{name='final';path=[string]$paths.final_target;relative=[string]$paths.final_target_relative;limit=4MB;preimage=$null}
             candidate = [ordered]@{name='candidate';path=[string]$paths.candidate_target;relative=[string]$paths.candidate_target_relative;limit=4MB;preimage=$null}
             authorization = [ordered]@{name='authorization';path=[string]$paths.authorization_target;relative=[string]$paths.authorization_target_relative;limit=64KB;preimage=$null}
+            runtime_default = [ordered]@{name='runtime-default';path=[string]$paths.runtime_default_target;relative=[string]$paths.runtime_default_target_relative;limit=64KB;preimage=$null}
         }
         foreach ($record in $records.Values) {
             $record.preimage = Get-HarnessRolloutPublicationPreimage -Path ([string]$record.path) -Limit ([long]$record.limit) -Name ([string]$record.name)
@@ -343,11 +354,13 @@ function Invoke-HarnessRolloutPublicationTransaction {
         $operations = if ($Phase -ceq 'canary-candidate') {
             @(
                 [ordered]@{record=$records.candidate;action='write';bytes=$ReportBytes},
-                [ordered]@{record=$records.authorization;action='write';bytes=$AuthorizationBytes}
+                [ordered]@{record=$records.authorization;action='write';bytes=$AuthorizationBytes},
+                [ordered]@{record=$records.runtime_default;action='write';bytes=$DecisionBytes}
             )
         } else {
             @(
                 [ordered]@{record=$records.final;action='write';bytes=$ReportBytes},
+                [ordered]@{record=$records.runtime_default;action='write';bytes=$DecisionBytes},
                 [ordered]@{record=$records.candidate;action='delete';bytes=[byte[]]::new(0)},
                 [ordered]@{record=$records.authorization;action='delete';bytes=[byte[]]::new(0)}
             )
@@ -375,24 +388,27 @@ function Invoke-HarnessRolloutPublicationTransaction {
             if ($Phase -ceq 'canary-candidate') {
                 if ((Get-ReleaseFileDigest -Path ([string]$paths.candidate_target)) -cne (Get-ReleaseSha256Bytes -Bytes $ReportBytes) -or
                     (Get-ReleaseFileDigest -Path ([string]$paths.authorization_target)) -cne (Get-ReleaseSha256Bytes -Bytes $AuthorizationBytes) -or
+                    (Get-ReleaseFileDigest -Path ([string]$paths.runtime_default_target)) -cne $expectedDecisionBytesDigest -or
                     (Test-Path -LiteralPath ([string]$paths.final_target))) { throw 'rollout-promotion-candidate-byte-verification-failed' }
             } elseif ((Get-ReleaseFileDigest -Path ([string]$paths.final_target)) -cne (Get-ReleaseSha256Bytes -Bytes $ReportBytes) -or
+                (Get-ReleaseFileDigest -Path ([string]$paths.runtime_default_target)) -cne $expectedDecisionBytesDigest -or
                 (Test-Path -LiteralPath ([string]$paths.candidate_target)) -or (Test-Path -LiteralPath ([string]$paths.authorization_target))) { throw 'rollout-promotion-final-state-verification-failed' }
             if ($null -ne $SourceStateStart) {
                 $sourceStateEnd = Get-HarnessReleaseSourceState -RepoRoot $RepoRoot
                 if (-not (Test-HarnessReleaseSourceStable -Start $SourceStateStart -End $sourceStateEnd)) { throw 'rollout-promotion-source-changed' }
             }
             if (-not $SkipCanonicalResolutionForStructuralTest) {
-                if ($null -eq $ProtocolModule -or $null -eq $ObservedHostContext) { throw 'rollout-promotion-canonical-verification-context-missing' }
-                $canonicalReportPath = if ($Phase -ceq 'canary-candidate') { [string]$paths.candidate_target_relative } else { [string]$paths.final_target_relative }
+                if ($null -eq $ProtocolModule) { throw 'rollout-promotion-canonical-verification-context-missing' }
                 $resolution = & $ProtocolModule {
-                    param($Root,$Workspace,$Context,$ReportPath)
-                    Get-HarnessProtocolResolution -RepoRoot $Root -WorkspaceRoot $Workspace -RequestedProtocol auto -EligibilityReportPath $ReportPath -ObservedHostContext $Context
-                } $RepoRoot $workspace $ObservedHostContext $canonicalReportPath
-                $expectedStatus = if ($Phase -ceq 'canary-candidate') { 'canary-authorized' } else { 'pass' }
-                $eligibility = $resolution.rollout_eligibility
-                $authorizationMatches = if ($Phase -ceq 'canary-candidate') { [string]$eligibility.authorization_digest -ceq $ExpectedAuthorizationDigest } else { [string]::IsNullOrWhiteSpace([string]$eligibility.authorization_digest) }
-                if ([string]$resolution.selected_protocol -cne 'v2' -or [string]$eligibility.status -cne $expectedStatus -or [string]$eligibility.phase -cne $Phase -or [string]$eligibility.report_digest -cne $ExpectedReportDigest -or -not $authorizationMatches) { throw 'rollout-promotion-canonical-verification-failed' }
+                    param($Root,$Workspace)
+                    Get-HarnessProtocolResolution -RepoRoot $Root -WorkspaceRoot $Workspace -RequestedProtocol auto
+                } $RepoRoot $workspace
+                $runtimeDefault = $resolution.runtime_default_decision
+                $expectedScope = if ($Phase -ceq 'canary-candidate') { 'workspace-canary' } else { 'release-default' }
+                if ([string]$resolution.selected_protocol -cne 'v2' -or [string]$runtimeDefault.status -cne 'valid' -or
+                    [string]$runtimeDefault.scope -cne $expectedScope -or [string]$runtimeDefault.decision_digest -cne $ExpectedDecisionDigest) {
+                    throw 'rollout-promotion-canonical-verification-failed'
+                }
             }
         } catch {
             $publishError = $_
@@ -410,6 +426,7 @@ function Invoke-HarnessRolloutPublicationTransaction {
             final_target=[string]$paths.final_target_relative
             candidate_target=[string]$paths.candidate_target_relative
             authorization_target=[string]$paths.authorization_target_relative
+            runtime_default_target=[string]$paths.runtime_default_target_relative
         }
     } finally {
         if ($null -ne $mutex) {

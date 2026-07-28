@@ -129,6 +129,7 @@ $coreScriptGroups = [ordered]@{
         'verify-entry-routing-clarification.ps1',
         'verify-v2-entry-contract.ps1',
         'verify-v2-protocol-config.ps1',
+        'verify-runtime-qualification-decoupling.ps1',
         'verify-v2-direct-no-artifacts.ps1',
         'verify-v2-requirement-gate.ps1',
         'verify-v2-json-compat.ps1',

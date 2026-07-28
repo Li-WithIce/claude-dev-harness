@@ -106,7 +106,7 @@ function New-HostGroup([int]$Index,[Collections.IDictionary]$Source,[Collections
 }
 
 $modulePath = Join-Path $RepoRoot 'scripts\lib\Harness.RolloutEvidence.psm1'
-$protocolPath = Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1'
+$qualificationPath = Join-Path $RepoRoot 'scripts\lib\Harness.Qualification.psm1'
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('thin-v2-rollout-evidence-' + [guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($temp)
 try {
@@ -279,8 +279,8 @@ try {
     $dirtyExpected = Copy-Document $cleanSource; $dirtyExpected.dirty=$true
     Check ([string](Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $hostPath -ExpectedSource $dirtyExpected).status -ceq 'fail') 'dirty generator source rejects otherwise passing evidence' 'dirty generator source accepted release evidence'
 
-    $protocolModule = Import-Module $protocolPath -Force -PassThru
-    $sourcePaths = @(& $protocolModule { param($Root) Get-HarnessRolloutSourcePaths -RepoRoot $Root } $RepoRoot)
+    $qualificationModule = Import-Module $qualificationPath -Force -PassThru
+    $sourcePaths = @(& $qualificationModule { param($Root) Get-HarnessRolloutSourcePaths -RepoRoot $Root } $RepoRoot)
     $tracked = @(& git -C $RepoRoot -c core.quotepath=false ls-files -- | ForEach-Object { ([string]$_).Replace('\','/') })
     Check ($sourcePaths.Count -gt 0 -and @($sourcePaths | Where-Object { $_ -cnotin $tracked }).Count -eq 0) 'rollout source digest enumerates tracked files only' 'rollout source digest included an untracked or ignored file'
     Check (@($sourcePaths | Where-Object { $_.StartsWith('skills/.system/',[StringComparison]::Ordinal) }).Count -eq 0) 'ignored generated skill runtime is excluded from rollout source digest' 'ignored generated skill runtime entered rollout source digest'

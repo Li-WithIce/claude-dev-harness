@@ -18,7 +18,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Split-Path -Parent $PSScriptRoot }
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 $evidenceModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.RolloutEvidence.psm1') -Force -PassThru -ErrorAction Stop
-$protocolModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1') -Force -PassThru -ErrorAction Stop
+$qualificationModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Qualification.psm1') -Force -PassThru -ErrorAction Stop
 
 function Resolve-ReportInputPath {
     param([AllowEmptyString()][string]$Path)
@@ -34,7 +34,7 @@ function Read-RolloutInputDocument {
     if ($info.Length -gt $MaximumBytes) { throw $TooLargeReason }
     $bytes = [IO.File]::ReadAllBytes($Path)
     if ($bytes.Length -gt $MaximumBytes) { throw $TooLargeReason }
-    return & $protocolModule { param($Value,$DocumentKind) ConvertFrom-HarnessRolloutJsonBytes -Bytes $Value -Kind $DocumentKind } $bytes $Kind
+    return & $qualificationModule { param($Value,$DocumentKind) ConvertFrom-HarnessRolloutJsonBytes -Bytes $Value -Kind $DocumentKind } $bytes $Kind
 }
 
 if (-not [string]::IsNullOrWhiteSpace($ModelEvalReportPath) -or -not [string]::IsNullOrWhiteSpace($HostBenchmarkReportPath)) {
@@ -68,7 +68,7 @@ $document = $null
 $exitCode = 0
 if ($evidenceMode) {
     $evidenceSet = Read-RolloutInputDocument -Path $GateEvidencePath -Kind evidence-set -MaximumBytes 4MB -MissingReason 'rollout-evidence-set-missing' -TooLargeReason 'rollout-evidence-set-too-large'
-    & $protocolModule { param($Root,$Set) Assert-HarnessRolloutV2EvidenceSet -RepoRoot $Root -Document $Set } $RepoRoot $evidenceSet
+    & $qualificationModule { param($Root,$Set) Assert-HarnessRolloutV2EvidenceSet -RepoRoot $Root -Document $Set } $RepoRoot $evidenceSet
     $provenanceStatus = 'verified'
     try {
         & $evidenceModule { param($Gates,$Protected) Assert-HarnessRolloutEvidenceSetProvenance -Gates $Gates -ProtectedRoots $Protected } $evidenceSet.gates @($protectedRoots)
@@ -77,19 +77,19 @@ if ($evidenceMode) {
         if (-not $reason.StartsWith('rollout-evidence-',[StringComparison]::Ordinal)) { throw }
         $provenanceStatus = 'unverified'
     }
-    $document = & $protocolModule { param($Root,$Set,$Status) New-HarnessRolloutReviewPayloadDocument -RepoRoot $Root -EvidenceSet $Set -ProvenanceStatus $Status } $RepoRoot $evidenceSet $provenanceStatus
+    $document = & $qualificationModule { param($Root,$Set,$Status) New-HarnessRolloutReviewPayloadDocument -RepoRoot $Root -EvidenceSet $Set -ProvenanceStatus $Status } $RepoRoot $evidenceSet $provenanceStatus
     $exitCode = if ($provenanceStatus -ceq 'verified') { 0 } else { 3 }
 } else {
     $payload = Read-RolloutInputDocument -Path $ReviewPayloadPath -Kind review-payload -MaximumBytes 4MB -MissingReason 'rollout-review-payload-missing' -TooLargeReason 'rollout-review-payload-too-large'
     $receipt = Read-RolloutInputDocument -Path $ReviewReceiptPath -Kind review-receipt -MaximumBytes 64KB -MissingReason 'rollout-review-receipt-missing' -TooLargeReason 'rollout-review-receipt-too-large'
-    & $protocolModule {
+    & $qualificationModule {
         param($Root,$Payload,$Receipt)
         Assert-HarnessRolloutReviewPayload -RepoRoot $Root -Document $Payload
         Assert-HarnessRolloutReviewReceipt -RepoRoot $Root -Document $Receipt -ExpectedPayloadDigest ([string]$Payload.reviewed_payload_digest) -ExpectedSourceRevision ([string]$Payload.source_revision) -ExpectedPhase ([string]$Payload.phase)
     } $RepoRoot $payload $receipt
     if ([string]$payload.provenance_status -cne 'verified') { throw 'rollout-evidence-provenance-unverified' }
     & $evidenceModule { param($Gates,$Protected) Assert-HarnessRolloutEvidenceSetProvenance -Gates $Gates -ProtectedRoots $Protected } $payload.gates @($protectedRoots)
-    $document = & $protocolModule {
+    $document = & $qualificationModule {
         param($Root,$Payload,$Receipt,$ReceiptPath)
         New-HarnessRolloutV2ReportDocument -RepoRoot $Root -ReviewPayload $Payload -ReviewReceipt $Receipt -ReviewReceiptArtifactPath $ReceiptPath
     } $RepoRoot $payload $receipt $ReviewReceiptPath

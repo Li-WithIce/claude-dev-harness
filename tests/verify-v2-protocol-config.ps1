@@ -76,7 +76,7 @@ try {
     $missingBefore = Snapshot $workspace
     $missingResult = Invoke-Cli $workspace @('protocol') $null
     $missing = Read-Json $missingResult
-    Check ($missingResult.ExitCode -eq 0 -and $missing.selected_protocol -ceq 'v1' -and $missing.preference_source -ceq 'default-auto' -and $missing.workspace_config.status -ceq 'missing' -and $missing.side_effects.runtime_writes -eq 0) 'protocol status defaults a new task to v1 without a local selection or rollout' 'protocol status did not preserve the v1 fallback'
+    Check ($missingResult.ExitCode -eq 0 -and $missing.selected_protocol -ceq 'v1' -and $missing.preference_source -ceq 'default-auto' -and $missing.workspace_config.status -ceq 'missing' -and $missing.side_effects.runtime_writes -eq 0) 'protocol status defaults a new task to v1 without a local selection or Runtime Default' 'protocol status did not preserve the v1 fallback'
     Same $missingBefore (Snapshot $workspace) 'protocol status is read-only' 'protocol status wrote workspace state'
 
     $enableResult = Invoke-Cli $workspace @('enable-v2') $null
@@ -113,7 +113,7 @@ try {
     $resetResult = Invoke-Cli $workspace @('reset-auto') $null
     $reset = Read-Json $resetResult
     $resetStatus = Read-Json (Invoke-Cli $workspace @('protocol') $null)
-    Check ($resetResult.ExitCode -eq 0 -and $reset.new_task_protocol -ceq 'auto' -and $resetStatus.selected_protocol -ceq 'v1' -and $resetStatus.preference_source -ceq 'workspace-config' -and $resetStatus.reason -ceq 'rollout-report-missing') 'reset-auto restores gated auto and therefore the current v1 fallback' 'reset-auto silently promoted new tasks to v2'
+    Check ($resetResult.ExitCode -eq 0 -and $reset.new_task_protocol -ceq 'auto' -and $resetStatus.selected_protocol -ceq 'v1' -and $resetStatus.preference_source -ceq 'workspace-config' -and $resetStatus.reason -ceq 'runtime-default-missing') 'reset-auto restores Runtime Default lookup and therefore the current v1 fallback' 'reset-auto silently promoted new tasks to v2'
 
     $invalidCases = @(
         [pscustomobject]@{Name='BOM';Bytes=[byte[]](0xEF,0xBB,0xBF)+[System.Text.UTF8Encoding]::new($false).GetBytes($validJson)},

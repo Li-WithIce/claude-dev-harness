@@ -62,8 +62,8 @@ Need-Text 'docs/architecture/policy-engine.md' 'it does not mark Codex trust, Ho
 
 $entryContractPath = 'policies/entry-contract.md'
 Need-Text $entryContractPath '`protocol_default`: `auto`'
-Need-Text $entryContractPath '`auto_resolves_to`: `existing-artifact-or-gated-v2-new`'
-Need-Text $entryContractPath '`v2_entry_activation`: `explicit-or-workspace-new-or-existing-v2-or-eligible-auto-new`'
+Need-Text $entryContractPath '`auto_resolves_to`: `existing-artifact-or-runtime-default-or-v1-fallback`'
+Need-Text $entryContractPath '`v2_entry_activation`: `explicit-or-workspace-new-or-existing-v2-or-runtime-default-new`'
 Need-Text $entryContractPath 'first complete routing hop'
 Need-Text $entryContractPath 'Selected v2 Direct loads no `entry-router`, `orchestrator`, lifecycle skill'
 Need-Text $entryContractPath 'minimum focused checks covering all confirmed acceptance criteria'

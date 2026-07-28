@@ -6,7 +6,7 @@ This document defines the machine-readable contracts introduced by PR-01 and imp
 
 - PR-00 through PR-03 keep v1 as the only default runtime.
 - PR-04 through PR-13 expose v2 only through explicit opt-in.
-- PR-14 lets `auto` select v2 only for a new task with a current all-pass rollout report; a missing, stale, failed, simulated, or unavailable gate selects v1 with a diagnostic reason.
+- PR-14 keeps `auto` artifact-first and consumes only a strict `harness-runtime-default/v1` decision after explicit/workspace preferences; missing, invalid, expired, source-drifted, workspace-mismatched, or capability-incompatible decisions select v1 with a runtime reason. Release Gate reports remain outside Runtime Core.
 - Existing v1 tasks continue to use the current five-stage files and scripts throughout this refactor.
 
 Schema or policy load failure never grants permission. Read-only inspection may continue when policy infrastructure is unavailable, but protected writes fail closed.

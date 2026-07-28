@@ -24,7 +24,7 @@ pwsh -File .assistant\entry\task.ps1 protocol
 # enable：写入默认不入 Git 的项目配置；之后正常打开 Desktop 即可
 pwsh -File .assistant\entry\task.ps1 enable-v2
 
-# reset：回到证据门控 auto；disable：立即让新任务回到 v1
+# reset：回到 Runtime Default 驱动的 auto；disable：立即让新任务回到 v1
 pwsh -File .assistant\entry\task.ps1 reset-auto
 pwsh -File .assistant\entry\task.ps1 disable-v2
 ```
@@ -51,7 +51,7 @@ pwsh -File D:\data\dev-harness\scripts\harness-status.ps1 `
   -RepoRoot D:\data\dev-harness
 ```
 
-状态会分别报告 Hook 是否安装、信任与可调用性、Codex Host 版本、Protected Action policy、Desktop enforcement 和 Canonical rollout report。宿主无法权威查询 Hook trust/callable 时结果是 `unknown`；当前受控 Desktop writer 尚未由安装器部署，因此 `desktop_enforcement` 是 `unavailable`。直接运行 `harness-status.ps1` 时整体为 `WARN`，不能当成资格通过；`harness.ps1` 的成功 bootstrap/update 仍返回 `PASS`，并把这项 `WARN` 作为可见的 advisory step 保留下来。
+默认状态只报告实际 Host product/version、可观测 Capability、协议选择来源、Runtime Default Decision、工作区配置、已有任务 artifact 和 Protected Action policy。无法权威观测的 Capability 保持 `unavailable`，不会被解释为版本不匹配，也不会让普通 Direct 因 request-send telemetry 或 Hook status 不可用而失败。需要查看精确 Release Profile、Gate、Evidence、Review 或 Canary 时，必须显式运行 `scripts/qualification-status.ps1`；默认 `harness.ps1` 不调用它。
 
 ## Worktree
 

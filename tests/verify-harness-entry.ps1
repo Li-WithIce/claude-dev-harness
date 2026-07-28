@@ -243,20 +243,20 @@ $statusUserAfter = @(Get-TestTreeState -Root $userProfile | Where-Object { -not 
 $statusRepoAfter = @(& git -C $RepoRoot status --porcelain --untracked-files=all)
 $statusGitOptionalLocksAfter = [Environment]::GetEnvironmentVariable('GIT_OPTIONAL_LOCKS', [EnvironmentVariableTarget]::Process)
 $statusText = $statusResult.Output -join "`n"
-$hostVersionState = Get-StatusLineValue -Output $statusResult.Output -Prefix 'host_version'
 if ($statusResult.ExitCode -eq 1 -and
     (Get-StatusLineValue -Output $statusResult.Output -Prefix 'STATUS') -eq 'WARN' -and
-    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'hook_installed') -eq 'verified' -and
-    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'hook_trust') -eq 'unknown' -and
-    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'hook_callable') -eq 'unknown' -and
-    $hostVersionState -in @('verified','mismatch','unavailable') -and
+    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'host_product') -eq 'codex' -and
+    -not [string]::IsNullOrWhiteSpace((Get-StatusLineValue -Output $statusResult.Output -Prefix 'host_version_actual')) -and
+    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'capability_observation') -eq 'partial' -and
+    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'capability_workspace_protocol_config') -eq 'true' -and
+    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'capability_hook_status_query') -eq 'unavailable' -and
     (Get-StatusLineValue -Output $statusResult.Output -Prefix 'protected_policy') -eq 'verified' -and
-    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'desktop_enforcement') -eq 'unavailable' -and
-    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'canonical_report') -eq 'missing' -and
-    $statusText -notmatch '(?m)^(desktop_enforcement|hook_trust|hook_callable): pass$') {
-    Add-Check 'harness-status reports installed, unknown, versioned, unavailable, and canonical states without false pass'
+    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'runtime_default') -eq 'missing' -and
+    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'workspace_config') -eq 'missing' -and
+    $statusText -notmatch '(?m)^(host_version_expected|qualification_profile|canonical_report|hook_installed|hook_trust|hook_callable):') {
+    Add-Check 'harness-status reports actual Host facts, capabilities, protocol, and Runtime Default without Qualification'
 } else {
-    Add-Failure 'harness-status should report each Desktop health dimension truthfully'
+    Add-Failure 'harness-status should report the ordinary runtime health surface truthfully'
 }
 if (@(Compare-Object $statusWorkspaceBefore $statusWorkspaceAfter -CaseSensitive).Count -eq 0 -and
     @(Compare-Object $statusUserBefore $statusUserAfter -CaseSensitive).Count -eq 0 -and
@@ -284,12 +284,13 @@ try {
 } finally {
     [System.IO.File]::WriteAllBytes($hookPath, $hookBytes)
 }
-if ($oversizedHookProbe.ExitCode -eq 2 -and
-    (Get-StatusLineValue -Output $oversizedHookProbe.Output -Prefix 'STATUS') -eq 'FAIL' -and
-    (Get-StatusLineValue -Output $oversizedHookProbe.Output -Prefix 'hook_installed') -eq 'invalid') {
-    Add-Check 'harness-status rejects an oversized Hook document through its bounded reader'
+if ($oversizedHookProbe.ExitCode -eq 1 -and
+    (Get-StatusLineValue -Output $oversizedHookProbe.Output -Prefix 'STATUS') -eq 'WARN' -and
+    (Get-StatusLineValue -Output $oversizedHookProbe.Output -Prefix 'capability_hook_status_query') -eq 'unavailable' -and
+    ($oversizedHookProbe.Output -join "`n") -notmatch '(?m)^hook_installed:') {
+    Add-Check 'ordinary harness-status does not read user Hook qualification state'
 } else {
-    Add-Failure 'harness-status should fail closed on an oversized Hook document'
+    Add-Failure 'ordinary harness-status should remain independent of user Hook qualification state'
 }
 
 $fakeCodexBin = Join-Path $caseRoot 'fake-codex-exact-version'
@@ -300,11 +301,11 @@ $fakeCodexBin = Join-Path $caseRoot 'fake-codex-exact-version'
     [System.Text.UTF8Encoding]::new($false))
 $exactVersionProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot
 if ($exactVersionProbe.Result.ExitCode -eq 1 -and
-    (Get-StatusLineValue -Output $exactVersionProbe.Result.Output -Prefix 'host_version') -eq 'verified' -and
-    (Get-StatusLineValue -Output $exactVersionProbe.Result.Output -Prefix 'host_version_actual') -eq '0.144.4') {
-    Add-Check 'harness-status verifies the exact pinned Codex Host version when observable'
+    (Get-StatusLineValue -Output $exactVersionProbe.Result.Output -Prefix 'host_version_actual') -eq '0.144.4' -and
+    ($exactVersionProbe.Result.Output -join "`n") -notmatch '(?m)^host_version_expected:') {
+    Add-Check 'harness-status reports an observed Host version as a fact without a qualification target'
 } else {
-    Add-Failure 'harness-status should verify the exact pinned Codex Host version'
+    Add-Failure 'harness-status should report the observed Host version without a qualification target'
 }
 
 $fakeCodexBin = Join-Path $caseRoot 'fake-codex-mismatched-version'
@@ -315,11 +316,11 @@ $fakeCodexBin = Join-Path $caseRoot 'fake-codex-mismatched-version'
     [System.Text.UTF8Encoding]::new($false))
 $mismatchedVersionProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot
 if ($mismatchedVersionProbe.Result.ExitCode -eq 1 -and
-    (Get-StatusLineValue -Output $mismatchedVersionProbe.Result.Output -Prefix 'host_version') -eq 'mismatch' -and
-    (Get-StatusLineValue -Output $mismatchedVersionProbe.Result.Output -Prefix 'host_version_actual') -eq '9.9.9') {
-    Add-Check 'harness-status reports a well-formed non-pinned Codex Host version as mismatch'
+    (Get-StatusLineValue -Output $mismatchedVersionProbe.Result.Output -Prefix 'host_version_actual') -eq '9.9.9' -and
+    ($mismatchedVersionProbe.Result.Output -join "`n") -notmatch '(?i)version.mismatch|host_version_expected') {
+    Add-Check 'harness-status accepts a well-formed newer Host version without a mismatch conclusion'
 } else {
-    Add-Failure 'harness-status should preserve an observable non-pinned Codex Host version'
+    Add-Failure 'harness-status should preserve a newer Host version without qualification mismatch'
 }
 
 $fakeCodexBin = Join-Path $caseRoot 'fake-codex-malformed-version'
@@ -330,8 +331,8 @@ $fakeCodexBin = Join-Path $caseRoot 'fake-codex-malformed-version'
     [System.Text.UTF8Encoding]::new($false))
 $malformedVersionProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot
 if ($malformedVersionProbe.Result.ExitCode -eq 1 -and
-    (Get-StatusLineValue -Output $malformedVersionProbe.Result.Output -Prefix 'host_version') -eq 'unavailable' -and
-    (Get-StatusLineValue -Output $malformedVersionProbe.Result.Output -Prefix 'host_version_actual') -eq 'unknown') {
+    (Get-StatusLineValue -Output $malformedVersionProbe.Result.Output -Prefix 'host_version_actual') -eq 'unknown' -and
+    ($malformedVersionProbe.Result.Output -join "`n") -notmatch '(?i)version.mismatch|host_version_expected') {
     Add-Check 'harness-status rejects malformed Codex Host version output as unavailable'
 } else {
     Add-Failure 'harness-status should not classify malformed Host output as a version mismatch'
@@ -347,7 +348,7 @@ $hangProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userPro
 if ($hangProbe.Result.ExitCode -eq 1 -and
     $hangProbe.Elapsed.TotalSeconds -lt 10 -and
     (Get-StatusLineValue -Output $hangProbe.Result.Output -Prefix 'STATUS') -eq 'WARN' -and
-    (Get-StatusLineValue -Output $hangProbe.Result.Output -Prefix 'host_version') -eq 'unavailable') {
+    (Get-StatusLineValue -Output $hangProbe.Result.Output -Prefix 'host_version_actual') -eq 'unknown') {
     Add-Check 'harness-status bounds a hanging Codex version probe and reports unavailable'
 } else {
     Add-Failure 'harness-status should terminate a hanging Codex version probe within its bounded timeout'
@@ -372,7 +373,7 @@ foreach ($argument in @('-NoLogo', '-NoProfile', '-NonInteractive', '-Command', 
 $inheritedPipeProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot
 if ($inheritedPipeProbe.Result.ExitCode -eq 1 -and
     $inheritedPipeProbe.Elapsed.TotalSeconds -lt 10 -and
-    (Get-StatusLineValue -Output $inheritedPipeProbe.Result.Output -Prefix 'host_version') -eq 'unavailable') {
+    (Get-StatusLineValue -Output $inheritedPipeProbe.Result.Output -Prefix 'host_version_actual') -eq 'unknown') {
     Add-Check 'harness-status bounds inherited output pipes after the Codex probe root exits'
 } else {
     Add-Failure 'harness-status should not wait indefinitely when a Codex probe child inherits output pipes'
@@ -387,7 +388,7 @@ $fakeCodexBin = Join-Path $caseRoot 'fake-codex-output-flood'
 $floodProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot
 if ($floodProbe.Result.ExitCode -eq 1 -and
     $floodProbe.Elapsed.TotalSeconds -lt 10 -and
-    (Get-StatusLineValue -Output $floodProbe.Result.Output -Prefix 'host_version') -eq 'unavailable') {
+    (Get-StatusLineValue -Output $floodProbe.Result.Output -Prefix 'host_version_actual') -eq 'unknown') {
     Add-Check 'harness-status drains but rejects truncated Codex version output'
 } else {
     Add-Failure 'harness-status should fail closed when Codex version output exceeds the retention cap'

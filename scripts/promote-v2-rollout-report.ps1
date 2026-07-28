@@ -26,6 +26,8 @@ function Get-RolloutRawDigest {
 try {
     $protocolModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1') -Force -PassThru -ErrorAction Stop
     $evidenceModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.RolloutEvidence.psm1') -Force -PassThru -ErrorAction Stop
+    $qualificationModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Qualification.psm1') -Force -PassThru -ErrorAction Stop
+    $runtimeDefaultModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.RuntimeDefault.psm1') -Force -PassThru -ErrorAction Stop
     $protectedRoots = [Collections.Generic.List[string]]::new()
     $userProfile = [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
     if (-not [string]::IsNullOrWhiteSpace($userProfile)) { $protectedRoots.Add((Join-Path $userProfile '.codex')) }
@@ -46,9 +48,9 @@ try {
     $reportBytes = [IO.File]::ReadAllBytes([string]$paths.source)
     if ($reportBytes.Length -gt 4MB) { throw 'rollout-promotion-input-too-large' }
     $reportFileDigest = Get-RolloutRawDigest -Bytes $reportBytes
-    try { $report = & $protocolModule { param($Bytes) ConvertFrom-HarnessRolloutJsonBytes -Bytes $Bytes -Kind report } $reportBytes }
+    try { $report = & $qualificationModule { param($Bytes) ConvertFrom-HarnessRolloutJsonBytes -Bytes $Bytes -Kind report } $reportBytes }
     catch { throw 'rollout-promotion-report-invalid-json' }
-    & $protocolModule {
+    & $qualificationModule {
         param($Root,$Document)
         Assert-HarnessRolloutRepositoryClean -RepoRoot $Root
         Assert-HarnessRolloutReport -RepoRoot $Root -Document $Document
@@ -78,9 +80,9 @@ try {
     $receiptArtifact = & $evidenceModule {
         param($Path,$Protected) Read-HarnessRolloutEvidenceArtifact -ArtifactPath $Path -ProtectedRoots $Protected -MaximumBytes 64KB
     } $ReviewReceiptPath $inputProtectedRoots
-    $observedHostContext = & $protocolModule { param($Bytes) ConvertFrom-HarnessRolloutJsonBytes -Bytes $Bytes -Kind observed-host-context } ([byte[]]$contextArtifact.bytes)
-    $reviewReceipt = & $protocolModule { param($Bytes) ConvertFrom-HarnessRolloutJsonBytes -Bytes $Bytes -Kind review-receipt } ([byte[]]$receiptArtifact.bytes)
-    & $protocolModule {
+    $observedHostContext = & $qualificationModule { param($Bytes) ConvertFrom-HarnessRolloutJsonBytes -Bytes $Bytes -Kind observed-host-context } ([byte[]]$contextArtifact.bytes)
+    $reviewReceipt = & $qualificationModule { param($Bytes) ConvertFrom-HarnessRolloutJsonBytes -Bytes $Bytes -Kind review-receipt } ([byte[]]$receiptArtifact.bytes)
+    & $qualificationModule {
         param($Root,$Context,$Report,$Receipt,$ReceiptPath)
         Assert-HarnessObservedHostContext -RepoRoot $Root -Document $Context
         Assert-HarnessRolloutReviewReceipt -RepoRoot $Root -Document $Receipt -ExpectedPayloadDigest ([string]$Report.review_payload_digest) -ExpectedSourceRevision ([string]$Report.source_revision) -ExpectedPhase ([string]$Report.phase)
@@ -96,23 +98,32 @@ try {
 
     $authorization = $null
     $authorizationBytes = [byte[]]::new(0)
+    $decisionIssuedAt = [datetimeoffset]::UtcNow
+    $decisionExpiresAt = $null
     if ([string]$report.phase -ceq 'canary-candidate') {
-        $issuedAt = [datetimeoffset]::UtcNow
-        $expiresAt = if ($null -ne $DurationHours) { $issuedAt.AddHours($durationValue) } else {
+        $decisionIssuedAt = [datetimeoffset]::UtcNow
+        $decisionExpiresAt = if ($null -ne $DurationHours) { $decisionIssuedAt.AddHours($durationValue) } else {
             try { [datetimeoffset]::Parse($ExpiresAtUtc,[Globalization.CultureInfo]::InvariantCulture) }
             catch { throw 'rollout-promotion-canary-expiry-invalid' }
         }
-        $authorization = & $protocolModule {
+        $authorization = & $qualificationModule {
             param($Root,$Workspace,$Report,$Context,$Owner,$Issued,$Expires)
             New-HarnessCanaryAuthorizationDocument -RepoRoot $Root -WorkspaceRoot $Workspace -Report $Report -ObservedHostContext $Context -AuthorizedBy $Owner -IssuedAtUtc $Issued -ExpiresAtUtc $Expires
-        } $RepoRoot $WorkspaceRoot $report $observedHostContext $AuthorizedBy $issuedAt $expiresAt
+        } $RepoRoot $WorkspaceRoot $report $observedHostContext $AuthorizedBy $decisionIssuedAt $decisionExpiresAt
         $authorizationBytes = [Text.UTF8Encoding]::new($false).GetBytes(($authorization | ConvertTo-Json -Depth 100 -Compress))
     }
 
+    $decisionScope = if ([string]$report.phase -ceq 'canary-candidate') { 'workspace-canary' } else { 'release-default' }
+    $runtimeDecision = & $runtimeDefaultModule {
+        param($Root,$Workspace,$Scope,$Revision,$Issued,$Expires)
+        New-HarnessRuntimeDefaultDecisionDocument -RepoRoot $Root -WorkspaceRoot $Workspace -Scope $Scope -SourceRevision $Revision -IssuedAtUtc $Issued -ExpiresAtUtc $Expires
+    } $RepoRoot $WorkspaceRoot $decisionScope ([string]$report.source_revision) $decisionIssuedAt $decisionExpiresAt
+    $runtimeDecisionBytes = [Text.UTF8Encoding]::new($false).GetBytes(($runtimeDecision | ConvertTo-Json -Depth 20 -Compress))
+
     $transaction = & $evidenceModule {
-        param($Root,$Workspace,$InputPath,$Phase,$ReportBytes,$AuthorizationBytes,$Protected,$SourceState,$Context,$Protocol,$Report,$Authorization)
-        Invoke-HarnessRolloutPublicationTransaction -RepoRoot $Root -WorkspaceRoot $Workspace -ReportPath $InputPath -Phase $Phase -ReportBytes $ReportBytes -ExpectedReportDigest ([string]$Report.report_digest) -AuthorizationBytes $AuthorizationBytes -ExpectedAuthorizationDigest $(if($null-eq$Authorization){''}else{[string]$Authorization.authorization_digest}) -ProtectedRoots $Protected -SourceStateStart $SourceState -ObservedHostContext $Context -ProtocolModule $Protocol
-    } $RepoRoot $WorkspaceRoot $ReportPath ([string]$report.phase) $reportBytes $authorizationBytes @($protectedRoots) $sourceStateStart $observedHostContext $protocolModule $report $authorization
+        param($Root,$Workspace,$InputPath,$Phase,$ReportBytes,$AuthorizationBytes,$DecisionBytes,$Protected,$SourceState,$Protocol,$Report,$Authorization,$Decision)
+        Invoke-HarnessRolloutPublicationTransaction -RepoRoot $Root -WorkspaceRoot $Workspace -ReportPath $InputPath -Phase $Phase -ReportBytes $ReportBytes -ExpectedReportDigest ([string]$Report.report_digest) -AuthorizationBytes $AuthorizationBytes -ExpectedAuthorizationDigest $(if($null-eq$Authorization){''}else{[string]$Authorization.authorization_digest}) -DecisionBytes $DecisionBytes -ExpectedDecisionDigest ([string]$Decision.decision_digest) -ProtectedRoots $Protected -SourceStateStart $SourceState -ProtocolModule $Protocol
+    } $RepoRoot $WorkspaceRoot $ReportPath ([string]$report.phase) $reportBytes $authorizationBytes $runtimeDecisionBytes @($protectedRoots) $sourceStateStart $protocolModule $report $authorization $runtimeDecision
 
     [ordered]@{
         operation = 'promote-v2-rollout-report'
@@ -121,10 +132,12 @@ try {
         final_target = [string]$transaction.final_target
         candidate_target = [string]$transaction.candidate_target
         authorization_target = $(if ($null -eq $authorization) { $null } else { [string]$transaction.authorization_target })
+        runtime_default_target = [string]$transaction.runtime_default_target
         report_digest = [string]$report.report_digest
         file_digest = $reportFileDigest
         source_revision = [string]$report.source_revision
         authorization_digest = $(if ($null -eq $authorization) { $null } else { [string]$authorization.authorization_digest })
+        decision_digest = [string]$runtimeDecision.decision_digest
     } | ConvertTo-Json -Depth 10 -Compress | Write-Output
     exit 0
 } catch {
