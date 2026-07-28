@@ -311,7 +311,7 @@ function Invoke-HarnessRolloutPublicationTransaction {
     if ($Phase -ceq 'canary-candidate' -and $ExpectedAuthorizationDigest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'rollout-promotion-expected-authorization-digest-invalid' }
     if ($Phase -ceq 'final-default' -and -not [string]::IsNullOrWhiteSpace($ExpectedAuthorizationDigest)) { throw 'rollout-promotion-unexpected-authorization-digest' }
     if ($DecisionBytes.Length -eq 0 -or $ExpectedDecisionDigest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'rollout-promotion-runtime-decision-invalid' }
-    try { $decisionDocument = [Text.UTF8Encoding]::new($false,$true).GetString($DecisionBytes) | ConvertFrom-Json -AsHashtable -Depth 20 -DateKind String }
+    try { $decisionDocument = [Text.UTF8Encoding]::new($false,$true).GetString($DecisionBytes) | ConvertFrom-HarnessJson -Depth 20 }
     catch { throw 'rollout-promotion-runtime-decision-invalid' }
     if ($decisionDocument -isnot [Collections.IDictionary] -or [string]$decisionDocument.decision_digest -cne $ExpectedDecisionDigest) {
         throw 'rollout-promotion-runtime-decision-invalid'
