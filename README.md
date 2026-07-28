@@ -399,7 +399,7 @@ pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite core -
 
 GitHub Actions 的普通 PR 路径由五路 `pr-core-checks` matrix、`changed-optional` 和最终 core 安装回滚组成。所有普通 PR job 都 checkout 精确 PR HEAD，并分别上传一个 `thin-harness-ordinary-ci-receipt/v1` 单文件 artifact；receipt 只含 PR/run、base/head/checkout SHA、固定 check identity、outcome 与 UTC 时间，不含 prompt、credential、raw trace/log 或私人绝对路径。最终 `pr-core` 只有在五个分组精确为 `success` 时才继续；`pr-core-checks` 的每个 matrix leg 与最终 `pr-core` job 上限均为 45 分钟，`changed-optional` 上限为 30 分钟。其他 CI 维护合同见 [`docs/release/default-promotion-gates.md`](docs/release/default-promotion-gates.md)。
 
-协议解析先认已有 v2 `task.json` / 合法 v1 `plan.md` artifact，再看显式维护覆盖或 `HARNESS_PROTOCOL`，随后读取严格的工作区 `.assistant/config/protocol.json`。只有新任务最终仍为 `auto` 时才读取版本无关、Evidence 无关的 `.assistant/runtime/protocol-default.json`；它严格验证 schema、digest、source revision、可选 workspace/expiry 绑定和实际 required capabilities。Decision 缺失或无效时回退 v1；`disable-v2` / `HARNESS_PROTOCOL=v1` 永久保留为止损开关。
+协议解析先认已有 v2 `task.json` / 合法 v1 `plan.md` artifact，再看显式维护覆盖或 `HARNESS_PROTOCOL`，随后读取严格的工作区 `.assistant/config/protocol.json`。只有新任务最终仍为 `auto` 时才读取版本无关、Evidence 无关的 `.assistant/runtime/protocol-default.json`；它严格验证 schema、digest、绑定固定 Runtime 路径集的 Source Identity、可选 workspace/expiry 绑定和实际 required capabilities，并且只观察当前 Decision 要求的能力。Decision 缺失或无效时回退 v1；`disable-v2` / `HARNESS_PROTOCOL=v1` 永久保留为止损开关。
 
 ### 跑完整 verify 套件
 

@@ -91,17 +91,20 @@ function Invoke-FakeCodexStatus {
         [Parameter(Mandatory = $true)][string]$UserProfile,
         [Parameter(Mandatory = $true)][string]$StatusPath,
         [Parameter(Mandatory = $true)][string]$WorkspaceRoot,
-        [Parameter(Mandatory = $true)][string]$RepoRoot
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [switch]$ProbeHostDetails
     )
 
     $originalPath = $env:PATH
     try {
         $env:PATH = $BinPath + [System.IO.Path]::PathSeparator + $originalPath
         $timer = [System.Diagnostics.Stopwatch]::StartNew()
-        $result = Invoke-RepoScript -UserProfile $UserProfile -ScriptPath $StatusPath -Arguments @{
+        $arguments = @{
             WorkspaceRoot = $WorkspaceRoot
             RepoRoot      = $RepoRoot
         }
+        if ($ProbeHostDetails) { $arguments.ProbeHostDetails = $true }
+        $result = Invoke-RepoScript -UserProfile $UserProfile -ScriptPath $StatusPath -Arguments $arguments
         $timer.Stop()
         return [pscustomobject]@{ Result = $result; Elapsed = $timer.Elapsed }
     } finally {
@@ -246,15 +249,17 @@ $statusText = $statusResult.Output -join "`n"
 if ($statusResult.ExitCode -eq 1 -and
     (Get-StatusLineValue -Output $statusResult.Output -Prefix 'STATUS') -eq 'WARN' -and
     (Get-StatusLineValue -Output $statusResult.Output -Prefix 'host_product') -eq 'codex' -and
-    -not [string]::IsNullOrWhiteSpace((Get-StatusLineValue -Output $statusResult.Output -Prefix 'host_version_actual')) -and
-    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'capability_observation') -eq 'partial' -and
+    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'host_version_actual') -eq 'unknown' -and
+    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'host_details_probed') -eq 'false' -and
+    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'capability_observation') -eq 'observed' -and
     (Get-StatusLineValue -Output $statusResult.Output -Prefix 'capability_workspace_protocol_config') -eq 'true' -and
     (Get-StatusLineValue -Output $statusResult.Output -Prefix 'capability_hook_status_query') -eq 'unavailable' -and
     (Get-StatusLineValue -Output $statusResult.Output -Prefix 'protected_policy') -eq 'verified' -and
     (Get-StatusLineValue -Output $statusResult.Output -Prefix 'runtime_default') -eq 'missing' -and
     (Get-StatusLineValue -Output $statusResult.Output -Prefix 'workspace_config') -eq 'missing' -and
-    $statusText -notmatch '(?m)^(host_version_expected|qualification_profile|canonical_report|hook_installed|hook_trust|hook_callable):') {
-    Add-Check 'harness-status reports actual Host facts, capabilities, protocol, and Runtime Default without Qualification'
+    $statusText -notmatch '(?m)^(host_version_expected|qualification_profile|canonical_report|hook_installed|hook_trust|hook_callable):' -and
+    $statusText -notmatch 'Host capability observation|Host version observation') {
+    Add-Check 'default harness-status reports only required Runtime facts without probing Host details or warning on optional facts'
 } else {
     Add-Failure 'harness-status should report the ordinary runtime health surface truthfully'
 }
@@ -295,13 +300,23 @@ if ($oversizedHookProbe.ExitCode -eq 1 -and
 
 $fakeCodexBin = Join-Path $caseRoot 'fake-codex-exact-version'
 [void][System.IO.Directory]::CreateDirectory($fakeCodexBin)
+$defaultProbeSentinel = Join-Path $fakeCodexBin 'default-probe-sentinel.txt'
 [System.IO.File]::WriteAllText(
     (Join-Path $fakeCodexBin 'codex.ps1'),
-    "[Console]::Out.WriteLine('codex-cli 0.144.4')`r`n",
+    "[IO.File]::WriteAllText('$($defaultProbeSentinel.Replace("'", "''"))','called')`r`n[Console]::Out.WriteLine('codex-cli 0.144.4')`r`n",
     [System.Text.UTF8Encoding]::new($false))
-$exactVersionProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot
+$defaultVersionProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot
+if (-not (Test-Path -LiteralPath $defaultProbeSentinel) -and
+    (Get-StatusLineValue -Output $defaultVersionProbe.Result.Output -Prefix 'host_version_actual') -eq 'unknown' -and
+    (Get-StatusLineValue -Output $defaultVersionProbe.Result.Output -Prefix 'host_details_probed') -eq 'false') {
+    Add-Check 'default harness-status does not execute the Codex version probe'
+} else {
+    Add-Failure 'default harness-status should not execute the Codex version probe'
+}
+$exactVersionProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -ProbeHostDetails
 if ($exactVersionProbe.Result.ExitCode -eq 1 -and
     (Get-StatusLineValue -Output $exactVersionProbe.Result.Output -Prefix 'host_version_actual') -eq '0.144.4' -and
+    (Get-StatusLineValue -Output $exactVersionProbe.Result.Output -Prefix 'host_details_probed') -eq 'true' -and
     ($exactVersionProbe.Result.Output -join "`n") -notmatch '(?m)^host_version_expected:') {
     Add-Check 'harness-status reports an observed Host version as a fact without a qualification target'
 } else {
@@ -314,7 +329,7 @@ $fakeCodexBin = Join-Path $caseRoot 'fake-codex-mismatched-version'
     (Join-Path $fakeCodexBin 'codex.ps1'),
     "[Console]::Out.WriteLine('codex-cli 9.9.9')`r`n",
     [System.Text.UTF8Encoding]::new($false))
-$mismatchedVersionProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot
+$mismatchedVersionProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -ProbeHostDetails
 if ($mismatchedVersionProbe.Result.ExitCode -eq 1 -and
     (Get-StatusLineValue -Output $mismatchedVersionProbe.Result.Output -Prefix 'host_version_actual') -eq '9.9.9' -and
     ($mismatchedVersionProbe.Result.Output -join "`n") -notmatch '(?i)version.mismatch|host_version_expected') {
@@ -329,7 +344,7 @@ $fakeCodexBin = Join-Path $caseRoot 'fake-codex-malformed-version'
     (Join-Path $fakeCodexBin 'codex.ps1'),
     "[Console]::Out.WriteLine('not-a-codex-version')`r`n",
     [System.Text.UTF8Encoding]::new($false))
-$malformedVersionProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot
+$malformedVersionProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -ProbeHostDetails
 if ($malformedVersionProbe.Result.ExitCode -eq 1 -and
     (Get-StatusLineValue -Output $malformedVersionProbe.Result.Output -Prefix 'host_version_actual') -eq 'unknown' -and
     ($malformedVersionProbe.Result.Output -join "`n") -notmatch '(?i)version.mismatch|host_version_expected') {
@@ -344,7 +359,7 @@ $fakeCodexBin = Join-Path $caseRoot 'fake-codex-hang'
     (Join-Path $fakeCodexBin 'codex.ps1'),
     "Start-Sleep -Seconds 120`r`n",
     [System.Text.UTF8Encoding]::new($false))
-$hangProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot
+$hangProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -ProbeHostDetails
 if ($hangProbe.Result.ExitCode -eq 1 -and
     $hangProbe.Elapsed.TotalSeconds -lt 10 -and
     (Get-StatusLineValue -Output $hangProbe.Result.Output -Prefix 'STATUS') -eq 'WARN' -and
@@ -370,7 +385,7 @@ foreach ($argument in @('-NoLogo', '-NoProfile', '-NonInteractive', '-Command', 
     (Join-Path $fakeCodexBin 'codex.ps1'),
     $inheritedPipeScript,
     [System.Text.UTF8Encoding]::new($false))
-$inheritedPipeProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot
+$inheritedPipeProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -ProbeHostDetails
 if ($inheritedPipeProbe.Result.ExitCode -eq 1 -and
     $inheritedPipeProbe.Elapsed.TotalSeconds -lt 10 -and
     (Get-StatusLineValue -Output $inheritedPipeProbe.Result.Output -Prefix 'host_version_actual') -eq 'unknown') {
@@ -385,7 +400,7 @@ $fakeCodexBin = Join-Path $caseRoot 'fake-codex-output-flood'
     (Join-Path $fakeCodexBin 'codex.ps1'),
     "[Console]::Out.Write(('x' * 131072))`r`n",
     [System.Text.UTF8Encoding]::new($false))
-$floodProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot
+$floodProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -ProbeHostDetails
 if ($floodProbe.Result.ExitCode -eq 1 -and
     $floodProbe.Elapsed.TotalSeconds -lt 10 -and
     (Get-StatusLineValue -Output $floodProbe.Result.Output -Prefix 'host_version_actual') -eq 'unknown') {

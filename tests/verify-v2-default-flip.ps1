@@ -258,6 +258,8 @@ try {
     $finalDecision=Get-Content -Raw -LiteralPath $runtimeDefaultTarget|ConvertFrom-Json -AsHashtable -Depth 20 -DateKind String
     $finalBytesExact=Test-ExactBytes $finalBytes ([IO.File]::ReadAllBytes($finalTarget))
     Check ((Test-Path $finalTarget)-and-not(Test-Path $candidateTarget)-and-not(Test-Path $authorizationTarget)-and$finalBytesExact-and$finalDecision.scope-ceq'release-default') 'Final transaction writes Final plus release Runtime Default and removes stale Candidate/Auth' 'Final transaction left stale or wrongly scoped state'
+    $sharedSourceIdentity=& $script:runtimeDefaultModule {param($Root)Get-HarnessRuntimeSourceIdentity -RepoRoot $Root} $RepoRoot
+    Check (($candidateDecision.source_identity|ConvertTo-Json -Compress)-ceq($sharedSourceIdentity|ConvertTo-Json -Compress)-and($finalDecision.source_identity|ConvertTo-Json -Compress)-ceq($sharedSourceIdentity|ConvertTo-Json -Compress)) 'Candidate and Final Promotion decisions use the shared Runtime Source Identity' 'Promotion produced a separate or drifting Runtime Source Identity'
     $finalBefore=[IO.File]::ReadAllBytes($finalTarget);$candidateAfterFinalReason=Get-Rejection {Invoke-StructuralTransaction $transactionWorkspace $verifiedCandidate.ReportPath 'canary-candidate' $candidateBytes $authorizationBytes}
     Check ($candidateAfterFinalReason-match'final-already-canonical'-and(Test-ExactBytes $finalBefore ([IO.File]::ReadAllBytes($finalTarget)))-and-not(Test-Path $candidateTarget)-and-not(Test-Path $authorizationTarget)) 'Candidate cannot affect an existing Final' 'Candidate modified or shadowed an existing Final'
 

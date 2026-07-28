@@ -9,6 +9,7 @@
     "new_task_protocol",
     "scope",
     "source_revision",
+    "source_identity",
     "decision_id",
     "issued_at_utc",
     "required_capabilities",
@@ -19,6 +20,24 @@
     "new_task_protocol": { "type": "string", "enum": ["v1", "v2"] },
     "scope": { "type": "string", "enum": ["workspace-canary", "release-default"] },
     "source_revision": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+    "source_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "revision",
+        "tree_oid",
+        "path_set_digest",
+        "runtime_contract_digest"
+      ],
+      "properties": {
+        "schema_version": { "type": "string", "enum": ["harness-runtime-source-identity/v1"] },
+        "revision": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+        "tree_oid": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+        "path_set_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "runtime_contract_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    },
     "decision_id": { "type": "string", "pattern": "^rtd_[0-9a-f]{32}$" },
     "issued_at_utc": { "type": "string", "minLength": 1 },
     "expires_at_utc": { "type": ["string", "null"], "minLength": 1 },

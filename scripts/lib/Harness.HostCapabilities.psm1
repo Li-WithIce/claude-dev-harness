@@ -195,24 +195,36 @@ function Assert-HarnessHostCapabilitiesDocument {
 
 function Get-HarnessHostCapabilities {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$RepoRoot)
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [string[]]$RequiredCapabilities = @(),
+        [switch]$ProbeHostDetails
+    )
 
     $root = (Resolve-Path -LiteralPath $RepoRoot).Path
-    $version = Get-HarnessCodexVersionObservation
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($name in $RequiredCapabilities) {
+        if ([string]$name -cnotin $script:HostCapabilityNames) { throw "host-capabilities-unknown-required-capability-$name" }
+        if (-not $seen.Add([string]$name)) { throw "host-capabilities-duplicate-required-capability-$name" }
+    }
+    $version = if ($ProbeHostDetails) { Get-HarnessCodexVersionObservation } else { [ordered]@{ status = 'unavailable'; actual = 'unknown' } }
     $workspaceProtocolConfig = (Test-Path -LiteralPath (Join-Path $root 'schemas\protocol-config.schema.json') -PathType Leaf) -and
         (Test-Path -LiteralPath (Join-Path $root 'scripts\lib\Harness.Protocol.psm1') -PathType Leaf)
+    $capabilities = [ordered]@{
+        workspace_protocol_config = [bool]$workspaceProtocolConfig
+        structured_tool_events = 'unavailable'
+        request_send_telemetry = 'unavailable'
+        desktop_profile_isolation = 'unavailable'
+        hook_status_query = 'unavailable'
+    }
+    $requiredValues = @($RequiredCapabilities | ForEach-Object { $capabilities[[string]$_] })
+    $observedCount = @($requiredValues | Where-Object { $_ -is [bool] }).Count
     $document = [ordered]@{
         schema_version = 'harness-host-capabilities/v1'
         product = 'codex'
         actual_version = $(if ([string]$version.status -ceq 'observed') { [string]$version.actual } else { 'unknown' })
-        observation_status = 'partial'
-        capabilities = [ordered]@{
-            workspace_protocol_config = [bool]$workspaceProtocolConfig
-            structured_tool_events = 'unavailable'
-            request_send_telemetry = 'unavailable'
-            desktop_profile_isolation = 'unavailable'
-            hook_status_query = 'unavailable'
-        }
+        observation_status = $(if ($observedCount -eq $requiredValues.Count) { 'observed' } elseif ($observedCount -eq 0) { 'unavailable' } else { 'partial' })
+        capabilities = $capabilities
     }
     [void](Assert-HarnessHostCapabilitiesDocument -Document $document)
     return $document

@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$WorkspaceRoot,
     [string]$RepoRoot = "",
-    [string]$UserProfileRoot = ""
+    [string]$UserProfileRoot = "",
+    [switch]$ProbeHostDetails
 )
 
 Set-StrictMode -Version Latest
@@ -16,10 +17,8 @@ try {
     }
     $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot -ErrorAction Stop).Path
     Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Path.psm1') -Force -ErrorAction Stop
-    Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.HostCapabilities.psm1') -Force -ErrorAction Stop
+    $hostCapabilitiesModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.HostCapabilities.psm1') -Force -PassThru -ErrorAction Stop
     $WorkspaceRoot = Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
-
-    $hostCapabilities = Get-HarnessHostCapabilities -RepoRoot $RepoRoot
 
     try {
         $protectedModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.ProtectedAction.psm1') -Force -PassThru -ErrorAction Stop
@@ -40,22 +39,26 @@ try {
     } finally {
         [Environment]::SetEnvironmentVariable('GIT_OPTIONAL_LOCKS', $previousGitOptionalLocks, [EnvironmentVariableTarget]::Process)
     }
+    $requiredCapabilities = @($resolution.runtime_default_decision.required_capabilities)
+    $hostCapabilities = if ($ProbeHostDetails) {
+        & $hostCapabilitiesModule { param($Root,$Required) Get-HarnessHostCapabilities -RepoRoot $Root -RequiredCapabilities $Required -ProbeHostDetails } $RepoRoot $requiredCapabilities
+    } elseif ($null -ne $resolution.runtime_default_decision.host_capabilities) {
+        $resolution.runtime_default_decision.host_capabilities
+    } else {
+        & $hostCapabilitiesModule { param($Root,$Required) Get-HarnessHostCapabilities -RepoRoot $Root -RequiredCapabilities $Required } $RepoRoot $requiredCapabilities
+    }
 
     $warnings = [Collections.Generic.List[string]]::new()
     $errors = [Collections.Generic.List[string]]::new()
     if ([string]$protectedPolicy.status -cne 'verified') {
         $errors.Add("Protected Action policy is $($protectedPolicy.status): $($protectedPolicy.reason)")
     }
-    if ([string]$hostCapabilities.actual_version -ceq 'unknown') {
-        $warnings.Add('Codex Host version observation is unavailable.')
-    }
-    if ([string]$hostCapabilities.observation_status -cne 'observed') {
-        $warnings.Add("Host capability observation is $($hostCapabilities.observation_status); unavailable facts remain unavailable.")
-    }
     if ([string]$resolution.selected_protocol -ceq 'v1') {
         $warnings.Add("New tasks select v1: $($resolution.reason)")
     }
-    if ([string]$resolution.runtime_default_decision.status -cin @('invalid','unavailable')) {
+    if ([string]$resolution.detected_protocol -ceq 'new' -and
+        [string]$resolution.requested_protocol -ceq 'auto' -and
+        [string]$resolution.runtime_default_decision.status -cin @('invalid','unavailable')) {
         $warnings.Add("Runtime Default Decision is $($resolution.runtime_default_decision.status): $($resolution.runtime_default_decision.reason)")
     }
 
@@ -65,6 +68,7 @@ try {
     Write-Output ("WorkspaceRoot: {0}" -f $WorkspaceRoot)
     Write-Output ("host_product: {0}" -f $hostCapabilities.product)
     Write-Output ("host_version_actual: {0}" -f $hostCapabilities.actual_version)
+    Write-Output ("host_details_probed: {0}" -f ([string][bool]$ProbeHostDetails).ToLowerInvariant())
     Write-Output ("capability_observation: {0}" -f $hostCapabilities.observation_status)
     foreach ($name in @($hostCapabilities.capabilities.Keys)) {
         Write-Output ("capability_{0}: {1}" -f $name, ([string]$hostCapabilities.capabilities[$name]).ToLowerInvariant())

@@ -51,7 +51,7 @@ pwsh -File D:\data\dev-harness\scripts\harness-status.ps1 `
   -RepoRoot D:\data\dev-harness
 ```
 
-默认状态只报告实际 Host product/version、可观测 Capability、协议选择来源、Runtime Default Decision、工作区配置、已有任务 artifact 和 Protected Action policy。无法权威观测的 Capability 保持 `unavailable`，不会被解释为版本不匹配，也不会让普通 Direct 因 request-send telemetry 或 Hook status 不可用而失败。
+默认状态只报告 Host product、当前 Runtime 所需 Capability、协议选择来源、Runtime Default Decision、工作区配置、已有任务 artifact 和 Protected Action policy；它不启动 `codex --version`，Host version 作为未探测的可选事实显示为 `unknown`。只有显式运行同一命令并追加 `-ProbeHostDetails` 才观察版本；未被当前 Decision 要求的 Capability 即使是 `unavailable` 也不形成 WARN，更不会被解释为版本不匹配。
 
 ## Worktree
 

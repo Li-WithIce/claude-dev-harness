@@ -239,7 +239,9 @@ function Get-HarnessProtocolResolution {
         decision_digest = $null
         new_task_protocol = $null
         scope = $null
+        required_capabilities = @()
         missing_capabilities = @()
+        host_capabilities = $null
     }
     if ($detected -ceq 'new' -and $requested -ceq 'auto') {
         $runtimeDefault = Get-HarnessRuntimeDefaultDecision -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot
