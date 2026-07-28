@@ -56,9 +56,9 @@ Need-Text 'runtime-hooks/claude/codex-pretooluse-launcher.ps1' "if (`$stdout.Tri
 Need-Text 'runtime-hooks/claude/codex-pretooluse-launcher.ps1' "permissionDecision = 'deny'"
 Reject-Regex $codexHooksPath '(?i)\b(?:EncodedCommand|ExecutionPolicy|WindowStyle)\b' 'Codex Hook command must remain a transparent, unencoded launcher invocation'
 Reject-Regex 'runtime-hooks/claude/codex-pretooluse-launcher.ps1' '(?i)\b(?:EncodedCommand|Invoke-Expression|FromBase64String|CreateNoWindow|WindowStyle)\b|ScriptBlock\s*\]\s*::\s*Create' 'Codex Hook launcher must not hide or dynamically evaluate its payload'
-Need-Text 'README.md' '不证明 Codex 已信任或启用 Hook，也不证明飞连/其他企业端点产品已放行'
+Need-Text 'README.md' '不证明 Host 已信任或启用 Hook，也不证明端点产品已放行'
 Need-Text 'agent-configs/codex/README.md' 'Bash shell-form 和所有 direct `apply_patch` 都 fail closed'
-Need-Text 'docs/architecture/policy-engine.md' 'it does not mark Codex trust, Hook activation, or Flylink/endpoint policy as passed'
+Need-Text 'docs/architecture/policy-engine.md' 'it does not mark Host trust, Hook activation, or endpoint policy as passed'
 
 $entryContractPath = 'policies/entry-contract.md'
 Need-Text $entryContractPath '`protocol_default`: `auto`'
