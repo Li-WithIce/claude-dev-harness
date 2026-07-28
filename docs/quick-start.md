@@ -51,7 +51,7 @@ pwsh -File D:\data\dev-harness\scripts\harness-status.ps1 `
   -RepoRoot D:\data\dev-harness
 ```
 
-默认状态只报告实际 Host product/version、可观测 Capability、协议选择来源、Runtime Default Decision、工作区配置、已有任务 artifact 和 Protected Action policy。无法权威观测的 Capability 保持 `unavailable`，不会被解释为版本不匹配，也不会让普通 Direct 因 request-send telemetry 或 Hook status 不可用而失败。需要查看精确 Release Profile、Gate、Evidence、Review 或 Canary 时，必须显式运行 `scripts/qualification-status.ps1`；默认 `harness.ps1` 不调用它。
+默认状态只报告实际 Host product/version、可观测 Capability、协议选择来源、Runtime Default Decision、工作区配置、已有任务 artifact 和 Protected Action policy。无法权威观测的 Capability 保持 `unavailable`，不会被解释为版本不匹配，也不会让普通 Direct 因 request-send telemetry 或 Hook status 不可用而失败。
 
 ## Worktree
 

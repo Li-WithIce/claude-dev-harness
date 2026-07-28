@@ -5,9 +5,8 @@ Windows 优先的轻量工程 harness。新任务先经过 Requirement Gate，�
 ## 当前交付状态
 
 - **v2 public opt-in implementation complete**：Requirement Gate、执行 profile、v2 Task State / Evidence / Approval / Audit、v1/v2 共存与迁移，以及工作区级 `enable-v2` 和 `core` / `governed` / `full` 生命周期已进入公共工程交付范围。
-- **Release Qualification 独立且仍 pending**：普通 Runtime、Direct、status 与 bootstrap 不加载资格 Gate 或报告；正式资格、Promotion、Canary / Stable 与 v1 retirement 的状态和边界见 [`docs/release/compatibility-policy.md`](docs/release/compatibility-policy.md)，未运行项不计为通过。
 - 普通工作区的默认 `auto` 仍继续 fail-closed 到 v1；需要主动试用的新任务可执行一次工作区级 `enable-v2`，之后正常打开 Codex Desktop，不需要保留环境变量。Default Promotion、零配置 Auto 默认 v2 和 v1 retirement 均是后续里程碑。已有任务始终按现有 v2 `task.json` 或 v1 `plan.md` artifact 继续原协议，不会被偏好配置隐式迁移。
-- 入口和架构已经瘦身；当前 HEAD 尚未重新完成正式性能资格测量，因此不声明性能已接近 Bare。
+- 入口和架构已经瘦身；本页不声明性能已接近 Bare。
 
 ## 快速开始
 
@@ -38,7 +37,7 @@ pwsh -File .assistant\entry\task.ps1 reset-auto
 pwsh -File .assistant\entry\task.ps1 disable-v2
 ```
 
-选择保存在默认不入 Git 的 `.assistant/config/protocol.json`，install、update 和 uninstall 都保留它。优先级固定为：已有 v1/v2 artifact；显式维护覆盖或 `HARNESS_PROTOCOL`；工作区配置；有效的 `.assistant/runtime/protocol-default.json`；v1 fallback。`enable-v2` 是独立可用的项目级 opt-in，不要求 Release Qualification。
+选择保存在默认不入 Git 的 `.assistant/config/protocol.json`，install、update 和 uninstall 都保留它。优先级固定为：已有 v1/v2 artifact；显式维护覆盖或 `HARNESS_PROTOCOL`；工作区配置；有效的 `.assistant/runtime/protocol-default.json`；v1 fallback。`enable-v2` 是独立可用的项目级 opt-in。
 
 ### 3. 直接描述需求
 
@@ -61,11 +60,11 @@ pwsh -File .assistant\entry\task.ps1 disable-v2
 
 Evidence 记录真实执行过的验证、覆盖与缺口，并绑定任务版本和仓库修订；没有执行的检查不能写成通过。Critical 的 Approval、顶层结构化 `dry_run` 和至少一条成功执行 record 还必须绑定同一个运行时重算的 `protected-operation/v1` identity，且 `covers` 非空并包含它；无关成功 no-op、环境/目标/scope 漂移或旧 Critical 记录缺少绑定都会 fail closed。该 identity 只使用任务版本、Contract digest、规范化环境/目标、受保护动作类别、Approval 类型与 scope 等稳定非秘密输入。Approval 是对确定操作的合作式授权记录，不是密码学身份认证；参与独立性判断的 actor/context/base-model 字段拒绝空白字符串。
 
-Core 只内置有限的受保护动作规则：生产破坏性数据库命令，以及 `auth` / `permissions` / `rbac` 路径变更。项目特有风险必须通过严格的 `protected-actions-overlay/v1` 增加，不能靠提示词放宽 core。安装器把 Codex `PreToolUse` 合并到普通用户 `hooks.json`，不写信任记录，也不覆盖企业 `hooks=false` / managed-only 策略；经用户正常信任并启用后，`Bash` 只把 command text 送入 core policy。宿主未提供可信的实际 environment identity/cwd 时，Bash 中的 `apply_patch` / `applypatch` 和所有 direct `apply_patch` 都在 adapter 层 fail closed；adapter 不从 approval/permission 标签臆造只读保证。精确 Host 的资格结论只记录在 release 文档中，不回流普通 Runtime。
+Core 只内置有限的受保护动作规则：生产破坏性数据库命令，以及 `auth` / `permissions` / `rbac` 路径变更。项目特有风险必须通过严格的 `protected-actions-overlay/v1` 增加，不能靠提示词放宽 core。安装器把 Codex `PreToolUse` 合并到普通用户 `hooks.json`，不写信任记录，也不覆盖企业 `hooks=false` / managed-only 策略；经用户正常信任并启用后，`Bash` 只把 command text 送入 core policy。宿主未提供可信的实际 environment identity/cwd 时，Bash 中的 `apply_patch` / `applypatch` 和所有 direct `apply_patch` 都在 adapter 层 fail closed；adapter 不从 approval/permission 标签臆造只读保证。
 
 Windows 启动链使用绝对 System32 Windows PowerShell 与安装时固化的 PowerShell 7.3+ 路径；用户 JSON 用显式 writer 精确保留 `BigInteger` 与 decimal。命令、参数和脚本文件均保持明文，不使用 `EncodedCommand`、隐藏窗口、动态求值、改写信任或安全产品绕过。用户目录若包含无法同时由 cmd 与 PowerShell 安全表示的 `` ` $ % ! ^ & | < > ( ) `` 字符，安装会在写入前拒绝。`tests/verify-v2-install-presets.ps1` 证明命令链可解析并产生预期 allow/deny JSON，但不证明 Host 已信任或启用 Hook，也不证明端点产品已放行。企业策略、Hook trust 或端点隔离无法观测时，Capability 保持 `unavailable`；普通 Direct 不把这种不可观测性误写成 Release 失败。宿主 Hook 是 guardrail，不是完整执行边界；Critical 生产动作仍必须交给独立受控执行器。
 
-仓库同时提供 release-only 的 `config.workspace.toml.template` 与 `harness-write-mcp.ps1`，用于验证“原生只读、唯一受控写工具”的确定性边界。受控 writer 固定 RepoRoot/WorkspaceRoot、规范化目标、执行目标 preimage CAS，并对受保护写重新绑定 v2 task/version/profile/Contract/Approval/dry-run；它拒绝 Harness 控制面、自身 RepoRoot 和 NTFS alternate data stream。`install.ps1` 不部署该资格原型；未做正式观察时状态保持 `unavailable`，不能写成 active/pass。
+仓库同时提供 release-only 的 `config.workspace.toml.template` 与 `harness-write-mcp.ps1`，用于验证“原生只读、唯一受控写工具”的确定性边界。受控 writer 固定 RepoRoot/WorkspaceRoot、规范化目标、执行目标 preimage CAS，并对受保护写重新绑定 v2 task/version/profile/Contract/Approval/dry-run；它拒绝 Harness 控制面、自身 RepoRoot 和 NTFS alternate data stream。`install.ps1` 不部署该原型；无法观察时状态保持 `unavailable`，不能写成 active/pass。
 
 ## Worktree 与回滚最短路径
 
@@ -398,9 +397,9 @@ pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite core -
 
 `-CoreGroup` 只允许与 `-Suite core` 一起使用，默认值 `all` 保持 43 个 core 脚本及其顺序；五个可单独执行的分组依次为 `entry-lifecycle`（14）、`evaluation-release`（9）、`install-evidence`（2）、`governance-approval`（3）和 `harness-contracts`（15）。从 Windows PowerShell 5.1 进入时，该参数也会透明转交给 PowerShell 7 runner。
 
-GitHub Actions 的普通 PR 路径由五路 `pr-core-checks` matrix、`changed-optional` 和最终 core 安装回滚组成。所有普通 PR job 都 checkout 精确 PR HEAD，并分别上传一个 `thin-harness-ordinary-ci-receipt/v1` 单文件 artifact；receipt 只含 PR/run、base/head/checkout SHA、固定 check identity、outcome 与 UTC 时间，不含 prompt、credential、raw trace/log 或私人绝对路径。最终 `pr-core` 只有在五个分组精确为 `success` 时才继续；`pr-core-checks` 的每个 matrix leg 与最终 `pr-core` job 上限均为 45 分钟，`changed-optional` 上限为 30 分钟。独立的 Release Qualification job、专用 runner、Evidence 与预算合同见 [`docs/release/default-promotion-gates.md`](docs/release/default-promotion-gates.md)；它们不是普通 Runtime 或 PR 路由输入。
+GitHub Actions 的普通 PR 路径由五路 `pr-core-checks` matrix、`changed-optional` 和最终 core 安装回滚组成。所有普通 PR job 都 checkout 精确 PR HEAD，并分别上传一个 `thin-harness-ordinary-ci-receipt/v1` 单文件 artifact；receipt 只含 PR/run、base/head/checkout SHA、固定 check identity、outcome 与 UTC 时间，不含 prompt、credential、raw trace/log 或私人绝对路径。最终 `pr-core` 只有在五个分组精确为 `success` 时才继续；`pr-core-checks` 的每个 matrix leg 与最终 `pr-core` job 上限均为 45 分钟，`changed-optional` 上限为 30 分钟。
 
-协议解析先认已有 v2 `task.json` / 合法 v1 `plan.md` artifact，再看显式维护覆盖或 `HARNESS_PROTOCOL`，随后读取严格的工作区 `.assistant/config/protocol.json`。只有新任务最终仍为 `auto` 时才读取版本无关、Evidence 无关的 `.assistant/runtime/protocol-default.json`；它严格验证 schema、digest、source revision、可选 workspace/expiry 绑定和实际 required capabilities。完整 Qualification Report、Review Receipt、Host Context 与 Canary Authorization 只是 Release Evidence，单独存在、移动或删除都不影响普通选路。Decision 缺失或无效时回退 v1；`disable-v2` / `HARNESS_PROTOCOL=v1` 永久保留为止损开关。Promotion 如何在严格资格后原子发布蒸馏 Decision，见 `docs/release/compatibility-policy.md`。
+协议解析先认已有 v2 `task.json` / 合法 v1 `plan.md` artifact，再看显式维护覆盖或 `HARNESS_PROTOCOL`，随后读取严格的工作区 `.assistant/config/protocol.json`。只有新任务最终仍为 `auto` 时才读取版本无关、Evidence 无关的 `.assistant/runtime/protocol-default.json`；它严格验证 schema、digest、source revision、可选 workspace/expiry 绑定和实际 required capabilities。Decision 缺失或无效时回退 v1；`disable-v2` / `HARNESS_PROTOCOL=v1` 永久保留为止损开关。
 
 ### 跑完整 verify 套件
 
