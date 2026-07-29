@@ -187,19 +187,26 @@ function Read-HarnessRolloutEvidenceArtifact {
     )
     if (-not [IO.Path]::IsPathRooted($ArtifactPath)) { throw 'rollout-evidence-artifact-path-must-be-absolute' }
     $path = [IO.Path]::GetFullPath($ArtifactPath)
-    foreach ($root in @($ProtectedRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
-        if (Test-ReleasePathAtOrBelow -Path $path -Root ([IO.Path]::GetFullPath($root))) { throw 'rollout-evidence-artifact-overlaps-protected-root' }
-    }
     Assert-ReleasePathHasNoReparseAncestor -Path $path
     Assert-ReleaseSingleLinkFile -Path $path -Label 'evidence-artifact'
     Assert-ReleaseSingleDataStreamFile -Path $path -Label 'evidence-artifact'
+    $physical = Get-HostPhysicalPathInfo -Path $path -RejectLinks
+    foreach ($root in @($ProtectedRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+        $protected = [IO.Path]::GetFullPath($root)
+        $physicalProtected = Get-HostPhysicalPathInfo -Path $protected -AllowMissing
+        if ((Test-ReleasePathAtOrBelow -Path $path -Root $protected) -or
+            (Test-ReleasePathAtOrBelow -Path ([string]$physical.physical_path) -Root ([string]$physicalProtected.physical_path)) -or
+            (Test-ReleasePathAtOrBelow -Path ([string]$physicalProtected.physical_path) -Root ([string]$physical.physical_path))) {
+            throw 'rollout-evidence-artifact-overlaps-protected-root'
+        }
+    }
     $info = Get-Item -LiteralPath $path -Force -ErrorAction Stop
     if ($info.Length -gt $MaximumBytes) { throw 'rollout-evidence-artifact-too-large' }
     $bytes = [IO.File]::ReadAllBytes($path)
     if ($bytes.Length -gt $MaximumBytes) { throw 'rollout-evidence-artifact-too-large' }
     $digest = Get-ReleaseSha256Bytes -Bytes $bytes
     if (-not [string]::IsNullOrWhiteSpace($ExpectedDigest) -and $digest -cne $ExpectedDigest) { throw 'rollout-evidence-artifact-digest-mismatch' }
-    return [ordered]@{path=$path;bytes=$bytes;digest=$digest}
+    return [ordered]@{path=$path;bytes=$bytes;digest=$digest;physical=$physical}
 }
 
 function Assert-InstalledDesktopStrictJsonElement {
@@ -431,7 +438,7 @@ function Read-InstalledDesktopRolloutEvidence {
         $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$Gate.artifact_path) -ExpectedDigest ([string]$Gate.evidence_digest) -ProtectedRoots $ProtectedRoots
         $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
         $result = Assert-InstalledDesktopReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource
-        $physical = Get-HostPhysicalPathInfo -Path ([string]$artifact.path) -RejectLinks
+        $physical = $artifact.physical
         $result['path'] = [string]$artifact.path
         $result['raw_digest'] = [string]$artifact.digest
         $result['volume'] = [string]$physical.volume

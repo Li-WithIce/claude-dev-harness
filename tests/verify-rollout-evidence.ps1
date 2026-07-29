@@ -436,6 +436,11 @@ try {
     $protectedReport=New-InstalledHostReport -HostReport $hostReport -Seed protected-left;$protectedPath=Join-Path $protectedRoot 'installed.json';Write-Document $protectedPath $protectedReport -Compress
     $pathResult=Invoke-InstalledGatePaths -Module $module -Expected $cleanSource -LeftPath $protectedPath -LeftDigest (Get-FileDigest $protectedPath) -RightPath $pathRight -RightDigest $pathRightDigest -ProtectedRoots @($protectedRoot)
     Check (-not $pathResult.Success) 'installed Adapter rejects Protected Root overlap' 'installed Adapter accepted Protected Root overlap'
+    $protectedAlias=Join-Path $temp 'protected-root-alias';[void](New-Item -ItemType Junction -Path $protectedAlias -Target $protectedRoot -ErrorAction Stop)
+    try {
+        $pathResult=Invoke-InstalledGatePaths -Module $module -Expected $cleanSource -LeftPath $protectedPath -LeftDigest (Get-FileDigest $protectedPath) -RightPath $pathRight -RightDigest $pathRightDigest -ProtectedRoots @($protectedAlias)
+        Check (-not $pathResult.Success) 'installed Adapter rejects a physical Protected Root alias' 'installed Adapter accepted an Artifact through a physical Protected Root alias'
+    } finally { Remove-Item -LiteralPath $protectedAlias -Force }
 
     $legacyProtocols = Copy-Document $hostGroups[0].protocols
     foreach ($protocol in @('bare','v1','v2')) { foreach ($trial in @($legacyProtocols[$protocol].trials)) { [void]$trial.Remove('trial_run_id'); [void]$trial.Remove('trial_root_digest') } }

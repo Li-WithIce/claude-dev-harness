@@ -1251,7 +1251,7 @@ Work only inside this workspace. The user explicitly authorizes this complete, r
             [string]$installedDesktop.verification_status -ceq 'pass' -and
             [bool]$installedDesktop.auth_unchanged -and
             [string]$installedDesktop.hook_installed -ceq 'verified' -and
-            [string]$installedDesktop.route_probe.requested_protocol -ceq 'auto' -and
+            [string]$installedDesktop.route_probe.requested_protocol -ceq $(if($Protocol-ceq'v2'){'v2'}else{'auto'}) -and
             [string]$installedDesktop.route_probe.selected_protocol -ceq $Protocol
         )
         if (-not $writeBoundaryPassed -and $null -eq $diagnostic) { $diagnostic = 'write-boundary-violation' }
