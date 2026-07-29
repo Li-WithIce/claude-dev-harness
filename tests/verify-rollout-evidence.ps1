@@ -355,6 +355,9 @@ try {
     & $rejectInstalledMutation 'a stale producer input digest' {param($r)$r.source.installed_inputs.install_digest='sha256:' + ('0' * 64)}
     & $rejectInstalledMutation 'credential content' {param($r)$r.qualification.reason='authorization: bearer secret'}
     & $rejectInstalledMutation 'a private absolute path' {param($r)$r.qualification.reason='C:\Users\private\secret.txt'}
+    & $rejectInstalledMutation 'an embedded Windows private absolute path' {param($r)$r.qualification.reason='prefix C:\Users\private\secret.txt'}
+    & $rejectInstalledMutation 'an embedded Unix private absolute path' {param($r)$r.qualification.reason='prefix /home/private/secret.txt'}
+    & $rejectInstalledMutation 'an embedded UNC private absolute path' {param($r)$r.qualification.reason='prefix \\server\share\secret.txt'}
     & $rejectInstalledMutation 'raw log content' {param($r)$r.qualification.reason='raw log: retained output'}
     & $rejectInstalledMutation 'a retained raw trace' {param($r)$r.groups[0].protocols.v2.trials[0].raw_trace_deleted=$false}
     & $rejectInstalledMutation 'a CLI-host-equivalent surface' {param($r)$r.groups[0].protocols.v2.trials[0].installed_desktop.host_surface='codex-cli-host-equivalent'}

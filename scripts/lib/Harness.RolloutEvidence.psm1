@@ -256,7 +256,7 @@ function Assert-InstalledDesktopSanitizedContent {
     }
     if ($Value -isnot [string]) { return }
     $text = [string]$Value
-    if ($text.Length -gt 1024 -or $text -match '[\r\n]' -or $text -match '^(?:[A-Za-z]:[\\/]|\\\\|/(?:home|Users|private|tmp|var)(?:/|$))' -or
+    if ($text.Length -gt 1024 -or $text -match '[\r\n]' -or $text -match '(?:[A-Za-z]:[\\/]|\\\\|/(?:home|Users|private|tmp|var)(?:/|$))' -or
         $text -match '(?i)(?:access[_-]?token|refresh[_-]?token|api[_-]?key|bearer\s+|authorization\s*:|cookie\s*:|password\s*:|credential\s*:|prompt\s*:|raw[ _-]?(?:trace|log)\s*:|thread[ _-]?id\s*:)') {
         throw 'installed Desktop report contains non-portable or sensitive content'
     }
