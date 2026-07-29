@@ -6,7 +6,6 @@ param(
     [string]$OutputPath = '',
     [string]$CodexHome = '',
     [ValidateSet('cognitive-fast-path','installed-desktop-path')][string]$BenchmarkPath = 'cognitive-fast-path',
-    [string]$EligibilityReportPath = '',
     [ValidateRange(1,10)][int]$Groups = 1,
     [ValidateRange(1,10)][int]$Trials = 3,
     [ValidateRange(1,12)][int]$MaxRoundTrips = 8,
@@ -82,20 +81,6 @@ function Test-HostReportPath {
     $relative = [IO.Path]::GetRelativePath($rootFull,$pathFull).Replace('\','/')
     & git -C $rootFull check-ignore --no-index --quiet -- $relative 2>$null
     return $LASTEXITCODE -eq 0
-}
-
-function Get-HostInstalledRolloutReportBinding {
-    param([Parameter(Mandatory)][string]$Path)
-    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
-    if ($item.PSIsContainer -or $item.Length -gt 4MB -or -not [string]::IsNullOrWhiteSpace([string]$item.LinkType)) { throw 'host-benchmark-installed-rollout-report-invalid' }
-    $bytes = [IO.File]::ReadAllBytes($item.FullName)
-    if ($bytes.Length -gt 4MB) { throw 'host-benchmark-installed-rollout-report-invalid' }
-    try {
-        $document = [Text.UTF8Encoding]::new($false,$true).GetString($bytes) | ConvertFrom-Json -AsHashtable -Depth 100 -ErrorAction Stop
-    } catch { throw 'host-benchmark-installed-rollout-report-invalid' }
-    if ([string]$document.report_digest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'host-benchmark-installed-rollout-report-invalid' }
-    $rawDigest = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
-    return [ordered]@{report_digest=[string]$document.report_digest;file_digest=('sha256:' + $rawDigest)}
 }
 
 function Get-HostMedian {
@@ -204,8 +189,6 @@ function Test-HostTrialContract {
         [Parameter(Mandatory)][string]$SourceRevision,
         [Parameter(Mandatory)][string]$SourceCommitTree,
         [ValidateSet('cognitive-fast-path','installed-desktop-path')][string]$BenchmarkPath = 'cognitive-fast-path',
-        [AllowEmptyString()][string]$ExpectedRolloutReportDigest = '',
-        [AllowEmptyString()][string]$ExpectedRolloutFileDigest = '',
         [switch]$AllowUnavailableRequestMeasurement,
         [switch]$AllowUnavailableRecord,
         [switch]$RequireSourceBinding
@@ -234,7 +217,10 @@ function Test-HostTrialContract {
         }
         if ($BenchmarkPath -ceq 'installed-desktop-path') {
             $desktop = $Record.installed_desktop
-            if ($desktop -isnot [Collections.IDictionary] -or [string]$desktop.benchmark_path -cne $BenchmarkPath -or [string]$desktop.host_surface -cne 'codex-cli-host-equivalent' -or [string]$desktop.user_config_mode -cne 'loaded' -or [string]$desktop.protocol_environment -cne 'cleared' -or [string]$desktop.hook_trust -cne 'unknown' -or [string]$desktop.hook_callability -cne 'unknown') { return $false }
+            $desktopKeys = @('benchmark_path','host_surface','user_config_mode','workspace_config_loaded','profile_config','protocol_environment','install_status','verification_status','auth_unchanged','workspace_protocol_config','route_probe','cleanup_status','hook_installed','hook_trust','hook_callability')
+            if ($desktop -isnot [Collections.IDictionary] -or (@(Compare-Object @($desktopKeys|Sort-Object) @($desktop.Keys|ForEach-Object{[string]$_}|Sort-Object))).Count -ne 0 -or
+                [string]$desktop.benchmark_path -cne $BenchmarkPath -or [string]$desktop.host_surface -cne 'installed-desktop-path' -or [string]$desktop.user_config_mode -cne 'loaded' -or
+                [string]$desktop.protocol_environment -cne 'cleared' -or [string]$desktop.hook_trust -cne 'manual' -or [string]$desktop.hook_callability -cne 'manual') { return $false }
             $profileConfig = $desktop.profile_config
             if ($profileConfig -isnot [Collections.IDictionary] -or (@($profileConfig.Keys | Sort-Object) -join ',') -cne 'digest,status') { return $false }
             if ([string]$profileConfig.status -ceq 'absent') {
@@ -243,15 +229,18 @@ function Test-HostTrialContract {
                 if ([string]$profileConfig.digest -cnotmatch '^sha256:[0-9a-f]{64}$') { return $false }
             } else { return $false }
             if ($Protocol -ceq 'bare') {
-                if ([string]$desktop.install_status -cne 'not-applicable' -or [string]$desktop.verification_status -cne 'not-applicable' -or [string]$desktop.cleanup_status -cne 'not-required' -or [string]$desktop.hook_installed -cne 'not-applicable' -or $null -ne $desktop.route_probe -or $null -ne $desktop.rollout_promotion) { return $false }
+                if ([bool]$desktop.workspace_config_loaded -or [string]$desktop.install_status -cne 'not-applicable' -or [string]$desktop.verification_status -cne 'not-applicable' -or [string]$desktop.cleanup_status -cne 'not-required' -or [string]$desktop.hook_installed -cne 'not-applicable' -or $null -ne $desktop.auth_unchanged -or $null -ne $desktop.workspace_protocol_config -or $null -ne $desktop.route_probe) { return $false }
             } else {
-                if ([string]$desktop.install_status -cne 'pass' -or [string]$desktop.verification_status -cne 'pass' -or -not [bool]$desktop.auth_unchanged -or [string]$desktop.cleanup_status -cne 'passed' -or [string]$desktop.hook_installed -cne 'verified') { return $false }
-                if ($desktop.rollout_promotion -isnot [Collections.IDictionary] -or [string]$desktop.rollout_promotion.status -cne 'pass' -or [string]$desktop.rollout_promotion.source_revision -cne $SourceRevision -or [string]$desktop.rollout_promotion.report_digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or [string]$desktop.rollout_promotion.file_digest -cnotmatch '^sha256:[0-9a-f]{64}$') { return $false }
-                if ((-not [string]::IsNullOrWhiteSpace($ExpectedRolloutReportDigest) -and [string]$desktop.rollout_promotion.report_digest -cne $ExpectedRolloutReportDigest) -or (-not [string]::IsNullOrWhiteSpace($ExpectedRolloutFileDigest) -and [string]$desktop.rollout_promotion.file_digest -cne $ExpectedRolloutFileDigest)) { return $false }
-                if ($desktop.route_probe -isnot [Collections.IDictionary] -or [string]$desktop.route_probe.requested_protocol -cne 'auto' -or [string]$desktop.route_probe.selected_protocol -cne $Protocol) { return $false }
+                if (-not [bool]$desktop.workspace_config_loaded -or [string]$desktop.install_status -cne 'pass' -or [string]$desktop.verification_status -cne 'pass' -or -not [bool]$desktop.auth_unchanged -or [string]$desktop.cleanup_status -cne 'passed' -or [string]$desktop.hook_installed -cne 'verified') { return $false }
+                $routeKeys = @('requested_protocol','detected_protocol','selected_protocol','preference_source','default_source','reason','workspace_config_status','workspace_config_protocol','runtime_default_status','artifact_kind')
+                if ($desktop.route_probe -isnot [Collections.IDictionary] -or (@(Compare-Object @($routeKeys|Sort-Object) @($desktop.route_probe.Keys|ForEach-Object{[string]$_}|Sort-Object))).Count -ne 0 -or [string]$desktop.route_probe.selected_protocol -cne $Protocol) { return $false }
                 if ($Protocol -ceq 'v2') {
-                    if ([string]$desktop.route_probe.detected_protocol -cne 'new' -or [string]$desktop.route_probe.reason -cne 'eligible-rollout-report' -or [string]$desktop.route_probe.rollout_status -cne 'pass' -or [string]$desktop.route_probe.report_digest -cne [string]$desktop.rollout_promotion.report_digest) { return $false }
-                } elseif ([string]$desktop.route_probe.detected_protocol -cne 'v1' -or [string]$desktop.route_probe.reason -cne 'existing-v1-plan' -or [string]$desktop.route_probe.rollout_status -cne 'not-required' -or $null -ne $desktop.route_probe.report_digest) { return $false }
+                    $workspaceConfigKeys = @('status','new_task_protocol','preference_source','config_digest')
+                    if ($desktop.workspace_protocol_config -isnot [Collections.IDictionary] -or (@(Compare-Object @($workspaceConfigKeys|Sort-Object) @($desktop.workspace_protocol_config.Keys|ForEach-Object{[string]$_}|Sort-Object))).Count -ne 0 -or
+                        [string]$desktop.workspace_protocol_config.status -cne 'pass' -or [string]$desktop.workspace_protocol_config.new_task_protocol -cne 'v2' -or [string]$desktop.workspace_protocol_config.preference_source -cne 'workspace-config' -or [string]$desktop.workspace_protocol_config.config_digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or
+                        [string]$desktop.route_probe.requested_protocol -cne 'v2' -or [string]$desktop.route_probe.detected_protocol -cne 'new' -or [string]$desktop.route_probe.preference_source -cne 'workspace-config' -or [string]$desktop.route_probe.default_source -cne 'workspace-config' -or
+                        [string]$desktop.route_probe.reason -cne 'workspace-v2-new-task' -or [string]$desktop.route_probe.workspace_config_status -cne 'present' -or [string]$desktop.route_probe.workspace_config_protocol -cne 'v2' -or [string]$desktop.route_probe.runtime_default_status -cne 'not-read' -or [string]$desktop.route_probe.artifact_kind -cne 'new-task') { return $false }
+                } elseif ($null -ne $desktop.workspace_protocol_config -or [string]$desktop.route_probe.detected_protocol -cne 'v1' -or [string]$desktop.route_probe.default_source -cne 'existing-artifact' -or [string]$desktop.route_probe.reason -cne 'existing-v1-plan' -or [string]$desktop.route_probe.artifact_kind -cne 'v1-plan') { return $false }
             }
         } elseif ($Record -is [Collections.IDictionary] -and $Record.Contains('installed_desktop')) { return $false }
         if ($RequireSourceBinding) {
@@ -267,35 +256,23 @@ function Test-ReleaseHostTrialSet {
         [Parameter(Mandatory)][int]$RequiredTrials,
         [Parameter(Mandatory)][string]$SourceRevision,
         [Parameter(Mandatory)][string]$SourceCommitTree,
-        [ValidateSet('cognitive-fast-path','installed-desktop-path')][string]$BenchmarkPath = 'cognitive-fast-path',
-        [AllowEmptyString()][string]$ExpectedRolloutReportDigest = '',
-        [AllowEmptyString()][string]$ExpectedRolloutFileDigest = ''
+        [ValidateSet('cognitive-fast-path','installed-desktop-path')][string]$BenchmarkPath = 'cognitive-fast-path'
     )
     if ($RequiredTrials -ne 3) { return $false }
     $profileConfig = $null
-    $rolloutReportDigest = $null
-    $rolloutFileDigest = $null
     foreach ($protocol in @('bare','v1','v2')) {
         if (-not $Records.Contains($protocol)) { return $false }
         $trials = @($Records[$protocol].trials)
         if ($trials.Count -ne $RequiredTrials) { return $false }
         if ((@($trials | ForEach-Object { [int]$_.trial } | Sort-Object) -join ',') -cne '1,2,3') { return $false }
         foreach ($record in $trials) {
-            if (-not (Test-HostTrialContract -Protocol $protocol -Record $record -ExpectedTrial ([int]$record.runner_expected_trial) -SourceRevision $SourceRevision -SourceCommitTree $SourceCommitTree -BenchmarkPath $BenchmarkPath -ExpectedRolloutReportDigest $ExpectedRolloutReportDigest -ExpectedRolloutFileDigest $ExpectedRolloutFileDigest -RequireSourceBinding)) { return $false }
+            if (-not (Test-HostTrialContract -Protocol $protocol -Record $record -ExpectedTrial ([int]$record.runner_expected_trial) -SourceRevision $SourceRevision -SourceCommitTree $SourceCommitTree -BenchmarkPath $BenchmarkPath -RequireSourceBinding)) { return $false }
             if ($BenchmarkPath -ceq 'installed-desktop-path') {
                 if ($null -eq $profileConfig) { $profileConfig = $record.installed_desktop.profile_config }
                 elseif (-not (Test-InstalledDesktopUserConfigBinding -Expected $profileConfig -Actual $record.installed_desktop.profile_config)) { return $false }
-                if ($protocol -cne 'bare') {
-                    $promotion = $record.installed_desktop.rollout_promotion
-                    if ($null -eq $rolloutReportDigest) {
-                        $rolloutReportDigest = [string]$promotion.report_digest
-                        $rolloutFileDigest = [string]$promotion.file_digest
-                    } elseif ([string]$promotion.report_digest -cne $rolloutReportDigest -or [string]$promotion.file_digest -cne $rolloutFileDigest) { return $false }
-                }
             }
         }
     }
-    if ($BenchmarkPath -ceq 'installed-desktop-path' -and ($null -eq $rolloutReportDigest -or $null -eq $rolloutFileDigest)) { return $false }
     return $true
 }
 
@@ -356,20 +333,13 @@ if (-not [string]::IsNullOrWhiteSpace($CodexHome)) {
         if ((Test-HostRunnerPathAtOrBelow -Path ([string]$physicalOutput.physical_path) -Root ([string]$physicalCodexHome.physical_path)) -or (Test-HostRunnerPathAtOrBelow -Path ([string]$physicalCodexHome.physical_path) -Root ([string]$physicalOutput.physical_path))) { throw 'Host benchmark output must not overlap the dedicated Codex home.' }
     }
 }
-$installedRolloutReportBinding = [ordered]@{report_digest='';file_digest=''}
 if ($BenchmarkPath -ceq 'installed-desktop-path') {
     if ([string]::IsNullOrWhiteSpace($CodexHome) -or [IO.Path]::GetFileName($CodexHome) -cne '.codex') { throw 'host-benchmark-installed-profile-invalid' }
-    if ([string]::IsNullOrWhiteSpace($EligibilityReportPath)) { throw 'host-benchmark-installed-rollout-report-missing' }
-    if (-not [IO.Path]::IsPathRooted($EligibilityReportPath) -or -not (Test-Path -LiteralPath $EligibilityReportPath -PathType Leaf)) { throw 'host-benchmark-installed-rollout-report-unavailable' }
-    $EligibilityReportPath = [IO.Path]::GetFullPath($EligibilityReportPath)
-    $installedRolloutReportBinding = Get-HostInstalledRolloutReportBinding -Path $EligibilityReportPath
     $installedProfileRoot = [IO.Path]::GetDirectoryName($CodexHome)
     if ((Test-HostRunnerPathAtOrBelow -Path $OutputPath -Root $installedProfileRoot) -or (Test-HostRunnerPathAtOrBelow -Path $installedProfileRoot -Root $OutputPath)) { throw 'Host benchmark output must not overlap the installed Desktop profile.' }
     $physicalInstalledProfile = Get-HostPhysicalPathInfo -Path $installedProfileRoot -RejectLinks
     $physicalInstalledOutput = Get-HostPhysicalPathInfo -Path $OutputPath -AllowMissing -RejectLinks
     if ((Test-HostRunnerPathAtOrBelow -Path ([string]$physicalInstalledOutput.physical_path) -Root ([string]$physicalInstalledProfile.physical_path)) -or (Test-HostRunnerPathAtOrBelow -Path ([string]$physicalInstalledProfile.physical_path) -Root ([string]$physicalInstalledOutput.physical_path))) { throw 'Host benchmark output must not physically overlap the installed Desktop profile.' }
-} elseif (-not [string]::IsNullOrWhiteSpace($EligibilityReportPath)) {
-    throw 'EligibilityReportPath is valid only for installed-desktop-path.'
 }
 
 $sourceStart = Get-HostGitState -Root $RepoRoot
@@ -379,7 +349,6 @@ if ($BenchmarkPath -ceq 'installed-desktop-path') {
         (Join-Path $RepoRoot 'install.ps1'),
         (Join-Path $RepoRoot 'uninstall.ps1'),
         (Join-Path $RepoRoot 'tests\verify-installation.ps1'),
-        (Join-Path $RepoRoot 'scripts\promote-v2-rollout-report.ps1'),
         (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1')
     )
 }
@@ -399,11 +368,12 @@ if ($BenchmarkPath -ceq 'installed-desktop-path') {
         install_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path (Join-Path $RepoRoot 'install.ps1')
         uninstall_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path (Join-Path $RepoRoot 'uninstall.ps1')
         verification_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path (Join-Path $RepoRoot 'tests\verify-installation.ps1')
-        promotion_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path (Join-Path $RepoRoot 'scripts\promote-v2-rollout-report.ps1')
         protocol_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1')
     }
 }
 $sourceMode = if ([bool]$sourceStart.dirty -or -not $sourceInputHeadBoundStart) { 'live-dirty-diagnostic' } else { 'clean-commit-clone' }
+$producerMode = if ($BenchmarkPath -cne 'installed-desktop-path') { 'not-applicable' } elseif (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable('HOST_BENCHMARK_TEST_MODE',[EnvironmentVariableTarget]::Process))) { 'test-only' } elseif ($Groups -ne 3 -or $Trials -ne 3 -or $KeepScratch) { 'diagnostic-smoke' } else { 'formal' }
+$reportRunId = [guid]::NewGuid().ToString('N')
 $benchmarkGroups = [Collections.Generic.List[object]]::new()
 $protocolNames = @('bare','v1','v2')
 $timer = [Diagnostics.Stopwatch]::StartNew()
@@ -450,7 +420,7 @@ try {
                 $installedIntegrityFailed = $false
                 try {
                     if ($BenchmarkPath -ceq 'installed-desktop-path') { $installedProfileConfigBefore = Get-InstalledDesktopUserConfigBinding -CodexHome $CodexHome }
-                    $record = Invoke-HostTrial -Protocol $protocol -Trial $trial -ScratchRoot $groupRoot -RepoRoot $RepoRoot -WrapperPath $wrapperPath -SchemaPath $schemaPath -CollectorPath $collectorPath -CodexHome $CodexHome -BenchmarkPath $BenchmarkPath -EligibilityReportPath $EligibilityReportPath -ExpectedRolloutReportDigest ([string]$installedRolloutReportBinding.report_digest) -ExpectedRolloutFileDigest ([string]$installedRolloutReportBinding.file_digest) -Model $Model -Reasoning $Reasoning -MaxRoundTrips $MaxRoundTrips -TimeoutSeconds $TimeoutSeconds -ExpectedCodexVersion $expectedCodexVersion -SourceBindingRequired (-not [bool]$groupSourceStart.dirty -and $groupInputHeadBoundStart) -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid)
+                    $record = Invoke-HostTrial -Protocol $protocol -Trial $trial -ScratchRoot $groupRoot -RepoRoot $RepoRoot -WrapperPath $wrapperPath -SchemaPath $schemaPath -CollectorPath $collectorPath -CodexHome $CodexHome -BenchmarkPath $BenchmarkPath -Model $Model -Reasoning $Reasoning -MaxRoundTrips $MaxRoundTrips -TimeoutSeconds $TimeoutSeconds -ExpectedCodexVersion $expectedCodexVersion -SourceBindingRequired (-not [bool]$groupSourceStart.dirty -and $groupInputHeadBoundStart) -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid)
                 } catch {
                     $installedIntegrityFailed = $BenchmarkPath -ceq 'installed-desktop-path' -and [string]$_.Exception.Message -cmatch '^host-benchmark-installed-(?:install|verification)-(?:profile-integrity-failed|changed-auth|changed-config)$'
                     $diagnostic = Get-SanitizedHostTrialDiagnostic -ErrorRecord $_
@@ -539,11 +509,11 @@ try {
                 if ([string]$_.status -ceq 'fail') { return $true }
                 if ([string]$_.status -ceq 'unavailable') {
                     if ([string]$_.outcome -cne 'completed' -or [string]$_.reason_code -cne 'completed') { return $false }
-                    return -not (Test-HostTrialContract -Protocol $protocol -Record $_ -ExpectedTrial ([int]$_.runner_expected_trial) -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -BenchmarkPath $BenchmarkPath -ExpectedRolloutReportDigest ([string]$installedRolloutReportBinding.report_digest) -ExpectedRolloutFileDigest ([string]$installedRolloutReportBinding.file_digest) -AllowUnavailableRequestMeasurement -AllowUnavailableRecord -RequireSourceBinding:(-not [bool]$groupSourceStart.dirty -and $groupInputHeadBoundStart))
+                    return -not (Test-HostTrialContract -Protocol $protocol -Record $_ -ExpectedTrial ([int]$_.runner_expected_trial) -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -BenchmarkPath $BenchmarkPath -AllowUnavailableRequestMeasurement -AllowUnavailableRecord -RequireSourceBinding:(-not [bool]$groupSourceStart.dirty -and $groupInputHeadBoundStart))
                 }
-                if (-not (Test-HostTrialContract -Protocol $protocol -Record $_ -ExpectedTrial ([int]$_.runner_expected_trial) -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -BenchmarkPath $BenchmarkPath -ExpectedRolloutReportDigest ([string]$installedRolloutReportBinding.report_digest) -ExpectedRolloutFileDigest ([string]$installedRolloutReportBinding.file_digest) -AllowUnavailableRequestMeasurement -RequireSourceBinding:(-not [bool]$groupSourceStart.dirty -and $groupInputHeadBoundStart))) { return $true }
+                if (-not (Test-HostTrialContract -Protocol $protocol -Record $_ -ExpectedTrial ([int]$_.runner_expected_trial) -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -BenchmarkPath $BenchmarkPath -AllowUnavailableRequestMeasurement -RequireSourceBinding:(-not [bool]$groupSourceStart.dirty -and $groupInputHeadBoundStart))) { return $true }
                 if ([string]$_.successful_request_sends.status -ceq 'unavailable') { return $false }
-                return -not (Test-HostTrialContract -Protocol $protocol -Record $_ -ExpectedTrial ([int]$_.runner_expected_trial) -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -BenchmarkPath $BenchmarkPath -ExpectedRolloutReportDigest ([string]$installedRolloutReportBinding.report_digest) -ExpectedRolloutFileDigest ([string]$installedRolloutReportBinding.file_digest) -RequireSourceBinding:(-not [bool]$groupSourceStart.dirty -and $groupInputHeadBoundStart))
+                return -not (Test-HostTrialContract -Protocol $protocol -Record $_ -ExpectedTrial ([int]$_.runner_expected_trial) -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -BenchmarkPath $BenchmarkPath -RequireSourceBinding:(-not [bool]$groupSourceStart.dirty -and $groupInputHeadBoundStart))
             }).Count
             $protocolStatus = if ($invalidCount -gt 0 -or $all.Count -ne $Trials) { 'fail' } elseif ($unavailableCount -gt 0) { 'unavailable' } else { 'measured' }
             $sendStatus = if (@($all | Where-Object { [string]$_.successful_request_sends.status -cne 'measured' }).Count -eq 0 -and $all.Count -eq $Trials) { 'measured' } else { 'unavailable' }
@@ -566,9 +536,6 @@ try {
 
         $groupProfileConfig = $null
         $groupProfileConfigConsistent = $true
-        $groupRolloutReportDigest = $null
-        $groupRolloutFileDigest = $null
-        $groupRolloutReportConsistent = $true
         if ($BenchmarkPath -ceq 'installed-desktop-path') {
             foreach ($candidate in @($groupRecords.Values | ForEach-Object { @($_.trials) } | ForEach-Object {
                 if ($_ -is [Collections.IDictionary] -and $_.Contains('installed_desktop') -and $_['installed_desktop'] -is [Collections.IDictionary] -and $_['installed_desktop'].Contains('profile_config')) { $_['installed_desktop']['profile_config'] }
@@ -576,20 +543,6 @@ try {
                 if ($null -eq $groupProfileConfig) { $groupProfileConfig = $candidate }
                 elseif (-not (Test-InstalledDesktopUserConfigBinding -Expected $groupProfileConfig -Actual $candidate)) { $groupProfileConfigConsistent = $false }
             }
-            foreach ($protocol in @('v1','v2')) {
-                foreach ($candidate in @($groupRecords[$protocol].trials)) {
-                    if ($candidate -isnot [Collections.IDictionary] -or -not $candidate.Contains('installed_desktop') -or $candidate['installed_desktop'] -isnot [Collections.IDictionary] -or $candidate['installed_desktop']['rollout_promotion'] -isnot [Collections.IDictionary]) {
-                        $groupRolloutReportConsistent = $false
-                        continue
-                    }
-                    $promotion = $candidate['installed_desktop']['rollout_promotion']
-                    if ($null -eq $groupRolloutReportDigest) {
-                        $groupRolloutReportDigest = [string]$promotion.report_digest
-                        $groupRolloutFileDigest = [string]$promotion.file_digest
-                    } elseif ([string]$promotion.report_digest -cne $groupRolloutReportDigest -or [string]$promotion.file_digest -cne $groupRolloutFileDigest) { $groupRolloutReportConsistent = $false }
-                }
-            }
-            if ($groupRolloutReportDigest -cne [string]$installedRolloutReportBinding.report_digest -or $groupRolloutFileDigest -cne [string]$installedRolloutReportBinding.file_digest) { $groupRolloutReportConsistent = $false }
         }
 
         $groupSourceEnd = Get-HostGitState -Root $RepoRoot
@@ -609,7 +562,7 @@ try {
         $protocolUnavailable = @($groupRecords.Values | Where-Object { [string]$_.status -ceq 'unavailable' }).Count -gt 0
         $protocolFailed = @($groupRecords.Values | Where-Object { [string]$_.status -ceq 'fail' }).Count -gt 0
         $gateUnavailable = [string]$direct.status -ceq 'unavailable' -or [string]$requestSend.status -ceq 'unavailable'
-        $releaseTrialSetPassed = -not $groupSourceDirty -and $groupProfileConfigConsistent -and $groupRolloutReportConsistent -and (Test-ReleaseHostTrialSet -Records $groupRecords -RequiredTrials 3 -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -BenchmarkPath $BenchmarkPath -ExpectedRolloutReportDigest ([string]$installedRolloutReportBinding.report_digest) -ExpectedRolloutFileDigest ([string]$installedRolloutReportBinding.file_digest))
+        $releaseTrialSetPassed = -not $groupSourceDirty -and $groupProfileConfigConsistent -and (Test-ReleaseHostTrialSet -Records $groupRecords -RequiredTrials 3 -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -BenchmarkPath $BenchmarkPath)
         $releaseTrialSet = [ordered]@{status=$(if($releaseTrialSetPassed){'pass'}else{'fail'});required_trials_per_protocol=3;reason=$(if($releaseTrialSetPassed){'Each protocol in this group has exactly three runner-rechecked, source-bound trials.'}else{'Each release group requires clean source and exactly three runner-rechecked, source-bound trials for every protocol.'})}
         $groupEligible = $groupSourceStable -and -not $groupSourceDirty -and $releaseTrialSetPassed -and -not $protocolFailed -and [string]$direct.status -ceq 'pass' -and [string]$requestSend.status -ceq 'pass'
         $groupConfigurationFailure = $Trials -ne 3
@@ -617,7 +570,7 @@ try {
         $groupKnownFailure = $protocolFailed -or $groupConfigurationFailure -or $groupPerformanceFailure
         $groupStatus = if ($groupKnownFailure) { 'fail' } elseif ($protocolUnavailable -or -not $groupSourceStable -or $gateUnavailable) { 'unavailable' } elseif ($groupSourceDirty -or -not $releaseTrialSetPassed) { 'fail' } elseif ($groupEligible) { 'pass' } else { 'fail' }
         $measurementPassed = $groupEligible
-        if ($BenchmarkPath -ceq 'installed-desktop-path') {
+        if ($BenchmarkPath -ceq 'installed-desktop-path' -and $producerMode -cne 'formal') {
             $groupEligible = $false
             if ($groupStatus -ceq 'pass') { $groupStatus = 'unavailable' }
         }
@@ -634,16 +587,13 @@ try {
         if ($BenchmarkPath -ceq 'installed-desktop-path') {
             $group.source['installed_inputs'] = $sourceInputs.installed_inputs
             $group.execution['benchmark_path'] = $BenchmarkPath
-            $group.execution['host_surface'] = 'codex-cli-host-equivalent'
+            $group.execution['host_surface'] = 'installed-desktop-path'
             $group.execution['user_config_mode'] = 'loaded'
             $group.execution['codex_home'] = 'dedicated-installed-desktop-profile-path-not-persisted'
             $group.execution['profile_config'] = $(if($groupProfileConfigConsistent){$groupProfileConfig}else{$null})
             $group.execution['profile_config_consistent'] = $groupProfileConfigConsistent
-            $group.execution['rollout_report_digest'] = $(if($groupRolloutReportConsistent){$groupRolloutReportDigest}else{$null})
-            $group.execution['rollout_report_file_digest'] = $(if($groupRolloutReportConsistent){$groupRolloutFileDigest}else{$null})
-            $group.execution['rollout_report_consistent'] = $groupRolloutReportConsistent
             $group.performance['measurement_passed'] = $measurementPassed
-            $group['qualification'] = [ordered]@{status='unavailable';reason='RQ-25A does not authoritatively observe runtime protocol/profile/lifecycle or Desktop Hook trust and callability.'}
+            $group['qualification'] = [ordered]@{status=$(if($producerMode-ceq'formal'){$groupStatus}else{'unavailable'});reason=$(if($producerMode-ceq'formal'){'Derived from the complete installed Desktop hard-result contract.'}else{"Non-formal producer mode: $producerMode"})}
         }
         $group.group_digest = Get-HarnessSha256Text -Content ($group | ConvertTo-Json -Depth 100 -Compress)
         $benchmarkGroups.Add($group)
@@ -673,9 +623,6 @@ $sourceDirty = [bool]$sourceStart.dirty -or [bool]$sourceEnd.dirty -or -not $sou
 $sourceStable = -not $sourceDirty -and [string]$sourceStart.revision -ceq [string]$sourceEnd.revision -and [string]$sourceStart.commit_tree_oid -ceq [string]$sourceEnd.commit_tree_oid -and [string]$sourceStart.state_digest -ceq [string]$sourceEnd.state_digest
 $installedProfileConfig = $null
 $installedProfileConfigConsistent = $true
-$installedRolloutReportDigest = $null
-$installedRolloutFileDigest = $null
-$installedRolloutReportConsistent = $true
 if ($BenchmarkPath -ceq 'installed-desktop-path') {
     foreach ($group in $benchmarkGroups) {
         if (-not [bool]$group.execution.profile_config_consistent) { $installedProfileConfigConsistent = $false; continue }
@@ -684,23 +631,12 @@ if ($BenchmarkPath -ceq 'installed-desktop-path') {
         if ($null -eq $installedProfileConfig) { $installedProfileConfig = $candidate }
         elseif (-not (Test-InstalledDesktopUserConfigBinding -Expected $installedProfileConfig -Actual $candidate)) { $installedProfileConfigConsistent = $false }
     }
-    foreach ($group in $benchmarkGroups) {
-        if (-not [bool]$group.execution.rollout_report_consistent) { $installedRolloutReportConsistent = $false; continue }
-        $candidateReportDigest = [string]$group.execution.rollout_report_digest
-        $candidateFileDigest = [string]$group.execution.rollout_report_file_digest
-        if ($candidateReportDigest -cnotmatch '^sha256:[0-9a-f]{64}$' -or $candidateFileDigest -cnotmatch '^sha256:[0-9a-f]{64}$') { $installedRolloutReportConsistent = $false; continue }
-        if ($null -eq $installedRolloutReportDigest) {
-            $installedRolloutReportDigest = $candidateReportDigest
-            $installedRolloutFileDigest = $candidateFileDigest
-        } elseif ($candidateReportDigest -cne $installedRolloutReportDigest -or $candidateFileDigest -cne $installedRolloutFileDigest) { $installedRolloutReportConsistent = $false }
-    }
-    if ($installedRolloutReportDigest -cne [string]$installedRolloutReportBinding.report_digest -or $installedRolloutFileDigest -cne [string]$installedRolloutReportBinding.file_digest) { $installedRolloutReportConsistent = $false }
 }
 $passedGroups = @($benchmarkGroups | Where-Object { [string]$_.status -ceq 'pass' -and [bool]$_.performance.eligible }).Count
 $measurementPassedGroups = if ($BenchmarkPath -ceq 'installed-desktop-path') { @($benchmarkGroups | Where-Object { [bool]$_.performance.measurement_passed }).Count } else { $passedGroups }
 $failedGroups = @($benchmarkGroups | Where-Object { [string]$_.status -ceq 'fail' }).Count
 $unavailableGroups = @($benchmarkGroups | Where-Object { [string]$_.status -ceq 'unavailable' }).Count
-$releaseConfigurationFailure = $Groups -ne 3 -or $Trials -ne 3 -or -not $installedProfileConfigConsistent -or -not $installedRolloutReportConsistent
+$releaseConfigurationFailure = $Groups -ne 3 -or $Trials -ne 3 -or -not $installedProfileConfigConsistent
 $eligible = $sourceStable -and -not $sourceDirty -and -not $releaseConfigurationFailure -and $benchmarkGroups.Count -eq 3 -and $passedGroups -eq 3
 $reportStatus = if ($releaseConfigurationFailure -or $failedGroups -gt 0 -or $sourceDirty) { 'fail' } elseif ($unavailableGroups -gt 0 -or -not $sourceStable) { 'unavailable' } elseif ($eligible) { 'pass' } else { 'fail' }
 $releaseGroupSet = [ordered]@{status=$(if($eligible){'pass'}else{$reportStatus});required_groups=3;required_trials_per_protocol_per_group=3;passed_groups=$passedGroups;reason=$(if($eligible){'All three independent clean 3x3 groups passed their own latency and request-reduction gates.'}else{'Release eligibility requires three independent clean groups, each with bare/v1/v2 3x3 evidence and independently passing thresholds.'})}
@@ -713,21 +649,27 @@ $report = [ordered]@{
 }
 if ($BenchmarkPath -ceq 'installed-desktop-path') {
     $report.schema_version = 'harness-installed-desktop-benchmark-report/v1'
+    $report['report_run_id'] = $reportRunId
+    $report['producer_identity'] = 'host-benchmark-installed-desktop/v1'
+    $report['producer_mode'] = $producerMode
     $report['benchmark_path'] = $BenchmarkPath
     $report.source['installed_inputs'] = $sourceInputs.installed_inputs
     $report.execution['benchmark_path'] = $BenchmarkPath
-    $report.execution['host_surface'] = 'codex-cli-host-equivalent'
+    $report.execution['host_surface'] = 'installed-desktop-path'
     $report.execution['user_config_mode'] = 'loaded'
     $report.execution['codex_home'] = 'dedicated-installed-desktop-profile-path-not-persisted'
     $report.execution['profile_config'] = $installedProfileConfig
     $report.execution['profile_config_consistent'] = $installedProfileConfigConsistent
-    $report.execution['rollout_report_digest'] = $(if($installedRolloutReportConsistent){$installedRolloutReportDigest}else{$null})
-    $report.execution['rollout_report_file_digest'] = $(if($installedRolloutReportConsistent){$installedRolloutFileDigest}else{$null})
-    $report.execution['rollout_report_consistent'] = $installedRolloutReportConsistent
     $report.performance['measurement_passed_groups'] = $measurementPassedGroups
     $report.performance['measurement_passed'] = ($Groups -eq 3 -and $measurementPassedGroups -eq 3)
-    $report.performance['eligible'] = $false
-    $report['qualification'] = [ordered]@{status='unavailable';reason='RQ-25A does not authoritatively observe runtime protocol/profile/lifecycle or Desktop Hook trust and callability.'}
+    $report['qualification'] = [ordered]@{
+        status=$(if($producerMode-ceq'formal'){$reportStatus}else{'unavailable'})
+        hard_result_contract='installed-desktop-authoritative-observation/v1'
+        hook_trust='manual'
+        hook_callability='manual'
+        hook_observations_blocking=$false
+        reason=$(if($producerMode-ceq'formal'){'Derived from installed profile, workspace route, Direct completion, write, integrity, cleanup, performance, and source observations.'}else{"Non-formal producer mode: $producerMode"})
+    }
 }
 $report.report_digest = Get-HarnessSha256Text -Content ($report | ConvertTo-Json -Depth 100 -Compress)
 $outputParent = [IO.Path]::GetDirectoryName($OutputPath)

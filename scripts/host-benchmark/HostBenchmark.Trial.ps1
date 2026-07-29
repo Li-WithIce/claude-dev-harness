@@ -709,19 +709,22 @@ function Invoke-InstalledDesktopTrialCleanup {
     }
 }
 
-function Invoke-InstalledDesktopRolloutPromotion {
-    param(
-        [Parameter(Mandatory)][string]$RepoRoot,
-        [Parameter(Mandatory)][string]$Workspace,
-        [AllowEmptyString()][string]$EligibilityReportPath
-    )
-    if ([string]::IsNullOrWhiteSpace($EligibilityReportPath)) { throw 'host-benchmark-installed-rollout-report-missing' }
-    if (-not [IO.Path]::IsPathRooted($EligibilityReportPath) -or -not (Test-Path -LiteralPath $EligibilityReportPath -PathType Leaf)) { throw 'host-benchmark-installed-rollout-report-unavailable' }
-    $output = @(& pwsh -NoLogo -NoProfile -NonInteractive -File (Join-Path $RepoRoot 'scripts\promote-v2-rollout-report.ps1') -RepoRoot $RepoRoot -WorkspaceRoot $Workspace -ReportPath $EligibilityReportPath 2>&1 | ForEach-Object { [string]$_ })
-    if ($LASTEXITCODE -ne 0) { throw 'host-benchmark-installed-rollout-promotion-failed' }
-    try { $result = ($output -join "`n") | ConvertFrom-Json -AsHashtable -Depth 20 } catch { throw 'host-benchmark-installed-rollout-promotion-invalid' }
-    if ([string]$result.status -cne 'pass' -or [string]$result.source_revision -cnotmatch '^[0-9a-f]{40,64}$' -or [string]$result.report_digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or [string]$result.file_digest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'host-benchmark-installed-rollout-promotion-invalid' }
-    return $result
+function Enable-InstalledDesktopWorkspaceV2 {
+    param([Parameter(Mandatory)][string]$Workspace)
+    foreach ($name in @('HARNESS_PROTOCOL','HARNESS_V2_ELIGIBILITY_REPORT','DEV_HARNESS_WORKSPACE_ROOT','WORKSPACE_ROOT')) {
+        if ($null -ne [Environment]::GetEnvironmentVariable($name,[EnvironmentVariableTarget]::Process)) { throw 'host-benchmark-installed-protocol-environment-leaked' }
+    }
+    $shim = Join-Path $Workspace '.assistant\entry\task.ps1'
+    if (-not (Test-Path -LiteralPath $shim -PathType Leaf)) { throw 'host-benchmark-installed-task-shim-missing' }
+    $output = @(& pwsh -NoLogo -NoProfile -NonInteractive -File $shim 'enable-v2' '-AsJson' 2>&1 | ForEach-Object { [string]$_ })
+    if ($LASTEXITCODE -ne 0) { throw 'host-benchmark-installed-workspace-v2-enable-failed' }
+    try { $result = ($output -join "`n") | ConvertFrom-Json -AsHashtable -Depth 20 } catch { throw 'host-benchmark-installed-workspace-v2-enable-invalid' }
+    if ([string]$result.operation -cne 'protocol-config' -or [string]$result.action -cne 'enable-v2' -or [string]$result.path -cne '.assistant/config/protocol.json' -or
+        [string]$result.new_task_protocol -cne 'v2' -or [string]$result.digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or
+        [int]$result.side_effects.config_writes -ne 1 -or [int]$result.side_effects.runtime_writes -ne 0 -or [int]$result.side_effects.artifact_writes -ne 0) {
+        throw 'host-benchmark-installed-workspace-v2-enable-invalid'
+    }
+    return [ordered]@{status='pass';new_task_protocol='v2';preference_source='workspace-config';config_digest=[string]$result.digest}
 }
 
 function Invoke-InstalledDesktopInstall {
@@ -771,20 +774,27 @@ function Invoke-InstalledDesktopRouteProbe {
     $output = @(& pwsh @arguments 2>&1 | ForEach-Object { [string]$_ })
     if ($LASTEXITCODE -ne 0) { throw 'host-benchmark-installed-route-probe-failed' }
     try { $route = ($output -join "`n") | ConvertFrom-Json -AsHashtable -Depth 20 } catch { throw 'host-benchmark-installed-route-probe-invalid' }
-    $valid = [string]$route.requested_protocol -ceq 'auto'
     if ($Protocol -ceq 'v2') {
-        $valid = $valid -and [string]$route.detected_protocol -ceq 'new' -and [string]$route.selected_protocol -ceq 'v2' -and [string]$route.reason -ceq 'eligible-rollout-report' -and [string]$route.rollout_eligibility.status -ceq 'pass'
+        $valid = [string]$route.requested_protocol -ceq 'v2' -and [string]$route.detected_protocol -ceq 'new' -and [string]$route.selected_protocol -ceq 'v2' -and
+            [string]$route.preference_source -ceq 'workspace-config' -and [string]$route.default_source -ceq 'workspace-config' -and [string]$route.reason -ceq 'workspace-v2-new-task' -and
+            [string]$route.workspace_config.status -ceq 'present' -and [string]$route.workspace_config.new_task_protocol -ceq 'v2' -and [string]$route.runtime_default_decision.status -ceq 'not-read' -and
+            $null -eq $route.v1_plan_path -and $null -eq $route.v2_task_state_path
     } else {
-        $valid = $valid -and [string]$route.detected_protocol -ceq 'v1' -and [string]$route.selected_protocol -ceq 'v1' -and [string]$route.reason -ceq 'existing-v1-plan' -and [string]$route.rollout_eligibility.status -ceq 'not-required'
+        $valid = [string]$route.detected_protocol -ceq 'v1' -and [string]$route.selected_protocol -ceq 'v1' -and [string]$route.default_source -ceq 'existing-artifact' -and
+            [string]$route.reason -ceq 'existing-v1-plan' -and -not [string]::IsNullOrWhiteSpace([string]$route.v1_plan_path) -and $null -eq $route.v2_task_state_path
     }
     if (-not $valid) { throw 'host-benchmark-installed-route-probe-mismatch' }
     return [ordered]@{
         requested_protocol=[string]$route.requested_protocol
         detected_protocol=[string]$route.detected_protocol
         selected_protocol=[string]$route.selected_protocol
+        preference_source=[string]$route.preference_source
+        default_source=[string]$route.default_source
         reason=[string]$route.reason
-        rollout_status=[string]$route.rollout_eligibility.status
-        report_digest=$route.rollout_eligibility.report_digest
+        workspace_config_status=[string]$route.workspace_config.status
+        workspace_config_protocol=[string]$route.workspace_config.new_task_protocol
+        runtime_default_status=[string]$route.runtime_default_decision.status
+        artifact_kind=$(if($Protocol-ceq'v1'){'v1-plan'}else{'new-task'})
     }
 }
 
@@ -950,10 +960,7 @@ function Invoke-HostTrial {
         [bool]$SourceBindingRequired = $false,
         [string]$SourceRevision = '',
         [string]$SourceCommitTree = '',
-        [ValidateSet('cognitive-fast-path','installed-desktop-path')][string]$BenchmarkPath = 'cognitive-fast-path',
-        [AllowEmptyString()][string]$EligibilityReportPath = '',
-        [AllowEmptyString()][string]$ExpectedRolloutReportDigest = '',
-        [AllowEmptyString()][string]$ExpectedRolloutFileDigest = ''
+        [ValidateSet('cognitive-fast-path','installed-desktop-path')][string]$BenchmarkPath = 'cognitive-fast-path'
     )
     $installedMode = $BenchmarkPath -ceq 'installed-desktop-path'
     $trialRoot = Join-Path $ScratchRoot ("$Protocol-$Trial")
@@ -1014,19 +1021,20 @@ Execute the authorized workspace task directly. This workspace intentionally has
     $trialResult = $null
     $installedDesktop = [ordered]@{
         benchmark_path=$BenchmarkPath
-        host_surface=$(if($installedMode){'codex-cli-host-equivalent'}else{'codex-cli-isolated'})
+        host_surface=$(if($installedMode){'installed-desktop-path'}else{'codex-cli-isolated'})
         user_config_mode=$(if($installedMode){'loaded'}else{'ignored'})
+        workspace_config_loaded=$false
         profile_config=$(if($installedMode){$profileConfigBinding}else{$null})
         protocol_environment=$(if($installedMode){'cleared'}else{'explicit-or-cleared'})
         install_status=$(if($installedMode -and $Protocol -cne 'bare'){'pending'}else{'not-applicable'})
         verification_status=$(if($installedMode -and $Protocol -cne 'bare'){'pending'}else{'not-applicable'})
         auth_unchanged=$(if($installedMode -and $Protocol -cne 'bare'){$false}else{$null})
+        workspace_protocol_config=$null
         route_probe=$null
-        rollout_promotion=$null
         cleanup_status=$(if($installedMode -and $Protocol -cne 'bare'){'pending'}else{'not-required'})
         hook_installed=$(if($installedMode -and $Protocol -cne 'bare'){'pending'}else{'not-applicable'})
-        hook_trust='unknown'
-        hook_callability='unknown'
+        hook_trust='manual'
+        hook_callability='manual'
     }
     try {
         if ($installedMode) {
@@ -1040,13 +1048,13 @@ Execute the authorized workspace task directly. This workspace intentionally has
             if ($Protocol -eq 'bare') { Remove-Item Env:HARNESS_PROTOCOL -ErrorAction SilentlyContinue } else { $env:HARNESS_PROTOCOL = $Protocol }
         }
         if ($installedMode -and $Protocol -ne 'bare') {
-            $installedDesktop.rollout_promotion = Invoke-InstalledDesktopRolloutPromotion -RepoRoot $RepoRoot -Workspace $workspace -EligibilityReportPath $EligibilityReportPath
-            if ([string]$installedDesktop.rollout_promotion.report_digest -cne $ExpectedRolloutReportDigest -or [string]$installedDesktop.rollout_promotion.file_digest -cne $ExpectedRolloutFileDigest) { throw 'host-benchmark-installed-rollout-binding-changed' }
             $installResult = Invoke-InstalledDesktopInstall -CodexHome $CodexHome -Workspace $workspace -RepoRoot $RepoRoot
             $installedDesktop.install_status = [string]$installResult.install_status
             $installedDesktop.verification_status = [string]$installResult.verification_status
             $installedDesktop.auth_unchanged = [bool]$installResult.auth_unchanged
             $installedDesktop.hook_installed = 'verified'
+            $installedDesktop.workspace_config_loaded = $true
+            if ($Protocol -ceq 'v2') { $installedDesktop.workspace_protocol_config = Enable-InstalledDesktopWorkspaceV2 -Workspace $workspace }
         } elseif (-not $installedMode -and $Protocol -ne 'bare') {
             $installOutput = @(& pwsh -NoLogo -NoProfile -NonInteractive -File (Join-Path $RepoRoot 'install.ps1') -WorkspaceRoot $workspace -RepoRoot $RepoRoot -Preset core 2>&1 | ForEach-Object { [string]$_ })
             if ($LASTEXITCODE -ne 0) { throw "host benchmark install failed for $Protocol" }

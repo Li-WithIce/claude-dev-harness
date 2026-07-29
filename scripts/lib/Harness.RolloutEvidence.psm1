@@ -202,12 +202,274 @@ function Read-HarnessRolloutEvidenceArtifact {
     return [ordered]@{path=$path;bytes=$bytes;digest=$digest}
 }
 
+function Assert-InstalledDesktopStrictJsonElement {
+    param([Parameter(Mandatory)][System.Text.Json.JsonElement]$Element)
+    if ($Element.ValueKind -ceq [System.Text.Json.JsonValueKind]::Object) {
+        $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($property in $Element.EnumerateObject()) {
+            if (-not $names.Add($property.Name)) { throw 'duplicate JSON property' }
+            Assert-InstalledDesktopStrictJsonElement -Element $property.Value
+        }
+    } elseif ($Element.ValueKind -ceq [System.Text.Json.JsonValueKind]::Array) {
+        foreach ($item in $Element.EnumerateArray()) { Assert-InstalledDesktopStrictJsonElement -Element $item }
+    }
+}
+
+function ConvertFrom-InstalledDesktopEvidenceBytes {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
+    $jsonDocument = $null
+    try {
+        if ($Bytes.Length -ge 3 -and $Bytes[0] -eq 0xEF -and $Bytes[1] -eq 0xBB -and $Bytes[2] -eq 0xBF) { throw 'UTF-8 BOM is not allowed' }
+        $text = [Text.UTF8Encoding]::new($false,$true).GetString($Bytes)
+        $options = [System.Text.Json.JsonDocumentOptions]::new()
+        $options.MaxDepth = 100
+        $options.AllowTrailingCommas = $false
+        $options.CommentHandling = [System.Text.Json.JsonCommentHandling]::Disallow
+        $jsonDocument = [System.Text.Json.JsonDocument]::Parse($text,$options)
+        if ($jsonDocument.RootElement.ValueKind -cne [System.Text.Json.JsonValueKind]::Object) { throw 'root must be an object' }
+        Assert-InstalledDesktopStrictJsonElement -Element $jsonDocument.RootElement
+        $document = $text | ConvertFrom-HarnessJson -Depth 100 -ErrorAction Stop
+        if ($document -isnot [Collections.IDictionary]) { throw 'root must be an object' }
+        return $document
+    } finally {
+        if ($null -ne $jsonDocument) { $jsonDocument.Dispose() }
+    }
+}
+
+function Assert-InstalledDesktopSanitizedContent {
+    param([AllowNull()][object]$Value)
+    if ($null -eq $Value) { return }
+    if ($Value -is [Collections.IDictionary]) {
+        foreach ($entry in $Value.GetEnumerator()) { Assert-InstalledDesktopSanitizedContent -Value $entry.Value }
+        return
+    }
+    if ($Value -is [Collections.IEnumerable] -and $Value -isnot [string]) {
+        foreach ($item in $Value) { Assert-InstalledDesktopSanitizedContent -Value $item }
+        return
+    }
+    if ($Value -isnot [string]) { return }
+    $text = [string]$Value
+    if ($text.Length -gt 1024 -or $text -match '[\r\n]' -or $text -match '^(?:[A-Za-z]:[\\/]|\\\\|/(?:home|Users|private|tmp|var)(?:/|$))' -or
+        $text -match '(?i)(?:access[_-]?token|refresh[_-]?token|api[_-]?key|bearer\s+|authorization\s*:|cookie\s*:|password\s*:|credential\s*:|prompt\s*:|raw[ _-]?(?:trace|log)\s*:|thread[ _-]?id\s*:)') {
+        throw 'installed Desktop report contains non-portable or sensitive content'
+    }
+}
+
+function Assert-InstalledDesktopProfileConfig {
+    param([AllowNull()][object]$Value,[string]$Label)
+    Assert-ReleaseKeys -Value $Value -Expected @('status','digest') -Label $Label
+    if ([string]$Value.status -ceq 'absent') {
+        if ($null -ne $Value.digest) { throw "$Label is invalid" }
+    } elseif ([string]$Value.status -ceq 'present') {
+        Assert-ReleaseDigestValue -Value $Value.digest -Label $Label
+    } else { throw "$Label is invalid" }
+}
+
+function Test-InstalledDesktopProfileConfigEqual {
+    param([Collections.IDictionary]$Left,[Collections.IDictionary]$Right)
+    return [string]$Left.status -ceq [string]$Right.status -and [string]$Left.digest -ceq [string]$Right.digest
+}
+
+function ConvertTo-InstalledDesktopBaseHostReport {
+    param([Parameter(Mandatory)][Collections.IDictionary]$Document)
+    $copy = ($Document | ConvertTo-Json -Depth 100 -Compress) | ConvertFrom-HarnessJson -Depth 100
+    $copy.schema_version = 'harness-host-benchmark-report/v2'
+    foreach ($name in @('report_run_id','producer_identity','producer_mode','benchmark_path','qualification')) { [void]$copy.Remove($name) }
+    [void]$copy.source.Remove('installed_inputs')
+    foreach ($name in @('benchmark_path','host_surface','user_config_mode','profile_config','profile_config_consistent')) { [void]$copy.execution.Remove($name) }
+    $copy.execution.codex_home = 'dedicated-config-isolated-auth-home-path-not-persisted'
+    foreach ($name in @('measurement_passed_groups','measurement_passed')) { [void]$copy.performance.Remove($name) }
+    foreach ($group in @($copy.groups)) {
+        [void]$group.Remove('qualification')
+        [void]$group.source.Remove('installed_inputs')
+        foreach ($name in @('benchmark_path','host_surface','user_config_mode','profile_config','profile_config_consistent')) { [void]$group.execution.Remove($name) }
+        $group.execution.codex_home = 'dedicated-config-isolated-auth-home-path-not-persisted'
+        [void]$group.performance.Remove('measurement_passed')
+        foreach ($protocol in @('bare','v1','v2')) {
+            foreach ($trial in @($group.protocols[$protocol].trials)) { [void]$trial.Remove('installed_desktop') }
+        }
+    }
+    if ([bool]$Document.performance.measurement_passed) {
+        foreach ($group in @($copy.groups)) { $group.status='pass';$group.performance.eligible=$true }
+        $copy.status='pass';$copy.performance.eligible=$true;$copy.performance.release_group_set.status='pass';$copy.performance.release_group_set.passed_groups=[long]@($copy.groups).Count
+    }
+    foreach ($group in @($copy.groups)) {
+        $group.group_digest = $null
+        $group.group_digest = Get-ReleaseSha256Text -Text ($group | ConvertTo-Json -Depth 100 -Compress)
+    }
+    $copy.report_digest = $null
+    $copy.report_digest = Get-ReleaseSha256Text -Text ($copy | ConvertTo-Json -Depth 100 -Compress)
+    return $copy
+}
+
+function Assert-InstalledDesktopReport {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource
+    )
+    $topKeys = @('schema_version','generated_at_utc','source_revision','source_dirty','source_state_stable','source','execution','groups','performance','status','report_digest','report_run_id','producer_identity','producer_mode','benchmark_path','qualification')
+    Assert-ReleaseKeys -Value $Document -Expected $topKeys -Label 'installed Desktop report'
+    if ([string]$Document.schema_version -cne 'harness-installed-desktop-benchmark-report/v1' -or [string]$Document.report_run_id -cnotmatch '^[0-9a-f]{32}$' -or
+        [string]$Document.producer_identity -cne 'host-benchmark-installed-desktop/v1' -or [string]$Document.producer_mode -cnotin @('formal','test-only','diagnostic-smoke') -or
+        [string]$Document.benchmark_path -cne 'installed-desktop-path' -or [string]$Document.status -cnotin @('pass','fail','unavailable')) { throw 'installed Desktop report identity is invalid' }
+    Assert-ReleaseReportDigest -Document $Document
+    Assert-InstalledDesktopSanitizedContent -Value $Document
+
+    $sourceKeys = @('runner_digest','wrapper_digest','observation_schema_digest','otlp_collector_digest','atomic_write_module_digest','path_module_digest','otel_contract_digest','trial_helper_digest','installed_inputs','input_head_binding','execution_mode','commit_tree_oid','object_format','start','end')
+    Assert-ReleaseKeys -Value $Document.source -Expected $sourceKeys -Label 'installed Desktop source'
+    Assert-ReleaseKeys -Value $Document.source.installed_inputs -Expected @('install_digest','uninstall_digest','verification_digest','protocol_digest') -Label 'installed Desktop inputs'
+    $installedInputs = [ordered]@{install_digest='install.ps1';uninstall_digest='uninstall.ps1';verification_digest='tests/verify-installation.ps1';protocol_digest='scripts/lib/Harness.Protocol.psm1'}
+    foreach ($entry in $installedInputs.GetEnumerator()) { Assert-ReleaseCurrentFileDigest -RepoRoot $RepoRoot -Value $Document.source.installed_inputs[$entry.Key] -RelativePath ([string]$entry.Value) -Label ("installed Desktop {0}" -f $entry.Key) }
+
+    $executionKeys = @('model','reasoning','groups','required_groups','trials_per_protocol_per_group','required_trials_per_protocol_per_group','group_order_strategy','max_fresh_sessions','fresh_workspace_per_trial','fresh_ephemeral_session_per_invocation','codex_home','duration_ms','benchmark_path','host_surface','user_config_mode','profile_config','profile_config_consistent')
+    Assert-ReleaseKeys -Value $Document.execution -Expected $executionKeys -Label 'installed Desktop execution'
+    Assert-InstalledDesktopProfileConfig -Value $Document.execution.profile_config -Label 'installed Desktop profile config'
+    if ([string]$Document.execution.benchmark_path -cne 'installed-desktop-path' -or [string]$Document.execution.host_surface -cne 'installed-desktop-path' -or
+        [string]$Document.execution.user_config_mode -cne 'loaded' -or [string]$Document.execution.codex_home -cne 'dedicated-installed-desktop-profile-path-not-persisted' -or
+        $Document.execution.profile_config_consistent -isnot [bool]) { throw 'installed Desktop execution identity is invalid' }
+
+    Assert-ReleaseKeys -Value $Document.performance -Expected @('release_group_set','eligible','measurement_passed_groups','measurement_passed') -Label 'installed Desktop performance'
+    if ($Document.performance.measurement_passed -isnot [bool] -or $Document.performance.measurement_passed_groups -isnot [long]) { throw 'installed Desktop measurement status is invalid' }
+    Assert-ReleaseKeys -Value $Document.qualification -Expected @('status','hard_result_contract','hook_trust','hook_callability','hook_observations_blocking','reason') -Label 'installed Desktop qualification'
+    if ([string]$Document.qualification.hard_result_contract -cne 'installed-desktop-authoritative-observation/v1' -or [string]$Document.qualification.hook_trust -cne 'manual' -or
+        [string]$Document.qualification.hook_callability -cne 'manual' -or $Document.qualification.hook_observations_blocking -isnot [bool] -or [bool]$Document.qualification.hook_observations_blocking) {
+        throw 'installed Desktop qualification identity is invalid'
+    }
+
+    $groupKeys = @('group_index','group_run_id','group_root_digest','source_revision','source_dirty','source_state_stable','source','execution','protocols','performance','status','group_digest','qualification')
+    $groupExecutionKeys = @('model','reasoning','trials_per_protocol','release_trials_required','max_fresh_sessions','fresh_workspace_per_trial','fresh_ephemeral_session_per_invocation','v1_comparator','bare_and_v2_start','semantic_task','host_turn_basis','successful_request_send_measurement','expected_codex_service_version','trial_order_strategy','actual_trial_order','cache_state','codex_home','sandbox','approval_policy','workspace_boundary','prompt_persisted','raw_command_persisted','thread_id_persisted','raw_trace_persisted','raw_trace_cleanup_confirmed','scratch_persisted','install_duration_included','duration_ms','benchmark_path','host_surface','user_config_mode','profile_config','profile_config_consistent')
+    $trialKeys = @('trial_run_id','trial_root_digest','trial','runner_expected_trial','runner_evidence_passed','workspace_baseline_revision','status','diagnostic','completion_passed','outcome','reason_code','source_binding','workflow_contract','workflow_completed','v1_stage_journal','v1_target_journal','v1_validator_passed','fresh_sessions','host_turns','successful_request_sends','completed_agent_messages','total_duration_ms','sum_codex_process_duration_ms','first_useful_action_ms','tool_calls','loaded_skills','skill_file_command_matches','loaded_files','artifact_writes','runtime_writes','unexpected_writes','raw_trace_deleted','post_trial_diagnostics','tokens','installed_desktop')
+    $desktopKeys = @('benchmark_path','host_surface','user_config_mode','workspace_config_loaded','profile_config','protocol_environment','install_status','verification_status','auth_unchanged','workspace_protocol_config','route_probe','cleanup_status','hook_installed','hook_trust','hook_callability')
+    $routeKeys = @('requested_protocol','detected_protocol','selected_protocol','preference_source','default_source','reason','workspace_config_status','workspace_config_protocol','runtime_default_status','artifact_kind')
+    $measurementPassedGroups = 0
+    foreach ($group in @($Document.groups)) {
+        Assert-ReleaseKeys -Value $group -Expected $groupKeys -Label 'installed Desktop group'
+        if ([string]$group.status -cnotin @('pass','fail','unavailable') -or [string]$group.qualification.status -cnotin @('pass','fail','unavailable')) { throw 'installed Desktop group status is invalid' }
+        Assert-HostBenchmarkGroupDigest -Group $group
+        Assert-ReleaseKeys -Value $group.source -Expected $sourceKeys -Label 'installed Desktop group source'
+        Assert-ReleaseKeys -Value $group.execution -Expected $groupExecutionKeys -Label 'installed Desktop group execution'
+        Assert-InstalledDesktopProfileConfig -Value $group.execution.profile_config -Label 'installed Desktop group profile config'
+        if (-not (Test-InstalledDesktopProfileConfigEqual -Left $Document.execution.profile_config -Right $group.execution.profile_config) -or
+            ($group.source.installed_inputs | ConvertTo-Json -Compress) -cne ($Document.source.installed_inputs | ConvertTo-Json -Compress) -or
+            [string]$group.execution.benchmark_path -cne 'installed-desktop-path' -or [string]$group.execution.host_surface -cne 'installed-desktop-path' -or
+            [string]$group.execution.user_config_mode -cne 'loaded' -or [string]$group.execution.codex_home -cne 'dedicated-installed-desktop-profile-path-not-persisted' -or
+            $group.execution.profile_config_consistent -isnot [bool]) { throw 'installed Desktop group binding is invalid' }
+        Assert-ReleaseKeys -Value $group.performance -Expected @('release_trial_set','direct_latency','successful_request_send_reduction','eligible','measurement_passed') -Label 'installed Desktop group performance'
+        Assert-ReleaseKeys -Value $group.qualification -Expected @('status','reason') -Label 'installed Desktop group qualification'
+        if ($group.performance.measurement_passed -isnot [bool]) { throw 'installed Desktop group measurement status is invalid' }
+        if ([bool]$group.performance.measurement_passed) { $measurementPassedGroups++ }
+        foreach ($protocol in @('bare','v1','v2')) {
+            Assert-ReleaseKeys -Value $group.protocols[$protocol] -Expected @('status','runner_contract_failures','trials','successful_request_sends','medians') -Label "installed Desktop $protocol record"
+            foreach ($trial in @($group.protocols[$protocol].trials)) {
+                Assert-ReleaseKeys -Value $trial -Expected $trialKeys -Label "installed Desktop $protocol trial"
+                $desktop = $trial.installed_desktop
+                Assert-ReleaseKeys -Value $desktop -Expected $desktopKeys -Label "installed Desktop $protocol observation"
+                Assert-InstalledDesktopProfileConfig -Value $desktop.profile_config -Label "installed Desktop $protocol profile config"
+                if (-not (Test-InstalledDesktopProfileConfigEqual -Left $Document.execution.profile_config -Right $desktop.profile_config) -or
+                    [string]$desktop.benchmark_path -cne 'installed-desktop-path' -or [string]$desktop.host_surface -cne 'installed-desktop-path' -or [string]$desktop.user_config_mode -cne 'loaded' -or
+                    [string]$desktop.protocol_environment -cne 'cleared' -or [string]$desktop.hook_trust -cne 'manual' -or [string]$desktop.hook_callability -cne 'manual') { throw "installed Desktop $protocol observation is invalid" }
+                if ($protocol -ceq 'bare') {
+                    if ($desktop.workspace_config_loaded -isnot [bool] -or [bool]$desktop.workspace_config_loaded -or [string]$desktop.install_status -cne 'not-applicable' -or [string]$desktop.verification_status -cne 'not-applicable' -or
+                        [string]$desktop.cleanup_status -cne 'not-required' -or [string]$desktop.hook_installed -cne 'not-applicable' -or $null -ne $desktop.auth_unchanged -or $null -ne $desktop.workspace_protocol_config -or $null -ne $desktop.route_probe) { throw 'installed Desktop bare observation is invalid' }
+                } else {
+                    if ($desktop.workspace_config_loaded -isnot [bool] -or -not [bool]$desktop.workspace_config_loaded -or [string]$desktop.install_status -cne 'pass' -or [string]$desktop.verification_status -cne 'pass' -or
+                        $desktop.auth_unchanged -isnot [bool] -or -not [bool]$desktop.auth_unchanged -or [string]$desktop.cleanup_status -cne 'passed' -or [string]$desktop.hook_installed -cne 'verified') { throw "installed Desktop $protocol hard result is invalid" }
+                    Assert-ReleaseKeys -Value $desktop.route_probe -Expected $routeKeys -Label "installed Desktop $protocol route"
+                    if ([string]$desktop.route_probe.selected_protocol -cne $protocol -or [string]$desktop.route_probe.runtime_default_status -cne 'not-read') { throw "installed Desktop $protocol route is invalid" }
+                    if ($protocol -ceq 'v2') {
+                        Assert-ReleaseKeys -Value $desktop.workspace_protocol_config -Expected @('status','new_task_protocol','preference_source','config_digest') -Label 'installed Desktop v2 workspace config'
+                        Assert-ReleaseDigestValue -Value $desktop.workspace_protocol_config.config_digest -Label 'installed Desktop v2 workspace config'
+                        if ([string]$desktop.workspace_protocol_config.status -cne 'pass' -or [string]$desktop.workspace_protocol_config.new_task_protocol -cne 'v2' -or [string]$desktop.workspace_protocol_config.preference_source -cne 'workspace-config' -or
+                            [string]$desktop.route_probe.requested_protocol -cne 'v2' -or [string]$desktop.route_probe.detected_protocol -cne 'new' -or [string]$desktop.route_probe.preference_source -cne 'workspace-config' -or
+                            [string]$desktop.route_probe.default_source -cne 'workspace-config' -or [string]$desktop.route_probe.reason -cne 'workspace-v2-new-task' -or [string]$desktop.route_probe.workspace_config_status -cne 'present' -or
+                            [string]$desktop.route_probe.workspace_config_protocol -cne 'v2' -or [string]$desktop.route_probe.artifact_kind -cne 'new-task' -or [long]$trial.artifact_writes -ne 0 -or [long]$trial.runtime_writes -ne 0) {
+                            throw 'installed Desktop v2 did not use workspace-owned explicit selection'
+                        }
+                    } elseif ($null -ne $desktop.workspace_protocol_config -or [string]$desktop.route_probe.requested_protocol -cne 'auto' -or [string]$desktop.route_probe.detected_protocol -cne 'v1' -or
+                        [string]$desktop.route_probe.default_source -cne 'existing-artifact' -or [string]$desktop.route_probe.reason -cne 'existing-v1-plan' -or [string]$desktop.route_probe.artifact_kind -cne 'v1-plan') {
+                        throw 'installed Desktop v1 artifact behavior is invalid'
+                    }
+                }
+            }
+        }
+    }
+    if ([long]$Document.performance.measurement_passed_groups -ne $measurementPassedGroups -or [bool]$Document.performance.measurement_passed -ne ($measurementPassedGroups -eq 3 -and @($Document.groups).Count -eq 3)) { throw 'installed Desktop measurement aggregate is invalid' }
+
+    $base = ConvertTo-InstalledDesktopBaseHostReport -Document $Document
+    Assert-HostBenchmarkReportV2 -RepoRoot $RepoRoot -Document $base -ExpectedSource $ExpectedSource
+    $formal = [string]$Document.producer_mode -ceq 'formal'
+    if ($formal) {
+        if ([string]$Document.qualification.status -cne [string]$Document.status -or @($Document.groups | Where-Object { [string]$_.qualification.status -cne [string]$_.status }).Count -ne 0) { throw 'installed Desktop formal qualification status is inconsistent' }
+        if ([string]$Document.status -ceq 'pass' -and (-not [bool]$Document.performance.measurement_passed -or -not [bool]$Document.performance.eligible -or -not [bool]$Document.execution.profile_config_consistent)) { throw 'installed Desktop formal pass lacks hard results' }
+    } else {
+        if ([string]$Document.qualification.status -cne 'unavailable' -or @($Document.groups | Where-Object { [string]$_.qualification.status -cne 'unavailable' }).Count -ne 0 -or [bool]$Document.performance.eligible) { throw 'installed Desktop non-formal result was promoted' }
+    }
+    $status = if (-not $formal -and [string]$Document.status -cne 'fail') { 'unavailable' } else { [string]$Document.status }
+    $trialPayloadDigests = [Collections.Generic.List[string]]::new()
+    foreach ($group in @($base.groups)) { foreach ($protocol in @('bare','v1','v2')) { foreach ($trial in @($group.protocols[$protocol].trials)) { $trialPayloadDigests.Add((Get-HostBenchmarkTrialPayloadDigest -Protocol $protocol -Trial $trial)) } } }
+    return [ordered]@{
+        status=$status;producer_identity=[string]$Document.producer_identity;source_revision=[string]$Document.source_revision;report_run_id=[string]$Document.report_run_id
+        group_run_ids=@($Document.groups.group_run_id);group_root_digests=@($Document.groups.group_root_digest)
+        trial_run_ids=@($Document.groups | ForEach-Object { @($_.protocols.bare.trials + $_.protocols.v1.trials + $_.protocols.v2.trials) } | ForEach-Object { [string]$_.trial_run_id })
+        trial_root_digests=@($Document.groups | ForEach-Object { @($_.protocols.bare.trials + $_.protocols.v1.trials + $_.protocols.v2.trials) } | ForEach-Object { [string]$_.trial_root_digest })
+        trial_payload_digests=@($trialPayloadDigests)
+    }
+}
+
+function Read-InstalledDesktopRolloutEvidence {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Gate,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource,
+        [string[]]$ProtectedRoots = @()
+    )
+    try {
+        Assert-ReleaseKeys -Value $Gate -Expected @('status','evidence_contract','artifact_path','evidence_digest','source_revision','producer_identity') -Label 'installed Desktop gate'
+        if ([string]$Gate.evidence_contract -cne 'harness-installed-desktop-benchmark-report/v1' -or [string]$Gate.source_revision -cne [string]$ExpectedSource.revision -or
+            [string]::IsNullOrWhiteSpace([string]$Gate.producer_identity)) { throw 'installed Desktop gate binding is invalid' }
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$Gate.artifact_path) -ExpectedDigest ([string]$Gate.evidence_digest) -ProtectedRoots $ProtectedRoots
+        $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        $result = Assert-InstalledDesktopReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource
+        $physical = Get-HostPhysicalPathInfo -Path ([string]$artifact.path) -RejectLinks
+        $result['path'] = [string]$artifact.path
+        $result['raw_digest'] = [string]$artifact.digest
+        $result['volume'] = [string]$physical.volume
+        $result['file_id'] = [string]$physical.file_id
+        return $result
+    } catch { throw [IO.InvalidDataException]::new('rollout-evidence-installed-report-invalid',$_.Exception) }
+}
+
 function Assert-HarnessRolloutEvidenceSetProvenance {
     param(
         [Parameter(Mandatory)][System.Collections.IDictionary]$Gates,
+        [AllowEmptyString()][string]$RepoRoot = '',
+        [System.Collections.IDictionary]$ExpectedSource = $null,
         [string[]]$ProtectedRoots = @()
     )
-    foreach ($name in @($Gates.Keys | Sort-Object)) {
+    $installedNames = @('DP-G03-INSTALLED-DESKTOP-HOST-3X3','DP-G07-DISTINCT-INSTALLED-DESKTOP-GATE')
+    $installedPresent = @($installedNames | Where-Object { $Gates.Contains($_) })
+    if ($installedPresent.Count -gt 0) {
+        if ($installedPresent.Count -ne 2 -or [string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-installed-report-invalid' }
+        $installed = @(
+            Read-InstalledDesktopRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$installedNames[0]] -ExpectedSource $ExpectedSource -ProtectedRoots $ProtectedRoots
+            Read-InstalledDesktopRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$installedNames[1]] -ExpectedSource $ExpectedSource -ProtectedRoots $ProtectedRoots
+        )
+        if ($installed.Count -ne 2 -or [string]$installed[0].path -ceq [string]$installed[1].path -or [string]$installed[0].raw_digest -ceq [string]$installed[1].raw_digest -or
+            ([string]$installed[0].volume -ceq [string]$installed[1].volume -and [string]$installed[0].file_id -ceq [string]$installed[1].file_id) -or
+            [string]$installed[0].report_run_id -ceq [string]$installed[1].report_run_id -or [string]$installed[0].source_revision -cne [string]$installed[1].source_revision) {
+            throw 'rollout-evidence-installed-reports-not-distinct'
+        }
+        foreach ($property in @('group_run_ids','group_root_digests','trial_run_ids','trial_root_digests','trial_payload_digests')) {
+            if (@($installed[0][$property] | Where-Object { $_ -cin @($installed[1][$property]) }).Count -gt 0) { throw 'rollout-evidence-installed-reports-not-distinct' }
+        }
+        for ($index=0; $index -lt 2; $index++) {
+            $gate = $Gates[$installedNames[$index]]
+            $gate.status = [string]$installed[$index].status
+            $gate.producer_identity = [string]$installed[$index].producer_identity
+        }
+    }
+    foreach ($name in @($Gates.Keys | Where-Object { $_ -cnotin $installedNames } | Sort-Object)) {
         $gate = $Gates[$name]
         if ($gate -isnot [System.Collections.IDictionary] -or
             [string]::IsNullOrWhiteSpace([string]$gate.artifact_path) -or
@@ -216,6 +478,7 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
         [void](Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$gate.artifact_path) -ExpectedDigest ([string]$gate.evidence_digest) -ProtectedRoots $ProtectedRoots)
         throw "rollout-evidence-provenance-unwired-$name"
     }
+    if ($installedPresent.Count -eq 2) { return $true }
     throw 'rollout-evidence-provenance-unverified'
 }
 

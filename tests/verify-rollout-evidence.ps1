@@ -105,6 +105,85 @@ function New-HostGroup([int]$Index,[Collections.IDictionary]$Source,[Collections
     return $group
 }
 
+function New-InstalledHostReport([Collections.IDictionary]$HostReport,[string]$Seed,[ValidateSet('formal','test-only','diagnostic-smoke')][string]$ProducerMode='formal') {
+    $report = Copy-Document $HostReport
+    $profileConfig = [ordered]@{status='present';digest=('sha256:' + ('1' * 64))}
+    $installedInputs = [ordered]@{
+        install_digest=Get-FileDigest (Join-Path $RepoRoot 'install.ps1')
+        uninstall_digest=Get-FileDigest (Join-Path $RepoRoot 'uninstall.ps1')
+        verification_digest=Get-FileDigest (Join-Path $RepoRoot 'tests\verify-installation.ps1')
+        protocol_digest=Get-FileDigest (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1')
+    }
+    $report.schema_version='harness-installed-desktop-benchmark-report/v1'
+    $report['report_run_id']=(Get-TextDigest "installed-report-$Seed").Substring(7,32)
+    $report['producer_identity']='host-benchmark-installed-desktop/v1'
+    $report['producer_mode']=$ProducerMode
+    $report['benchmark_path']='installed-desktop-path'
+    $report.source['installed_inputs']=$installedInputs
+    $report.execution.codex_home='dedicated-installed-desktop-profile-path-not-persisted'
+    $report.execution['benchmark_path']='installed-desktop-path';$report.execution['host_surface']='installed-desktop-path';$report.execution['user_config_mode']='loaded'
+    $report.execution['profile_config']=(Copy-Document $profileConfig);$report.execution['profile_config_consistent']=$true
+    $report.performance['measurement_passed_groups']=3;$report.performance['measurement_passed']=$true
+    $report['qualification']=[ordered]@{status=$(if($ProducerMode-ceq'formal'){'pass'}else{'unavailable'});hard_result_contract='installed-desktop-authoritative-observation/v1';hook_trust='manual';hook_callability='manual';hook_observations_blocking=$false;reason="contract fixture $Seed"}
+    foreach($group in @($report.groups)) {
+        $group.group_run_id=(Get-TextDigest "installed-group-$Seed-$($group.group_index)").Substring(7,32)
+        $group.group_root_digest=Get-TextDigest "installed-group-root-$Seed-$($group.group_index)"
+        $group.source['installed_inputs']=(Copy-Document $installedInputs)
+        $group.execution.codex_home='dedicated-installed-desktop-profile-path-not-persisted'
+        $group.execution['benchmark_path']='installed-desktop-path';$group.execution['host_surface']='installed-desktop-path';$group.execution['user_config_mode']='loaded'
+        $group.execution['profile_config']=(Copy-Document $profileConfig);$group.execution['profile_config_consistent']=$true
+        $group.performance['measurement_passed']=$true
+        $group['qualification']=[ordered]@{status=$(if($ProducerMode-ceq'formal'){'pass'}else{'unavailable'});reason="contract fixture $Seed"}
+        foreach($protocol in @('bare','v1','v2')) {
+            foreach($trial in @($group.protocols[$protocol].trials)) {
+                $identity = "$Seed-$($group.group_index)-$protocol-$($trial.trial)"
+                $trial.trial_run_id=(Get-TextDigest "installed-trial-$identity").Substring(7,32)
+                $trial.trial_root_digest=Get-TextDigest "installed-trial-root-$identity"
+                $trial.source_binding.reason="contract source binding $identity"
+                $desktop=[ordered]@{benchmark_path='installed-desktop-path';host_surface='installed-desktop-path';user_config_mode='loaded';workspace_config_loaded=($protocol-cne'bare');profile_config=(Copy-Document $profileConfig);protocol_environment='cleared';hook_trust='manual';hook_callability='manual'}
+                if($protocol-ceq'bare') {
+                    $desktop+=@{install_status='not-applicable';verification_status='not-applicable';auth_unchanged=$null;workspace_protocol_config=$null;route_probe=$null;cleanup_status='not-required';hook_installed='not-applicable'}
+                } else {
+                    $desktop+=@{install_status='pass';verification_status='pass';auth_unchanged=$true;cleanup_status='passed';hook_installed='verified'}
+                    if($protocol-ceq'v2') {
+                        $desktop.workspace_protocol_config=[ordered]@{status='pass';new_task_protocol='v2';preference_source='workspace-config';config_digest=(Get-TextDigest "workspace-config-$identity")}
+                        $desktop.route_probe=[ordered]@{requested_protocol='v2';detected_protocol='new';selected_protocol='v2';preference_source='workspace-config';default_source='workspace-config';reason='workspace-v2-new-task';workspace_config_status='present';workspace_config_protocol='v2';runtime_default_status='not-read';artifact_kind='new-task'}
+                    } else {
+                        $desktop.workspace_protocol_config=$null
+                        $desktop.route_probe=[ordered]@{requested_protocol='auto';detected_protocol='v1';selected_protocol='v1';preference_source='workspace-config';default_source='existing-artifact';reason='existing-v1-plan';workspace_config_status='present';workspace_config_protocol='auto';runtime_default_status='not-read';artifact_kind='v1-plan'}
+                    }
+                }
+                $trial['installed_desktop']=$desktop
+            }
+        }
+        if($ProducerMode-cne'formal'){$group.status='unavailable';$group.performance.eligible=$false}
+        Set-GroupDigest $group
+    }
+    if($ProducerMode-cne'formal'){$report.status='unavailable';$report.performance.eligible=$false;$report.performance.release_group_set.status='unavailable';$report.performance.release_group_set.passed_groups=0}
+    Set-ReportDigest $report
+    return $report
+}
+
+function Invoke-InstalledGatePaths($Module,[Collections.IDictionary]$Expected,[string]$LeftPath,[string]$LeftDigest,[string]$RightPath,[string]$RightDigest,[string[]]$ProtectedRoots=@()) {
+    $gates=[ordered]@{
+        'DP-G03-INSTALLED-DESKTOP-HOST-3X3'=[ordered]@{status='pass';evidence_contract='harness-installed-desktop-benchmark-report/v1';artifact_path=$LeftPath;evidence_digest=$LeftDigest;source_revision=[string]$Expected.revision;producer_identity='forged-caller'}
+        'DP-G07-DISTINCT-INSTALLED-DESKTOP-GATE'=[ordered]@{status='pass';evidence_contract='harness-installed-desktop-benchmark-report/v1';artifact_path=$RightPath;evidence_digest=$RightDigest;source_revision=[string]$Expected.revision;producer_identity='forged-caller'}
+    }
+    try {
+        $value=& $Module {param($Root,$Source,$GateSet,$Protected)Assert-HarnessRolloutEvidenceSetProvenance -RepoRoot $Root -ExpectedSource $Source -Gates $GateSet -ProtectedRoots $Protected} $RepoRoot $Expected $gates $ProtectedRoots
+        return [pscustomobject]@{Success=[bool]$value;Reason='';Detail='';Gates=$gates}
+    } catch {
+        $detail=if($null-ne$_.Exception.InnerException){[string]$_.Exception.InnerException.Message}else{''}
+        return [pscustomobject]@{Success=$false;Reason=[string]$_.Exception.Message;Detail=$detail;Gates=$gates}
+    }
+}
+
+function Invoke-InstalledReportPair($Module,[Collections.IDictionary]$Expected,[string]$Root,[Collections.IDictionary]$Left,[Collections.IDictionary]$Right) {
+    $leftPath=Join-Path $Root ("installed-$($Left.report_run_id).json");$rightPath=Join-Path $Root ("installed-$($Right.report_run_id).json")
+    Write-Document $leftPath $Left -Compress;Write-Document $rightPath $Right -Compress
+    return Invoke-InstalledGatePaths -Module $Module -Expected $Expected -LeftPath $leftPath -LeftDigest (Get-FileDigest $leftPath) -RightPath $rightPath -RightDigest (Get-FileDigest $rightPath)
+}
+
 $modulePath = Join-Path $RepoRoot 'scripts\lib\Harness.RolloutEvidence.psm1'
 $qualificationPath = Join-Path $RepoRoot 'scripts\lib\Harness.Qualification.psm1'
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('thin-v2-rollout-evidence-' + [guid]::NewGuid().ToString('N'))
@@ -120,6 +199,17 @@ try {
         revision=[string]$cleanSource.revision;commit_tree_oid=[string]$cleanSource.commit_tree_oid;object_format=[string]$cleanSource.object_format
         dirty=$false;status_entry_count=0;status_digest=Get-TextDigest '';state_digest=[string]$cleanSource.state_digest;state_basis='git-revision-tree-status/v1'
     }
+    $prewireG03 = Join-Path $temp 'prewire-g03.json'
+    $prewireG07 = Join-Path $temp 'prewire-g07.json'
+    Write-Document $prewireG03 ([ordered]@{}) -Compress
+    Write-Document $prewireG07 ([ordered]@{}) -Compress
+    $prewireGates = [ordered]@{
+        'DP-G03-INSTALLED-DESKTOP-HOST-3X3' = [ordered]@{status='pass';evidence_contract='harness-installed-desktop-benchmark-report/v1';artifact_path=$prewireG03;evidence_digest=(Get-FileDigest $prewireG03);source_revision=[string]$cleanSource.revision;producer_identity='forged-caller'}
+        'DP-G07-DISTINCT-INSTALLED-DESKTOP-GATE' = [ordered]@{status='pass';evidence_contract='harness-installed-desktop-benchmark-report/v1';artifact_path=$prewireG07;evidence_digest=(Get-FileDigest $prewireG07);source_revision=[string]$cleanSource.revision;producer_identity='forged-caller'}
+    }
+    $prewireReason = ''
+    try { & $module { param($Root,$Source,$Gates) Assert-HarnessRolloutEvidenceSetProvenance -RepoRoot $Root -ExpectedSource $Source -Gates $Gates } $RepoRoot $cleanSource $prewireGates } catch { $prewireReason = [string]$_.Exception.Message }
+    Check ($prewireReason -ceq 'rollout-evidence-installed-report-invalid') 'G03/G07 dispatch reaches the strict installed report Adapter' 'G03/G07 remains provenance-unwired or bypasses strict installed report validation'
     $datasetPath = Join-Path $RepoRoot 'tests\evals\core-scenarios.json'
     $dataset = Get-Content -LiteralPath $datasetPath -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable -Depth 40
     $observationSchemaDigest = Get-FileDigest (Join-Path $RepoRoot 'schemas\model-eval-observation.schema.json')
@@ -229,6 +319,124 @@ try {
     $hostPath = Join-Path $temp 'host.json'; Write-Document $hostPath $hostReport
     $hostGate = Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $hostPath -ExpectedSource $cleanSource
     Check ([string]$hostGate.status -ceq 'pass') 'three independent clean host 3x3 groups are accepted' "clean host report was rejected: $($hostGate.reason)"
+
+    $installedFormalA=New-InstalledHostReport -HostReport $hostReport -Seed formal-a
+    $installedFormalB=New-InstalledHostReport -HostReport $hostReport -Seed formal-b
+    $installedFormalResult=Invoke-InstalledReportPair -Module $module -Expected $cleanSource -Root $temp -Left $installedFormalA -Right $installedFormalB
+    Check ($installedFormalResult.Success -and [string]$installedFormalResult.Gates['DP-G03-INSTALLED-DESKTOP-HOST-3X3'].status -ceq 'pass' -and [string]$installedFormalResult.Gates['DP-G07-DISTINCT-INSTALLED-DESKTOP-GATE'].producer_identity -ceq 'host-benchmark-installed-desktop/v1') 'two distinct formal-shaped installed contracts are adapted from Artifact status and identity' "valid installed contracts were rejected: $($installedFormalResult.Reason) / $($installedFormalResult.Detail)"
+    Check ([string]$installedFormalA.qualification.hook_trust -ceq 'manual' -and -not [bool]$installedFormalA.qualification.hook_observations_blocking -and $installedFormalResult.Success) 'manual Hook observations remain advisory and nonblocking' 'manual Hook observations were forged as machine facts or incorrectly made blocking'
+
+    $installedTestA=New-InstalledHostReport -HostReport $hostReport -Seed test-a -ProducerMode test-only
+    $installedTestB=New-InstalledHostReport -HostReport $hostReport -Seed test-b -ProducerMode test-only
+    $installedTestResult=Invoke-InstalledReportPair -Module $module -Expected $cleanSource -Root $temp -Left $installedTestA -Right $installedTestB
+    Check ($installedTestResult.Success -and @($installedTestResult.Gates.Values | Where-Object { [string]$_.status -ceq 'unavailable' }).Count -eq 2 -and @($installedTestResult.Gates.Values | Where-Object { [string]$_.producer_identity -ceq 'host-benchmark-installed-desktop/v1' }).Count -eq 2) 'caller pass/producer claims are overwritten by test-only Artifact facts' 'test-only evidence became pass or retained caller producer identity'
+    $installedSmokeA=New-InstalledHostReport -HostReport $hostReport -Seed smoke-a -ProducerMode diagnostic-smoke
+    $installedSmokeB=New-InstalledHostReport -HostReport $hostReport -Seed smoke-b -ProducerMode diagnostic-smoke
+    $installedSmokeResult=Invoke-InstalledReportPair -Module $module -Expected $cleanSource -Root $temp -Left $installedSmokeA -Right $installedSmokeB
+    Check ($installedSmokeResult.Success -and @($installedSmokeResult.Gates.Values | Where-Object { [string]$_.status -ceq 'unavailable' }).Count -eq 2) 'diagnostic smoke remains unavailable' 'diagnostic smoke became formal evidence'
+
+    $script:installedMutationIndex=0
+    $rejectInstalledMutation = {
+        param([string]$Name,[scriptblock]$Mutation)
+        $script:installedMutationIndex++
+        $left=New-InstalledHostReport -HostReport $hostReport -Seed ("mutation-$($script:installedMutationIndex)-left")
+        $right=New-InstalledHostReport -HostReport $hostReport -Seed ("mutation-$($script:installedMutationIndex)-right")
+        & $Mutation $left
+        foreach($group in @($left.groups)){Set-GroupDigest $group};Set-ReportDigest $left
+        $result=Invoke-InstalledReportPair -Module $module -Expected $cleanSource -Root $temp -Left $left -Right $right
+        Check (-not $result.Success) "installed Adapter rejects $Name" "installed Adapter accepted $Name"
+    }
+    & $rejectInstalledMutation 'wrong schema' {param($r)$r.schema_version='harness-host-benchmark-report/v2'}
+    & $rejectInstalledMutation 'an unknown field' {param($r)$r['unexpected']='sentinel'}
+    & $rejectInstalledMutation 'a stale source revision' {param($r)$r.source_revision='0' * 40}
+    & $rejectInstalledMutation 'a dirty source claim' {param($r)$r.source_dirty=$true}
+    & $rejectInstalledMutation 'an unstable source claim' {param($r)$r.source_state_stable=$false}
+    & $rejectInstalledMutation 'a missing Artifact producer identity' {param($r)$r.producer_identity=''}
+    & $rejectInstalledMutation 'a stale producer input digest' {param($r)$r.source.installed_inputs.install_digest='sha256:' + ('0' * 64)}
+    & $rejectInstalledMutation 'credential content' {param($r)$r.qualification.reason='authorization: bearer secret'}
+    & $rejectInstalledMutation 'a private absolute path' {param($r)$r.qualification.reason='C:\Users\private\secret.txt'}
+    & $rejectInstalledMutation 'raw log content' {param($r)$r.qualification.reason='raw log: retained output'}
+    & $rejectInstalledMutation 'a retained raw trace' {param($r)$r.groups[0].protocols.v2.trials[0].raw_trace_deleted=$false}
+    & $rejectInstalledMutation 'a CLI-host-equivalent surface' {param($r)$r.groups[0].protocols.v2.trials[0].installed_desktop.host_surface='codex-cli-host-equivalent'}
+    & $rejectInstalledMutation 'process-only HARNESS_PROTOCOL v2 selection' {param($r)$r.groups[0].protocols.v2.trials[0].installed_desktop.route_probe.preference_source='HARNESS_PROTOCOL'}
+    & $rejectInstalledMutation 'auto eligible-report v2 selection' {param($r)$r.groups[0].protocols.v2.trials[0].installed_desktop.route_probe.requested_protocol='auto';$r.groups[0].protocols.v2.trials[0].installed_desktop.route_probe.reason='eligible-rollout-report'}
+    & $rejectInstalledMutation 'a Direct Task or Plan write' {param($r)$r.groups[0].protocols.v2.trials[0].artifact_writes=1}
+    & $rejectInstalledMutation 'a Direct Runtime pointer write' {param($r)$r.groups[0].protocols.v2.trials[0].runtime_writes=1}
+    & $rejectInstalledMutation 'changed auth bytes' {param($r)$r.groups[0].protocols.v2.trials[0].installed_desktop.auth_unchanged=$false}
+    & $rejectInstalledMutation 'changed config bytes' {param($r)$r.groups[0].protocols.v2.trials[0].installed_desktop.profile_config.digest='sha256:' + ('2' * 64)}
+    & $rejectInstalledMutation 'cleanup residue' {param($r)$r.groups[0].protocols.v2.trials[0].installed_desktop.cleanup_status='failed'}
+    & $rejectInstalledMutation 'v1 Artifact migration' {param($r)$r.groups[0].protocols.v1.trials[0].installed_desktop.route_probe.selected_protocol='v2'}
+    & $rejectInstalledMutation 'manual qualification status' {param($r)$r.qualification.status='manual'}
+    & $rejectInstalledMutation 'skipped report status' {param($r)$r.status='skipped';$r.qualification.status='skipped'}
+
+    $digestMismatchLeft=New-InstalledHostReport -HostReport $hostReport -Seed digest-mismatch-left;$digestMismatchRight=New-InstalledHostReport -HostReport $hostReport -Seed digest-mismatch-right
+    $digestMismatchLeft.report_digest='sha256:' + ('0' * 64)
+    $digestMismatchResult=Invoke-InstalledReportPair -Module $module -Expected $cleanSource -Root $temp -Left $digestMismatchLeft -Right $digestMismatchRight
+    Check (-not $digestMismatchResult.Success) 'installed Adapter rejects report_digest mismatch' 'installed Adapter accepted report_digest mismatch'
+
+    $pathRightReport=New-InstalledHostReport -HostReport $hostReport -Seed path-right
+    $pathRight=Join-Path $temp 'path-right.json';Write-Document $pathRight $pathRightReport -Compress;$pathRightDigest=Get-FileDigest $pathRight
+    $missingPath=Join-Path $temp 'missing-installed.json'
+    $pathResult=Invoke-InstalledGatePaths -Module $module -Expected $cleanSource -LeftPath $missingPath -LeftDigest ('sha256:' + ('0' * 64)) -RightPath $pathRight -RightDigest $pathRightDigest
+    Check (-not $pathResult.Success) 'installed Adapter rejects a missing Artifact' 'installed Adapter accepted a missing Artifact'
+    $pathResult=Invoke-InstalledGatePaths -Module $module -Expected $cleanSource -LeftPath 'relative-installed.json' -LeftDigest ('sha256:' + ('0' * 64)) -RightPath $pathRight -RightDigest $pathRightDigest
+    Check (-not $pathResult.Success) 'installed Adapter rejects a relative Artifact path' 'installed Adapter accepted a relative Artifact path'
+
+    $malformedPath=Join-Path $temp 'malformed-installed.json';[IO.File]::WriteAllText($malformedPath,'{',[Text.UTF8Encoding]::new($false))
+    $pathResult=Invoke-InstalledGatePaths -Module $module -Expected $cleanSource -LeftPath $malformedPath -LeftDigest (Get-FileDigest $malformedPath) -RightPath $pathRight -RightDigest $pathRightDigest
+    Check (-not $pathResult.Success) 'installed Adapter rejects malformed JSON' 'installed Adapter accepted malformed JSON'
+    $bomPath=Join-Path $temp 'bom-installed.json';[IO.File]::WriteAllText($bomPath,'{}',[Text.UTF8Encoding]::new($true))
+    $pathResult=Invoke-InstalledGatePaths -Module $module -Expected $cleanSource -LeftPath $bomPath -LeftDigest (Get-FileDigest $bomPath) -RightPath $pathRight -RightDigest $pathRightDigest
+    Check (-not $pathResult.Success) 'installed Adapter rejects a UTF-8 BOM' 'installed Adapter accepted a UTF-8 BOM'
+    $duplicateKeyPath=Join-Path $temp 'duplicate-key-installed.json';[IO.File]::WriteAllText($duplicateKeyPath,'{"schema_version":"one","schema_version":"two"}',[Text.UTF8Encoding]::new($false))
+    $pathResult=Invoke-InstalledGatePaths -Module $module -Expected $cleanSource -LeftPath $duplicateKeyPath -LeftDigest (Get-FileDigest $duplicateKeyPath) -RightPath $pathRight -RightDigest $pathRightDigest
+    Check (-not $pathResult.Success) 'installed Adapter rejects duplicate JSON keys' 'installed Adapter accepted duplicate JSON keys'
+    $oversizedPath=Join-Path $temp 'oversized-installed.json';[IO.File]::WriteAllBytes($oversizedPath,[byte[]]::new((16MB)+1))
+    $pathResult=Invoke-InstalledGatePaths -Module $module -Expected $cleanSource -LeftPath $oversizedPath -LeftDigest (Get-FileDigest $oversizedPath) -RightPath $pathRight -RightDigest $pathRightDigest
+    Check (-not $pathResult.Success) 'installed Adapter rejects an oversized Artifact' 'installed Adapter accepted an oversized Artifact'
+
+    $rawMismatchReport=New-InstalledHostReport -HostReport $hostReport -Seed raw-mismatch
+    $rawMismatchPath=Join-Path $temp 'raw-mismatch-installed.json';Write-Document $rawMismatchPath $rawMismatchReport -Compress
+    $pathResult=Invoke-InstalledGatePaths -Module $module -Expected $cleanSource -LeftPath $rawMismatchPath -LeftDigest ('sha256:' + ('0' * 64)) -RightPath $pathRight -RightDigest $pathRightDigest
+    Check (-not $pathResult.Success) 'installed Adapter rejects a raw digest mismatch' 'installed Adapter accepted a raw digest mismatch'
+    $sameArtifactReport=New-InstalledHostReport -HostReport $hostReport -Seed same-artifact
+    $sameArtifactPath=Join-Path $temp 'same-artifact-installed.json';Write-Document $sameArtifactPath $sameArtifactReport -Compress;$sameArtifactDigest=Get-FileDigest $sameArtifactPath
+    $pathResult=Invoke-InstalledGatePaths -Module $module -Expected $cleanSource -LeftPath $sameArtifactPath -LeftDigest $sameArtifactDigest -RightPath $sameArtifactPath -RightDigest $sameArtifactDigest
+    Check (-not $pathResult.Success) 'G03/G07 reject one shared Artifact' 'G03/G07 accepted one shared Artifact'
+    $copiedArtifactPath=Join-Path $temp 'copied-artifact-installed.json';[IO.File]::Copy($sameArtifactPath,$copiedArtifactPath,$false)
+    $pathResult=Invoke-InstalledGatePaths -Module $module -Expected $cleanSource -LeftPath $sameArtifactPath -LeftDigest $sameArtifactDigest -RightPath $copiedArtifactPath -RightDigest (Get-FileDigest $copiedArtifactPath)
+    Check (-not $pathResult.Success) 'G03/G07 reject byte-identical copied evidence' 'G03/G07 accepted byte-identical copied evidence'
+    $pathResult=Invoke-InstalledGatePaths -Module $module -Expected $cleanSource -LeftPath $hostPath -LeftDigest (Get-FileDigest $hostPath) -RightPath $pathRight -RightDigest $pathRightDigest
+    Check (-not $pathResult.Success) 'Cognitive Host evidence cannot impersonate G03/G07' 'Cognitive Host evidence impersonated an installed Desktop Artifact'
+
+    $revisionMismatchLeft=New-InstalledHostReport -HostReport $hostReport -Seed revision-mismatch-left;$revisionMismatchRight=New-InstalledHostReport -HostReport $hostReport -Seed revision-mismatch-right
+    $revisionMismatchLeft.source_revision='0' * 40;Set-ReportDigest $revisionMismatchLeft
+    $revisionMismatchResult=Invoke-InstalledReportPair -Module $module -Expected $cleanSource -Root $temp -Left $revisionMismatchLeft -Right $revisionMismatchRight
+    Check (-not $revisionMismatchResult.Success) 'G03/G07 reject different source revisions' 'G03/G07 accepted different source revisions'
+
+    $reparseTarget=Join-Path $temp 'reparse-target';[void][IO.Directory]::CreateDirectory($reparseTarget)
+    $reparseReport=New-InstalledHostReport -HostReport $hostReport -Seed reparse-left;$reparseSource=Join-Path $reparseTarget 'installed.json';Write-Document $reparseSource $reparseReport -Compress
+    $reparseAlias=Join-Path $temp 'reparse-alias';[void](New-Item -ItemType Junction -Path $reparseAlias -Target $reparseTarget -ErrorAction Stop)
+    try {
+        $pathResult=Invoke-InstalledGatePaths -Module $module -Expected $cleanSource -LeftPath (Join-Path $reparseAlias 'installed.json') -LeftDigest (Get-FileDigest $reparseSource) -RightPath $pathRight -RightDigest $pathRightDigest
+        Check (-not $pathResult.Success) 'installed Adapter rejects a reparse/junction path' 'installed Adapter accepted a reparse/junction path'
+    } finally { Remove-Item -LiteralPath $reparseAlias -Force }
+
+    $hardlinkReport=New-InstalledHostReport -HostReport $hostReport -Seed hardlink-left;$hardlinkSource=Join-Path $temp 'hardlink-source.json';$hardlinkAlias=Join-Path $temp 'hardlink-alias.json';Write-Document $hardlinkSource $hardlinkReport -Compress
+    $hardlinkOutput=@(& fsutil hardlink create $hardlinkAlias $hardlinkSource 2>&1|ForEach-Object{[string]$_});if($LASTEXITCODE-ne0){throw "hardlink fixture setup failed: $($hardlinkOutput -join ' | ')"}
+    $pathResult=Invoke-InstalledGatePaths -Module $module -Expected $cleanSource -LeftPath $hardlinkAlias -LeftDigest (Get-FileDigest $hardlinkAlias) -RightPath $pathRight -RightDigest $pathRightDigest
+    Check (-not $pathResult.Success) 'installed Adapter rejects a multiply-linked Artifact' 'installed Adapter accepted a multiply-linked Artifact'
+
+    $adsReport=New-InstalledHostReport -HostReport $hostReport -Seed ads-left;$adsPath=Join-Path $temp 'ads-installed.json';Write-Document $adsPath $adsReport -Compress
+    Set-Content -LiteralPath $adsPath -Stream 'hidden-evidence' -Value 'sentinel' -Encoding utf8NoBOM
+    $pathResult=Invoke-InstalledGatePaths -Module $module -Expected $cleanSource -LeftPath $adsPath -LeftDigest (Get-FileDigest $adsPath) -RightPath $pathRight -RightDigest $pathRightDigest
+    Check (-not $pathResult.Success) 'installed Adapter rejects alternate data streams' 'installed Adapter accepted alternate data streams'
+
+    $protectedRoot=Join-Path $temp 'protected-root';[void][IO.Directory]::CreateDirectory($protectedRoot)
+    $protectedReport=New-InstalledHostReport -HostReport $hostReport -Seed protected-left;$protectedPath=Join-Path $protectedRoot 'installed.json';Write-Document $protectedPath $protectedReport -Compress
+    $pathResult=Invoke-InstalledGatePaths -Module $module -Expected $cleanSource -LeftPath $protectedPath -LeftDigest (Get-FileDigest $protectedPath) -RightPath $pathRight -RightDigest $pathRightDigest -ProtectedRoots @($protectedRoot)
+    Check (-not $pathResult.Success) 'installed Adapter rejects Protected Root overlap' 'installed Adapter accepted Protected Root overlap'
+
     $legacyProtocols = Copy-Document $hostGroups[0].protocols
     foreach ($protocol in @('bare','v1','v2')) { foreach ($trial in @($legacyProtocols[$protocol].trials)) { [void]$trial.Remove('trial_run_id'); [void]$trial.Remove('trial_root_digest') } }
     $legacyHost = [ordered]@{schema_version='harness-host-benchmark-report/v1';generated_at_utc=$hostReport.generated_at_utc;source_revision=$hostGroups[0].source_revision;source_dirty=$hostGroups[0].source_dirty;source_state_stable=$hostGroups[0].source_state_stable;source=$hostGroups[0].source;execution=$hostGroups[0].execution;protocols=$legacyProtocols;performance=$hostGroups[0].performance;status=$hostGroups[0].status;report_digest=$null}

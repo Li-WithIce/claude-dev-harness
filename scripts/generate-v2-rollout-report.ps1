@@ -71,7 +71,7 @@ if ($evidenceMode) {
     & $qualificationModule { param($Root,$Set) Assert-HarnessRolloutV2EvidenceSet -RepoRoot $Root -Document $Set } $RepoRoot $evidenceSet
     $provenanceStatus = 'verified'
     try {
-        & $evidenceModule { param($Gates,$Protected) Assert-HarnessRolloutEvidenceSetProvenance -Gates $Gates -ProtectedRoots $Protected } $evidenceSet.gates @($protectedRoots)
+        & $evidenceModule { param($Root,$Source,$Gates,$Protected) Assert-HarnessRolloutEvidenceSetProvenance -RepoRoot $Root -ExpectedSource $Source -Gates $Gates -ProtectedRoots $Protected } $RepoRoot $sourceStart $evidenceSet.gates @($protectedRoots)
     } catch {
         $reason = [string]$_.Exception.Message
         if (-not $reason.StartsWith('rollout-evidence-',[StringComparison]::Ordinal)) { throw }
@@ -88,7 +88,7 @@ if ($evidenceMode) {
         Assert-HarnessRolloutReviewReceipt -RepoRoot $Root -Document $Receipt -ExpectedPayloadDigest ([string]$Payload.reviewed_payload_digest) -ExpectedSourceRevision ([string]$Payload.source_revision) -ExpectedPhase ([string]$Payload.phase)
     } $RepoRoot $payload $receipt
     if ([string]$payload.provenance_status -cne 'verified') { throw 'rollout-evidence-provenance-unverified' }
-    & $evidenceModule { param($Gates,$Protected) Assert-HarnessRolloutEvidenceSetProvenance -Gates $Gates -ProtectedRoots $Protected } $payload.gates @($protectedRoots)
+    & $evidenceModule { param($Root,$Source,$Gates,$Protected) Assert-HarnessRolloutEvidenceSetProvenance -RepoRoot $Root -ExpectedSource $Source -Gates $Gates -ProtectedRoots $Protected } $RepoRoot $sourceStart $payload.gates @($protectedRoots)
     $document = & $qualificationModule {
         param($Root,$Payload,$Receipt,$ReceiptPath)
         New-HarnessRolloutV2ReportDocument -RepoRoot $Root -ReviewPayload $Payload -ReviewReceipt $Receipt -ReviewReceiptArtifactPath $ReceiptPath
