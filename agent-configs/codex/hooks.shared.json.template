@@ -1,7 +1,7 @@
 {
   "PreToolUse": [
     {
-      "matcher": "^(Bash|apply_patch)$",
+      "matcher": "^(Bash|apply_patch|Write|Edit|MultiEdit|NotebookEdit)$",
       "hooks": [
         {
           "type": "command",

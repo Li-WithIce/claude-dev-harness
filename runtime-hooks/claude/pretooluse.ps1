@@ -13,6 +13,134 @@ function Test-ShellApplyPatchInvocation {
     return [regex]::IsMatch($CommandText,'(?i)(?<![A-Za-z0-9_])(?:apply_patch|applypatch)(?![A-Za-z0-9_])')
 }
 
+function Assert-ApplyPatchRelativePath {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Path)
+
+    if ([string]::IsNullOrEmpty($Path) -or $Path -cne $Path.Trim() -or
+        $Path.IndexOfAny([char[]]@(0,10,13)) -ge 0) {
+        throw 'direct apply_patch input contains an invalid target path'
+    }
+    if ($Path.StartsWith('/',[System.StringComparison]::Ordinal) -or
+        $Path.StartsWith('\\',[System.StringComparison]::Ordinal) -or
+        $Path -cmatch '^[A-Za-z]:' -or $Path.Contains(':')) {
+        throw 'direct apply_patch input requires a relative target path'
+    }
+    foreach ($segment in [regex]::Split($Path,'[\\/]')) {
+        if ([string]::IsNullOrEmpty($segment) -or $segment -ceq '.' -or $segment -ceq '..' -or
+            $segment.IndexOfAny([char[]](0..31 + @(60,62,34,124,63,42))) -ge 0 -or
+            $segment.EndsWith('.', [System.StringComparison]::Ordinal) -or
+            $segment.EndsWith(' ', [System.StringComparison]::Ordinal)) {
+            throw 'direct apply_patch input contains an invalid target path'
+        }
+    }
+}
+
+function Get-ApplyPatchChangedPaths {
+    param([Parameter(Mandatory = $true)][string]$PatchText)
+
+    $normalized = $PatchText.Replace("`r`n","`n")
+    if ($normalized.Contains("`r")) {
+        throw 'direct apply_patch input has an invalid patch envelope'
+    }
+    if ($normalized.EndsWith("`n",[System.StringComparison]::Ordinal)) {
+        $normalized = $normalized.Substring(0,$normalized.Length - 1)
+    }
+    $lines = $normalized.Split([char]10)
+    if ($lines.Count -lt 2 -or $lines[0] -cne '*** Begin Patch' -or
+        $lines[$lines.Count - 1] -cne '*** End Patch') {
+        throw 'direct apply_patch input has an invalid patch envelope'
+    }
+
+    $paths = [System.Collections.Generic.List[string]]::new()
+    $pathKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $currentOperation = ''
+    $moveSeen = $false
+    $fileOperationCount = 0
+    for ($index = 1; $index -lt $lines.Count - 1; $index++) {
+        $line = [string]$lines[$index]
+        if (-not $line.StartsWith('*** ',[System.StringComparison]::Ordinal)) {
+            continue
+        }
+        if ($line -ceq '*** Begin Patch' -or $line -ceq '*** End Patch') {
+            throw 'direct apply_patch input has an invalid patch envelope'
+        }
+        $match = [regex]::Match($line,'^\*\*\* (?<operation>Add File|Update File|Delete File|Move to): (?<path>.*)$')
+        if (-not $match.Success) {
+            throw 'direct apply_patch input contains an unsupported patch directive'
+        }
+        $operation = [string]$match.Groups['operation'].Value
+        $path = [string]$match.Groups['path'].Value
+        Assert-ApplyPatchRelativePath -Path $path
+        if ($operation -ceq 'Move to') {
+            if ($currentOperation -cne 'Update File' -or $moveSeen) {
+                throw 'direct apply_patch input contains an invalid Move to directive'
+            }
+            $moveSeen = $true
+        } else {
+            $currentOperation = $operation
+            $moveSeen = $false
+            $fileOperationCount++
+        }
+        $pathKey = $path.Replace('/','\')
+        if ($pathKeys.Add($pathKey)) {
+            $paths.Add($path)
+        }
+    }
+    if ($fileOperationCount -eq 0) {
+        throw 'direct apply_patch input is missing a file operation'
+    }
+    return $paths.ToArray()
+}
+
+function Resolve-CodexWorkspaceRoot {
+    param([Parameter(Mandatory = $true)][string]$Path,[Parameter(Mandatory = $true)][string]$Source)
+
+    try {
+        if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+            throw 'not a directory'
+        }
+        $resolved = [System.IO.Path]::GetFullPath((Resolve-Path -LiteralPath $Path -ErrorAction Stop).ProviderPath)
+        $root = [System.IO.Path]::GetPathRoot($resolved)
+        if (-not $resolved.Equals($root,[System.StringComparison]::OrdinalIgnoreCase)) {
+            $resolved = $resolved.TrimEnd([System.IO.Path]::DirectorySeparatorChar,[System.IO.Path]::AltDirectorySeparatorChar)
+        }
+        return $resolved
+    } catch {
+        throw "Codex PreToolUse $Source must identify an existing Workspace directory"
+    }
+}
+
+function Get-CheckedFileMutationPaths {
+    param(
+        [Parameter(Mandatory = $true)][string]$WorkspaceRoot,
+        [Parameter(Mandatory = $true)][string[]]$Paths
+    )
+
+    $result = [System.Collections.Generic.List[string]]::new()
+    $identities = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($path in $Paths) {
+        if ([string]::IsNullOrWhiteSpace($path)) {
+            throw 'file mutation input is missing target path'
+        }
+        try {
+            $fullPath = if ([System.IO.Path]::IsPathFullyQualified($path)) {
+                [System.IO.Path]::GetFullPath($path)
+            } else {
+                [System.IO.Path]::GetFullPath((Join-Path $WorkspaceRoot $path))
+            }
+        } catch {
+            throw 'file mutation input contains an invalid target path'
+        }
+        if (Test-Path -LiteralPath $fullPath -PathType Container) {
+            throw 'file mutation target must not be a directory'
+        }
+        if ($identities.Add($fullPath)) {
+            $result.Add($path)
+        }
+    }
+    return $result.ToArray()
+}
+
 try {
     $raw = [Console]::In.ReadToEnd()
     if ($raw.Length -gt 0 -and [int]$raw[0] -eq 0xFEFF) {
@@ -60,7 +188,9 @@ try {
             throw 'Bash shell-form apply_patch is denied because Codex PreToolUse does not expose the effective tool workdir or environment identity'
         }
     } elseif ($toolName -ceq 'apply_patch') {
-        throw 'direct apply_patch is denied because Codex PreToolUse does not bind the effective environment identity and cwd'
+        foreach ($path in @(Get-ApplyPatchChangedPaths -PatchText $toolCommand)) {
+            $paths.Add([string]$path)
+        }
     } elseif ($toolName -cne 'Bash') {
         foreach ($key in @('file_path','path','notebook_path')) {
             if ($toolInput.Contains($key) -and -not [string]::IsNullOrWhiteSpace([string]$toolInput[$key])) {
@@ -71,12 +201,26 @@ try {
             throw "$toolName PreToolUse input is missing target path"
         }
     }
-    $workspaceRoot = if ($payload.Contains('cwd')) { [string]$payload.cwd } else { '' }
-    if ([string]::IsNullOrWhiteSpace($workspaceRoot)) {
-        $workspaceRoot = [Environment]::GetEnvironmentVariable('DEV_HARNESS_WORKSPACE_ROOT','Process')
+    if ($payload.Contains('cwd') -and $payload.cwd -isnot [string]) {
+        throw 'Codex PreToolUse input contains a non-string cwd'
     }
+    $payloadRootText = if ($payload.Contains('cwd')) { [string]$payload.cwd } else { '' }
+    $environmentRootText = [Environment]::GetEnvironmentVariable('DEV_HARNESS_WORKSPACE_ROOT','Process')
+    $payloadRoot = if ([string]::IsNullOrWhiteSpace($payloadRootText)) { '' } else { Resolve-CodexWorkspaceRoot -Path $payloadRootText -Source 'cwd' }
+    $environmentRoot = if ([string]::IsNullOrWhiteSpace($environmentRootText)) { '' } else { Resolve-CodexWorkspaceRoot -Path $environmentRootText -Source 'DEV_HARNESS_WORKSPACE_ROOT' }
+    if (-not [string]::IsNullOrWhiteSpace($payloadRoot) -and
+        -not [string]::IsNullOrWhiteSpace($environmentRoot) -and
+        -not $payloadRoot.Equals($environmentRoot,[System.StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Codex PreToolUse cwd conflicts with DEV_HARNESS_WORKSPACE_ROOT'
+    }
+    $workspaceRoot = if (-not [string]::IsNullOrWhiteSpace($payloadRoot)) { $payloadRoot } else { $environmentRoot }
     if ([string]::IsNullOrWhiteSpace($workspaceRoot)) {
-        throw 'Claude PreToolUse input is missing cwd'
+        throw 'Codex PreToolUse input is missing cwd and DEV_HARNESS_WORKSPACE_ROOT'
+    }
+    if ($paths.Count -gt 0) {
+        $checkedPaths = @(Get-CheckedFileMutationPaths -WorkspaceRoot $workspaceRoot -Paths $paths.ToArray())
+        $paths.Clear()
+        foreach ($path in $checkedPaths) { $paths.Add([string]$path) }
     }
 
     $coreHook = '{REPO_ROOT}\runtime-hooks\core\pretooluse.ps1'
