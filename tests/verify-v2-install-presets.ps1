@@ -782,9 +782,9 @@ try {
                 '*** Begin Patch',
                 '*** Add File: config/production.yml',
                 '+database:',
-                '+  password: ' + $fixtureSecrets.Database,
+                ('+  password: ' + $fixtureSecrets.Database),
                 '+external:',
-                '+  api_key: ' + $fixtureSecrets.Api,
+                ('+  api_key: ' + $fixtureSecrets.Api),
                 '+note: DROP TRUNCATE DELETE FROM authorization credential token',
                 '*** End Patch'
             ) -join "`n") }
@@ -801,6 +801,39 @@ try {
             Add-Check 'shared PreToolUse adapter allows direct production-config apply_patch without classifying file content as command text'
         } else {
             Add-Failure 'shared PreToolUse adapter rejected or disclosed an ordinary direct production-config apply_patch'
+        }
+
+        $environmentIdentifier = 'fixture-' + 'environment-marker'
+        $grammarAllowPatches = [ordered]@{
+            StartedLeadingSpaceAdd = (@('*** Begin Patch',' *** Add File: notes-space.txt','+ok','*** End Patch') -join "`n")
+            StartedLeadingTabAdd = (@('*** Begin Patch',("`t" + '*** Add File: notes-tab.txt'),'+ok','*** End Patch') -join "`n")
+            AddThenLeadingSpaceAdd = (@('*** Begin Patch','*** Add File: notes-one.txt','+one',' *** Add File: notes-two.txt','+two','*** End Patch') -join "`n")
+            DeleteThenLeadingSpaceAdd = (@('*** Begin Patch','*** Delete File: notes-old.txt',' *** Add File: notes-new.txt','+new','*** End Patch') -join "`n")
+            EnvironmentId = (@('*** Begin Patch',('*** Environment ID: ' + $environmentIdentifier),'*** Add File: config/production.yml','+key: fixture','*** End Patch') -join "`n")
+            EndOfFileLf = (@('*** Begin Patch','*** Update File: config/production.yml','@@','-old','+new','*** End of File','*** End Patch') -join "`n")
+            EndOfFileCrlf = (@('*** Begin Patch','*** Update File: config/production.yml','@@','-old','+new','*** End of File','*** End Patch') -join "`r`n")
+            MoveEndOfFile = (@('*** Begin Patch','*** Update File: notes-old.txt','*** Move to: notes-new.txt','@@','-old','+new','*** End of File','*** End Patch') -join "`n")
+            UpdateContextMarker = (@('*** Begin Patch','*** Update File: notes.txt','@@','-old','+new',' *** Update File: auth/context-only.ps1','*** End Patch') -join "`n")
+            TrailingHeaderWhitespace = (@('*** Begin Patch',('*** Add File: notes-trailing.txt' + " `t"),'+ok','*** End Patch') -join "`n")
+        }
+        foreach ($grammarAllowCase in $grammarAllowPatches.GetEnumerator()) {
+            $grammarAllowInput = [ordered]@{
+                tool_name='apply_patch';permission_mode='default';tool_input=[ordered]@{command=[string]$grammarAllowCase.Value};cwd=$defaultFixture.Workspace
+            } | ConvertTo-Json -Depth 10 -Compress
+            $grammarAllowResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $grammarAllowInput -Environment @{
+                DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace
+                HARNESS_ENVIRONMENT='production'
+                CODEX_VERSION='unknown'
+                HARNESS_HOST_QUALIFICATION='failed'
+            }
+            $grammarOutput = [string]$grammarAllowResult.StdOut + [string]$grammarAllowResult.StdErr
+            if ($grammarAllowResult.ExitCode -eq 0 -and $grammarAllowResult.StdOut.Trim() -ceq '{}' -and
+                [string]::IsNullOrWhiteSpace($grammarAllowResult.StdErr) -and
+                -not $grammarOutput.Contains($environmentIdentifier) -and -not (& $containsFixtureSecret $grammarAllowResult)) {
+                Add-Check "shared PreToolUse adapter accepts official direct patch grammar without metadata authority: $($grammarAllowCase.Key)"
+            } else {
+                Add-Failure "shared PreToolUse adapter rejected or disclosed official direct patch grammar: $($grammarAllowCase.Key)"
+            }
         }
 
         $consistentTarget = Join-Path $defaultFixture.Workspace '.env.production'
@@ -829,6 +862,12 @@ try {
             Delete = "*** Begin Patch`n*** Delete File: rbac/delete.ps1`n*** End Patch"
             Move = "*** Begin Patch`n*** Update File: notes.txt`n*** Move to: auth/moved.txt`n@@`n-old`n+new`n*** End Patch"
             MultiFile = "*** Begin Patch`n*** Add File: notes.txt`n+ok`n*** Add File: auth/mixed.ps1`n+protected`n*** End Patch"
+            LeadingSpaceAdd = "*** Begin Patch`n *** Add File: auth/space.ps1`n+protected`n*** End Patch"
+            LeadingTabAdd = "*** Begin Patch`n`t*** Add File: auth/tab.ps1`n+protected`n*** End Patch"
+            LeadingSpaceUpdate = "*** Begin Patch`n *** Update File: permissions/space.ps1`n@@`n-old`n+new`n*** End Patch"
+            LeadingSpaceDelete = "*** Begin Patch`n *** Delete File: rbac/space.ps1`n*** End Patch"
+            WhitespaceMultiFile = "*** Begin Patch`n*** Add File: notes.txt`n+ok`n *** Add File: auth/whitespace-mixed.ps1`n+protected`n*** End Patch"
+            EnvironmentProtected = ("*** Begin Patch`n*** Environment ID: " + $environmentIdentifier + "`n*** Add File: auth/environment.ps1`n+protected`n*** End Patch")
         }
         foreach ($protectedPatchCase in $protectedPatchCommands.GetEnumerator()) {
             $protectedPatchInput = [ordered]@{
@@ -838,7 +877,9 @@ try {
                 cwd = $defaultFixture.Workspace
             } | ConvertTo-Json -Depth 10 -Compress
             $protectedPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $protectedPatchInput -Environment @{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace}
-            if ($protectedPatchResult.ExitCode -eq 2 -and $protectedPatchResult.StdErr -match 'protected write requires TaskId and ExpectedVersion') {
+            $protectedPatchOutput = [string]$protectedPatchResult.StdOut + [string]$protectedPatchResult.StdErr
+            if ($protectedPatchResult.ExitCode -eq 2 -and $protectedPatchResult.StdErr -match 'protected write requires TaskId and ExpectedVersion' -and
+                -not $protectedPatchOutput.Contains($environmentIdentifier)) {
                 Add-Check "shared PreToolUse adapter extracts and preserves protected direct apply_patch targets: $($protectedPatchCase.Key)"
             } else {
                 Add-Failure "shared PreToolUse adapter did not protect direct apply_patch targets: $($protectedPatchCase.Key)"
@@ -1091,19 +1132,6 @@ try {
         } else {
             Add-Failure 'shared PreToolUse adapter classified direct patch file content as an executed production command'
         }
-        $remotePatchInput = [ordered]@{
-            tool_name = 'apply_patch'
-            permission_mode = 'default'
-            tool_input = [ordered]@{ command = "*** Begin Patch`n*** Environment ID: remote`n*** Add File: notes-remote.txt`n+no`n*** End Patch" }
-            cwd = $defaultFixture.Workspace
-        } | ConvertTo-Json -Depth 10 -Compress
-        $remotePatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $remotePatchInput -Environment @{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace}
-        if ($remotePatchResult.ExitCode -eq 2 -and $remotePatchResult.StdErr -match 'unsupported patch directive') {
-            Add-Check 'shared PreToolUse adapter fails closed for an unknown direct apply_patch directive'
-        } else {
-            Add-Failure 'shared PreToolUse adapter accepted an unknown direct apply_patch directive'
-        }
-
         $invalidPatchCases = [ordered]@{
             missing_begin = "*** Add File: a.txt`n+x`n*** End Patch"
             missing_end = "*** Begin Patch`n*** Add File: a.txt`n+x"
@@ -1115,14 +1143,23 @@ try {
             empty_patch = "*** Begin Patch`n*** End Patch"
             no_file_operation = "*** Begin Patch`n+body only`n*** End Patch"
             unknown_directive = "*** Begin Patch`n*** Unsupported: a.txt`n*** Add File: a.txt`n+x`n*** End Patch"
-            end_of_file_directive = "*** Begin Patch`n*** Add File: a.txt`n+x`n*** End of File`n*** End Patch"
+            duplicate_environment_id = "*** Begin Patch`n*** Environment ID: first`n*** Environment ID: second`n*** Add File: a.txt`n+x`n*** End Patch"
+            empty_environment_id = "*** Begin Patch`n*** Environment ID:   `n*** Add File: a.txt`n+x`n*** End Patch"
+            late_environment_id = "*** Begin Patch`n*** Add File: a.txt`n+x`n*** Environment ID: late`n*** End Patch"
+            environment_id_in_update = "*** Begin Patch`n*** Update File: a.txt`n@@`n-old`n+new`n*** Environment ID: late`n*** End Patch"
+            environment_id_as_update_context = "*** Begin Patch`n*** Update File: a.txt`n@@`n-old`n+new`n *** Environment ID: late`n*** End Patch"
+            end_of_file_in_add = "*** Begin Patch`n*** Add File: a.txt`n+x`n*** End of File`n*** End Patch"
+            end_of_file_in_delete = "*** Begin Patch`n*** Delete File: a.txt`n*** End of File`n*** End Patch"
+            end_of_file_before_change = "*** Begin Patch`n*** Update File: a.txt`n@@`n*** End of File`n*** End Patch"
+            duplicate_end_of_file = "*** Begin Patch`n*** Update File: a.txt`n@@`n-old`n+new`n*** End of File`n*** End of File`n*** End Patch"
+            content_after_end_of_file = "*** Begin Patch`n*** Update File: a.txt`n@@`n-old`n+new`n*** End of File`n+late`n*** End Patch"
             orphan_move = "*** Begin Patch`n*** Move to: b.txt`n*** End Patch"
             duplicate_move = "*** Begin Patch`n*** Update File: a.txt`n*** Move to: b.txt`n*** Move to: c.txt`n@@`n-x`n+y`n*** End Patch"
+            move_after_change = "*** Begin Patch`n*** Update File: a.txt`n@@`n-x`n+y`n*** Move to: b.txt`n*** End Patch"
             move_after_add = "*** Begin Patch`n*** Add File: a.txt`n*** Move to: b.txt`n+x`n*** End Patch"
             move_after_delete = "*** Begin Patch`n*** Delete File: a.txt`n*** Move to: b.txt`n*** End Patch"
             empty_path = "*** Begin Patch`n*** Add File: `n+x`n*** End Patch"
-            leading_whitespace = "*** Begin Patch`n*** Add File:  a.txt`n+x`n*** End Patch"
-            trailing_whitespace = "*** Begin Patch`n*** Add File: a.txt `n+x`n*** End Patch"
+            leading_path_whitespace = "*** Begin Patch`n*** Add File:  a.txt`n+x`n*** End Patch"
             nul_path = "*** Begin Patch`n*** Add File: a$([char]0)b.txt`n+x`n*** End Patch"
             bare_cr_path = "*** Begin Patch`n*** Add File: a`rb.txt`n+x`n*** End Patch"
             windows_absolute = "*** Begin Patch`n*** Add File: C:\outside.txt`n+x`n*** End Patch"
@@ -1166,10 +1203,23 @@ try {
             }
             $deduplicatedPaths = @(& $patchParserBody -PatchText "*** Begin Patch`n*** Add File: Config/File.txt`n+x`n*** Update File: config\file.txt`n@@`n-x`n+y`n*** End Patch")
             $movePaths = @(& $patchParserBody -PatchText "*** Begin Patch`r`n*** Update File: old.txt`r`n*** Move to: new.txt`r`n@@`r`n-old`r`n+new`r`n*** End Patch`r`n")
-            if ($deduplicatedPaths.Count -eq 1 -and $movePaths.Count -eq 2) {
-                Add-Check 'direct apply_patch parser uses Windows path deduplication and accepts one LF-or-CRLF envelope with a valid Move'
+            $startedWhitespacePaths = @(& $patchParserBody -PatchText "*** Begin Patch`n *** Add File: notes-space.txt`n+one`n*** End Patch")
+            $addWhitespacePaths = @(& $patchParserBody -PatchText "*** Begin Patch`n*** Add File: notes-one.txt`n+one`n`t*** Update File: notes-two.txt`n@@`n-old`n+new`n*** End Patch")
+            $deleteWhitespacePaths = @(& $patchParserBody -PatchText "*** Begin Patch`n*** Delete File: notes-old.txt`n *** Add File: notes-new.txt`n+new`n*** End Patch")
+            $environmentPaths = @(& $patchParserBody -PatchText ("*** Begin Patch`n*** Environment ID: " + $environmentIdentifier + "`n*** Add File: config/production.yml`n+x`n*** End Patch"))
+            $moveEndOfFilePaths = @(& $patchParserBody -PatchText "*** Begin Patch`n*** Update File: notes-old.txt`n*** Move to: notes-new.txt`n@@`n-old`n+new`n*** End of File`n*** End Patch")
+            $updateContextPaths = @(& $patchParserBody -PatchText "*** Begin Patch`n*** Update File: notes.txt`n@@`n-old`n+new`n *** Update File: auth/context-only.ps1`n*** End Patch")
+            if ($deduplicatedPaths.Count -eq 1 -and $movePaths.Count -eq 2 -and
+                $startedWhitespacePaths.Count -eq 1 -and $startedWhitespacePaths[0] -ceq 'notes-space.txt' -and
+                $addWhitespacePaths.Count -eq 2 -and $addWhitespacePaths[1] -ceq 'notes-two.txt' -and
+                $deleteWhitespacePaths.Count -eq 2 -and $deleteWhitespacePaths[1] -ceq 'notes-new.txt' -and
+                $environmentPaths.Count -eq 1 -and $environmentPaths[0] -ceq 'config/production.yml' -and
+                @($environmentPaths | Where-Object { [string]$_ -ceq $environmentIdentifier }).Count -eq 0 -and
+                $moveEndOfFilePaths.Count -eq 2 -and $moveEndOfFilePaths[0] -ceq 'notes-old.txt' -and $moveEndOfFilePaths[1] -ceq 'notes-new.txt' -and
+                $updateContextPaths.Count -eq 1 -and $updateContextPaths[0] -ceq 'notes.txt') {
+                Add-Check 'direct apply_patch parser aligns whitespace, Environment ID, Move, End of File, LF/CRLF, and Update context target extraction'
             } else {
-                Add-Failure 'direct apply_patch parser path deduplication or CRLF Move handling is invalid'
+                Add-Failure 'direct apply_patch parser grammar-aware target extraction is invalid'
             }
         } else {
             Add-Failure 'installed direct apply_patch parser functions are unavailable or do not parse'

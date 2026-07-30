@@ -46,45 +46,140 @@ function Get-ApplyPatchChangedPaths {
         $normalized = $normalized.Substring(0,$normalized.Length - 1)
     }
     $lines = $normalized.Split([char]10)
-    if ($lines.Count -lt 2 -or $lines[0] -cne '*** Begin Patch' -or
-        $lines[$lines.Count - 1] -cne '*** End Patch') {
+    if ($lines.Count -lt 2 -or $lines[0].Trim() -cne '*** Begin Patch' -or
+        $lines[$lines.Count - 1].Trim() -cne '*** End Patch') {
         throw 'direct apply_patch input has an invalid patch envelope'
     }
 
     $paths = [System.Collections.Generic.List[string]]::new()
     $pathKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    $currentOperation = ''
+    $currentOperation = 'StartedPatch'
+    $environmentSeen = $false
     $moveSeen = $false
+    $updateSyntaxSeen = $false
+    $updateContentSeen = $false
+    $updateChunkStarted = $false
+    $updateChunkContentSeen = $false
+    $endOfFileSeen = $false
     $fileOperationCount = 0
     for ($index = 1; $index -lt $lines.Count - 1; $index++) {
         $line = [string]$lines[$index]
-        if (-not $line.StartsWith('*** ',[System.StringComparison]::Ordinal)) {
+
+        $trimmed = $line.Trim()
+        if ($trimmed.StartsWith('*** Environment ID:',[System.StringComparison]::Ordinal)) {
+            if ($currentOperation -cne 'StartedPatch') {
+                throw 'direct apply_patch input contains an invalid Environment ID directive'
+            }
+            if ($environmentSeen) {
+                throw 'direct apply_patch input contains a duplicate Environment ID directive'
+            }
+            if ([string]::IsNullOrWhiteSpace($trimmed.Substring('*** Environment ID:'.Length))) {
+                throw 'direct apply_patch input contains an empty Environment ID directive'
+            }
+            $environmentSeen = $true
             continue
         }
-        if ($line -ceq '*** Begin Patch' -or $line -ceq '*** End Patch') {
+
+        $headerLine = if ($currentOperation -ceq 'Update File') { $line.TrimEnd() } else { $trimmed }
+        if ($headerLine -ceq '*** Begin Patch' -or $headerLine -ceq '*** End Patch') {
             throw 'direct apply_patch input has an invalid patch envelope'
         }
-        $match = [regex]::Match($line,'^\*\*\* (?<operation>Add File|Update File|Delete File|Move to): (?<path>.*)$')
-        if (-not $match.Success) {
-            throw 'direct apply_patch input contains an unsupported patch directive'
-        }
-        $operation = [string]$match.Groups['operation'].Value
-        $path = [string]$match.Groups['path'].Value
-        Assert-ApplyPatchRelativePath -Path $path
-        if ($operation -ceq 'Move to') {
-            if ($currentOperation -cne 'Update File' -or $moveSeen) {
-                throw 'direct apply_patch input contains an invalid Move to directive'
+
+        $fileMatch = [regex]::Match($headerLine,'^\*\*\* (?<operation>Add File|Update File|Delete File): (?<path>.*)$')
+        if ($fileMatch.Success) {
+            if ($currentOperation -ceq 'Update File' -and
+                (-not $updateContentSeen -or ($updateChunkStarted -and -not $updateChunkContentSeen))) {
+                throw 'direct apply_patch input contains an empty Update File hunk'
             }
-            $moveSeen = $true
-        } else {
+            $operation = [string]$fileMatch.Groups['operation'].Value
+            $path = [string]$fileMatch.Groups['path'].Value
+            Assert-ApplyPatchRelativePath -Path $path
             $currentOperation = $operation
             $moveSeen = $false
+            $updateSyntaxSeen = $false
+            $updateContentSeen = $false
+            $updateChunkStarted = $false
+            $updateChunkContentSeen = $false
+            $endOfFileSeen = $false
             $fileOperationCount++
+            $pathKey = $path.Replace('/','\')
+            if ($pathKeys.Add($pathKey)) {
+                $paths.Add($path)
+            }
+            continue
         }
-        $pathKey = $path.Replace('/','\')
-        if ($pathKeys.Add($pathKey)) {
-            $paths.Add($path)
+
+        if ($currentOperation -ceq 'Update File') {
+            if ($headerLine -ceq '*** End of File') {
+                if ($endOfFileSeen -or -not $updateContentSeen -or
+                    ($updateChunkStarted -and -not $updateChunkContentSeen)) {
+                    throw 'direct apply_patch input contains an invalid End of File directive'
+                }
+                $endOfFileSeen = $true
+                continue
+            }
+
+            $moveMatch = [regex]::Match($headerLine,'^\*\*\* Move to: (?<path>.*)$')
+            if ($moveMatch.Success) {
+                if ($moveSeen -or $updateSyntaxSeen -or $endOfFileSeen) {
+                    throw 'direct apply_patch input contains an invalid Move to directive'
+                }
+                $path = [string]$moveMatch.Groups['path'].Value
+                Assert-ApplyPatchRelativePath -Path $path
+                $moveSeen = $true
+                $pathKey = $path.Replace('/','\')
+                if ($pathKeys.Add($pathKey)) {
+                    $paths.Add($path)
+                }
+                continue
+            }
+
+            if ($endOfFileSeen) {
+                if ([string]::IsNullOrWhiteSpace($line)) {
+                    continue
+                }
+                throw 'direct apply_patch input contains content after End of File'
+            }
+            if ($headerLine.StartsWith('*** ',[System.StringComparison]::Ordinal)) {
+                throw 'direct apply_patch input contains an unsupported patch directive'
+            }
+            if ($headerLine -ceq '@@' -or $headerLine.StartsWith('@@ ',[System.StringComparison]::Ordinal)) {
+                if ($updateChunkStarted -and -not $updateChunkContentSeen) {
+                    throw 'direct apply_patch input contains an empty Update File chunk'
+                }
+                $updateSyntaxSeen = $true
+                $updateChunkStarted = $true
+                $updateChunkContentSeen = $false
+                continue
+            }
+            if ($line.Length -eq 0 -or $line.StartsWith(' ',[System.StringComparison]::Ordinal) -or
+                $line.StartsWith('+',[System.StringComparison]::Ordinal) -or
+                $line.StartsWith('-',[System.StringComparison]::Ordinal)) {
+                $updateSyntaxSeen = $true
+                $updateContentSeen = $true
+                $updateChunkContentSeen = $true
+                continue
+            }
+            throw 'direct apply_patch input contains an invalid Update File hunk'
         }
+
+        if ($trimmed -ceq '*** End of File') {
+            throw 'direct apply_patch input contains an invalid End of File directive'
+        }
+        if ($trimmed.StartsWith('*** Move to:',[System.StringComparison]::Ordinal)) {
+            throw 'direct apply_patch input contains an invalid Move to directive'
+        }
+        if ($trimmed.StartsWith('*** ',[System.StringComparison]::Ordinal)) {
+            throw 'direct apply_patch input contains an unsupported patch directive'
+        }
+        if ($currentOperation -ceq 'Add File' -and $line.StartsWith('+',[System.StringComparison]::Ordinal)) {
+            continue
+        }
+        throw 'direct apply_patch input contains an invalid patch hunk'
+    }
+    if ($currentOperation -ceq 'Update File' -and
+        (-not $updateContentSeen -or ($updateChunkStarted -and -not $updateChunkContentSeen))) {
+        throw 'direct apply_patch input contains an empty Update File hunk'
     }
     if ($fileOperationCount -eq 0) {
         throw 'direct apply_patch input is missing a file operation'
