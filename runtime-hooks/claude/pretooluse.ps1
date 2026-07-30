@@ -13,6 +13,30 @@ function Test-ShellApplyPatchInvocation {
     return [regex]::IsMatch($CommandText,'(?i)(?<![A-Za-z0-9_])(?:apply_patch|applypatch)(?![A-Za-z0-9_])')
 }
 
+function Get-ApplyPatchChangedPaths {
+    param([Parameter(Mandatory = $true)][string]$PatchText)
+
+    if (-not [regex]::IsMatch($PatchText,'\A\*\*\* Begin Patch\r?\n') -or
+        -not [regex]::IsMatch($PatchText,'\r?\n\*\*\* End Patch(?:\r?\n)?\z')) {
+        throw 'direct apply_patch input has an invalid patch envelope'
+    }
+    $paths = [System.Collections.Generic.List[string]]::new()
+    foreach ($marker in [regex]::Matches($PatchText,'(?m)^\*\*\* (?<directive>[^\r\n]+)\r?$')) {
+        $directive = [string]$marker.Groups['directive'].Value
+        if ($directive -cin @('Begin Patch','End Patch','End of File')) {
+            continue
+        }
+        if ($directive -cnotmatch '^(?:Add File|Update File|Delete File|Move to): (?<path>.+)$') {
+            throw 'direct apply_patch input contains an unsupported patch directive'
+        }
+        $paths.Add([string]$Matches['path'])
+    }
+    if ($paths.Count -eq 0) {
+        throw 'direct apply_patch input is missing target path'
+    }
+    return $paths.ToArray()
+}
+
 try {
     $raw = [Console]::In.ReadToEnd()
     if ($raw.Length -gt 0 -and [int]$raw[0] -eq 0xFEFF) {
@@ -60,7 +84,9 @@ try {
             throw 'Bash shell-form apply_patch is denied because Codex PreToolUse does not expose the effective tool workdir or environment identity'
         }
     } elseif ($toolName -ceq 'apply_patch') {
-        throw 'direct apply_patch is denied because Codex PreToolUse does not bind the effective environment identity and cwd'
+        foreach ($path in @(Get-ApplyPatchChangedPaths -PatchText $toolCommand)) {
+            $paths.Add([string]$path)
+        }
     } elseif ($toolName -cne 'Bash') {
         foreach ($key in @('file_path','path','notebook_path')) {
             if ($toolInput.Contains($key) -and -not [string]::IsNullOrWhiteSpace([string]$toolInput[$key])) {
