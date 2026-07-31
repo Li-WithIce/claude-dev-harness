@@ -56,10 +56,13 @@ Need-Text 'runtime-hooks/claude/codex-pretooluse-launcher.ps1' "if (`$stdout.Tri
 Need-Text 'runtime-hooks/claude/codex-pretooluse-launcher.ps1' "permissionDecision = 'deny'"
 Reject-Regex $codexHooksPath '(?i)\b(?:EncodedCommand|ExecutionPolicy|WindowStyle)\b' 'Codex Hook command must remain a transparent, unencoded launcher invocation'
 Reject-Regex 'runtime-hooks/claude/codex-pretooluse-launcher.ps1' '(?i)\b(?:EncodedCommand|Invoke-Expression|FromBase64String|CreateNoWindow|WindowStyle)\b|ScriptBlock\s*\]\s*::\s*Create' 'Codex Hook launcher must not hide or dynamically evaluate its payload'
-Need-Text 'README.md' '不证明 Host 已信任或启用 Hook，也不证明端点产品已放行'
-Need-Text 'README.md' 'direct `apply_patch` 解析 Add/Update/Delete/Move 目标，配置正文不作为 command text'
+Need-Text 'README.md' 'direct `apply_patch` 严格解析全部 Add/Update/Delete/Move 目标'
+Need-Text 'README.md' '持久化不等于披露'
 Need-Text 'agent-configs/codex/README.md' '普通文件写入只把目标路径送入 core policy'
-Need-Text 'docs/architecture/policy-engine.md' 'it does not mark Host trust, Hook activation, or endpoint policy as passed'
+Need-Text 'agent-configs/codex/README.md' '包括生产配置；这不依赖精确 Host/model 版本、Release Qualification、Vault、KMS 或 Secret Provider'
+Need-Text 'docs/architecture/policy-engine.md' 'Persistence is not disclosure'
+Need-Text 'agent-configs/workspace/AGENTS.md.template' '已更新指定生产配置文件；数据库和外部服务敏感字段未在报告中回显。'
+Need-Text 'agent-configs/claude/CLAUDE.md.template' 'Authorized secrets may persist in the named production config; never disclose them.'
 
 $entryContractPath = 'policies/entry-contract.md'
 Need-Text $entryContractPath '`protocol_default`: `auto`'

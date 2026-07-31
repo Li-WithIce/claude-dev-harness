@@ -112,6 +112,13 @@ $expectedSchemaFiles = @(
     'model-eval-observation.schema.json',
     'protocol-config.schema.json',
     'requirement-contract.schema.json',
+    'rollout-canary-authorization.schema.json',
+    'rollout-eligibility-v2.schema.json',
+    'rollout-evidence-set.schema.json',
+    'rollout-observed-host-context.schema.json',
+    'rollout-review-payload.schema.json',
+    'rollout-review-receipt.schema.json',
+    'runtime-default-decision.schema.json',
     'task-state.schema.json'
 )
 $actualSchemaFiles = @(Get-ChildItem -LiteralPath $schemaRoot -Filter '*.json' -File | Select-Object -ExpandProperty Name | Sort-Object)
