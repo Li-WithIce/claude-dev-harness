@@ -65,7 +65,12 @@ function Invoke-ChildScriptWithInput {
     $processInfo.RedirectStandardOutput = $true
     $processInfo.RedirectStandardError = $true
     $processInfo.CreateNoWindow = $true
-    foreach ($name in @('HARNESS_TASK_ID','HARNESS_EXPECTED_VERSION','HARNESS_SESSION_MODE','HARNESS_ENVIRONMENT','HARNESS_DRY_RUN')) {
+    foreach ($name in @(
+        'DEV_HARNESS_WORKSPACE_ROOT','HARNESS_TASK_ID','HARNESS_EXPECTED_VERSION','HARNESS_SESSION_MODE',
+        'HARNESS_ENVIRONMENT','HARNESS_DRY_RUN','HARNESS_HOST_QUALIFICATION','HARNESS_SECRET_PROVIDER',
+        'CODEX_VERSION','VAULT_ADDR','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY','AZURE_CLIENT_SECRET',
+        'GOOGLE_APPLICATION_CREDENTIALS','KMS_KEY_ID'
+    )) {
         [void]$processInfo.Environment.Remove($name)
     }
     foreach ($name in $Environment.Keys) { $processInfo.Environment[$name] = [string]$Environment[$name] }
@@ -117,7 +122,12 @@ function Invoke-CodexHookCommandWithInput {
     $processInfo.StandardInputEncoding = [System.Text.UTF8Encoding]::new($false)
     $processInfo.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
     $processInfo.StandardErrorEncoding = [System.Text.UTF8Encoding]::new($false)
-    foreach ($name in @('HARNESS_TASK_ID','HARNESS_EXPECTED_VERSION','HARNESS_SESSION_MODE','HARNESS_ENVIRONMENT','HARNESS_DRY_RUN')) {
+    foreach ($name in @(
+        'DEV_HARNESS_WORKSPACE_ROOT','HARNESS_TASK_ID','HARNESS_EXPECTED_VERSION','HARNESS_SESSION_MODE',
+        'HARNESS_ENVIRONMENT','HARNESS_DRY_RUN','HARNESS_HOST_QUALIFICATION','HARNESS_SECRET_PROVIDER',
+        'CODEX_VERSION','VAULT_ADDR','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY','AZURE_CLIENT_SECRET',
+        'GOOGLE_APPLICATION_CREDENTIALS','KMS_KEY_ID'
+    )) {
         [void]$processInfo.Environment.Remove($name)
     }
     foreach ($name in $Environment.Keys) { $processInfo.Environment[$name] = [string]$Environment[$name] }
@@ -502,7 +512,7 @@ function Assert-InstalledCodexHook {
         )
         $validHarness = $harnessHooks.Count -eq 1 -and
             [string]$harnessHooks[0].Event -ceq 'PreToolUse' -and
-            [string]$harnessHooks[0].Section.matcher -ceq '^(Bash|apply_patch)$' -and
+            [string]$harnessHooks[0].Section.matcher -ceq '^(Bash|apply_patch|Write|Edit|MultiEdit|NotebookEdit)$' -and
             [string]$harnessHooks[0].Hook.type -ceq 'command' -and
             [int]$harnessHooks[0].Hook.timeout -eq 15
         $foreignPreTool = @(
@@ -648,7 +658,7 @@ try {
   "hooks": {
     "PreToolUse": [
       { "matcher": "^ForeignTool$", "hooks": [{ "type": "command", "command": "foreign-pretool", "timeout": 7 }] },
-      { "matcher": "^(Bash|apply_patch)$", "hooks": [{ "type": "command", "command": "third-party-shape-collision", "timeout": 15 }] }
+      { "matcher": "^(Bash|apply_patch|Write|Edit|MultiEdit|NotebookEdit)$", "hooks": [{ "type": "command", "command": "third-party-shape-collision", "timeout": 15 }] }
     ],
     "Stop": [
       { "hooks": [{ "type": "command", "command": "foreign-stop", "timeout": 8 }] }
@@ -704,42 +714,184 @@ try {
         } else {
             Add-Failure 'core install did not record semantic ownership for Codex hooks.json'
         }
-        $adapterInput = [ordered]@{
-            tool_name = 'Write'
-            permission_mode = 'default'
-            tool_input = [ordered]@{ file_path = (Join-Path $defaultFixture.Workspace 'notes.txt') }
-            cwd = $defaultFixture.Workspace
-        } | ConvertTo-Json -Depth 10 -Compress
-        $adapterResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $adapterInput
-        if ($adapterResult.ExitCode -eq 0 -and $adapterResult.StdOut.Trim() -ceq '{}') {
-            Add-Check 'Claude PreToolUse adapter accepts optional command and user prompt fields'
-        } else {
-            Add-Failure "Claude PreToolUse adapter rejected a valid Write payload: $($adapterResult.StdErr)"
+        $fixtureSecrets = [ordered]@{
+            Database = 'fixture-only-' + 'db-password'
+            Api = 'fixture-only-' + 'api-key'
+            Client = 'fixture-only-' + 'client-secret'
+            Webhook = 'fixture-only-' + 'webhook-secret'
+            ObjectStorage = 'fixture-only-' + 'object-storage-key'
+            Queue = 'fixture-only-' + 'queue-credential'
+            Smtp = 'fixture-only-' + 'smtp-credential'
         }
+        $containsFixtureSecret = {
+            param($Result)
+            $output = [string]$Result.StdOut + [string]$Result.StdErr
+            return @($fixtureSecrets.Values | Where-Object { $output.Contains([string]$_) }).Count -gt 0
+        }
+        $gitIgnorePath = Join-Path $defaultFixture.Workspace '.gitignore'
+        $gitIgnoreExisted = Test-Path -LiteralPath $gitIgnorePath -PathType Leaf
+        $gitIgnorePreimage = if ($gitIgnoreExisted) { Get-TestFileSha256 -Path $gitIgnorePath } else { '' }
+        $productionFileCases = @(
+            [ordered]@{
+                Name='Write appsettings.Production.json';Tool='Write';Version='fixture-old-version';Qualification='failed'
+                Input=[ordered]@{file_path=(Join-Path $defaultFixture.Workspace 'appsettings.Production.json');content=('Server=fixture-db.internal;Database=fixture;User Id=fixture;Password=' + $fixtureSecrets.Database)}
+            },
+            [ordered]@{
+                Name='Edit .env.production';Tool='Edit';Version='fixture-future-version';Qualification='unavailable'
+                Input=[ordered]@{file_path=(Join-Path $defaultFixture.Workspace '.env.production');old_string='FIXTURE_OLD';new_string=(@(
+                    'DB_PASSWORD=' + $fixtureSecrets.Database,
+                    'EXTERNAL_API_KEY=' + $fixtureSecrets.Api,
+                    'CLIENT_SECRET=' + $fixtureSecrets.Client,
+                    'WEBHOOK_SECRET=' + $fixtureSecrets.Webhook
+                ) -join "`n")}
+            },
+            [ordered]@{
+                Name='MultiEdit config/production.yml';Tool='MultiEdit';Version='unknown';Qualification='failed'
+                Input=[ordered]@{file_path=(Join-Path $defaultFixture.Workspace 'config\production.yml');edits=@([ordered]@{old_string='FIXTURE_OLD';new_string=('database: fixture`nobject_storage_key: ' + $fixtureSecrets.ObjectStorage)})}
+            },
+            [ordered]@{
+                Name='NotebookEdit application-prod.yml';Tool='NotebookEdit';Version='unknown';Qualification='unavailable'
+                Input=[ordered]@{notebook_path=(Join-Path $defaultFixture.Workspace 'application-prod.yml');new_source=('message_queue: ' + $fixtureSecrets.Queue + "`nsmtp: " + $fixtureSecrets.Smtp)}
+            }
+        )
+        foreach ($fileCase in $productionFileCases) {
+            $adapterInput = [ordered]@{
+                tool_name = [string]$fileCase.Tool
+                permission_mode = 'default'
+                tool_input = $fileCase.Input
+                cwd = $defaultFixture.Workspace
+            } | ConvertTo-Json -Depth 12 -Compress
+            $adapterResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $adapterInput -Environment @{
+                DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace
+                HARNESS_ENVIRONMENT='production'
+                CODEX_VERSION=[string]$fileCase.Version
+                HARNESS_HOST_QUALIFICATION=[string]$fileCase.Qualification
+            }
+            if ($adapterResult.ExitCode -eq 0 -and $adapterResult.StdOut.Trim() -ceq '{}' -and
+                [string]::IsNullOrWhiteSpace($adapterResult.StdErr) -and -not (& $containsFixtureSecret $adapterResult)) {
+                Add-Check "shared PreToolUse adapter allows version-neutral production config persistence through $($fileCase.Name) without disclosure"
+            } else {
+                Add-Failure "shared PreToolUse adapter rejected or disclosed content through $($fileCase.Name)"
+            }
+        }
+
         $ordinaryPatchInput = [ordered]@{
             tool_name = 'apply_patch'
             permission_mode = 'default'
-            tool_input = [ordered]@{ command = "*** Begin Patch`n*** Add File: notes.txt`n+ok`n*** End Patch" }
+            tool_input = [ordered]@{ command = (@(
+                '*** Begin Patch',
+                '*** Add File: config/production.yml',
+                '+database:',
+                ('+  password: ' + $fixtureSecrets.Database),
+                '+external:',
+                ('+  api_key: ' + $fixtureSecrets.Api),
+                '+note: DROP TRUNCATE DELETE FROM authorization credential token',
+                '*** End Patch'
+            ) -join "`n") }
             cwd = $defaultFixture.Workspace
         } | ConvertTo-Json -Depth 10 -Compress
-        $ordinaryPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $ordinaryPatchInput
-        if ($ordinaryPatchResult.ExitCode -eq 2 -and $ordinaryPatchResult.StdErr -match 'does not bind the effective environment identity and cwd') {
-            Add-Check 'shared PreToolUse adapter fails closed for local-looking direct apply_patch without trusted environment binding'
+        $ordinaryPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $ordinaryPatchInput -Environment @{
+            DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace
+            HARNESS_ENVIRONMENT='production'
+            CODEX_VERSION='unknown'
+            HARNESS_HOST_QUALIFICATION='failed'
+        }
+        if ($ordinaryPatchResult.ExitCode -eq 0 -and $ordinaryPatchResult.StdOut.Trim() -ceq '{}' -and
+            [string]::IsNullOrWhiteSpace($ordinaryPatchResult.StdErr) -and -not (& $containsFixtureSecret $ordinaryPatchResult)) {
+            Add-Check 'shared PreToolUse adapter allows direct production-config apply_patch without classifying file content as command text'
         } else {
-            Add-Failure "shared PreToolUse adapter accepted a local-looking direct apply_patch without trusted environment binding: $($ordinaryPatchResult.StdErr)"
+            Add-Failure 'shared PreToolUse adapter rejected or disclosed an ordinary direct production-config apply_patch'
+        }
+
+        $environmentIdentifier = 'fixture-' + 'environment-marker'
+        $grammarAllowPatches = [ordered]@{
+            StartedLeadingSpaceAdd = (@('*** Begin Patch',' *** Add File: notes-space.txt','+ok','*** End Patch') -join "`n")
+            StartedLeadingTabAdd = (@('*** Begin Patch',("`t" + '*** Add File: notes-tab.txt'),'+ok','*** End Patch') -join "`n")
+            AddThenLeadingSpaceAdd = (@('*** Begin Patch','*** Add File: notes-one.txt','+one',' *** Add File: notes-two.txt','+two','*** End Patch') -join "`n")
+            DeleteThenLeadingSpaceAdd = (@('*** Begin Patch','*** Delete File: notes-old.txt',' *** Add File: notes-new.txt','+new','*** End Patch') -join "`n")
+            EnvironmentId = (@('*** Begin Patch',('*** Environment ID: ' + $environmentIdentifier),'*** Add File: config/production.yml','+key: fixture','*** End Patch') -join "`n")
+            EndOfFileLf = (@('*** Begin Patch','*** Update File: config/production.yml','@@','-old','+new','*** End of File','*** End Patch') -join "`n")
+            EndOfFileCrlf = (@('*** Begin Patch','*** Update File: config/production.yml','@@','-old','+new','*** End of File','*** End Patch') -join "`r`n")
+            MoveEndOfFile = (@('*** Begin Patch','*** Update File: notes-old.txt','*** Move to: notes-new.txt','@@','-old','+new','*** End of File','*** End Patch') -join "`n")
+            UpdateContextMarker = (@('*** Begin Patch','*** Update File: notes.txt','@@','-old','+new',' *** Update File: auth/context-only.ps1','*** End Patch') -join "`n")
+            UpdateEnvironmentContext = (@('*** Begin Patch','*** Update File: notes.txt','@@','-old','+new',(' *** Environment ID: ' + $environmentIdentifier),'*** End Patch') -join "`n")
+            TrailingHeaderWhitespace = (@('*** Begin Patch',('*** Add File: notes-trailing.txt' + " `t"),'+ok','*** End Patch') -join "`n")
+        }
+        foreach ($grammarAllowCase in $grammarAllowPatches.GetEnumerator()) {
+            $grammarAllowInput = [ordered]@{
+                tool_name='apply_patch';permission_mode='default';tool_input=[ordered]@{command=[string]$grammarAllowCase.Value};cwd=$defaultFixture.Workspace
+            } | ConvertTo-Json -Depth 10 -Compress
+            $grammarAllowResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $grammarAllowInput -Environment @{
+                DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace
+                HARNESS_ENVIRONMENT='production'
+                CODEX_VERSION='unknown'
+                HARNESS_HOST_QUALIFICATION='failed'
+            }
+            $grammarOutput = [string]$grammarAllowResult.StdOut + [string]$grammarAllowResult.StdErr
+            if ($grammarAllowResult.ExitCode -eq 0 -and $grammarAllowResult.StdOut.Trim() -ceq '{}' -and
+                [string]::IsNullOrWhiteSpace($grammarAllowResult.StdErr) -and
+                -not $grammarOutput.Contains($environmentIdentifier) -and -not (& $containsFixtureSecret $grammarAllowResult)) {
+                Add-Check "shared PreToolUse adapter accepts official direct patch grammar without metadata authority: $($grammarAllowCase.Key)"
+            } else {
+                Add-Failure "shared PreToolUse adapter rejected or disclosed official direct patch grammar: $($grammarAllowCase.Key)"
+            }
+        }
+
+        $consistentTarget = Join-Path $defaultFixture.Workspace '.env.production'
+        $consistentCases = @(
+            [ordered]@{Tool='Write';Input=[ordered]@{file_path=$consistentTarget;content=$fixtureSecrets.Database}},
+            [ordered]@{Tool='Edit';Input=[ordered]@{file_path=$consistentTarget;old_string='FIXTURE_OLD';new_string=$fixtureSecrets.Database}},
+            [ordered]@{Tool='MultiEdit';Input=[ordered]@{file_path=$consistentTarget;edits=@([ordered]@{old_string='FIXTURE_OLD';new_string=$fixtureSecrets.Database})}},
+            [ordered]@{Tool='NotebookEdit';Input=[ordered]@{notebook_path=$consistentTarget;new_source=$fixtureSecrets.Database}},
+            [ordered]@{Tool='apply_patch';Input=[ordered]@{command=("*** Begin Patch`n*** Add File: .env.production`n+DB_PASSWORD=" + $fixtureSecrets.Database + "`n*** End Patch")}}
+        )
+        $consistentResults = @(
+            foreach ($consistentCase in $consistentCases) {
+                $inputJson = [ordered]@{tool_name=$consistentCase.Tool;permission_mode='default';tool_input=$consistentCase.Input;cwd=$defaultFixture.Workspace} | ConvertTo-Json -Depth 10 -Compress
+                Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $inputJson -Environment @{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace;HARNESS_ENVIRONMENT='production'}
+            }
+        )
+        if (@($consistentResults | Where-Object { $_.ExitCode -ne 0 -or $_.StdOut.Trim() -cne '{}' -or -not [string]::IsNullOrWhiteSpace($_.StdErr) -or (& $containsFixtureSecret $_) }).Count -eq 0) {
+            Add-Check 'Write, Edit, MultiEdit, NotebookEdit, and direct apply_patch receive the same ordinary target policy result'
+        } else {
+            Add-Failure 'ordinary file tools did not receive a consistent target-only policy result'
+        }
+
+        $protectedPatchCommands = [ordered]@{
+            Add = "*** Begin Patch`n*** Add File: auth/new.ps1`n+new`n*** End Patch"
+            Update = "*** Begin Patch`n*** Update File: permissions/update.ps1`n@@`n-old`n+new`n*** End Patch"
+            Delete = "*** Begin Patch`n*** Delete File: rbac/delete.ps1`n*** End Patch"
+            Move = "*** Begin Patch`n*** Update File: notes.txt`n*** Move to: auth/moved.txt`n@@`n-old`n+new`n*** End Patch"
+            MultiFile = "*** Begin Patch`n*** Add File: notes.txt`n+ok`n*** Add File: auth/mixed.ps1`n+protected`n*** End Patch"
+            LeadingSpaceAdd = "*** Begin Patch`n *** Add File: auth/space.ps1`n+protected`n*** End Patch"
+            LeadingTabAdd = "*** Begin Patch`n`t*** Add File: auth/tab.ps1`n+protected`n*** End Patch"
+            LeadingSpaceUpdate = "*** Begin Patch`n *** Update File: permissions/space.ps1`n@@`n-old`n+new`n*** End Patch"
+            LeadingSpaceDelete = "*** Begin Patch`n *** Delete File: rbac/space.ps1`n*** End Patch"
+            WhitespaceMultiFile = "*** Begin Patch`n*** Add File: notes.txt`n+ok`n *** Add File: auth/whitespace-mixed.ps1`n+protected`n*** End Patch"
+            EnvironmentProtected = ("*** Begin Patch`n*** Environment ID: " + $environmentIdentifier + "`n*** Add File: auth/environment.ps1`n+protected`n*** End Patch")
+        }
+        foreach ($protectedPatchCase in $protectedPatchCommands.GetEnumerator()) {
+            $protectedPatchInput = [ordered]@{
+                tool_name = 'apply_patch'
+                permission_mode = $(if ($protectedPatchCase.Key -ceq 'MultiFile') { 'bypassPermissions' } else { 'default' })
+                tool_input = [ordered]@{ command = [string]$protectedPatchCase.Value }
+                cwd = $defaultFixture.Workspace
+            } | ConvertTo-Json -Depth 10 -Compress
+            $protectedPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $protectedPatchInput -Environment @{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace}
+            $protectedPatchOutput = [string]$protectedPatchResult.StdOut + [string]$protectedPatchResult.StdErr
+            if ($protectedPatchResult.ExitCode -eq 2 -and $protectedPatchResult.StdErr -match 'protected write requires TaskId and ExpectedVersion' -and
+                -not $protectedPatchOutput.Contains($environmentIdentifier)) {
+                Add-Check "shared PreToolUse adapter extracts and preserves protected direct apply_patch targets: $($protectedPatchCase.Key)"
+            } else {
+                Add-Failure "shared PreToolUse adapter did not protect direct apply_patch targets: $($protectedPatchCase.Key)"
+            }
         }
         $protectedPatchInput = [ordered]@{
             tool_name = 'apply_patch'
             permission_mode = 'default'
-            tool_input = [ordered]@{ command = "*** Begin Patch`n*** Update File: auth/authorize.ps1`n@@`n-old`n+new`n*** End Patch" }
+            tool_input = [ordered]@{ command = [string]$protectedPatchCommands.Update }
             cwd = $defaultFixture.Workspace
         } | ConvertTo-Json -Depth 10 -Compress
-        $protectedPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $protectedPatchInput
-        if ($protectedPatchResult.ExitCode -eq 2 -and $protectedPatchResult.StdErr -match 'does not bind the effective environment identity and cwd') {
-            Add-Check 'shared PreToolUse adapter denies protected direct apply_patch before relying on an untrusted local cwd'
-        } else {
-            Add-Failure 'shared PreToolUse adapter did not fail closed for protected direct apply_patch'
-        }
         $ordinaryBashInput = [ordered]@{
             tool_name = 'Bash'
             permission_mode = 'default'
@@ -775,6 +927,12 @@ try {
                 Add-Check "installed Codex Hook command fixture emits the allow sentinel through the $runner parser"
             } else {
                 Add-Failure "installed Codex Hook command fixture did not emit the allow sentinel through the $runner parser"
+            }
+            $runnerMutationAllow = Invoke-CodexHookCommandWithInput -Runner $runner -Command $installedHookCommand -InputText $ordinaryPatchInput -WorkingDirectory $defaultFixture.Workspace
+            if ($runnerMutationAllow.ExitCode -eq 0 -and $runnerMutationAllow.StdOut.Trim() -ceq '{}' -and [string]::IsNullOrWhiteSpace($runnerMutationAllow.StdErr) -and -not (& $containsFixtureSecret $runnerMutationAllow)) {
+                Add-Check "installed Codex Hook command fixture allows a relative direct apply_patch through the $runner parser without disclosure"
+            } else {
+                Add-Failure "installed Codex Hook command fixture rejected or disclosed a relative direct apply_patch through the $runner parser"
             }
         }
         $legacyCodePage = $null
@@ -937,17 +1095,19 @@ try {
         } else {
             Add-Failure 'shared PreToolUse adapter accepted a permission mode outside the pinned Codex hook contract'
         }
-        $productionBashInput = [ordered]@{
-            tool_name = 'Bash'
-            permission_mode = 'bypassPermissions'
-            tool_input = [ordered]@{ command = 'DELETE FROM customer' }
-            cwd = $defaultFixture.Workspace
-        } | ConvertTo-Json -Depth 10 -Compress
-        $productionBashResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $productionBashInput -Environment @{ HARNESS_ENVIRONMENT='production' }
-        if ($productionBashResult.ExitCode -eq 2 -and $productionBashResult.StdErr -match 'protected write requires TaskId and ExpectedVersion') {
-            Add-Check 'shared PreToolUse adapter forwards production Bash commands to core policy'
-        } else {
-            Add-Failure 'shared PreToolUse adapter allowed a protected production Bash command'
+        foreach ($productionCommand in @('DROP DATABASE fixture_database','TRUNCATE TABLE fixture_table','DELETE FROM fixture_table')) {
+            $productionBashInput = [ordered]@{
+                tool_name = 'Bash'
+                permission_mode = 'bypassPermissions'
+                tool_input = [ordered]@{ command = $productionCommand }
+                cwd = $defaultFixture.Workspace
+            } | ConvertTo-Json -Depth 10 -Compress
+            $productionBashResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $productionBashInput -Environment @{HARNESS_ENVIRONMENT='production';DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace}
+            if ($productionBashResult.ExitCode -eq 2 -and $productionBashResult.StdErr -match 'protected write requires TaskId and ExpectedVersion') {
+                Add-Check "shared PreToolUse adapter forwards and protects production Bash command: $($productionCommand.Split(' ')[0])"
+            } else {
+                Add-Failure "shared PreToolUse adapter allowed protected production Bash command: $($productionCommand.Split(' ')[0])"
+            }
         }
         $longBashInput = [ordered]@{
             tool_name = 'Bash'
@@ -967,24 +1127,166 @@ try {
             tool_input = [ordered]@{ command = "*** Begin Patch`n*** Add File: docs/example.sql`n+DELETE FROM customer;`n*** End Patch" }
             cwd = $defaultFixture.Workspace
         } | ConvertTo-Json -Depth 10 -Compress
-        $productionSqlPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $productionSqlPatchInput -Environment @{ HARNESS_ENVIRONMENT='production' }
-        if ($productionSqlPatchResult.ExitCode -eq 2 -and $productionSqlPatchResult.StdErr -match 'does not bind the effective environment identity and cwd') {
-            Add-Check 'shared PreToolUse adapter denies direct apply_patch before classifying patch content as an executed command'
+        $productionSqlPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $productionSqlPatchInput -Environment @{HARNESS_ENVIRONMENT='production';DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace}
+        if ($productionSqlPatchResult.ExitCode -eq 0 -and $productionSqlPatchResult.StdOut.Trim() -ceq '{}' -and [string]::IsNullOrWhiteSpace($productionSqlPatchResult.StdErr)) {
+            Add-Check 'shared PreToolUse adapter does not classify direct patch file content as an executed production command'
         } else {
-            Add-Failure "shared PreToolUse adapter accepted direct apply_patch without a trusted environment binding: $($productionSqlPatchResult.StdErr)"
+            Add-Failure 'shared PreToolUse adapter classified direct patch file content as an executed production command'
         }
-        $remotePatchInput = [ordered]@{
-            tool_name = 'apply_patch'
-            permission_mode = 'default'
-            tool_input = [ordered]@{ command = "*** Begin Patch`n*** Environment ID: remote`n*** Add File: notes-remote.txt`n+no`n*** End Patch" }
-            cwd = $defaultFixture.Workspace
-        } | ConvertTo-Json -Depth 10 -Compress
-        $remotePatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $remotePatchInput
-        if ($remotePatchResult.ExitCode -eq 2 -and $remotePatchResult.StdErr -match 'does not bind the effective environment identity and cwd') {
-            Add-Check 'shared PreToolUse adapter fails closed for explicitly remote apply_patch environments'
+        $invalidPatchCases = [ordered]@{
+            missing_begin = "*** Add File: a.txt`n+x`n*** End Patch"
+            missing_end = "*** Begin Patch`n*** Add File: a.txt`n+x"
+            duplicate_begin = "*** Begin Patch`n*** Begin Patch`n*** Add File: a.txt`n+x`n*** End Patch"
+            nested_begin = "*** Begin Patch`n*** Add File: a.txt`n*** Begin Patch`n+x`n*** End Patch"
+            early_end = "*** Begin Patch`n*** End Patch`n*** Add File: a.txt`n+x`n*** End Patch"
+            duplicate_end = "*** Begin Patch`n*** Add File: a.txt`n+x`n*** End Patch`n*** End Patch"
+            repeated_final_newline = "*** Begin Patch`n*** Add File: a.txt`n+x`n*** End Patch`n`n"
+            empty_patch = "*** Begin Patch`n*** End Patch"
+            no_file_operation = "*** Begin Patch`n+body only`n*** End Patch"
+            unknown_directive = "*** Begin Patch`n*** Unsupported: a.txt`n*** Add File: a.txt`n+x`n*** End Patch"
+            duplicate_environment_id = "*** Begin Patch`n*** Environment ID: first`n*** Environment ID: second`n*** Add File: a.txt`n+x`n*** End Patch"
+            empty_environment_id = "*** Begin Patch`n*** Environment ID:   `n*** Add File: a.txt`n+x`n*** End Patch"
+            late_environment_id = "*** Begin Patch`n*** Add File: a.txt`n+x`n*** Environment ID: late`n*** End Patch"
+            environment_id_in_update = "*** Begin Patch`n*** Update File: a.txt`n@@`n-old`n+new`n*** Environment ID: late`n*** End Patch"
+            end_of_file_in_add = "*** Begin Patch`n*** Add File: a.txt`n+x`n*** End of File`n*** End Patch"
+            end_of_file_in_delete = "*** Begin Patch`n*** Delete File: a.txt`n*** End of File`n*** End Patch"
+            end_of_file_before_change = "*** Begin Patch`n*** Update File: a.txt`n@@`n*** End of File`n*** End Patch"
+            duplicate_end_of_file = "*** Begin Patch`n*** Update File: a.txt`n@@`n-old`n+new`n*** End of File`n*** End of File`n*** End Patch"
+            content_after_end_of_file = "*** Begin Patch`n*** Update File: a.txt`n@@`n-old`n+new`n*** End of File`n+late`n*** End Patch"
+            orphan_move = "*** Begin Patch`n*** Move to: b.txt`n*** End Patch"
+            duplicate_move = "*** Begin Patch`n*** Update File: a.txt`n*** Move to: b.txt`n*** Move to: c.txt`n@@`n-x`n+y`n*** End Patch"
+            move_after_change = "*** Begin Patch`n*** Update File: a.txt`n@@`n-x`n+y`n*** Move to: b.txt`n*** End Patch"
+            move_after_add = "*** Begin Patch`n*** Add File: a.txt`n*** Move to: b.txt`n+x`n*** End Patch"
+            move_after_delete = "*** Begin Patch`n*** Delete File: a.txt`n*** Move to: b.txt`n*** End Patch"
+            empty_path = "*** Begin Patch`n*** Add File: `n+x`n*** End Patch"
+            leading_path_whitespace = "*** Begin Patch`n*** Add File:  a.txt`n+x`n*** End Patch"
+            nul_path = "*** Begin Patch`n*** Add File: a$([char]0)b.txt`n+x`n*** End Patch"
+            bare_cr_path = "*** Begin Patch`n*** Add File: a`rb.txt`n+x`n*** End Patch"
+            windows_absolute = "*** Begin Patch`n*** Add File: C:\outside.txt`n+x`n*** End Patch"
+            unix_absolute = "*** Begin Patch`n*** Add File: /outside.txt`n+x`n*** End Patch"
+            unc_path = "*** Begin Patch`n*** Add File: \\server\share\outside.txt`n+x`n*** End Patch"
+            drive_relative = "*** Begin Patch`n*** Add File: C:outside.txt`n+x`n*** End Patch"
+            alternate_data_stream = "*** Begin Patch`n*** Add File: a.txt:stream`n+x`n*** End Patch"
+            dot_segment = "*** Begin Patch`n*** Add File: config/./a.txt`n+x`n*** End Patch"
+            dotdot_segment = "*** Begin Patch`n*** Add File: config/../a.txt`n+x`n*** End Patch"
+            escaping_move = "*** Begin Patch`n*** Update File: a.txt`n*** Move to: ../outside.txt`n@@`n-x`n+y`n*** End Patch"
+        }
+        foreach ($invalidPatchCase in $invalidPatchCases.GetEnumerator()) {
+            $invalidPatchInput = [ordered]@{
+                tool_name='apply_patch';permission_mode='default';tool_input=[ordered]@{command=[string]$invalidPatchCase.Value};cwd=$defaultFixture.Workspace
+            } | ConvertTo-Json -Depth 10 -Compress
+            $invalidPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $invalidPatchInput -Environment @{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace}
+            if ($invalidPatchResult.ExitCode -eq 2 -and $invalidPatchResult.StdErr -match '^direct apply_patch input') {
+                Add-Check "shared PreToolUse adapter fails closed for malformed direct apply_patch: $($invalidPatchCase.Key)"
+            } else {
+                Add-Failure "shared PreToolUse adapter accepted malformed direct apply_patch: $($invalidPatchCase.Key)"
+            }
+        }
+
+        $adapterTokens = $null
+        $adapterErrors = $null
+        $adapterAst = [System.Management.Automation.Language.Parser]::ParseFile($installedPreToolHook,[ref]$adapterTokens,[ref]$adapterErrors)
+        $adapterFunctions = @($adapterAst.FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true))
+        $pathValidatorAst = @($adapterFunctions | Where-Object Name -CEQ 'Assert-ApplyPatchRelativePath')[0]
+        $patchParserAst = @($adapterFunctions | Where-Object Name -CEQ 'Get-ApplyPatchChangedPaths')[0]
+        if (@($adapterErrors).Count -eq 0 -and $null -ne $pathValidatorAst -and $null -ne $patchParserAst) {
+            $pathValidatorBody = $pathValidatorAst.Body.GetScriptBlock()
+            function Assert-ApplyPatchRelativePath { param([string]$Path) & $pathValidatorBody -Path $Path }
+            $patchParserBody = $patchParserAst.Body.GetScriptBlock()
+            foreach ($controlPath in @("a$([char]0)b.txt","a`rb.txt","a`nb.txt")) {
+                try {
+                    & $pathValidatorBody -Path $controlPath
+                    Add-Failure 'direct apply_patch path validator accepted a NUL, CR, or LF control character'
+                } catch {
+                    Add-Check 'direct apply_patch path validator rejects a NUL, CR, or LF control character'
+                }
+            }
+            $deduplicatedPaths = @(& $patchParserBody -PatchText "*** Begin Patch`n*** Add File: Config/File.txt`n+x`n*** Update File: config\file.txt`n@@`n-x`n+y`n*** End Patch")
+            $movePaths = @(& $patchParserBody -PatchText "*** Begin Patch`r`n*** Update File: old.txt`r`n*** Move to: new.txt`r`n@@`r`n-old`r`n+new`r`n*** End Patch`r`n")
+            $startedWhitespacePaths = @(& $patchParserBody -PatchText "*** Begin Patch`n *** Add File: notes-space.txt`n+one`n*** End Patch")
+            $addWhitespacePaths = @(& $patchParserBody -PatchText "*** Begin Patch`n*** Add File: notes-one.txt`n+one`n`t*** Update File: notes-two.txt`n@@`n-old`n+new`n*** End Patch")
+            $deleteWhitespacePaths = @(& $patchParserBody -PatchText "*** Begin Patch`n*** Delete File: notes-old.txt`n *** Add File: notes-new.txt`n+new`n*** End Patch")
+            $environmentPaths = @(& $patchParserBody -PatchText ("*** Begin Patch`n*** Environment ID: " + $environmentIdentifier + "`n*** Add File: config/production.yml`n+x`n*** End Patch"))
+            $moveEndOfFilePaths = @(& $patchParserBody -PatchText "*** Begin Patch`n*** Update File: notes-old.txt`n*** Move to: notes-new.txt`n@@`n-old`n+new`n*** End of File`n*** End Patch")
+            $updateContextPaths = @(& $patchParserBody -PatchText "*** Begin Patch`n*** Update File: notes.txt`n@@`n-old`n+new`n *** Update File: auth/context-only.ps1`n*** End Patch")
+            $updateEnvironmentContextPaths = @(& $patchParserBody -PatchText ("*** Begin Patch`n*** Update File: notes.txt`n@@`n-old`n+new`n *** Environment ID: " + $environmentIdentifier + "`n*** End Patch"))
+            if ($deduplicatedPaths.Count -eq 1 -and $movePaths.Count -eq 2 -and
+                $startedWhitespacePaths.Count -eq 1 -and $startedWhitespacePaths[0] -ceq 'notes-space.txt' -and
+                $addWhitespacePaths.Count -eq 2 -and $addWhitespacePaths[1] -ceq 'notes-two.txt' -and
+                $deleteWhitespacePaths.Count -eq 2 -and $deleteWhitespacePaths[1] -ceq 'notes-new.txt' -and
+                $environmentPaths.Count -eq 1 -and $environmentPaths[0] -ceq 'config/production.yml' -and
+                @($environmentPaths | Where-Object { [string]$_ -ceq $environmentIdentifier }).Count -eq 0 -and
+                $moveEndOfFilePaths.Count -eq 2 -and $moveEndOfFilePaths[0] -ceq 'notes-old.txt' -and $moveEndOfFilePaths[1] -ceq 'notes-new.txt' -and
+                $updateContextPaths.Count -eq 1 -and $updateContextPaths[0] -ceq 'notes.txt' -and
+                $updateEnvironmentContextPaths.Count -eq 1 -and $updateEnvironmentContextPaths[0] -ceq 'notes.txt') {
+                Add-Check 'direct apply_patch parser aligns whitespace, Environment ID, Move, End of File, LF/CRLF, and Update context target extraction'
+            } else {
+                Add-Failure 'direct apply_patch parser grammar-aware target extraction is invalid'
+            }
         } else {
-            Add-Failure 'shared PreToolUse adapter did not fail closed for an unbound remote apply_patch environment'
+            Add-Failure 'installed direct apply_patch parser functions are unavailable or do not parse'
         }
+
+        $rootCases = @(
+            [ordered]@{Name='environment-only root';Payload=[ordered]@{tool_name='apply_patch';permission_mode='default';tool_input=[ordered]@{command="*** Begin Patch`n*** Add File: env-root.txt`n+x`n*** End Patch"}};Environment=@{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace};Allowed=$true},
+            [ordered]@{Name='same normalized roots';Payload=[ordered]@{tool_name='apply_patch';permission_mode='default';tool_input=[ordered]@{command="*** Begin Patch`n*** Add File: same-root.txt`n+x`n*** End Patch"};cwd=$defaultFixture.Workspace};Environment=@{DEV_HARNESS_WORKSPACE_ROOT=($defaultFixture.Workspace + '\')};Allowed=$true},
+            [ordered]@{Name='missing roots';Payload=[ordered]@{tool_name='apply_patch';permission_mode='default';tool_input=[ordered]@{command="*** Begin Patch`n*** Add File: missing-root.txt`n+x`n*** End Patch"}};Environment=@{};Allowed=$false},
+            [ordered]@{Name='conflicting roots';Payload=[ordered]@{tool_name='apply_patch';permission_mode='default';tool_input=[ordered]@{command="*** Begin Patch`n*** Add File: conflict-root.txt`n+x`n*** End Patch"};cwd=$defaultFixture.Workspace};Environment=@{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.User};Allowed=$false},
+            [ordered]@{Name='non-string cwd';Payload=[ordered]@{tool_name='apply_patch';permission_mode='default';tool_input=[ordered]@{command="*** Begin Patch`n*** Add File: bad-cwd.txt`n+x`n*** End Patch"};cwd=@($defaultFixture.Workspace)};Environment=@{};Allowed=$false}
+        )
+        foreach ($rootCase in $rootCases) {
+            $rootResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText ($rootCase.Payload | ConvertTo-Json -Depth 10 -Compress) -Environment $rootCase.Environment
+            $actualAllowed = $rootResult.ExitCode -eq 0 -and $rootResult.StdOut.Trim() -ceq '{}' -and [string]::IsNullOrWhiteSpace($rootResult.StdErr)
+            if ($actualAllowed -eq [bool]$rootCase.Allowed) {
+                Add-Check "shared PreToolUse adapter enforces Workspace root binding: $($rootCase.Name)"
+            } else {
+                Add-Failure "shared PreToolUse adapter Workspace root binding is invalid: $($rootCase.Name)"
+            }
+        }
+
+        $directoryPatchInput = [ordered]@{tool_name='apply_patch';permission_mode='default';tool_input=[ordered]@{command="*** Begin Patch`n*** Add File: .assistant`n+x`n*** End Patch"};cwd=$defaultFixture.Workspace} | ConvertTo-Json -Depth 10 -Compress
+        $directoryPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $directoryPatchInput -Environment @{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace}
+        if ($directoryPatchResult.ExitCode -eq 2 -and $directoryPatchResult.StdErr -match 'must not be a directory') {
+            Add-Check 'shared PreToolUse adapter rejects a direct apply_patch directory target'
+        } else {
+            Add-Failure 'shared PreToolUse adapter accepted a direct apply_patch directory target'
+        }
+
+        $outsideWriteInput = [ordered]@{tool_name='Write';permission_mode='default';tool_input=[ordered]@{file_path=(Join-Path $defaultFixture.Workspace '..\outside.txt');content='fixture'};cwd=$defaultFixture.Workspace} | ConvertTo-Json -Depth 10 -Compress
+        $outsideWriteResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $outsideWriteInput -Environment @{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace}
+        if ($outsideWriteResult.ExitCode -eq 2 -and $outsideWriteResult.StdErr -match 'escapes WorkspaceRoot') {
+            Add-Check 'shared PreToolUse adapter preserves Workspace containment for ordinary file tools'
+        } else {
+            Add-Failure 'shared PreToolUse adapter allowed an ordinary file-tool target outside the Workspace'
+        }
+
+        $reparseTarget = Join-Path $defaultFixture.Root 'reparse-target'
+        $reparseLink = Join-Path $defaultFixture.Workspace 'config-link'
+        [System.IO.Directory]::CreateDirectory($reparseTarget) | Out-Null
+        New-Item -ItemType Junction -Path $reparseLink -Target $reparseTarget | Out-Null
+        $reparsePatchInput = [ordered]@{tool_name='apply_patch';permission_mode='default';tool_input=[ordered]@{command="*** Begin Patch`n*** Add File: config-link/production.yml`n+x`n*** End Patch"};cwd=$defaultFixture.Workspace} | ConvertTo-Json -Depth 10 -Compress
+        $reparsePatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $reparsePatchInput -Environment @{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace}
+        if ($reparsePatchResult.ExitCode -eq 2 -and $reparsePatchResult.StdErr -match 'reparse point') {
+            Add-Check 'shared PreToolUse adapter preserves reparse, junction, and symlink ancestor protection'
+        } else {
+            Add-Failure 'shared PreToolUse adapter allowed a target through a reparse ancestor'
+        }
+
+        $productionTargets = @(
+            'appsettings.Production.json','.env.production','config\production.yml','application-prod.yml'
+        ) | ForEach-Object { Join-Path $defaultFixture.Workspace $_ }
+        $gitIgnorePreserved = if ($gitIgnoreExisted) {
+            (Test-Path -LiteralPath $gitIgnorePath -PathType Leaf) -and (Get-TestFileSha256 -Path $gitIgnorePath) -ceq $gitIgnorePreimage
+        } else {
+            -not (Test-Path -LiteralPath $gitIgnorePath)
+        }
+        if ($gitIgnorePreserved -and
+            @($productionTargets | Where-Object { Test-Path -LiteralPath $_ }).Count -eq 0) {
+            Add-Check 'PreToolUse policy evaluation neither changes .gitignore nor writes or reclassifies target files'
+        } else {
+            Add-Failure 'PreToolUse policy evaluation changed .gitignore or a target file'
+        }
+        [System.IO.Directory]::Delete($reparseLink)
         $missingPathInput = [ordered]@{
             tool_name = 'Write'
             permission_mode = 'default'
@@ -1642,7 +1944,7 @@ try {
     if ($apostropheInstall.ExitCode -eq 0) {
         Assert-InstalledCodexHook -Fixture $apostropheFixture -Label 'apostrophe workspace'
         $apostropheHooksDocument = Get-Content -LiteralPath (Join-Path $apostropheFixture.User '.codex\hooks.json') -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable -DateKind String
-        $apostropheHookCommand = [string]@($apostropheHooksDocument.hooks.PreToolUse | Where-Object { [string]$_.matcher -ceq '^(Bash|apply_patch)$' })[0].hooks[0].command
+        $apostropheHookCommand = [string]@($apostropheHooksDocument.hooks.PreToolUse | Where-Object { [string]$_.matcher -ceq '^(Bash|apply_patch|Write|Edit|MultiEdit|NotebookEdit)$' })[0].hooks[0].command
         $apostropheHookInput = [ordered]@{
             tool_name = 'Bash'
             permission_mode = 'default'

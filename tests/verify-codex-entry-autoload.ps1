@@ -49,16 +49,19 @@ function Reject-Regex {
 }
 
 $codexHooksPath = 'agent-configs/codex/hooks.shared.json.template'
-Need-Text $codexHooksPath '"matcher": "^(Bash|apply_patch)$"'
+Need-Text $codexHooksPath '"matcher": "^(Bash|apply_patch|Write|Edit|MultiEdit|NotebookEdit)$"'
 Need-Text $codexHooksPath '"command": "{WINDOWS_POWERSHELL_EXE} -NoLogo -NoProfile -NonInteractive -Command . ''{CODEX_PRETOOLUSE_LAUNCHER_PS_LITERAL}''"'
 Need-Text $codexHooksPath '"timeout": 15'
 Need-Text 'runtime-hooks/claude/codex-pretooluse-launcher.ps1' "if (`$stdout.Trim() -cne '{}')"
 Need-Text 'runtime-hooks/claude/codex-pretooluse-launcher.ps1' "permissionDecision = 'deny'"
 Reject-Regex $codexHooksPath '(?i)\b(?:EncodedCommand|ExecutionPolicy|WindowStyle)\b' 'Codex Hook command must remain a transparent, unencoded launcher invocation'
 Reject-Regex 'runtime-hooks/claude/codex-pretooluse-launcher.ps1' '(?i)\b(?:EncodedCommand|Invoke-Expression|FromBase64String|CreateNoWindow|WindowStyle)\b|ScriptBlock\s*\]\s*::\s*Create' 'Codex Hook launcher must not hide or dynamically evaluate its payload'
-Need-Text 'README.md' '不证明 Codex 已信任或启用 Hook，也不证明飞连/其他企业端点产品已放行'
-Need-Text 'agent-configs/codex/README.md' 'Bash shell-form 和所有 direct `apply_patch` 都 fail closed'
-Need-Text 'docs/architecture/policy-engine.md' 'it does not mark Codex trust, Hook activation, or Flylink/endpoint policy as passed'
+Need-Text 'README.md' 'direct `apply_patch` 严格解析全部 Add/Update/Delete/Move 目标'
+Need-Text 'README.md' '持久化不等于披露'
+Need-Text 'agent-configs/codex/README.md' '普通文件写入只把目标路径送入 core policy'
+Need-Text 'docs/architecture/policy-engine.md' 'Persistence is not disclosure'
+Need-Text 'agent-configs/workspace/AGENTS.md.template' '已更新指定生产配置文件；数据库和外部服务敏感字段未在报告中回显。'
+Need-Text 'agent-configs/claude/CLAUDE.md.template' 'Authorized secrets may persist in the named production config; never disclose them.'
 
 $entryContractPath = 'policies/entry-contract.md'
 Need-Text $entryContractPath '`protocol_default`: `auto`'

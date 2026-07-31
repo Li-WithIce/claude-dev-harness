@@ -5,6 +5,8 @@
 - Use `.assistant\entry\task.ps1 status` only for an explicit recovery/status request after protocol selection; a new selected v2 request never calls it, and v1 recovery files remain compatibility inputs only for existing v1 tasks.
 - Use `rg`, file reading, and manual inspection only when directly relevant. Optional providers are never required for core routing.
 - Current requirements and business correctness take precedence over stale tests or snapshots unless historical compatibility is explicitly required.
+- When the user explicitly authorizes and names a Workspace configuration file, database credentials and external-service keys may be persisted there, including production configuration files. This ordinary Runtime capability does not require Vault, KMS, a Secret Provider, Release Qualification, or an exact Host/model version. Persistence is not disclosure: never echo sensitive values into replies, logs, task artifacts, Evidence, reviews, PRs, CI artifacts, or unrelated files.
+- Report such business changes as: `已更新指定生产配置文件；数据库和外部服务敏感字段未在报告中回显。`
 - Only a detector-selected v1 workflow reads the executable `.assistant\entry\AGENTS.md` shim; selected v2 never reads it.
 
 <!-- BEGIN GENERATED ENTRY CONTRACT -->

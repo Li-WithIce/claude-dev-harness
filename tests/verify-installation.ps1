@@ -836,7 +836,7 @@ if (Test-Path -LiteralPath $CodexHooksPath -PathType Leaf) {
         )
         if ($matches.Count -eq 1 -and
             [string]$matches[0].Event -ceq 'PreToolUse' -and
-            [string]$matches[0].Section.matcher -ceq '^(Bash|apply_patch)$' -and
+            [string]$matches[0].Section.matcher -ceq '^(Bash|apply_patch|Write|Edit|MultiEdit|NotebookEdit)$' -and
             [string]$matches[0].Hook.type -ceq 'command' -and
             [int]$matches[0].Hook.timeout -eq 15 -and
             $expectedCommand -notmatch '\{CLAUDE_HOME\}') {

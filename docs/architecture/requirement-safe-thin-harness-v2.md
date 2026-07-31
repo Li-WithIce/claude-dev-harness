@@ -45,6 +45,8 @@ Ask is not a fifth profile. It is `requirement_state=blocked`. Legacy `quick` an
 
 `policies/protected-actions.json` contains hard escalation rules. A match raises requirements; it never declares a command or path safe. PR-01 records only the two plan-defined rules. Detection and approval enforcement arrive in later PRs.
 
+Ordinary configuration persistence is a general Runtime capability. Once the user explicitly authorizes and names a Workspace configuration file, database credentials and external-service keys may be written there, including production configuration, without depending on exact model/Host versions, Release Qualification, Vault, KMS, or a Secret Provider. File adapters send target paths to Core Policy and never classify file bodies as command text; Bash continues to send actual command text. Persistence does not authorize disclosure in replies, logs, task artifacts, Evidence, reviews, PRs, CI artifacts, snapshots, documentation, or unrelated files, and it does not bypass read-only sessions, Workspace containment, protected paths, OS permissions, enterprise endpoint policy, or real production-command governance.
+
 ## Canonical JSON contracts
 
 PR-01 owns exactly these five JSON Schemas:
