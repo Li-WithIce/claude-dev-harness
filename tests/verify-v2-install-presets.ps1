@@ -814,6 +814,7 @@ try {
             EndOfFileCrlf = (@('*** Begin Patch','*** Update File: config/production.yml','@@','-old','+new','*** End of File','*** End Patch') -join "`r`n")
             MoveEndOfFile = (@('*** Begin Patch','*** Update File: notes-old.txt','*** Move to: notes-new.txt','@@','-old','+new','*** End of File','*** End Patch') -join "`n")
             UpdateContextMarker = (@('*** Begin Patch','*** Update File: notes.txt','@@','-old','+new',' *** Update File: auth/context-only.ps1','*** End Patch') -join "`n")
+            UpdateEnvironmentContext = (@('*** Begin Patch','*** Update File: notes.txt','@@','-old','+new',(' *** Environment ID: ' + $environmentIdentifier),'*** End Patch') -join "`n")
             TrailingHeaderWhitespace = (@('*** Begin Patch',('*** Add File: notes-trailing.txt' + " `t"),'+ok','*** End Patch') -join "`n")
         }
         foreach ($grammarAllowCase in $grammarAllowPatches.GetEnumerator()) {
@@ -1147,7 +1148,6 @@ try {
             empty_environment_id = "*** Begin Patch`n*** Environment ID:   `n*** Add File: a.txt`n+x`n*** End Patch"
             late_environment_id = "*** Begin Patch`n*** Add File: a.txt`n+x`n*** Environment ID: late`n*** End Patch"
             environment_id_in_update = "*** Begin Patch`n*** Update File: a.txt`n@@`n-old`n+new`n*** Environment ID: late`n*** End Patch"
-            environment_id_as_update_context = "*** Begin Patch`n*** Update File: a.txt`n@@`n-old`n+new`n *** Environment ID: late`n*** End Patch"
             end_of_file_in_add = "*** Begin Patch`n*** Add File: a.txt`n+x`n*** End of File`n*** End Patch"
             end_of_file_in_delete = "*** Begin Patch`n*** Delete File: a.txt`n*** End of File`n*** End Patch"
             end_of_file_before_change = "*** Begin Patch`n*** Update File: a.txt`n@@`n*** End of File`n*** End Patch"
@@ -1209,6 +1209,7 @@ try {
             $environmentPaths = @(& $patchParserBody -PatchText ("*** Begin Patch`n*** Environment ID: " + $environmentIdentifier + "`n*** Add File: config/production.yml`n+x`n*** End Patch"))
             $moveEndOfFilePaths = @(& $patchParserBody -PatchText "*** Begin Patch`n*** Update File: notes-old.txt`n*** Move to: notes-new.txt`n@@`n-old`n+new`n*** End of File`n*** End Patch")
             $updateContextPaths = @(& $patchParserBody -PatchText "*** Begin Patch`n*** Update File: notes.txt`n@@`n-old`n+new`n *** Update File: auth/context-only.ps1`n*** End Patch")
+            $updateEnvironmentContextPaths = @(& $patchParserBody -PatchText ("*** Begin Patch`n*** Update File: notes.txt`n@@`n-old`n+new`n *** Environment ID: " + $environmentIdentifier + "`n*** End Patch"))
             if ($deduplicatedPaths.Count -eq 1 -and $movePaths.Count -eq 2 -and
                 $startedWhitespacePaths.Count -eq 1 -and $startedWhitespacePaths[0] -ceq 'notes-space.txt' -and
                 $addWhitespacePaths.Count -eq 2 -and $addWhitespacePaths[1] -ceq 'notes-two.txt' -and
@@ -1216,7 +1217,8 @@ try {
                 $environmentPaths.Count -eq 1 -and $environmentPaths[0] -ceq 'config/production.yml' -and
                 @($environmentPaths | Where-Object { [string]$_ -ceq $environmentIdentifier }).Count -eq 0 -and
                 $moveEndOfFilePaths.Count -eq 2 -and $moveEndOfFilePaths[0] -ceq 'notes-old.txt' -and $moveEndOfFilePaths[1] -ceq 'notes-new.txt' -and
-                $updateContextPaths.Count -eq 1 -and $updateContextPaths[0] -ceq 'notes.txt') {
+                $updateContextPaths.Count -eq 1 -and $updateContextPaths[0] -ceq 'notes.txt' -and
+                $updateEnvironmentContextPaths.Count -eq 1 -and $updateEnvironmentContextPaths[0] -ceq 'notes.txt') {
                 Add-Check 'direct apply_patch parser aligns whitespace, Environment ID, Move, End of File, LF/CRLF, and Update context target extraction'
             } else {
                 Add-Failure 'direct apply_patch parser grammar-aware target extraction is invalid'

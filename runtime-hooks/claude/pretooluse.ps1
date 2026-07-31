@@ -66,10 +66,8 @@ function Get-ApplyPatchChangedPaths {
         $line = [string]$lines[$index]
 
         $trimmed = $line.Trim()
-        if ($trimmed.StartsWith('*** Environment ID:',[System.StringComparison]::Ordinal)) {
-            if ($currentOperation -cne 'StartedPatch') {
-                throw 'direct apply_patch input contains an invalid Environment ID directive'
-            }
+        if ($currentOperation -ceq 'StartedPatch' -and
+            $trimmed.StartsWith('*** Environment ID:',[System.StringComparison]::Ordinal)) {
             if ($environmentSeen) {
                 throw 'direct apply_patch input contains a duplicate Environment ID directive'
             }
