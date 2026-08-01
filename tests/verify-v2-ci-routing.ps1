@@ -165,14 +165,14 @@ $expectedCoreScripts = @(
     'verify-v1-v2-coexistence.ps1','verify-v1-to-v2-migration.ps1','verify-v2-default-flip.ps1','verify-v2-runtime-memory-decoupling.ps1',
     'run-scenario-evals.ps1','verify-model-eval-runner.ps1','verify-rollout-evidence.ps1','verify-host-benchmark-runner.ps1',
     'verify-host-benchmark-otel.ps1','verify-host-benchmark-qualification.ps1','verify-release-runner-boundary.ps1','verify-ordinary-ci-receipt.ps1','verify-v2-ci-routing.ps1',
-    'verify-v2-install-presets.ps1','verify-v2-evidence.ps1',
+    'verify-v2-install-presets.ps1','verify-preset-lifecycle-qualification.ps1','verify-v2-evidence.ps1',
     'verify-v2-governed-audit.ps1','verify-v2-approval.ps1','verify-v2-readonly-zero-write.ps1',
     'verify-harness-entry.ps1','verify-lite-artifact-validator.ps1','verify-lite-footprint.ps1','verify-minimal-safe-change-policy.ps1',
     'verify-no-node-install-dependency.ps1','verify-placeholder-rendering.ps1','verify-workflow-contracts.ps1','verify-workflow-descriptor.ps1',
     'verify-shared-memory-layers.ps1','verify-stage-discipline-matrix.ps1','verify-release-validation.ps1','verify-runtime-state-contract.ps1',
     'verify-skill-manifest.ps1','verify-task-artifact-drift-audit.ps1','verify-tool-profile.ps1'
 )
-$expectedGroupSizes = [ordered]@{'entry-lifecycle'=14;'evaluation-release'=9;'install-evidence'=2;'governance-approval'=3;'harness-contracts'=15}
+$expectedGroupSizes = [ordered]@{'entry-lifecycle'=14;'evaluation-release'=9;'install-evidence'=3;'governance-approval'=3;'harness-contracts'=15}
 $coreGroupAssignments = @($validationAst.FindAll({param($node)$node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -ceq '$coreScriptGroups'},$true))
 $coreGroupNames=[Collections.Generic.List[string]]::new();$coreGroupSizes=[Collections.Generic.List[int]]::new();$actualCoreScripts=[Collections.Generic.List[string]]::new();$coreShapeValid=$validationErrors.Count -eq 0 -and $coreGroupAssignments.Count -eq 1
 if($coreShapeValid){
@@ -216,7 +216,7 @@ if($coreGroupValidateSet.Count -eq 1){
 }
 $coreGroupDefault = if($coreGroupParameters.Count -eq 1){$coreGroupParameters[0].DefaultValue.SafeGetValue()}else{''}
 $optionalNames = @('verify-ask-codex.ps1','verify-codex-entry-autoload.ps1','verify-code-intel-provider-boundary.ps1','verify-context-provider-boundary.ps1','verify-context-provider-install-isolation.ps1','verify-memory-provider-boundary.ps1','verify-md-html-review-renderer.ps1','verify-provider-usage-recording.ps1','verify-render-review-html.ps1','verify-aiteamcode-skill-contract.ps1')
-Check ($coreShapeValid -and ($coreGroupNames -join '|') -ceq (@($expectedGroupSizes.Keys) -join '|') -and ($coreGroupSizes -join '|') -ceq (@($expectedGroupSizes.Values) -join '|') -and $actualCoreScripts.Count -eq 43 -and @($actualCoreScripts | Sort-Object -CaseSensitive -Unique).Count -eq 43 -and ($actualCoreScripts -join '|') -ceq ($expectedCoreScripts -join '|') -and @($actualCoreScripts | Where-Object {-not(Test-Path -LiteralPath (Join-Path $RepoRoot "tests\$_") -PathType Leaf)}).Count -eq 0) 'five core groups contain the exact forty-three unique scripts in legacy order' 'core group shape, boundary, membership, uniqueness, order, or files drifted'
+Check ($coreShapeValid -and ($coreGroupNames -join '|') -ceq (@($expectedGroupSizes.Keys) -join '|') -and ($coreGroupSizes -join '|') -ceq (@($expectedGroupSizes.Values) -join '|') -and $actualCoreScripts.Count -eq 44 -and @($actualCoreScripts | Sort-Object -CaseSensitive -Unique).Count -eq 44 -and ($actualCoreScripts -join '|') -ceq ($expectedCoreScripts -join '|') -and @($actualCoreScripts | Where-Object {-not(Test-Path -LiteralPath (Join-Path $RepoRoot "tests\$_") -PathType Leaf)}).Count -eq 0) 'five core groups contain the exact forty-four unique scripts in legacy order' 'core group shape, boundary, membership, uniqueness, order, or files drifted'
 Check ($flattenValid -and $groupSelectionValid -and $coreGroupDefault -ceq 'all' -and ($coreGroupAllowed -join '|') -ceq ((@('all')+$expectedCoreGroups) -join '|') -and $validation -match "'-CoreGroup',\`$CoreGroup" -and $validation -match "\`$Suite -ne 'core'.*\`$CoreGroup -ne 'all'") 'CoreGroup defaults to the full legacy suite, bridges safely, and rejects non-core use' 'CoreGroup parameter, flattening, bridge, or selection contract drifted'
 Check (@($optionalNames | Where-Object {$actualCoreScripts -ccontains $_}).Count -eq 0) 'core suite excludes changed-path optional modules' 'core suite still runs optional heavy modules unconditionally'
 

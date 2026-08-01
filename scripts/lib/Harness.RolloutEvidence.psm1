@@ -447,6 +447,193 @@ function Read-InstalledDesktopRolloutEvidence {
     } catch { throw [IO.InvalidDataException]::new('rollout-evidence-installed-report-invalid',$_.Exception) }
 }
 
+function Assert-PresetLifecycleSanitizedContent {
+    param([AllowNull()][object]$Value)
+    if ($null -eq $Value) { return }
+    if ($Value -is [Collections.IDictionary]) {
+        foreach ($entry in $Value.GetEnumerator()) { Assert-PresetLifecycleSanitizedContent -Value $entry.Value }
+        return
+    }
+    if ($Value -is [Collections.IEnumerable] -and $Value -isnot [string]) {
+        foreach ($item in $Value) { Assert-PresetLifecycleSanitizedContent -Value $item }
+        return
+    }
+    if ($Value -isnot [string]) { return }
+    $text = [string]$Value
+    if ($text.Length -gt 1024 -or $text -match '[\r\n]' -or $text -match '(?:[A-Za-z]:[\\/]|\\\\|/(?:home|Users|private|tmp|var)(?:/|$))' -or
+        $text -match '(?i)(?:access[_-]?token|refresh[_-]?token|api[_-]?key|bearer\s+|authorization\s*:|cookie\s*:|password\s*:|credential\s*:|prompt\s*:|raw[ _-]?(?:output|trace|log)\s*:|thread[ _-]?id\s*:)') {
+        throw 'preset lifecycle report contains non-portable or sensitive content'
+    }
+}
+
+function ConvertFrom-PresetLifecycleEvidenceBytes {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
+    return ConvertFrom-InstalledDesktopEvidenceBytes -Bytes $Bytes
+}
+
+function Assert-PresetLifecycleUtcDate {
+    param([object]$Value,[string]$Label)
+    try { $parsed = [DateTimeOffset]::Parse([string]$Value,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None) }
+    catch { throw "$Label timestamp is invalid" }
+    if ($parsed.Offset -ne [TimeSpan]::Zero) { throw "$Label timestamp is not UTC" }
+    return $parsed
+}
+
+function Assert-PresetLifecycleStage {
+    param(
+        [Parameter(Mandatory)][Collections.IDictionary]$Stage,
+        [Parameter(Mandatory)][string]$ExpectedName
+    )
+    Assert-ReleaseKeys -Value $Stage -Expected @('stage','status','exit_code','started_at_utc','ended_at_utc','duration_ms','command_digest','output_digest','reason') -Label "preset lifecycle $ExpectedName stage"
+    if ([string]$Stage.stage -cne $ExpectedName -or [string]$Stage.status -cnotin @('pass','fail','not_run')) { throw "preset lifecycle $ExpectedName stage identity is invalid" }
+    $started = Assert-PresetLifecycleUtcDate -Value $Stage.started_at_utc -Label "preset lifecycle $ExpectedName start"
+    $ended = Assert-PresetLifecycleUtcDate -Value $Stage.ended_at_utc -Label "preset lifecycle $ExpectedName end"
+    if ($ended -lt $started) { throw "preset lifecycle $ExpectedName time order is invalid" }
+    $duration = Assert-ReleaseInteger -Value $Stage.duration_ms -Label "preset lifecycle $ExpectedName duration" -NonNegative
+    $expectedDuration = [long][Math]::Round(($ended - $started).TotalMilliseconds,0,[MidpointRounding]::AwayFromZero)
+    if ($duration -ne $expectedDuration) { throw "preset lifecycle $ExpectedName duration is inconsistent" }
+    Assert-ReleaseDigestValue -Value $Stage.command_digest -Label "preset lifecycle $ExpectedName command"
+    Assert-ReleaseDigestValue -Value $Stage.output_digest -Label "preset lifecycle $ExpectedName output"
+    if ([string]::IsNullOrWhiteSpace([string]$Stage.reason)) { throw "preset lifecycle $ExpectedName reason is invalid" }
+    if ([string]$Stage.status -ceq 'pass') {
+        if ($Stage.exit_code -isnot [long] -or [long]$Stage.exit_code -ne 0) { throw "preset lifecycle $ExpectedName pass exit code is invalid" }
+    } elseif ([string]$Stage.status -ceq 'fail') {
+        if ($Stage.exit_code -isnot [long] -or [long]$Stage.exit_code -eq 0) { throw "preset lifecycle $ExpectedName failure exit code is invalid" }
+    } elseif ($null -ne $Stage.exit_code) { throw "preset lifecycle $ExpectedName not-run exit code is invalid" }
+}
+
+function Assert-PresetLifecycleReport {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Collections.IDictionary]$ExpectedSource = $null,
+        [AllowEmptyString()][string]$ExpectedPreset = '',
+        [switch]$AllowNonFormalSource
+    )
+    $topKeys = @('schema_version','generated_at_utc','source_revision','source_dirty','source_state_stable','source','preset','report_run_id','producer_identity','producer_mode','execution','stages','results','status','reason','report_digest')
+    Assert-ReleaseKeys -Value $Document -Expected $topKeys -Label 'preset lifecycle report'
+    $schemaPath = Join-Path $RepoRoot 'schemas\preset-lifecycle-report.schema.json'
+    if (-not (Test-Path -LiteralPath $schemaPath -PathType Leaf) -or
+        -not (Test-Json -Json ($Document | ConvertTo-Json -Depth 100 -Compress) -SchemaFile $schemaPath -ErrorAction Stop -WarningAction SilentlyContinue)) {
+        throw 'preset lifecycle report schema validation failed'
+    }
+    if ([string]$Document.schema_version -cne 'harness-preset-lifecycle-report/v1' -or
+        [string]$Document.report_run_id -cnotmatch '^[0-9a-f]{32}$' -or
+        [string]$Document.producer_identity -cne 'preset-lifecycle-qualification/v1' -or
+        [string]$Document.producer_mode -cnotin @('formal','test-only','diagnostic-smoke') -or
+        [string]$Document.preset -cnotin @('core','governed','full') -or
+        [string]$Document.status -cnotin @('pass','fail','unavailable')) { throw 'preset lifecycle report identity is invalid' }
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedPreset) -and [string]$Document.preset -cne $ExpectedPreset) { throw 'preset lifecycle report preset does not match its Gate' }
+    [void](Assert-PresetLifecycleUtcDate -Value $Document.generated_at_utc -Label 'preset lifecycle report')
+    Assert-ReleaseReportDigest -Document $Document
+    Assert-PresetLifecycleSanitizedContent -Value $Document
+
+    Assert-ReleaseKeys -Value $Document.source -Expected @('commit_tree_oid','object_format','start','end','input_digests') -Label 'preset lifecycle source'
+    Assert-ReleaseKeys -Value $Document.source.input_digests -Expected @('install_digest','uninstall_digest','verification_digest','producer_digest','atomic_write_digest','path_digest') -Label 'preset lifecycle inputs'
+    $inputPaths = [ordered]@{
+        install_digest='install.ps1'
+        uninstall_digest='uninstall.ps1'
+        verification_digest='tests/verify-installation.ps1'
+        producer_digest='scripts/run-preset-lifecycle-qualification.ps1'
+        atomic_write_digest='scripts/lib/Harness.AtomicWrite.psm1'
+        path_digest='scripts/lib/Harness.Path.psm1'
+    }
+    foreach ($entry in $inputPaths.GetEnumerator()) { Assert-ReleaseCurrentFileDigest -RepoRoot $RepoRoot -Value $Document.source.input_digests[$entry.Key] -RelativePath ([string]$entry.Value) -Label ("preset lifecycle {0}" -f $entry.Key) }
+    Assert-ReleaseSourceStateShape -Value $Document.source.start -Label 'preset lifecycle source start'
+    Assert-ReleaseSourceStateShape -Value $Document.source.end -Label 'preset lifecycle source end'
+    if ([string]$Document.source_revision -cne [string]$Document.source.start.revision -or
+        [string]$Document.source.commit_tree_oid -cne [string]$Document.source.start.commit_tree_oid -or
+        [string]$Document.source.object_format -cne [string]$Document.source.start.object_format -or
+        [bool]$Document.source_dirty -ne ([bool]$Document.source.start.dirty -or [bool]$Document.source.end.dirty)) { throw 'preset lifecycle source binding is invalid' }
+    $stable = Test-HarnessReleaseSourceStable -Start $Document.source.start -End $Document.source.end
+    if ([bool]$Document.source_state_stable -ne $stable) { throw 'preset lifecycle source stability is inconsistent' }
+    if ($null -ne $ExpectedSource) {
+        Assert-ReleaseSourceStateMatchesExpected -Value $Document.source.start -Expected $ExpectedSource -Label 'preset lifecycle source start'
+        Assert-ReleaseSourceStateMatchesExpected -Value $Document.source.end -Expected $ExpectedSource -Label 'preset lifecycle source end'
+        if ([string]$Document.source_revision -cne [string]$ExpectedSource.revision -or [string]$Document.source.commit_tree_oid -cne [string]$ExpectedSource.commit_tree_oid -or [string]$Document.source.object_format -cne [string]$ExpectedSource.object_format) { throw 'preset lifecycle source does not match the qualified source' }
+    }
+    if (-not $AllowNonFormalSource -and ([bool]$Document.source_dirty -or -not [bool]$Document.source_state_stable)) { throw 'preset lifecycle source is not clean and stable' }
+
+    Assert-ReleaseKeys -Value $Document.execution -Expected @('sequence_contract','effective_preset','isolated_workspace','isolated_profile','workspace_identity_digest','profile_identity_digest','duration_ms','raw_output_persisted','auth_bytes_persisted','private_paths_persisted') -Label 'preset lifecycle execution'
+    if ([string]$Document.execution.sequence_contract -cne 'install-verify-update-verify-uninstall-cleanup/v1' -or
+        [string]$Document.execution.effective_preset -cne [string]$Document.preset -or
+        $Document.execution.isolated_workspace -isnot [bool] -or -not [bool]$Document.execution.isolated_workspace -or
+        $Document.execution.isolated_profile -isnot [bool] -or -not [bool]$Document.execution.isolated_profile -or
+        $Document.execution.raw_output_persisted -isnot [bool] -or [bool]$Document.execution.raw_output_persisted -or
+        $Document.execution.auth_bytes_persisted -isnot [bool] -or [bool]$Document.execution.auth_bytes_persisted -or
+        $Document.execution.private_paths_persisted -isnot [bool] -or [bool]$Document.execution.private_paths_persisted) { throw 'preset lifecycle execution identity is invalid' }
+    Assert-ReleaseDigestValue -Value $Document.execution.workspace_identity_digest -Label 'preset lifecycle workspace identity'
+    Assert-ReleaseDigestValue -Value $Document.execution.profile_identity_digest -Label 'preset lifecycle profile identity'
+    [void](Assert-ReleaseInteger -Value $Document.execution.duration_ms -Label 'preset lifecycle execution duration' -Positive)
+
+    $stageNames = @('install','verify-after-install','update','verify-after-update','uninstall','cleanup')
+    if (@($Document.stages).Count -ne $stageNames.Count) { throw 'preset lifecycle stage count is invalid' }
+    for ($index=0; $index -lt $stageNames.Count; $index++) { Assert-PresetLifecycleStage -Stage $Document.stages[$index] -ExpectedName $stageNames[$index] }
+    if ([string]$Document.stages[0].status -ceq 'not_run' -or [string]$Document.stages[4].status -ceq 'not_run' -or [string]$Document.stages[5].status -ceq 'not_run') { throw 'preset lifecycle required attempt was not recorded' }
+    if ([string]$Document.stages[0].status -ceq 'fail') {
+        if (@($Document.stages[1..3] | Where-Object { [string]$_.status -cne 'not_run' }).Count -gt 0) { throw 'preset lifecycle install failure did not block dependent stages' }
+    } else {
+        if ([string]$Document.stages[1].status -ceq 'not_run') { throw 'preset lifecycle verify-after-install was not attempted' }
+        if ([string]$Document.stages[1].status -ceq 'fail') {
+            if (@($Document.stages[2..3] | Where-Object { [string]$_.status -cne 'not_run' }).Count -gt 0) { throw 'preset lifecycle verification failure did not block update stages' }
+        } else {
+            if ([string]$Document.stages[2].status -ceq 'not_run') { throw 'preset lifecycle update was not attempted' }
+            if ([string]$Document.stages[2].status -ceq 'fail' -and [string]$Document.stages[3].status -cne 'not_run') { throw 'preset lifecycle update failure did not block verification' }
+            if ([string]$Document.stages[2].status -ceq 'pass' -and [string]$Document.stages[3].status -ceq 'not_run') { throw 'preset lifecycle verify-after-update was not attempted' }
+        }
+    }
+    Assert-ReleaseKeys -Value $Document.results -Expected @('all_required_stages_passed','preset_consistent','auth_unchanged','unrelated_user_config_unchanged','cleanup_no_residue','installation_verified','update_verified') -Label 'preset lifecycle results'
+    foreach ($name in @($Document.results.Keys)) { Assert-ReleaseBoolean -Value $Document.results[$name] -Label "preset lifecycle result $name" }
+    $allStagesPassed = @($Document.stages | Where-Object { [string]$_.status -cne 'pass' }).Count -eq 0
+    $hasFailedStage = @($Document.stages | Where-Object { [string]$_.status -ceq 'fail' }).Count -gt 0
+    if ([bool]$Document.results.all_required_stages_passed -ne $allStagesPassed -or
+        [bool]$Document.results.installation_verified -ne ([string]$Document.stages[1].status -ceq 'pass') -or
+        [bool]$Document.results.update_verified -ne ([string]$Document.stages[3].status -ceq 'pass') -or
+        ([string]$Document.stages[5].status -ceq 'pass' -and -not [bool]$Document.results.cleanup_no_residue)) { throw 'preset lifecycle result aggregate is inconsistent' }
+    $formal = [string]$Document.producer_mode -ceq 'formal'
+    $allResultsPassed = @($Document.results.Keys | Where-Object { -not [bool]$Document.results[$_] }).Count -eq 0
+    $sourceUnchanged = [string]$Document.source.start.revision -ceq [string]$Document.source.end.revision -and [string]$Document.source.start.commit_tree_oid -ceq [string]$Document.source.end.commit_tree_oid -and [string]$Document.source.start.object_format -ceq [string]$Document.source.end.object_format -and [string]$Document.source.start.state_digest -ceq [string]$Document.source.end.state_digest
+    $operationalPass = $allStagesPassed -and $allResultsPassed -and $sourceUnchanged
+    $derivedStatus = if (-not $operationalPass) { 'fail' } elseif (-not $formal) { 'unavailable' } elseif (-not [bool]$Document.source_dirty -and [bool]$Document.source_state_stable) { 'pass' } else { 'fail' }
+    $derivedReason = if ($derivedStatus -ceq 'pass') { 'all-required-stages-passed' } elseif ($derivedStatus -ceq 'unavailable') { 'non-formal-producer-mode' } else { 'lifecycle-stage-or-result-failure' }
+    if ([string]$Document.status -cne $derivedStatus -or [string]$Document.reason -cne $derivedReason -or ($hasFailedStage -and $derivedStatus -cne 'fail')) { throw 'preset lifecycle aggregate status is inconsistent' }
+
+    return [ordered]@{
+        status=$derivedStatus
+        producer_identity=[string]$Document.producer_identity
+        source_revision=[string]$Document.source_revision
+        commit_tree_oid=[string]$Document.source.commit_tree_oid
+        object_format=[string]$Document.source.object_format
+        preset=[string]$Document.preset
+        report_run_id=[string]$Document.report_run_id
+        workspace_identity_digest=[string]$Document.execution.workspace_identity_digest
+        profile_identity_digest=[string]$Document.execution.profile_identity_digest
+    }
+}
+
+function Read-PresetLifecycleRolloutEvidence {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Gate,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource,
+        [Parameter(Mandatory)][string]$ExpectedPreset,
+        [string[]]$ProtectedRoots = @()
+    )
+    try {
+        Assert-ReleaseKeys -Value $Gate -Expected @('status','evidence_contract','artifact_path','evidence_digest','source_revision','producer_identity') -Label 'preset lifecycle gate'
+        if ([string]$Gate.evidence_contract -cne 'harness-preset-lifecycle-report/v1' -or [string]$Gate.source_revision -cne [string]$ExpectedSource.revision -or
+            [string]::IsNullOrWhiteSpace([string]$Gate.producer_identity)) { throw 'preset lifecycle gate binding is invalid' }
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$Gate.artifact_path) -ExpectedDigest ([string]$Gate.evidence_digest) -ProtectedRoots $ProtectedRoots -MaximumBytes 1MB
+        $document = ConvertFrom-PresetLifecycleEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        $result = Assert-PresetLifecycleReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource -ExpectedPreset $ExpectedPreset
+        $result['path'] = [string]$artifact.path
+        $result['raw_digest'] = [string]$artifact.digest
+        $result['volume'] = [string]$artifact.physical.volume
+        $result['file_id'] = [string]$artifact.physical.file_id
+        return $result
+    } catch { throw [IO.InvalidDataException]::new('rollout-evidence-lifecycle-report-invalid',$_.Exception) }
+}
+
 function Assert-HarnessRolloutEvidenceSetProvenance {
     param(
         [Parameter(Mandatory)][System.Collections.IDictionary]$Gates,
@@ -455,6 +642,12 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
         [string[]]$ProtectedRoots = @()
     )
     $installedNames = @('DP-G03-INSTALLED-DESKTOP-HOST-3X3','DP-G07-DISTINCT-INSTALLED-DESKTOP-GATE')
+    $lifecyclePresets = [ordered]@{
+        'DP-G18-CORE-LIFECYCLE'='core'
+        'DP-G19-GOVERNED-LIFECYCLE'='governed'
+        'DP-G20-FULL-LIFECYCLE'='full'
+    }
+    $lifecycleNames = @($lifecyclePresets.Keys)
     $installedPresent = @($installedNames | Where-Object { $Gates.Contains($_) })
     if ($installedPresent.Count -gt 0) {
         if ($installedPresent.Count -ne 2 -or [string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-installed-report-invalid' }
@@ -476,7 +669,35 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
             $gate.producer_identity = [string]$installed[$index].producer_identity
         }
     }
-    foreach ($name in @($Gates.Keys | Where-Object { $_ -cnotin $installedNames } | Sort-Object)) {
+    $lifecyclePresent = @($lifecycleNames | Where-Object { $Gates.Contains($_) })
+    if ($lifecyclePresent.Count -gt 0) {
+        if ($lifecyclePresent.Count -ne 3 -or [string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-lifecycle-gate-set-incomplete' }
+        $lifecycle = [Collections.Generic.List[object]]::new()
+        foreach ($name in $lifecycleNames) {
+            $lifecycle.Add((Read-PresetLifecycleRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$name] -ExpectedSource $ExpectedSource -ExpectedPreset ([string]$lifecyclePresets[$name]) -ProtectedRoots $ProtectedRoots))
+        }
+        for ($left=0; $left -lt $lifecycle.Count; $left++) {
+            for ($right=$left+1; $right -lt $lifecycle.Count; $right++) {
+                if ([string]$lifecycle[$left].path -ieq [string]$lifecycle[$right].path -or
+                    [string]$lifecycle[$left].raw_digest -ceq [string]$lifecycle[$right].raw_digest -or
+                    ([string]$lifecycle[$left].volume -ceq [string]$lifecycle[$right].volume -and [string]$lifecycle[$left].file_id -ceq [string]$lifecycle[$right].file_id) -or
+                    [string]$lifecycle[$left].report_run_id -ceq [string]$lifecycle[$right].report_run_id -or
+                    [string]$lifecycle[$left].workspace_identity_digest -ceq [string]$lifecycle[$right].workspace_identity_digest -or
+                    [string]$lifecycle[$left].profile_identity_digest -ceq [string]$lifecycle[$right].profile_identity_digest -or
+                    [string]$lifecycle[$left].source_revision -cne [string]$lifecycle[$right].source_revision -or
+                    [string]$lifecycle[$left].commit_tree_oid -cne [string]$lifecycle[$right].commit_tree_oid -or
+                    [string]$lifecycle[$left].object_format -cne [string]$lifecycle[$right].object_format) {
+                    throw 'rollout-evidence-lifecycle-reports-not-distinct'
+                }
+            }
+        }
+        for ($index=0; $index -lt $lifecycleNames.Count; $index++) {
+            $gate = $Gates[$lifecycleNames[$index]]
+            $gate.status = [string]$lifecycle[$index].status
+            $gate.producer_identity = [string]$lifecycle[$index].producer_identity
+        }
+    }
+    foreach ($name in @($Gates.Keys | Where-Object { $_ -cnotin @($installedNames + $lifecycleNames) } | Sort-Object)) {
         $gate = $Gates[$name]
         if ($gate -isnot [System.Collections.IDictionary] -or
             [string]::IsNullOrWhiteSpace([string]$gate.artifact_path) -or
@@ -485,7 +706,7 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
         [void](Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$gate.artifact_path) -ExpectedDigest ([string]$gate.evidence_digest) -ProtectedRoots $ProtectedRoots)
         throw "rollout-evidence-provenance-unwired-$name"
     }
-    if ($installedPresent.Count -eq 2) { return $true }
+    if ($installedPresent.Count -eq 2 -or $lifecyclePresent.Count -eq 3) { return $true }
     throw 'rollout-evidence-provenance-unverified'
 }
 

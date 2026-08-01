@@ -153,6 +153,7 @@ $coreScriptGroups = [ordered]@{
     )
     'install-evidence' = @(
         'verify-v2-install-presets.ps1',
+        'verify-preset-lifecycle-qualification.ps1',
         'verify-v2-evidence.ps1'
     )
     'governance-approval' = @(

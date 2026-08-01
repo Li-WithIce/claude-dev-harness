@@ -1,0 +1,188 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/preset-lifecycle-report.schema.json",
+  "title": "Thin Harness preset lifecycle report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at_utc",
+    "source_revision",
+    "source_dirty",
+    "source_state_stable",
+    "source",
+    "preset",
+    "report_run_id",
+    "producer_identity",
+    "producer_mode",
+    "execution",
+    "stages",
+    "results",
+    "status",
+    "reason",
+    "report_digest"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["harness-preset-lifecycle-report/v1"] },
+    "generated_at_utc": { "$ref": "#/definitions/utcDateTime" },
+    "source_revision": { "$ref": "#/definitions/objectId" },
+    "source_dirty": { "type": "boolean" },
+    "source_state_stable": { "type": "boolean" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit_tree_oid", "object_format", "start", "end", "input_digests"],
+      "properties": {
+        "commit_tree_oid": { "$ref": "#/definitions/objectId" },
+        "object_format": { "$ref": "#/definitions/objectFormat" },
+        "start": { "$ref": "#/definitions/sourceState" },
+        "end": { "$ref": "#/definitions/sourceState" },
+        "input_digests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["install_digest", "uninstall_digest", "verification_digest", "producer_digest", "atomic_write_digest", "path_digest"],
+          "properties": {
+            "install_digest": { "$ref": "#/definitions/digest" },
+            "uninstall_digest": { "$ref": "#/definitions/digest" },
+            "verification_digest": { "$ref": "#/definitions/digest" },
+            "producer_digest": { "$ref": "#/definitions/digest" },
+            "atomic_write_digest": { "$ref": "#/definitions/digest" },
+            "path_digest": { "$ref": "#/definitions/digest" }
+          }
+        }
+      }
+    },
+    "preset": { "$ref": "#/definitions/preset" },
+    "report_run_id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "producer_identity": { "type": "string", "enum": ["preset-lifecycle-qualification/v1"] },
+    "producer_mode": { "type": "string", "enum": ["formal", "test-only", "diagnostic-smoke"] },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence_contract", "effective_preset", "isolated_workspace", "isolated_profile", "workspace_identity_digest", "profile_identity_digest", "duration_ms", "raw_output_persisted", "auth_bytes_persisted", "private_paths_persisted"],
+      "properties": {
+        "sequence_contract": { "type": "string", "enum": ["install-verify-update-verify-uninstall-cleanup/v1"] },
+        "effective_preset": { "$ref": "#/definitions/preset" },
+        "isolated_workspace": { "type": "boolean", "const": true },
+        "isolated_profile": { "type": "boolean", "const": true },
+        "workspace_identity_digest": { "$ref": "#/definitions/digest" },
+        "profile_identity_digest": { "$ref": "#/definitions/digest" },
+        "duration_ms": { "type": "integer", "minimum": 1 },
+        "raw_output_persisted": { "type": "boolean", "const": false },
+        "auth_bytes_persisted": { "type": "boolean", "const": false },
+        "private_paths_persisted": { "type": "boolean", "const": false }
+      }
+    },
+    "stages": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "additionalItems": false,
+      "items": [
+        { "allOf": [{ "$ref": "#/definitions/stage" }, { "properties": { "stage": { "const": "install" } } }] },
+        { "allOf": [{ "$ref": "#/definitions/stage" }, { "properties": { "stage": { "const": "verify-after-install" } } }] },
+        { "allOf": [{ "$ref": "#/definitions/stage" }, { "properties": { "stage": { "const": "update" } } }] },
+        { "allOf": [{ "$ref": "#/definitions/stage" }, { "properties": { "stage": { "const": "verify-after-update" } } }] },
+        { "allOf": [{ "$ref": "#/definitions/stage" }, { "properties": { "stage": { "const": "uninstall" } } }] },
+        { "allOf": [{ "$ref": "#/definitions/stage" }, { "properties": { "stage": { "const": "cleanup" } } }] }
+      ]
+    },
+    "results": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["all_required_stages_passed", "preset_consistent", "auth_unchanged", "unrelated_user_config_unchanged", "cleanup_no_residue", "installation_verified", "update_verified"],
+      "properties": {
+        "all_required_stages_passed": { "type": "boolean" },
+        "preset_consistent": { "type": "boolean" },
+        "auth_unchanged": { "type": "boolean" },
+        "unrelated_user_config_unchanged": { "type": "boolean" },
+        "cleanup_no_residue": { "type": "boolean" },
+        "installation_verified": { "type": "boolean" },
+        "update_verified": { "type": "boolean" }
+      }
+    },
+    "status": { "type": "string", "enum": ["pass", "fail", "unavailable"] },
+    "reason": { "type": "string", "enum": ["all-required-stages-passed", "non-formal-producer-mode", "lifecycle-stage-or-result-failure"] },
+    "report_digest": { "$ref": "#/definitions/digest" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "producer_mode": { "enum": ["test-only", "diagnostic-smoke"] } } },
+      "then": { "properties": { "status": { "enum": ["fail", "unavailable"] } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "pass" } } },
+      "then": {
+        "properties": {
+          "producer_mode": { "const": "formal" },
+          "source_dirty": { "const": false },
+          "source_state_stable": { "const": true },
+          "stages": { "items": { "properties": { "status": { "const": "pass" }, "exit_code": { "const": 0 } } } },
+          "results": {
+            "properties": {
+              "all_required_stages_passed": { "const": true },
+              "preset_consistent": { "const": true },
+              "auth_unchanged": { "const": true },
+              "unrelated_user_config_unchanged": { "const": true },
+              "cleanup_no_residue": { "const": true },
+              "installation_verified": { "const": true },
+              "update_verified": { "const": true }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "objectId": { "type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" },
+    "objectFormat": { "type": "string", "enum": ["sha1", "sha256"] },
+    "preset": { "type": "string", "enum": ["core", "governed", "full"] },
+    "utcDateTime": { "type": "string", "format": "date-time", "pattern": "(?:Z|\\+00:00)$" },
+    "sourceState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision", "commit_tree_oid", "object_format", "dirty", "status_entry_count", "status_digest", "state_digest", "state_basis"],
+      "properties": {
+        "revision": { "$ref": "#/definitions/objectId" },
+        "commit_tree_oid": { "$ref": "#/definitions/objectId" },
+        "object_format": { "$ref": "#/definitions/objectFormat" },
+        "dirty": { "type": "boolean" },
+        "status_entry_count": { "type": "integer", "minimum": 0 },
+        "status_digest": { "$ref": "#/definitions/digest" },
+        "state_digest": { "$ref": "#/definitions/digest" },
+        "state_basis": { "type": "string", "enum": ["git-revision-tree-status/v1"] }
+      }
+    },
+    "stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stage", "status", "exit_code", "started_at_utc", "ended_at_utc", "duration_ms", "command_digest", "output_digest", "reason"],
+      "properties": {
+        "stage": { "type": "string", "enum": ["install", "verify-after-install", "update", "verify-after-update", "uninstall", "cleanup"] },
+        "status": { "type": "string", "enum": ["pass", "fail", "not_run"] },
+        "exit_code": { "type": ["integer", "null"] },
+        "started_at_utc": { "$ref": "#/definitions/utcDateTime" },
+        "ended_at_utc": { "$ref": "#/definitions/utcDateTime" },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "command_digest": { "$ref": "#/definitions/digest" },
+        "output_digest": { "$ref": "#/definitions/digest" },
+        "reason": { "type": "string", "enum": ["stage-pass", "stage-exit-nonzero", "blocked-by-prior-stage", "stage-internal-failure", "cleanup-internal-failure"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "pass" } } },
+          "then": { "properties": { "exit_code": { "const": 0 } } }
+        },
+        {
+          "if": { "properties": { "status": { "const": "fail" } } },
+          "then": { "properties": { "exit_code": { "type": "integer", "not": { "const": 0 } } } }
+        },
+        {
+          "if": { "properties": { "status": { "const": "not_run" } } },
+          "then": { "properties": { "exit_code": { "type": "null" } } }
+        }
+      ]
+    }
+  }
+}

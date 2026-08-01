@@ -110,6 +110,7 @@ $expectedSchemaFiles = @(
     'ordinary-ci-receipt.schema.json',
     'protected-actions-overlay.schema.json',
     'model-eval-observation.schema.json',
+    'preset-lifecycle-report.schema.json',
     'protocol-config.schema.json',
     'requirement-contract.schema.json',
     'rollout-canary-authorization.schema.json',

@@ -184,6 +184,65 @@ function Invoke-InstalledReportPair($Module,[Collections.IDictionary]$Expected,[
     return Invoke-InstalledGatePaths -Module $Module -Expected $Expected -LeftPath $leftPath -LeftDigest (Get-FileDigest $leftPath) -RightPath $rightPath -RightDigest (Get-FileDigest $rightPath)
 }
 
+function New-PresetLifecycleReport([Collections.IDictionary]$Source,[ValidateSet('core','governed','full')][string]$Preset,[string]$Seed,[ValidateSet('formal','test-only','diagnostic-smoke')][string]$ProducerMode='formal') {
+    $timestamp=[DateTimeOffset]::UtcNow.ToString('o')
+    $stages=@('install','verify-after-install','update','verify-after-update','uninstall','cleanup' | ForEach-Object {
+        [ordered]@{stage=$_;status='pass';exit_code=0L;started_at_utc=$timestamp;ended_at_utc=$timestamp;duration_ms=0L;command_digest=(Get-TextDigest "Contract Fixture command $Seed $_");output_digest=(Get-TextDigest "Contract Fixture output $Seed $_");reason='stage-pass'}
+    })
+    $report=[ordered]@{
+        schema_version='harness-preset-lifecycle-report/v1';generated_at_utc=$timestamp;source_revision=[string]$Source.revision;source_dirty=$false;source_state_stable=$true
+        source=[ordered]@{
+            commit_tree_oid=[string]$Source.commit_tree_oid;object_format=[string]$Source.object_format;start=(Copy-Document $Source);end=(Copy-Document $Source)
+            input_digests=[ordered]@{
+                install_digest=Get-FileDigest (Join-Path $RepoRoot 'install.ps1');uninstall_digest=Get-FileDigest (Join-Path $RepoRoot 'uninstall.ps1')
+                verification_digest=Get-FileDigest (Join-Path $RepoRoot 'tests\verify-installation.ps1');producer_digest=Get-FileDigest (Join-Path $RepoRoot 'scripts\run-preset-lifecycle-qualification.ps1')
+                atomic_write_digest=Get-FileDigest (Join-Path $RepoRoot 'scripts\lib\Harness.AtomicWrite.psm1');path_digest=Get-FileDigest (Join-Path $RepoRoot 'scripts\lib\Harness.Path.psm1')
+            }
+        }
+        preset=$Preset;report_run_id=(Get-TextDigest "Contract Fixture report $Seed").Substring(7,32);producer_identity='preset-lifecycle-qualification/v1';producer_mode=$ProducerMode
+        execution=[ordered]@{sequence_contract='install-verify-update-verify-uninstall-cleanup/v1';effective_preset=$Preset;isolated_workspace=$true;isolated_profile=$true;workspace_identity_digest=(Get-TextDigest "Contract Fixture workspace $Seed");profile_identity_digest=(Get-TextDigest "Contract Fixture profile $Seed");duration_ms=1L;raw_output_persisted=$false;auth_bytes_persisted=$false;private_paths_persisted=$false}
+        stages=$stages
+        results=[ordered]@{all_required_stages_passed=$true;preset_consistent=$true;auth_unchanged=$true;unrelated_user_config_unchanged=$true;cleanup_no_residue=$true;installation_verified=$true;update_verified=$true}
+        status=$(if($ProducerMode-ceq'formal'){'pass'}else{'unavailable'});reason=$(if($ProducerMode-ceq'formal'){'all-required-stages-passed'}else{'non-formal-producer-mode'});report_digest=$null
+    }
+    Set-ReportDigest $report
+    return $report
+}
+
+function Set-PresetLifecycleFailure([Collections.IDictionary]$Report,[int]$StageIndex) {
+    $Report.stages[$StageIndex].status='fail';$Report.stages[$StageIndex].exit_code=86L;$Report.stages[$StageIndex].reason='stage-exit-nonzero'
+    if($StageIndex-eq0){foreach($index in 1,2,3){$Report.stages[$index].status='not_run';$Report.stages[$index].exit_code=$null;$Report.stages[$index].reason='blocked-by-prior-stage'}}
+    elseif($StageIndex-eq1){foreach($index in 2,3){$Report.stages[$index].status='not_run';$Report.stages[$index].exit_code=$null;$Report.stages[$index].reason='blocked-by-prior-stage'}}
+    elseif($StageIndex-eq2){$Report.stages[3].status='not_run';$Report.stages[3].exit_code=$null;$Report.stages[3].reason='blocked-by-prior-stage'}
+    $Report.results.all_required_stages_passed=$false
+    $Report.results.installation_verified=([string]$Report.stages[1].status-ceq'pass')
+    $Report.results.update_verified=([string]$Report.stages[3].status-ceq'pass')
+    $Report.results.cleanup_no_residue=([string]$Report.stages[5].status-ceq'pass')
+    if($StageIndex-le2){$Report.results.preset_consistent=$false}
+    $Report.status='fail';$Report.reason='lifecycle-stage-or-result-failure';Set-ReportDigest $Report
+}
+
+function Invoke-PresetLifecycleGatePaths($Module,[Collections.IDictionary]$Expected,[string[]]$Paths,[string[]]$Digests,[string[]]$ProtectedRoots=@()) {
+    $names=@('DP-G18-CORE-LIFECYCLE','DP-G19-GOVERNED-LIFECYCLE','DP-G20-FULL-LIFECYCLE')
+    $gates=[ordered]@{}
+    for($index=0;$index-lt3;$index++){$gates[$names[$index]]=[ordered]@{status='pass';evidence_contract='harness-preset-lifecycle-report/v1';artifact_path=$Paths[$index];evidence_digest=$Digests[$index];source_revision=[string]$Expected.revision;producer_identity='forged-caller'}}
+    try {
+        $value=& $Module {param($Root,$Source,$GateSet,$Protected)Assert-HarnessRolloutEvidenceSetProvenance -RepoRoot $Root -ExpectedSource $Source -Gates $GateSet -ProtectedRoots $Protected} $RepoRoot $Expected $gates $ProtectedRoots
+        return [pscustomobject]@{Success=[bool]$value;Reason='';Detail='';Gates=$gates}
+    } catch {
+        $detail=if($null-ne$_.Exception.InnerException){[string]$_.Exception.InnerException.Message}else{''}
+        return [pscustomobject]@{Success=$false;Reason=[string]$_.Exception.Message;Detail=$detail;Gates=$gates}
+    }
+}
+
+$script:lifecycleSetIndex=0
+function Invoke-PresetLifecycleReportSet($Module,[Collections.IDictionary]$Expected,[string]$Root,[Collections.IDictionary[]]$Reports) {
+    $script:lifecycleSetIndex++
+    $paths=[Collections.Generic.List[string]]::new();$digests=[Collections.Generic.List[string]]::new()
+    for($index=0;$index-lt3;$index++){$path=Join-Path $Root ("lifecycle-$($script:lifecycleSetIndex)-$index.json");Write-Document $path $Reports[$index] -Compress;$paths.Add($path);$digests.Add((Get-FileDigest $path))}
+    return Invoke-PresetLifecycleGatePaths -Module $Module -Expected $Expected -Paths @($paths) -Digests @($digests)
+}
+
 $modulePath = Join-Path $RepoRoot 'scripts\lib\Harness.RolloutEvidence.psm1'
 $qualificationPath = Join-Path $RepoRoot 'scripts\lib\Harness.Qualification.psm1'
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('thin-v2-rollout-evidence-' + [guid]::NewGuid().ToString('N'))
@@ -334,6 +393,155 @@ try {
     $installedSmokeB=New-InstalledHostReport -HostReport $hostReport -Seed smoke-b -ProducerMode diagnostic-smoke
     $installedSmokeResult=Invoke-InstalledReportPair -Module $module -Expected $cleanSource -Root $temp -Left $installedSmokeA -Right $installedSmokeB
     Check ($installedSmokeResult.Success -and @($installedSmokeResult.Gates.Values | Where-Object { [string]$_.status -ceq 'unavailable' }).Count -eq 2) 'diagnostic smoke remains unavailable' 'diagnostic smoke became formal evidence'
+
+    $lifecycleFormal=@(
+        (New-PresetLifecycleReport -Source $cleanSource -Preset core -Seed 'Contract Fixture formal core'),
+        (New-PresetLifecycleReport -Source $cleanSource -Preset governed -Seed 'Contract Fixture formal governed'),
+        (New-PresetLifecycleReport -Source $cleanSource -Preset full -Seed 'Contract Fixture formal full')
+    )
+    $lifecycleFormalResult=Invoke-PresetLifecycleReportSet -Module $module -Expected $cleanSource -Root $temp -Reports $lifecycleFormal
+    Check ($lifecycleFormalResult.Success -and @($lifecycleFormalResult.Gates.Values|Where-Object{[string]$_.status-ceq'pass'}).Count-eq3 -and @($lifecycleFormalResult.Gates.Values|Where-Object{[string]$_.producer_identity-ceq'preset-lifecycle-qualification/v1'}).Count-eq3) 'G18/G19/G20 adapt three distinct formal-shaped Contract Fixtures and override caller claims' "valid lifecycle Contract Fixtures were rejected: $($lifecycleFormalResult.Reason) / $($lifecycleFormalResult.Detail)"
+
+    foreach($mode in @('test-only','diagnostic-smoke')){
+        $reports=@(
+            (New-PresetLifecycleReport -Source $cleanSource -Preset core -Seed "Contract Fixture $mode core" -ProducerMode $mode),
+            (New-PresetLifecycleReport -Source $cleanSource -Preset governed -Seed "Contract Fixture $mode governed" -ProducerMode $mode),
+            (New-PresetLifecycleReport -Source $cleanSource -Preset full -Seed "Contract Fixture $mode full" -ProducerMode $mode)
+        )
+        $result=Invoke-PresetLifecycleReportSet -Module $module -Expected $cleanSource -Root $temp -Reports $reports
+        Check ($result.Success -and @($result.Gates.Values|Where-Object{[string]$_.status-ceq'unavailable'}).Count-eq3) "$mode Contract Fixtures remain unavailable despite caller status=pass" "$mode lifecycle evidence became formal pass"
+    }
+
+    $failureStages=@('install','verify-after-install','update','verify-after-update','uninstall','cleanup')
+    for($stageIndex=0;$stageIndex-lt$failureStages.Count;$stageIndex++){
+        $reports=@(
+            (New-PresetLifecycleReport -Source $cleanSource -Preset core -Seed "Contract Fixture failure $stageIndex core"),
+            (New-PresetLifecycleReport -Source $cleanSource -Preset governed -Seed "Contract Fixture failure $stageIndex governed"),
+            (New-PresetLifecycleReport -Source $cleanSource -Preset full -Seed "Contract Fixture failure $stageIndex full")
+        )
+        Set-PresetLifecycleFailure -Report $reports[0] -StageIndex $stageIndex
+        $result=Invoke-PresetLifecycleReportSet -Module $module -Expected $cleanSource -Root $temp -Reports $reports
+        Check ($result.Success -and [string]$result.Gates['DP-G18-CORE-LIFECYCLE'].status-ceq'fail') "lifecycle $($failureStages[$stageIndex]) failure is retained as Gate fail" "lifecycle $($failureStages[$stageIndex]) failure was rejected or promoted"
+    }
+
+    foreach($resultName in @('auth_unchanged','unrelated_user_config_unchanged','preset_consistent')){
+        $reports=@(
+            (New-PresetLifecycleReport -Source $cleanSource -Preset core -Seed "Contract Fixture result $resultName core"),
+            (New-PresetLifecycleReport -Source $cleanSource -Preset governed -Seed "Contract Fixture result $resultName governed"),
+            (New-PresetLifecycleReport -Source $cleanSource -Preset full -Seed "Contract Fixture result $resultName full")
+        )
+        $reports[0].results[$resultName]=$false;$reports[0].status='fail';$reports[0].reason='lifecycle-stage-or-result-failure';Set-ReportDigest $reports[0]
+        $result=Invoke-PresetLifecycleReportSet -Module $module -Expected $cleanSource -Root $temp -Reports $reports
+        Check ($result.Success -and [string]$result.Gates['DP-G18-CORE-LIFECYCLE'].status-ceq'fail') "lifecycle $resultName=false derives Gate fail" "lifecycle $resultName=false was rejected or promoted"
+    }
+
+    $script:lifecycleMutationIndex=0
+    $rejectLifecycleMutation={
+        param([string]$Name,[scriptblock]$Mutation)
+        $script:lifecycleMutationIndex++
+        $reports=@(
+            (New-PresetLifecycleReport -Source $cleanSource -Preset core -Seed "Contract Fixture mutation $($script:lifecycleMutationIndex) core"),
+            (New-PresetLifecycleReport -Source $cleanSource -Preset governed -Seed "Contract Fixture mutation $($script:lifecycleMutationIndex) governed"),
+            (New-PresetLifecycleReport -Source $cleanSource -Preset full -Seed "Contract Fixture mutation $($script:lifecycleMutationIndex) full")
+        )
+        & $Mutation $reports[0]
+        Set-ReportDigest $reports[0]
+        $result=Invoke-PresetLifecycleReportSet -Module $module -Expected $cleanSource -Root $temp -Reports $reports
+        Check (-not $result.Success) "lifecycle Adapter rejects $Name" "lifecycle Adapter accepted $Name"
+    }
+    & $rejectLifecycleMutation 'an unknown field' {param($r)$r['unexpected']='sentinel'}
+    & $rejectLifecycleMutation 'the wrong schema' {param($r)$r.schema_version='harness-preset-lifecycle-report/v2'}
+    & $rejectLifecycleMutation 'a stale source revision' {param($r)$r.source_revision='0'*40;$r.source.start.revision='0'*40;$r.source.end.revision='0'*40}
+    & $rejectLifecycleMutation 'the wrong tree OID' {param($r)$r.source.commit_tree_oid='0'*40;$r.source.start.commit_tree_oid='0'*40;$r.source.end.commit_tree_oid='0'*40}
+    & $rejectLifecycleMutation 'a dirty source' {param($r)$r.source_dirty=$true;$r.source.start.dirty=$true;$r.source.end.dirty=$true}
+    & $rejectLifecycleMutation 'an unstable source' {param($r)$r.source_state_stable=$false}
+    & $rejectLifecycleMutation 'the wrong producer identity' {param($r)$r.producer_identity='preset-lifecycle-fixture/v1'}
+    & $rejectLifecycleMutation 'the wrong producer mode' {param($r)$r.producer_mode='fixture'}
+    & $rejectLifecycleMutation 'the wrong preset' {param($r)$r.preset='full';$r.execution.effective_preset='full'}
+    & $rejectLifecycleMutation 'a missing Stage' {param($r)$r.stages=@($r.stages|Select-Object -First 5)}
+    & $rejectLifecycleMutation 'reordered Stages' {param($r)$swap=$r.stages[0];$r.stages[0]=$r.stages[1];$r.stages[1]=$swap}
+    & $rejectLifecycleMutation 'a duplicate Stage' {param($r)$r.stages[1]=(Copy-Document $r.stages[0])}
+    & $rejectLifecycleMutation 'pass with a nonzero Exit Code' {param($r)$r.stages[0].exit_code=9L}
+    & $rejectLifecycleMutation 'fail with a zero Exit Code' {param($r)$r.stages[0].status='fail';$r.stages[0].exit_code=0L;$r.status='fail';$r.reason='lifecycle-stage-or-result-failure';$r.results.all_required_stages_passed=$false;$r.results.preset_consistent=$false}
+    & $rejectLifecycleMutation 'not_run presented as pass' {param($r)$r.stages[1].status='not_run';$r.stages[1].exit_code=$null}
+    & $rejectLifecycleMutation 'a stale Producer input digest' {param($r)$r.source.input_digests.producer_digest='sha256:'+('0'*64)}
+    & $rejectLifecycleMutation 'credential content' {param($r)$r.reason='authorization: bearer Contract Fixture secret'}
+    & $rejectLifecycleMutation 'a private absolute path' {param($r)$r.reason='C:\Users\private\Contract Fixture.json'}
+    & $rejectLifecycleMutation 'raw log content' {param($r)$r.reason='raw log: Contract Fixture output'}
+
+    $sameId=@(
+        (New-PresetLifecycleReport -Source $cleanSource -Preset core -Seed 'Contract Fixture same id core'),
+        (New-PresetLifecycleReport -Source $cleanSource -Preset governed -Seed 'Contract Fixture same id governed'),
+        (New-PresetLifecycleReport -Source $cleanSource -Preset full -Seed 'Contract Fixture same id full')
+    );$sameId[1].report_run_id=$sameId[0].report_run_id;Set-ReportDigest $sameId[1]
+    Check (-not (Invoke-PresetLifecycleReportSet -Module $module -Expected $cleanSource -Root $temp -Reports $sameId).Success) 'lifecycle Gate Set rejects duplicate report_run_id' 'lifecycle Gate Set accepted duplicate report_run_id'
+    $sameWorkspace=@(
+        (New-PresetLifecycleReport -Source $cleanSource -Preset core -Seed 'Contract Fixture same workspace core'),
+        (New-PresetLifecycleReport -Source $cleanSource -Preset governed -Seed 'Contract Fixture same workspace governed'),
+        (New-PresetLifecycleReport -Source $cleanSource -Preset full -Seed 'Contract Fixture same workspace full')
+    );$sameWorkspace[1].execution.workspace_identity_digest=$sameWorkspace[0].execution.workspace_identity_digest;Set-ReportDigest $sameWorkspace[1]
+    Check (-not (Invoke-PresetLifecycleReportSet -Module $module -Expected $cleanSource -Root $temp -Reports $sameWorkspace).Success) 'lifecycle Gate Set rejects duplicate Workspace identity' 'lifecycle Gate Set accepted duplicate Workspace identity'
+    $sameProfile=@(
+        (New-PresetLifecycleReport -Source $cleanSource -Preset core -Seed 'Contract Fixture same profile core'),
+        (New-PresetLifecycleReport -Source $cleanSource -Preset governed -Seed 'Contract Fixture same profile governed'),
+        (New-PresetLifecycleReport -Source $cleanSource -Preset full -Seed 'Contract Fixture same profile full')
+    );$sameProfile[1].execution.profile_identity_digest=$sameProfile[0].execution.profile_identity_digest;Set-ReportDigest $sameProfile[1]
+    Check (-not (Invoke-PresetLifecycleReportSet -Module $module -Expected $cleanSource -Root $temp -Reports $sameProfile).Success) 'lifecycle Gate Set rejects duplicate Profile identity' 'lifecycle Gate Set accepted duplicate Profile identity'
+    $fullAsGoverned=@(
+        (New-PresetLifecycleReport -Source $cleanSource -Preset core -Seed 'Contract Fixture full substitute core'),
+        (New-PresetLifecycleReport -Source $cleanSource -Preset full -Seed 'Contract Fixture full substitute governed'),
+        (New-PresetLifecycleReport -Source $cleanSource -Preset full -Seed 'Contract Fixture full substitute full')
+    )
+    Check (-not (Invoke-PresetLifecycleReportSet -Module $module -Expected $cleanSource -Root $temp -Reports $fullAsGoverned).Success) 'Full Contract Fixture cannot substitute for Governed' 'Full Contract Fixture substituted for Governed'
+
+    $lifecycleGoodPaths=[Collections.Generic.List[string]]::new();$lifecycleGoodDigests=[Collections.Generic.List[string]]::new()
+    for($index=0;$index-lt3;$index++){$path=Join-Path $temp "lifecycle-good-$index.json";Write-Document $path $lifecycleFormal[$index] -Compress;$lifecycleGoodPaths.Add($path);$lifecycleGoodDigests.Add((Get-FileDigest $path))}
+    $missingLifecycle=Join-Path $temp 'missing-lifecycle.json'
+    $pathResult=Invoke-PresetLifecycleGatePaths -Module $module -Expected $cleanSource -Paths @($missingLifecycle,$lifecycleGoodPaths[1],$lifecycleGoodPaths[2]) -Digests @(('sha256:'+('0'*64)),$lifecycleGoodDigests[1],$lifecycleGoodDigests[2])
+    Check (-not $pathResult.Success) 'lifecycle Adapter rejects a missing Artifact' 'lifecycle Adapter accepted a missing Artifact'
+    $pathResult=Invoke-PresetLifecycleGatePaths -Module $module -Expected $cleanSource -Paths @('relative-lifecycle.json',$lifecycleGoodPaths[1],$lifecycleGoodPaths[2]) -Digests @(('sha256:'+('0'*64)),$lifecycleGoodDigests[1],$lifecycleGoodDigests[2])
+    Check (-not $pathResult.Success) 'lifecycle Adapter rejects a relative Artifact path' 'lifecycle Adapter accepted a relative Artifact path'
+
+    $script:lifecycleBadPathIndex=0
+    $rejectLifecycleBytes={
+        param([string]$Name,[byte[]]$Bytes)
+        $script:lifecycleBadPathIndex++
+        $path=Join-Path $temp "lifecycle-bad-bytes-$($script:lifecycleBadPathIndex).json";[IO.File]::WriteAllBytes($path,$Bytes)
+        $result=Invoke-PresetLifecycleGatePaths -Module $module -Expected $cleanSource -Paths @($path,$lifecycleGoodPaths[1],$lifecycleGoodPaths[2]) -Digests @((Get-FileDigest $path),$lifecycleGoodDigests[1],$lifecycleGoodDigests[2])
+        Check (-not $result.Success) "lifecycle Adapter rejects $Name" "lifecycle Adapter accepted $Name"
+    }
+    & $rejectLifecycleBytes 'malformed JSON' ([Text.UTF8Encoding]::new($false).GetBytes('{'))
+    & $rejectLifecycleBytes 'a UTF-8 BOM' ([Text.UTF8Encoding]::new($true).GetBytes('{}'))
+    & $rejectLifecycleBytes 'duplicate JSON keys' ([Text.UTF8Encoding]::new($false).GetBytes('{"schema_version":"one","schema_version":"two"}'))
+    & $rejectLifecycleBytes 'an oversized Artifact' ([byte[]]::new((1MB)+1))
+    $pathResult=Invoke-PresetLifecycleGatePaths -Module $module -Expected $cleanSource -Paths @($lifecycleGoodPaths) -Digests @(('sha256:'+('0'*64)),$lifecycleGoodDigests[1],$lifecycleGoodDigests[2])
+    Check (-not $pathResult.Success) 'lifecycle Adapter rejects a raw digest mismatch' 'lifecycle Adapter accepted a raw digest mismatch'
+    $digestMismatch=Copy-Document $lifecycleFormal[0];$digestMismatch.report_digest='sha256:'+('0'*64);$digestMismatchPath=Join-Path $temp 'lifecycle-report-digest-mismatch.json';Write-Document $digestMismatchPath $digestMismatch -Compress
+    $pathResult=Invoke-PresetLifecycleGatePaths -Module $module -Expected $cleanSource -Paths @($digestMismatchPath,$lifecycleGoodPaths[1],$lifecycleGoodPaths[2]) -Digests @((Get-FileDigest $digestMismatchPath),$lifecycleGoodDigests[1],$lifecycleGoodDigests[2])
+    Check (-not $pathResult.Success) 'lifecycle Adapter rejects report_digest mismatch' 'lifecycle Adapter accepted report_digest mismatch'
+
+    $sharedPaths=@($lifecycleGoodPaths[0],$lifecycleGoodPaths[0],$lifecycleGoodPaths[0]);$sharedDigests=@($lifecycleGoodDigests[0],$lifecycleGoodDigests[0],$lifecycleGoodDigests[0])
+    Check (-not (Invoke-PresetLifecycleGatePaths -Module $module -Expected $cleanSource -Paths $sharedPaths -Digests $sharedDigests).Success) 'lifecycle Gate Set rejects one Artifact reused by multiple Gates' 'lifecycle Gate Set accepted one reused Artifact'
+    $twoGateSet=[ordered]@{}
+    foreach($name in @('DP-G18-CORE-LIFECYCLE','DP-G19-GOVERNED-LIFECYCLE')){$index=if($name-like'*G18*'){0}else{1};$twoGateSet[$name]=[ordered]@{status='pass';evidence_contract='harness-preset-lifecycle-report/v1';artifact_path=$lifecycleGoodPaths[$index];evidence_digest=$lifecycleGoodDigests[$index];source_revision=[string]$cleanSource.revision;producer_identity='forged-caller'}}
+    $incompleteReason='';try{& $module {param($Root,$Source,$Gates)Assert-HarnessRolloutEvidenceSetProvenance -RepoRoot $Root -ExpectedSource $Source -Gates $Gates} $RepoRoot $cleanSource $twoGateSet}catch{$incompleteReason=[string]$_.Exception.Message}
+    Check ($incompleteReason-ceq'rollout-evidence-lifecycle-gate-set-incomplete') 'a partial lifecycle Gate Set fails closed' 'a partial lifecycle Gate Set was accepted'
+
+    $reparseTarget=Join-Path $temp 'lifecycle-reparse-target';[void][IO.Directory]::CreateDirectory($reparseTarget);$reparseSource=Join-Path $reparseTarget 'core.json';Write-Document $reparseSource $lifecycleFormal[0] -Compress
+    $reparseAlias=Join-Path $temp 'lifecycle-reparse-alias';[void](New-Item -ItemType Junction -Path $reparseAlias -Target $reparseTarget -ErrorAction Stop)
+    try{$pathResult=Invoke-PresetLifecycleGatePaths -Module $module -Expected $cleanSource -Paths @((Join-Path $reparseAlias 'core.json'),$lifecycleGoodPaths[1],$lifecycleGoodPaths[2]) -Digests @((Get-FileDigest $reparseSource),$lifecycleGoodDigests[1],$lifecycleGoodDigests[2]);Check (-not $pathResult.Success) 'lifecycle Adapter rejects a reparse path' 'lifecycle Adapter accepted a reparse path'}finally{Remove-Item -LiteralPath $reparseAlias -Force}
+    $hardlinkSource=Join-Path $temp 'lifecycle-hardlink-source.json';$hardlinkAlias=Join-Path $temp 'lifecycle-hardlink-alias.json';Write-Document $hardlinkSource $lifecycleFormal[0] -Compress
+    $hardlinkOutput=@(& fsutil hardlink create $hardlinkAlias $hardlinkSource 2>&1|ForEach-Object{[string]$_});if($LASTEXITCODE-ne0){throw "lifecycle hardlink fixture setup failed: $($hardlinkOutput-join' | ')"}
+    $pathResult=Invoke-PresetLifecycleGatePaths -Module $module -Expected $cleanSource -Paths @($hardlinkAlias,$lifecycleGoodPaths[1],$lifecycleGoodPaths[2]) -Digests @((Get-FileDigest $hardlinkAlias),$lifecycleGoodDigests[1],$lifecycleGoodDigests[2]);Check (-not $pathResult.Success) 'lifecycle Adapter rejects a multiply-linked Artifact' 'lifecycle Adapter accepted a multiply-linked Artifact'
+    $adsPath=Join-Path $temp 'lifecycle-ads.json';Write-Document $adsPath $lifecycleFormal[0] -Compress;Set-Content -LiteralPath $adsPath -Stream 'hidden-evidence' -Value 'sentinel' -Encoding utf8NoBOM
+    $pathResult=Invoke-PresetLifecycleGatePaths -Module $module -Expected $cleanSource -Paths @($adsPath,$lifecycleGoodPaths[1],$lifecycleGoodPaths[2]) -Digests @((Get-FileDigest $adsPath),$lifecycleGoodDigests[1],$lifecycleGoodDigests[2]);Check (-not $pathResult.Success) 'lifecycle Adapter rejects alternate data streams' 'lifecycle Adapter accepted alternate data streams'
+    $protectedLifecycleRoot=Join-Path $temp 'lifecycle-protected';[void][IO.Directory]::CreateDirectory($protectedLifecycleRoot);$protectedLifecyclePath=Join-Path $protectedLifecycleRoot 'core.json';Write-Document $protectedLifecyclePath $lifecycleFormal[0] -Compress
+    $pathResult=Invoke-PresetLifecycleGatePaths -Module $module -Expected $cleanSource -Paths @($protectedLifecyclePath,$lifecycleGoodPaths[1],$lifecycleGoodPaths[2]) -Digests @((Get-FileDigest $protectedLifecyclePath),$lifecycleGoodDigests[1],$lifecycleGoodDigests[2]) -ProtectedRoots @($protectedLifecycleRoot);Check (-not $pathResult.Success) 'lifecycle Adapter rejects Protected Root overlap' 'lifecycle Adapter accepted Protected Root overlap'
+
+    $unwiredPath=Join-Path $temp 'still-unwired.json';Write-Document $unwiredPath ([ordered]@{}) -Compress
+    $unwiredGate=[ordered]@{'DP-G00-ENGINEERING-BASELINE'=[ordered]@{status='pass';evidence_contract='fixture/v1';artifact_path=$unwiredPath;evidence_digest=(Get-FileDigest $unwiredPath);source_revision=[string]$cleanSource.revision;producer_identity='Contract Fixture producer'}}
+    $unwiredReason='';try{& $module {param($Root,$Source,$Gates)Assert-HarnessRolloutEvidenceSetProvenance -RepoRoot $Root -ExpectedSource $Source -Gates $Gates} $RepoRoot $cleanSource $unwiredGate}catch{$unwiredReason=[string]$_.Exception.Message}
+    Check ($unwiredReason-ceq'rollout-evidence-provenance-unwired-DP-G00-ENGINEERING-BASELINE') 'non-lifecycle Gate remains provenance-unwired and fail closed' 'an unrelated Gate was silently wired or promoted'
 
     $script:installedMutationIndex=0
     $rejectInstalledMutation = {
