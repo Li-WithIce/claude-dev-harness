@@ -117,7 +117,7 @@ try {
     $sourceAfter=Get-HarnessReleaseSourceState -RepoRoot $RepoRoot;$protectedAfter=Get-FileSnapshot @($protectedFiles)
     Check (Test-SourceSame $sourceBefore $sourceAfter) 'all producer tests preserve repository Source state' 'producer tests changed repository Source state'
     Check (Test-SnapshotEqual $protectedBefore $protectedAfter) 'all producer tests preserve main Auth and user configuration bytes' 'producer tests changed main Auth or user configuration bytes'
-    $runtimeFiles=@('scripts\lib\Harness.Protocol.psm1','scripts\lib\Harness.RuntimeDefault.psm1','.assistant\entry\task.ps1')
+    $runtimeFiles=@('scripts\lib\Harness.Protocol.psm1','scripts\lib\Harness.RuntimeDefault.psm1','scripts\harness-status.ps1')
     Check (@($runtimeFiles|Where-Object{(Get-Content -LiteralPath (Join-Path $RepoRoot $_) -Raw -Encoding utf8)-match'preset-lifecycle-report'}).Count-eq0) 'Runtime Core, status entry, and Runtime Default do not read lifecycle evidence' 'Runtime Core or status started reading lifecycle evidence'
 } finally {
     Remove-Module Harness.RolloutEvidence,Harness.Protocol -ErrorAction Ignore
