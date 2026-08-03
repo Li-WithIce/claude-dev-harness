@@ -395,7 +395,7 @@ pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite core -
 - `core`：跑 `git diff --check`、v1/v2 核心协议、Requirement/route/TaskState/Evidence/Approval/兼容迁移、行为 eval、CI 路由、artifact/runtime/install 合同与基础 workflow/skill/tool checks；Memory、Team、md-html、Codex adapter 和 Provider 重型验证由 changed optional 或 `all` 执行。
 - `all`：跑 `git diff --check` 加除 `verify-installation.ps1` 外所有 `tests/verify-*.ps1`；需要安装验证时额外传 `-WorkspaceRoot`。
 
-`-CoreGroup` 只允许与 `-Suite core` 一起使用，默认值 `all` 保持 43 个 core 脚本及其顺序；五个可单独执行的分组依次为 `entry-lifecycle`（14）、`evaluation-release`（9）、`install-evidence`（2）、`governance-approval`（3）和 `harness-contracts`（15）。从 Windows PowerShell 5.1 进入时，该参数也会透明转交给 PowerShell 7 runner。
+`-CoreGroup` 只允许与 `-Suite core` 一起使用，默认值 `all` 保持 44 个 core 脚本及其顺序；五个可单独执行的分组依次为 `entry-lifecycle`（14）、`evaluation-release`（9）、`install-evidence`（3）、`governance-approval`（3）和 `harness-contracts`（15）。从 Windows PowerShell 5.1 进入时，该参数也会透明转交给 PowerShell 7 runner。
 
 GitHub Actions 的普通 PR 路径由五路 `pr-core-checks` matrix、`changed-optional` 和最终 core 安装回滚组成。所有普通 PR job 都 checkout 精确 PR HEAD，并分别上传一个 `thin-harness-ordinary-ci-receipt/v1` 单文件 artifact；receipt 只含 PR/run、base/head/checkout SHA、固定 check identity、outcome 与 UTC 时间，不含 prompt、credential、raw trace/log 或私人绝对路径。最终 `pr-core` 只有在五个分组精确为 `success` 时才继续；`pr-core-checks` 的每个 matrix leg 与最终 `pr-core` job 上限均为 45 分钟，`changed-optional` 上限为 30 分钟。其他 CI 维护合同见 [`docs/release/default-promotion-gates.md`](docs/release/default-promotion-gates.md)。
 

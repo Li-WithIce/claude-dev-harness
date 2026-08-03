@@ -243,6 +243,27 @@ function Invoke-PresetLifecycleReportSet($Module,[Collections.IDictionary]$Expec
     return Invoke-PresetLifecycleGatePaths -Module $Module -Expected $Expected -Paths @($paths) -Digests @($digests)
 }
 
+function Invoke-PortableGateSet($Module,[Collections.IDictionary]$Expected,[Collections.IDictionary]$Gates,[string[]]$ProtectedRoots=@()) {
+    try {
+        $value=& $Module {param($Root,$Source,$GateSet,$Protected)Assert-HarnessRolloutEvidenceSetProvenance -RepoRoot $Root -ExpectedSource $Source -Gates $GateSet -ProtectedRoots $Protected} $RepoRoot $Expected $Gates $ProtectedRoots
+        return [pscustomobject]@{Success=[bool]$value;Reason='';Detail='';Gates=$Gates}
+    } catch {
+        $detail=if($null-ne$_.Exception.InnerException){[string]$_.Exception.InnerException.Message}else{''}
+        return [pscustomobject]@{Success=$false;Reason=[string]$_.Exception.Message;Detail=$detail;Gates=$Gates}
+    }
+}
+
+function New-ModelPortableGate([Collections.IDictionary]$Expected,[string]$Path,[string]$Digest) {
+    return [ordered]@{'DP-G01-MODEL40'=[ordered]@{status='pass';evidence_contract='harness-model-eval-report/v2';artifact_path=$Path;evidence_digest=$Digest;source_revision=[string]$Expected.revision;producer_identity='forged-caller'}}
+}
+
+function New-CognitivePortableGateSet([Collections.IDictionary]$Expected,[string[]]$Paths,[string[]]$Digests) {
+    $names=@('DP-G02-COGNITIVE-HOST-3X3','DP-G05-V2-BARE-1.25','DP-G06-REQUEST-SEND-REDUCTION')
+    $gates=[ordered]@{}
+    for($index=0;$index-lt3;$index++){$gates[$names[$index]]=[ordered]@{status='pass';evidence_contract='harness-host-benchmark-report/v2';artifact_path=$Paths[$index];evidence_digest=$Digests[$index];source_revision=[string]$Expected.revision;producer_identity='forged-caller'}}
+    return $gates
+}
+
 $modulePath = Join-Path $RepoRoot 'scripts\lib\Harness.RolloutEvidence.psm1'
 $qualificationPath = Join-Path $RepoRoot 'scripts\lib\Harness.Qualification.psm1'
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('thin-v2-rollout-evidence-' + [guid]::NewGuid().ToString('N'))
@@ -355,6 +376,90 @@ try {
     Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath $path -ExpectedSource $cleanSource).status -ceq 'unavailable') 'model invocation unavailability remains unavailable' 'model invocation unavailability was misclassified'
     Check ([string](Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $RepoRoot -ReportPath (Join-Path $temp 'missing.json') -ExpectedSource $cleanSource).status -ceq 'unavailable') 'missing model report remains unavailable' 'missing model report was not unavailable'
 
+    $modelPortableGates=New-ModelPortableGate -Expected $cleanSource -Path $modelPath -Digest (Get-FileDigest $modelPath)
+    $modelPortableResult=Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $modelPortableGates
+    Check ($modelPortableResult.Success -and [string]$modelPortableGates['DP-G01-MODEL40'].status-ceq'pass' -and [string]$modelPortableGates['DP-G01-MODEL40'].producer_identity-ceq'model-eval/v2') 'G01 derives pass and fixed Model v2 producer identity from a strict Model40 Artifact' "G01 did not adapt strict Model40 evidence: $($modelPortableResult.Reason) / $($modelPortableResult.Detail)"
+
+    $modelFail=Copy-Document $modelReport;$modelFail.cases[0].status='fail';$modelFail.cases[0].failures=@('fixture-evaluation-failure');$modelFail.cases[0].observed=$null;$modelFail.cases[0].telemetry=$null
+    $modelFail.metrics.passed=39;$modelFail.metrics.failed=1;$modelFail.metrics.model_turns=39;$modelFail.metrics.input_tokens=39;$modelFail.metrics.output_tokens=39;$modelFail.metrics.token_observations=39;$modelFail.status='fail';$modelFail.hard_gate_passed=$false;Set-ReportDigest $modelFail
+    $modelFailPath=Join-Path $temp 'model-portable-fail.json';Write-Document $modelFailPath $modelFail -Compress
+    $modelFailGates=New-ModelPortableGate -Expected $cleanSource -Path $modelFailPath -Digest (Get-FileDigest $modelFailPath)
+    $modelFailResult=Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $modelFailGates
+    Check ($modelFailResult.Success -and [string]$modelFailGates['DP-G01-MODEL40'].status-ceq'fail' -and [string]$modelFailGates['DP-G01-MODEL40'].producer_identity-ceq'model-eval/v2') 'G01 overwrites caller pass and forged identity with strict Model failure facts' 'G01 trusted caller Model status or producer identity'
+
+    $modelUnavailable=Copy-Document $modelReport;$modelUnavailable.cases[0].status='unavailable';$modelUnavailable.cases[0].failures=@('fixture-evaluation-unavailable');$modelUnavailable.cases[0].observed=$null;$modelUnavailable.cases[0].telemetry=$null
+    $modelUnavailable.metrics.passed=39;$modelUnavailable.metrics.unavailable=1;$modelUnavailable.metrics.model_turns=39;$modelUnavailable.metrics.input_tokens=39;$modelUnavailable.metrics.output_tokens=39;$modelUnavailable.metrics.token_observations=39;$modelUnavailable.status='unavailable';$modelUnavailable.hard_gate_passed=$false;Set-ReportDigest $modelUnavailable
+    $modelUnavailablePath=Join-Path $temp 'model-portable-unavailable.json';Write-Document $modelUnavailablePath $modelUnavailable -Compress
+    $modelUnavailableGates=New-ModelPortableGate -Expected $cleanSource -Path $modelUnavailablePath -Digest (Get-FileDigest $modelUnavailablePath)
+    $modelUnavailableResult=Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $modelUnavailableGates
+    Check ($modelUnavailableResult.Success -and [string]$modelUnavailableGates['DP-G01-MODEL40'].status-ceq'unavailable') 'G01 preserves strictly valid Model unavailability without promoting it' 'G01 promoted or rejected valid Model unavailability'
+
+    $script:modelPortableMutationIndex=0
+    $rejectModelPortableMutation={param([string]$Name,[scriptblock]$Mutation)
+        $script:modelPortableMutationIndex++;$document=Copy-Document $modelReport;& $Mutation $document;Set-ReportDigest $document
+        $mutationPath=Join-Path $temp ("model-portable-mutation-$($script:modelPortableMutationIndex).json");Write-Document $mutationPath $document -Compress
+        $result=Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates (New-ModelPortableGate -Expected $cleanSource -Path $mutationPath -Digest (Get-FileDigest $mutationPath))
+        Check (-not $result.Success) "G01 Adapter rejects $Name" "G01 Adapter accepted $Name"
+    }
+    & $rejectModelPortableMutation 'a wrong schema' {param($d)$d.schema_version='harness-model-eval-report/v1'}
+    & $rejectModelPortableMutation '39 sessions' {param($d)$d.cases=@($d.cases|Select-Object -First 39);$d.metrics.total=39;$d.metrics.passed=39}
+    & $rejectModelPortableMutation 'a duplicate Case and Variant' {param($d)$d.cases[1].case_id=$d.cases[0].case_id;$d.cases[1].variant=$d.cases[0].variant;$d.cases[1].paraphrase_digest=$d.cases[0].paraphrase_digest}
+    & $rejectModelPortableMutation 'a wrong paraphrase digest' {param($d)$d.cases[0].paraphrase_digest='sha256:'+('a'*64)}
+    & $rejectModelPortableMutation 'the wrong model' {param($d)$d.execution.model='gpt-5.6-terra'}
+    & $rejectModelPortableMutation 'the wrong reasoning effort' {param($d)$d.execution.reasoning='high'}
+    & $rejectModelPortableMutation 'the wrong Codex CLI version' {param($d)$d.execution.expected_codex_cli_version='0.144.3'}
+    & $rejectModelPortableMutation 'a missing per-session Codex version' {param($d)[void]$d.cases[0].telemetry.Remove('codex_cli_version')}
+    & $rejectModelPortableMutation 'tool use' {param($d)$d.cases[0].telemetry.tool_calls.command=1;$d.metrics.tool_calls=1}
+    & $rejectModelPortableMutation 'a lifecycle skill load' {param($d)$d.cases[0].telemetry.lifecycle_skill_loads=1;$d.metrics.lifecycle_skill_loads=1}
+    & $rejectModelPortableMutation 'multiple model turns' {param($d)$d.cases[0].telemetry.model_turns=2;$d.metrics.model_turns=41}
+    & $rejectModelPortableMutation 'multiple agent messages' {param($d)$d.cases[0].telemetry.agent_messages=2}
+    & $rejectModelPortableMutation 'a workspace write' {param($d)$d.cases[0].workspace_write_count=1;$d.metrics.read_only_write=1}
+    $askCaseIndex=2*[array]::IndexOf(@($dataset.cases|ForEach-Object{[string]$_.id}),'ambiguous-export-asks')
+    & $rejectModelPortableMutation 'a missed Ask' {param($d)$d.cases[$askCaseIndex].observed.ask_required=$false}
+    $directCaseIndex=2*[array]::IndexOf(@($dataset.cases|ForEach-Object{[string]$_.id}),[string]@($dataset.cases|Where-Object{-not[bool]$_.expected.ask_required}|Select-Object -First 1).id)
+    & $rejectModelPortableMutation 'an unnecessary Ask' {param($d)$d.cases[$directCaseIndex].observed.ask_required=$true}
+    & $rejectModelPortableMutation 'a false pass' {param($d)$d.metrics.false_pass=1}
+    & $rejectModelPortableMutation 'unauthorized scope expansion' {param($d)$d.cases[0].observed.unauthorized_scope_change=$true;$d.metrics.scope_expansion=1}
+    & $rejectModelPortableMutation 'retained failed observation payload' {param($d)$d.cases[0].status='fail';$d.cases[0].failures=@('fixture-failure');$d.metrics.passed=39;$d.metrics.failed=1;$d.status='fail';$d.hard_gate_passed=$false}
+    & $rejectModelPortableMutation 'hard gate and status inconsistency' {param($d)$d.hard_gate_passed=$false}
+
+    $modelBadDigest=Copy-Document $modelReport;$modelBadDigest.report_digest='sha256:'+('0'*64);$modelBadDigestPath=Join-Path $temp 'model-portable-report-digest.json';Write-Document $modelBadDigestPath $modelBadDigest -Compress
+    Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates (New-ModelPortableGate -Expected $cleanSource -Path $modelBadDigestPath -Digest (Get-FileDigest $modelBadDigestPath))).Success) 'G01 Adapter rejects report_digest mismatch' 'G01 Adapter accepted report_digest mismatch'
+
+    foreach($entry in @(
+        [ordered]@{name='credential content';value=('access'+'_token: [redacted]')},
+        [ordered]@{name='a private absolute path';value=([string][char]67+':'+[char]92+'private'+[char]92+'artifact')},
+        [ordered]@{name='raw trace content';value=('raw'+' trace: [redacted]')},
+        [ordered]@{name='raw log content';value=('raw'+' log: [redacted]')},
+        [ordered]@{name='prompt content';value=('prompt'+': [redacted]')},
+        [ordered]@{name='raw command content';value=('raw'+' command: [redacted]')}
+    )){& $rejectModelPortableMutation ([string]$entry.name) {param($d)$d.execution.codex_home=[string]$entry.value}.GetNewClosure()}
+
+    & $rejectModelPortableMutation 'a wrong source tree OID' {param($d)$d.source.commit_tree_oid='0'*40}
+    & $rejectModelPortableMutation 'a dirty source' {param($d)$d.source_dirty=$true}
+    & $rejectModelPortableMutation 'an unstable source' {param($d)$d.source_state_stable=$false}
+
+    $genericRawCases=@(
+        [ordered]@{name='malformed JSON';bytes=[Text.UTF8Encoding]::new($false).GetBytes('{')},
+        [ordered]@{name='duplicate JSON keys';bytes=[Text.UTF8Encoding]::new($false).GetBytes('{"x":1,"x":2}')},
+        [ordered]@{name='a JSON comment';bytes=[Text.UTF8Encoding]::new($false).GetBytes('{"x":1/*comment*/}')},
+        [ordered]@{name='a trailing comma';bytes=[Text.UTF8Encoding]::new($false).GetBytes('{"x":1,}')},
+        [ordered]@{name='a non-object JSON root';bytes=[Text.UTF8Encoding]::new($false).GetBytes('[]')},
+        [ordered]@{name='a UTF-8 BOM';bytes=([byte[]](0xEF,0xBB,0xBF)+[Text.UTF8Encoding]::new($false).GetBytes('{}'))}
+    )
+    $genericIndex=0;foreach($entry in $genericRawCases){$genericIndex++;$genericPath=Join-Path $temp "model-portable-raw-$genericIndex.json";[IO.File]::WriteAllBytes($genericPath,[byte[]]$entry.bytes);$result=Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates (New-ModelPortableGate -Expected $cleanSource -Path $genericPath -Digest (Get-FileDigest $genericPath));Check (-not $result.Success) "portable Artifact reader rejects $($entry.name)" "portable Artifact reader accepted $($entry.name)"}
+    $missingPortablePath=Join-Path $temp 'model-portable-missing.json';$missingResult=Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates (New-ModelPortableGate -Expected $cleanSource -Path $missingPortablePath -Digest ('sha256:'+('0'*64)))
+    Check (-not $missingResult.Success) 'portable Artifact reader rejects a missing file' 'portable Artifact reader accepted a missing file'
+    $relativeResult=Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates (New-ModelPortableGate -Expected $cleanSource -Path 'model-relative.json' -Digest (Get-FileDigest $modelPath))
+    Check (-not $relativeResult.Success) 'portable Artifact reader rejects a relative path' 'portable Artifact reader accepted a relative path'
+    $rawMismatchGates=New-ModelPortableGate -Expected $cleanSource -Path $modelPath -Digest ('sha256:'+('0'*64));Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $rawMismatchGates).Success) 'portable Artifact reader rejects a raw digest mismatch' 'portable Artifact reader accepted a raw digest mismatch'
+    $staleGate=New-ModelPortableGate -Expected $cleanSource -Path $modelPath -Digest (Get-FileDigest $modelPath);$staleGate['DP-G01-MODEL40'].source_revision='0'*40;Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $staleGate).Success) 'portable Adapter rejects a stale Gate source revision' 'portable Adapter accepted a stale Gate source revision'
+    $oversizedPath=Join-Path $temp 'model-portable-oversized.json';[IO.File]::WriteAllBytes($oversizedPath,[byte[]]::new(4MB+1));Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates (New-ModelPortableGate -Expected $cleanSource -Path $oversizedPath -Digest (Get-FileDigest $oversizedPath))).Success) 'portable Artifact reader rejects an oversized Model Artifact' 'portable Artifact reader accepted an oversized Model Artifact'
+    $protectedRoot=Join-Path $temp 'portable-protected';[void][IO.Directory]::CreateDirectory($protectedRoot);$protectedPath=Join-Path $protectedRoot 'model.json';Write-Document $protectedPath $modelReport -Compress;Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates (New-ModelPortableGate -Expected $cleanSource -Path $protectedPath -Digest (Get-FileDigest $protectedPath)) -ProtectedRoots @($protectedRoot)).Success) 'portable Artifact reader rejects Protected Root overlap' 'portable Artifact reader accepted Protected Root overlap'
+    $hardlinkSource=Join-Path $temp 'model-portable-hardlink-source.json';$hardlinkAlias=Join-Path $temp 'model-portable-hardlink-alias.json';Write-Document $hardlinkSource $modelReport -Compress;$hardlinkOutput=@(& fsutil hardlink create $hardlinkAlias $hardlinkSource 2>&1|ForEach-Object{[string]$_});if($LASTEXITCODE-ne0){throw "model portable hardlink fixture setup failed: $($hardlinkOutput-join' | ')"};Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates (New-ModelPortableGate -Expected $cleanSource -Path $hardlinkAlias -Digest (Get-FileDigest $hardlinkAlias))).Success) 'portable Artifact reader rejects a multiply-linked file' 'portable Artifact reader accepted a multiply-linked file'
+    $adsPath=Join-Path $temp 'model-portable-ads.json';Write-Document $adsPath $modelReport -Compress;Set-Content -LiteralPath $adsPath -Stream 'hidden-evidence' -Value 'sentinel' -Encoding utf8NoBOM;Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates (New-ModelPortableGate -Expected $cleanSource -Path $adsPath -Digest (Get-FileDigest $adsPath))).Success) 'portable Artifact reader rejects alternate data streams' 'portable Artifact reader accepted alternate data streams'
+    $reparseTarget=Join-Path $temp 'model-portable-reparse-target';[void][IO.Directory]::CreateDirectory($reparseTarget);$reparseFile=Join-Path $reparseTarget 'model.json';Write-Document $reparseFile $modelReport -Compress;$reparseAlias=Join-Path $temp 'model-portable-reparse-alias';[void](New-Item -ItemType Junction -Path $reparseAlias -Target $reparseTarget -ErrorAction Stop);try{$aliasedPath=Join-Path $reparseAlias 'model.json';Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates (New-ModelPortableGate -Expected $cleanSource -Path $aliasedPath -Digest (Get-FileDigest $aliasedPath))).Success) 'portable Artifact reader rejects a reparse path' 'portable Artifact reader accepted a reparse path'}finally{Remove-Item -LiteralPath $reparseAlias -Force}
+
     $hostInputs = [ordered]@{
         runner_digest='scripts\run-host-benchmark.ps1';wrapper_digest='skills\codex\scripts\invoke_codex.ps1';observation_schema_digest='schemas\host-benchmark\observation.schema.json'
         otlp_collector_digest='scripts\receive-otlp-http.ps1';atomic_write_module_digest='scripts\lib\Harness.AtomicWrite.psm1';path_module_digest='scripts\lib\Harness.Path.psm1'
@@ -379,11 +484,89 @@ try {
     $hostGate = Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $RepoRoot -ReportPath $hostPath -ExpectedSource $cleanSource
     Check ([string]$hostGate.status -ceq 'pass') 'three independent clean host 3x3 groups are accepted' "clean host report was rejected: $($hostGate.reason)"
 
+    $hostDigest=Get-FileDigest $hostPath
+    $cognitiveGates=New-CognitivePortableGateSet -Expected $cleanSource -Paths @($hostPath,$hostPath,$hostPath) -Digests @($hostDigest,$hostDigest,$hostDigest)
+    $cognitiveResult=Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $cognitiveGates
+    Check ($cognitiveResult.Success -and @($cognitiveGates.Values|Where-Object{[string]$_.status-ceq'pass'}).Count-eq3 -and @($cognitiveGates.Values|Where-Object{[string]$_.producer_identity-ceq'host-benchmark-cognitive/v2'}).Count-eq3) 'one strict Cognitive Host 3x3 Artifact derives G02/G05/G06 pass and fixed producer identity' "Cognitive Portable Adapter rejected strict shared evidence: $($cognitiveResult.Reason) / $($cognitiveResult.Detail)"
+
+    $slowCognitive=Copy-Document $hostReport;$slowGroup=$slowCognitive.groups[0]
+    foreach($trial in @($slowGroup.protocols.v2.trials)){$duration=[double](200+(10*[long]$trial.trial)+[long]$slowGroup.group_index);$trial.total_duration_ms=$duration;$trial.sum_codex_process_duration_ms=$duration}
+    $slowGroup.protocols.v2.medians.total_duration_ms=[double]$slowGroup.protocols.v2.trials[1].total_duration_ms;$slowGroup.protocols.v2.medians.sum_codex_process_duration_ms=[double]$slowGroup.protocols.v2.trials[1].sum_codex_process_duration_ms
+    $slowGroup.performance.direct_latency.ratio=[math]::Round(([double]$slowGroup.protocols.v2.medians.total_duration_ms/[double]$slowGroup.protocols.bare.medians.total_duration_ms),4);$slowGroup.performance.direct_latency.status='fail';$slowGroup.performance.eligible=$false;$slowGroup.status='fail';Set-GroupDigest $slowGroup
+    $slowCognitive.performance.release_group_set.status='fail';$slowCognitive.performance.release_group_set.passed_groups=2L;$slowCognitive.performance.eligible=$false;$slowCognitive.status='fail';Set-ReportDigest $slowCognitive
+    $slowCognitivePath=Join-Path $temp 'cognitive-direct-fail.json';Write-Document $slowCognitivePath $slowCognitive -Compress;$slowCognitiveDigest=Get-FileDigest $slowCognitivePath
+    $slowCognitiveGates=New-CognitivePortableGateSet -Expected $cleanSource -Paths @($slowCognitivePath,$slowCognitivePath,$slowCognitivePath) -Digests @($slowCognitiveDigest,$slowCognitiveDigest,$slowCognitiveDigest)
+    $slowCognitiveResult=Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $slowCognitiveGates
+    Check ($slowCognitiveResult.Success -and [string]$slowCognitiveGates['DP-G02-COGNITIVE-HOST-3X3'].status-ceq'fail' -and [string]$slowCognitiveGates['DP-G05-V2-BARE-1.25'].status-ceq'fail' -and [string]$slowCognitiveGates['DP-G06-REQUEST-SEND-REDUCTION'].status-ceq'pass') 'G02/G05 derive a per-group ratio failure without altering G06' 'G05 did not independently derive the direct-latency result'
+
+    $sendCognitive=Copy-Document $hostReport;$sendGroup=$sendCognitive.groups[0]
+    foreach($trial in @($sendGroup.protocols.v2.trials)){$trial.successful_request_sends.value=6L;$trial.successful_request_sends.per_session_counts=@(6L)}
+    $sendGroup.protocols.v2.successful_request_sends.median=6.0;$sendGroup.protocols.v2.medians.successful_request_sends=6.0;$sendGroup.performance.successful_request_send_reduction.reduction=0.4;$sendGroup.performance.successful_request_send_reduction.status='fail';$sendGroup.performance.eligible=$false;$sendGroup.status='fail';Set-GroupDigest $sendGroup
+    $sendCognitive.performance.release_group_set.status='fail';$sendCognitive.performance.release_group_set.passed_groups=2L;$sendCognitive.performance.eligible=$false;$sendCognitive.status='fail';Set-ReportDigest $sendCognitive
+    $sendCognitivePath=Join-Path $temp 'cognitive-send-fail.json';Write-Document $sendCognitivePath $sendCognitive -Compress;$sendCognitiveDigest=Get-FileDigest $sendCognitivePath
+    $sendCognitiveGates=New-CognitivePortableGateSet -Expected $cleanSource -Paths @($sendCognitivePath,$sendCognitivePath,$sendCognitivePath) -Digests @($sendCognitiveDigest,$sendCognitiveDigest,$sendCognitiveDigest)
+    $sendCognitiveResult=Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $sendCognitiveGates
+    Check ($sendCognitiveResult.Success -and [string]$sendCognitiveGates['DP-G02-COGNITIVE-HOST-3X3'].status-ceq'fail' -and [string]$sendCognitiveGates['DP-G05-V2-BARE-1.25'].status-ceq'pass' -and [string]$sendCognitiveGates['DP-G06-REQUEST-SEND-REDUCTION'].status-ceq'fail') 'G02/G06 derive a per-group request-send failure without altering G05' 'G06 did not independently derive the request-send reduction result'
+
+    $unavailableCognitive=Copy-Document $hostReport;$unavailableGroup=$unavailableCognitive.groups[0]
+    foreach($trial in @($unavailableGroup.protocols.v2.trials)){$trial.successful_request_sends=[ordered]@{status='unavailable';value=$null;basis='codex-0.144.4-successful-websocket-send/v2';reason='fixture measurement unavailable'}}
+    $unavailableGroup.protocols.v2.status='unavailable';$unavailableGroup.protocols.v2.successful_request_sends=[ordered]@{status='unavailable';median=$null;basis='codex-0.144.4-successful-websocket-send/v2';reason='fixture measurement unavailable'};$unavailableGroup.protocols.v2.medians.successful_request_sends=$null
+    $unavailableGroup.performance.direct_latency.status='unavailable';$unavailableGroup.performance.direct_latency.ratio=$null;$unavailableGroup.performance.successful_request_send_reduction.status='unavailable';$unavailableGroup.performance.successful_request_send_reduction.reduction=$null;$unavailableGroup.performance.eligible=$false;$unavailableGroup.status='unavailable';Set-GroupDigest $unavailableGroup
+    $unavailableCognitive.performance.release_group_set.status='unavailable';$unavailableCognitive.performance.release_group_set.passed_groups=2L;$unavailableCognitive.performance.eligible=$false;$unavailableCognitive.status='unavailable';Set-ReportDigest $unavailableCognitive
+    $unavailableCognitivePath=Join-Path $temp 'cognitive-send-unavailable.json';Write-Document $unavailableCognitivePath $unavailableCognitive -Compress;$unavailableCognitiveDigest=Get-FileDigest $unavailableCognitivePath
+    $unavailableCognitiveGates=New-CognitivePortableGateSet -Expected $cleanSource -Paths @($unavailableCognitivePath,$unavailableCognitivePath,$unavailableCognitivePath) -Digests @($unavailableCognitiveDigest,$unavailableCognitiveDigest,$unavailableCognitiveDigest)
+    $unavailableCognitiveResult=Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $unavailableCognitiveGates
+    Check ($unavailableCognitiveResult.Success -and [string]$unavailableCognitiveGates['DP-G02-COGNITIVE-HOST-3X3'].status-ceq'unavailable' -and [string]$unavailableCognitiveGates['DP-G05-V2-BARE-1.25'].status-ceq'unavailable' -and [string]$unavailableCognitiveGates['DP-G06-REQUEST-SEND-REDUCTION'].status-ceq'unavailable') 'legal unavailable successful-send telemetry remains unavailable and does not become a Gate pass' 'Cognitive Adapter promoted or rejected legal request-send unavailability'
+
+    $script:cognitivePortableMutationIndex=0
+    $rejectCognitivePortableMutation={param([string]$Name,[scriptblock]$Mutation)
+        $script:cognitivePortableMutationIndex++;$document=Copy-Document $hostReport;& $Mutation $document;foreach($group in @($document.groups)){Set-GroupDigest $group};Set-ReportDigest $document
+        $mutationPath=Join-Path $temp ("cognitive-portable-mutation-$($script:cognitivePortableMutationIndex).json");Write-Document $mutationPath $document -Compress;$digest=Get-FileDigest $mutationPath
+        $result=Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates (New-CognitivePortableGateSet -Expected $cleanSource -Paths @($mutationPath,$mutationPath,$mutationPath) -Digests @($digest,$digest,$digest))
+        Check (-not $result.Success) "Cognitive Adapter rejects $Name" "Cognitive Adapter accepted $Name"
+    }
+    & $rejectCognitivePortableMutation 'a wrong schema' {param($d)$d.schema_version='harness-host-benchmark-report/v3'}
+    & $rejectCognitivePortableMutation 'a historical v1 report' {param($d)$d.schema_version='harness-host-benchmark-report/v1'}
+    & $rejectCognitivePortableMutation 'fewer than three Groups' {param($d)$d.groups=@($d.groups|Select-Object -First 2);$d.execution.groups=2L}
+    & $rejectCognitivePortableMutation 'fewer than three Trials' {param($d)$d.groups[0].protocols.v2.trials=@($d.groups[0].protocols.v2.trials|Select-Object -First 2)}
+    & $rejectCognitivePortableMutation 'a reused group_run_id' {param($d)$d.groups[1].group_run_id=$d.groups[0].group_run_id}
+    & $rejectCognitivePortableMutation 'a reused group_root_digest' {param($d)$d.groups[1].group_root_digest=$d.groups[0].group_root_digest}
+    & $rejectCognitivePortableMutation 'a reused trial_run_id' {param($d)$d.groups[1].protocols.v2.trials[0].trial_run_id=$d.groups[0].protocols.v2.trials[0].trial_run_id}
+    & $rejectCognitivePortableMutation 'a reused trial_root_digest' {param($d)$d.groups[1].protocols.v2.trials[0].trial_root_digest=$d.groups[0].protocols.v2.trials[0].trial_root_digest}
+    & $rejectCognitivePortableMutation 'a reused normalized Trial payload' {param($d)$id=$d.groups[1].protocols.v2.trials[0].trial_run_id;$root=$d.groups[1].protocols.v2.trials[0].trial_root_digest;$d.groups[1].protocols.v2.trials[0]=Copy-Document $d.groups[0].protocols.v2.trials[0];$d.groups[1].protocols.v2.trials[0].trial_run_id=$id;$d.groups[1].protocols.v2.trials[0].trial_root_digest=$root}
+    & $rejectCognitivePortableMutation 'the wrong model' {param($d)$d.groups[0].execution.model='gpt-5.6-terra'}
+    & $rejectCognitivePortableMutation 'the wrong reasoning effort' {param($d)$d.groups[0].execution.reasoning='high'}
+    & $rejectCognitivePortableMutation 'the wrong service version' {param($d)$d.groups[0].execution.expected_codex_service_version='0.144.3'}
+    & $rejectCognitivePortableMutation 'string-forged Group source and Trial fields' {param($d)$d.groups[0].source_state_stable='true';$d.groups[0].execution.trials_per_protocol='3';$d.groups[0].protocols.v2.trials[0].trial='1'}
+    & $rejectCognitivePortableMutation 'a dirty source' {param($d)$d.groups[0].source_dirty=$true}
+    & $rejectCognitivePortableMutation 'an unstable source' {param($d)$d.groups[0].source_state_stable=$false}
+    & $rejectCognitivePortableMutation 'a pooled median substitute' {param($d)$d.groups[0].protocols.v2.medians.total_duration_ms=999.0;$d.groups[0].performance.direct_latency.ratio=1.0}
+    & $rejectCognitivePortableMutation 'forged top-level eligibility' {param($d)$d.groups[0].status='unavailable';$d.groups[0].performance.eligible=$false;$d.performance.eligible=$true}
+    & $rejectCognitivePortableMutation 'a non-finite direct ratio' {param($d)$d.groups[0].performance.direct_latency.ratio='NaN'}
+    & $rejectCognitivePortableMutation 'a non-finite request reduction' {param($d)$d.groups[0].performance.successful_request_send_reduction.reduction='Infinity'}
+    & $rejectCognitivePortableMutation 'direct-ratio threshold drift' {param($d)$d.groups[0].performance.direct_latency.threshold=1.26}
+    & $rejectCognitivePortableMutation 'request-reduction threshold drift' {param($d)$d.groups[0].performance.successful_request_send_reduction.threshold=0.59}
+    & $rejectCognitivePortableMutation 'unavailable send evidence marked pass' {param($d)$d.groups[0].protocols.v2.trials[0].successful_request_sends=[ordered]@{status='unavailable';value=$null;basis='codex-0.144.4-successful-websocket-send/v2';reason='fixture unavailable'}}
+    & $rejectCognitivePortableMutation 'estimated sends' {param($d)$d.groups[0].protocols.v2.trials[0].successful_request_sends.status='estimated'}
+    & $rejectCognitivePortableMutation 'non-successful send counts' {param($d)$d.groups[0].protocols.v2.trials[0].successful_request_sends.basis='attempted-websocket-send/v1'}
+
+    foreach($name in @('DP-G02-COGNITIVE-HOST-3X3','DP-G05-V2-BARE-1.25','DP-G06-REQUEST-SEND-REDUCTION')){$partial=[ordered]@{};$partial[$name]=(New-CognitivePortableGateSet -Expected $cleanSource -Paths @($hostPath,$hostPath,$hostPath) -Digests @($hostDigest,$hostDigest,$hostDigest))[$name];$partialResult=Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $partial;Check (-not $partialResult.Success -and [string]$partialResult.Reason-ceq'rollout-evidence-cognitive-gate-set-incomplete') "Cognitive Gate Set rejects only $name" "Cognitive Gate Set accepted only $name"}
+    $differentPathGates=New-CognitivePortableGateSet -Expected $cleanSource -Paths @($hostPath,$slowCognitivePath,$sendCognitivePath) -Digests @($hostDigest,$slowCognitiveDigest,$sendCognitiveDigest);Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $differentPathGates).Success) 'Cognitive Gate Set rejects different Artifact paths' 'Cognitive Gate Set accepted different Artifact paths'
+    $copyPaths=@(1,2,3|ForEach-Object{$copyPath=Join-Path $temp "cognitive-byte-copy-$_.json";[IO.File]::WriteAllBytes($copyPath,[IO.File]::ReadAllBytes($hostPath));$copyPath});$copyGates=New-CognitivePortableGateSet -Expected $cleanSource -Paths $copyPaths -Digests @($hostDigest,$hostDigest,$hostDigest);Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $copyGates).Success) 'Cognitive Gate Set rejects byte-identical copied Artifacts with different physical identities' 'Cognitive Gate Set accepted byte-identical copied Artifacts'
+    $differentDigestGates=New-CognitivePortableGateSet -Expected $cleanSource -Paths @($hostPath,$hostPath,$hostPath) -Digests @($hostDigest,$hostDigest,('sha256:'+('0'*64)));Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $differentDigestGates).Success) 'Cognitive Gate Set rejects different raw digests' 'Cognitive Gate Set accepted different raw digests'
+    $differentRevisionGates=New-CognitivePortableGateSet -Expected $cleanSource -Paths @($hostPath,$hostPath,$hostPath) -Digests @($hostDigest,$hostDigest,$hostDigest);$differentRevisionGates['DP-G05-V2-BARE-1.25'].source_revision='0'*40;Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $differentRevisionGates).Success) 'Cognitive Gate Set rejects different source revisions' 'Cognitive Gate Set accepted different source revisions'
+    $differentContractGates=New-CognitivePortableGateSet -Expected $cleanSource -Paths @($hostPath,$hostPath,$hostPath) -Digests @($hostDigest,$hostDigest,$hostDigest);$differentContractGates['DP-G06-REQUEST-SEND-REDUCTION'].evidence_contract='harness-host-benchmark-report/v1';Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $differentContractGates).Success) 'Cognitive Gate Set rejects a different Evidence Contract' 'Cognitive Gate Set accepted a different Evidence Contract'
+    $hostAsModel=New-ModelPortableGate -Expected $cleanSource -Path $hostPath -Digest $hostDigest;Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $hostAsModel).Success) 'Cognitive Host Artifact cannot impersonate G01' 'Cognitive Host Artifact impersonated G01'
+    $modelAsHost=New-CognitivePortableGateSet -Expected $cleanSource -Paths @($modelPath,$modelPath,$modelPath) -Digests @((Get-FileDigest $modelPath),(Get-FileDigest $modelPath),(Get-FileDigest $modelPath));Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $modelAsHost).Success) 'Model Artifact cannot impersonate G02/G05/G06' 'Model Artifact impersonated Cognitive Host evidence'
+
     $installedFormalA=New-InstalledHostReport -HostReport $hostReport -Seed formal-a
     $installedFormalB=New-InstalledHostReport -HostReport $hostReport -Seed formal-b
     $installedFormalResult=Invoke-InstalledReportPair -Module $module -Expected $cleanSource -Root $temp -Left $installedFormalA -Right $installedFormalB
     Check ($installedFormalResult.Success -and [string]$installedFormalResult.Gates['DP-G03-INSTALLED-DESKTOP-HOST-3X3'].status -ceq 'pass' -and [string]$installedFormalResult.Gates['DP-G07-DISTINCT-INSTALLED-DESKTOP-GATE'].producer_identity -ceq 'host-benchmark-installed-desktop/v1') 'two distinct formal-shaped installed contracts are adapted from Artifact status and identity' "valid installed contracts were rejected: $($installedFormalResult.Reason) / $($installedFormalResult.Detail)"
     Check ([string]$installedFormalA.qualification.hook_trust -ceq 'manual' -and -not [bool]$installedFormalA.qualification.hook_observations_blocking -and $installedFormalResult.Success) 'manual Hook observations remain advisory and nonblocking' 'manual Hook observations were forged as machine facts or incorrectly made blocking'
+    $installedAsCognitivePath=Join-Path $temp ("installed-$($installedFormalA.report_run_id).json");$installedAsCognitiveDigest=Get-FileDigest $installedAsCognitivePath
+    $installedAsCognitive=New-CognitivePortableGateSet -Expected $cleanSource -Paths @($installedAsCognitivePath,$installedAsCognitivePath,$installedAsCognitivePath) -Digests @($installedAsCognitiveDigest,$installedAsCognitiveDigest,$installedAsCognitiveDigest)
+    Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $installedAsCognitive).Success) 'Installed Desktop Report cannot impersonate Cognitive Host evidence' 'Installed Desktop Report impersonated G02/G05/G06'
 
     $installedTestA=New-InstalledHostReport -HostReport $hostReport -Seed test-a -ProducerMode test-only
     $installedTestB=New-InstalledHostReport -HostReport $hostReport -Seed test-b -ProducerMode test-only
@@ -539,9 +722,11 @@ try {
     $pathResult=Invoke-PresetLifecycleGatePaths -Module $module -Expected $cleanSource -Paths @($protectedLifecyclePath,$lifecycleGoodPaths[1],$lifecycleGoodPaths[2]) -Digests @((Get-FileDigest $protectedLifecyclePath),$lifecycleGoodDigests[1],$lifecycleGoodDigests[2]) -ProtectedRoots @($protectedLifecycleRoot);Check (-not $pathResult.Success) 'lifecycle Adapter rejects Protected Root overlap' 'lifecycle Adapter accepted Protected Root overlap'
 
     $unwiredPath=Join-Path $temp 'still-unwired.json';Write-Document $unwiredPath ([ordered]@{}) -Compress
-    $unwiredGate=[ordered]@{'DP-G00-ENGINEERING-BASELINE'=[ordered]@{status='pass';evidence_contract='fixture/v1';artifact_path=$unwiredPath;evidence_digest=(Get-FileDigest $unwiredPath);source_revision=[string]$cleanSource.revision;producer_identity='Contract Fixture producer'}}
-    $unwiredReason='';try{& $module {param($Root,$Source,$Gates)Assert-HarnessRolloutEvidenceSetProvenance -RepoRoot $Root -ExpectedSource $Source -Gates $Gates} $RepoRoot $cleanSource $unwiredGate}catch{$unwiredReason=[string]$_.Exception.Message}
-    Check ($unwiredReason-ceq'rollout-evidence-provenance-unwired-DP-G00-ENGINEERING-BASELINE') 'non-lifecycle Gate remains provenance-unwired and fail closed' 'an unrelated Gate was silently wired or promoted'
+    foreach($unwiredName in @('DP-G00-ENGINEERING-BASELINE','DP-G04-RELEASE-ISOLATION','DP-G09-RELEASE-MODEL','DP-G10-RELEASE-HOST','DP-G11-RELEASE-FULL','DP-G14-V1-STOP-LOSS','DP-G13-PROMOTION','DP-G15-CANARY','DP-G16-STABLE')){
+        $unwiredGate=[ordered]@{};$unwiredGate[$unwiredName]=[ordered]@{status='pass';evidence_contract='fixture/v1';artifact_path=$unwiredPath;evidence_digest=(Get-FileDigest $unwiredPath);source_revision=[string]$cleanSource.revision;producer_identity='Contract Fixture producer'}
+        $unwiredReason='';try{& $module {param($Root,$Source,$Gates)Assert-HarnessRolloutEvidenceSetProvenance -RepoRoot $Root -ExpectedSource $Source -Gates $Gates} $RepoRoot $cleanSource $unwiredGate}catch{$unwiredReason=[string]$_.Exception.Message}
+        Check ($unwiredReason-ceq"rollout-evidence-provenance-unwired-$unwiredName") "$unwiredName remains provenance-unwired and fail closed" "$unwiredName was silently wired or promoted"
+    }
 
     $script:installedMutationIndex=0
     $rejectInstalledMutation = {

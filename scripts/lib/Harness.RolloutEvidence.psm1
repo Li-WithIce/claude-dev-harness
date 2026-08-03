@@ -209,6 +209,48 @@ function Read-HarnessRolloutEvidenceArtifact {
     return [ordered]@{path=$path;bytes=$bytes;digest=$digest;physical=$physical}
 }
 
+function Get-HarnessPortableEvidenceProtectedRoots {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [string[]]$ProtectedRoots = @()
+    )
+    $values = [Collections.Generic.List[string]]::new()
+    foreach ($argument in @('--git-dir','--git-common-dir')) { $values.Add((Resolve-ReleaseGitPath -RepoRoot $RepoRoot -Argument $argument)) }
+    if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) { $values.Add((Join-Path $env:USERPROFILE '.codex')) }
+    foreach ($name in @('CODEX_HOME','HOST_BENCHMARK_CODEX_HOME')) {
+        $value = [Environment]::GetEnvironmentVariable($name,[EnvironmentVariableTarget]::Process)
+        if (-not [string]::IsNullOrWhiteSpace($value)) { $values.Add($value) }
+    }
+    foreach ($value in @($ProtectedRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) { $values.Add($value) }
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    return @($values | ForEach-Object { [IO.Path]::GetFullPath($_) } | Where-Object { $seen.Add($_) })
+}
+
+function Assert-HarnessPortableEvidenceSource {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource
+    )
+    Assert-ReleaseKeys -Value $ExpectedSource -Expected @('revision','commit_tree_oid','object_format','dirty','status_entry_count','status_digest','state_digest','state_basis') -Label 'portable evidence source'
+    if ([string]$ExpectedSource.revision -cnotmatch '^[0-9a-f]{40,64}$' -or [string]$ExpectedSource.commit_tree_oid -cnotmatch '^[0-9a-f]{40,64}$' -or
+        $ExpectedSource.dirty -isnot [bool] -or ($ExpectedSource.status_entry_count -isnot [int] -and $ExpectedSource.status_entry_count -isnot [long]) -or
+        [long]$ExpectedSource.status_entry_count -lt 0 -or [string]$ExpectedSource.state_basis -cne 'git-revision-tree-status/v1') { throw 'portable evidence source shape is invalid' }
+    Assert-ReleaseDigestValue -Value $ExpectedSource.status_digest -Label 'portable evidence source status'
+    Assert-ReleaseDigestValue -Value $ExpectedSource.state_digest -Label 'portable evidence source state'
+    $cleanStatusDigest = Get-ReleaseSha256Text -Text ''
+    $cleanStateDigest = Get-ReleaseSha256Text -Text ("{0}`n{1}`n{2}`n" -f [string]$ExpectedSource.revision,[string]$ExpectedSource.commit_tree_oid,[string]$ExpectedSource.object_format)
+    if ([bool]$ExpectedSource.dirty -or [long]$ExpectedSource.status_entry_count -ne 0 -or
+        [string]$ExpectedSource.status_digest -cne $cleanStatusDigest -or [string]$ExpectedSource.state_digest -cne $cleanStateDigest) {
+        throw 'portable evidence source is not clean'
+    }
+    $revision = (@(Invoke-ReleaseGit -RepoRoot $RepoRoot -Arguments @('rev-parse','--verify','HEAD')) -join '').Trim()
+    $tree = (@(Invoke-ReleaseGit -RepoRoot $RepoRoot -Arguments @('rev-parse',"$revision`^{tree}")) -join '').Trim()
+    $objectFormat = (@(Invoke-ReleaseGit -RepoRoot $RepoRoot -Arguments @('rev-parse','--show-object-format')) -join '').Trim()
+    if ($revision -cne [string]$ExpectedSource.revision -or $tree -cne [string]$ExpectedSource.commit_tree_oid -or $objectFormat -cne [string]$ExpectedSource.object_format) {
+        throw 'portable evidence source identity changed'
+    }
+}
+
 function Assert-InstalledDesktopStrictJsonElement {
     param([Parameter(Mandatory)][System.Text.Json.JsonElement]$Element)
     if ($Element.ValueKind -ceq [System.Text.Json.JsonValueKind]::Object) {
@@ -260,6 +302,20 @@ function Assert-InstalledDesktopSanitizedContent {
         $text -match '(?i)(?:access[_-]?token|refresh[_-]?token|api[_-]?key|bearer\s+|authorization\s*:|cookie\s*:|password\s*:|credential\s*:|prompt\s*:|raw[ _-]?(?:trace|log)\s*:|thread[ _-]?id\s*:)') {
         throw 'installed Desktop report contains non-portable or sensitive content'
     }
+}
+
+function Assert-HarnessPortableAdditionalSanitizedContent {
+    param([AllowNull()][object]$Value)
+    if ($null -eq $Value) { return }
+    if ($Value -is [Collections.IDictionary]) {
+        foreach ($entry in $Value.GetEnumerator()) { Assert-HarnessPortableAdditionalSanitizedContent -Value $entry.Value }
+        return
+    }
+    if ($Value -is [Collections.IEnumerable] -and $Value -isnot [string]) {
+        foreach ($item in $Value) { Assert-HarnessPortableAdditionalSanitizedContent -Value $item }
+        return
+    }
+    if ($Value -is [string] -and [string]$Value -match '(?i)raw[ _-]?(?:command|prompt)\s*:') { throw 'portable evidence contains raw command or prompt content' }
 }
 
 function Assert-InstalledDesktopProfileConfig {
@@ -445,6 +501,207 @@ function Read-InstalledDesktopRolloutEvidence {
         $result['file_id'] = [string]$physical.file_id
         return $result
     } catch { throw [IO.InvalidDataException]::new('rollout-evidence-installed-report-invalid',$_.Exception) }
+}
+
+function Read-ModelRolloutEvidence {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Gate,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource,
+        [string[]]$ProtectedRoots = @()
+    )
+    try {
+        Assert-ReleaseKeys -Value $Gate -Expected @('status','evidence_contract','artifact_path','evidence_digest','source_revision','producer_identity') -Label 'model portable gate'
+        if ([string]$Gate.evidence_contract -cne 'harness-model-eval-report/v2' -or [string]$Gate.source_revision -cne [string]$ExpectedSource.revision -or
+            [string]::IsNullOrWhiteSpace([string]$Gate.producer_identity)) { throw 'model portable gate binding is invalid' }
+        Assert-ReleaseDigestValue -Value $Gate.evidence_digest -Label 'model portable gate'
+        $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $RepoRoot -ProtectedRoots $ProtectedRoots
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$Gate.artifact_path) -ExpectedDigest ([string]$Gate.evidence_digest) -ProtectedRoots $protected -MaximumBytes 4MB
+        $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        Assert-InstalledDesktopSanitizedContent -Value $document
+        Assert-HarnessPortableAdditionalSanitizedContent -Value $document
+        Assert-HarnessPortableEvidenceSource -RepoRoot $RepoRoot -ExpectedSource $ExpectedSource
+        Assert-ModelEvalReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource
+        if ([bool]$document.source_dirty -or -not [bool]$document.source_state_stable) { throw 'model portable source is not clean and stable' }
+        return [ordered]@{
+            status=[string]$document.status;producer_identity='model-eval/v2';source_revision=[string]$document.source_revision
+            path=[string]$artifact.path;raw_digest=[string]$artifact.digest;volume=[string]$artifact.physical.volume;file_id=[string]$artifact.physical.file_id
+        }
+    } catch { throw [IO.InvalidDataException]::new('rollout-evidence-model-report-invalid',$_.Exception) }
+}
+
+function Assert-CognitiveHostGroupContract {
+    param(
+        [Parameter(Mandatory)][Collections.IDictionary]$Group,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource
+    )
+    Assert-ReleaseBoolean -Value $Group.source_dirty -Label 'cognitive Host source dirty'
+    Assert-ReleaseBoolean -Value $Group.source_state_stable -Label 'cognitive Host source stability'
+    foreach ($name in @('trials_per_protocol','release_trials_required')) { [void](Assert-ReleaseInteger -Value $Group.execution[$name] -Label "cognitive Host $name" -Positive) }
+    if ([bool]$Group.source_dirty -or -not [bool]$Group.source_state_stable -or [string]$Group.source_revision -cne [string]$ExpectedSource.revision -or
+        [string]$Group.source.commit_tree_oid -cne [string]$ExpectedSource.commit_tree_oid -or [string]$Group.source.object_format -cne [string]$ExpectedSource.object_format -or
+        [string]$Group.execution.model -cne 'gpt-5.6-sol' -or [string]$Group.execution.reasoning -cne 'max' -or
+        [long]$Group.execution.trials_per_protocol -ne 3 -or [long]$Group.execution.release_trials_required -ne 3 -or
+        [string]$Group.execution.successful_request_send_measurement -cne 'codex-0.144.4-successful-websocket-send/v2' -or
+        [string]$Group.execution.expected_codex_service_version -cne '0.144.4') { throw 'cognitive Host group contract is invalid' }
+    foreach ($protocol in @('bare','v1','v2')) {
+        $trials = @($Group.protocols[$protocol].trials)
+        if ($trials.Count -ne 3 -or (@($trials | ForEach-Object { [long]$_.trial } | Sort-Object) -join ',') -cne '1,2,3') { throw 'cognitive Host trial set is incomplete' }
+        foreach ($trial in $trials) {
+            [void](Assert-ReleaseInteger -Value $trial.trial -Label 'cognitive Host trial number' -Positive)
+            [void](Assert-ReleaseInteger -Value $trial.runner_expected_trial -Label 'cognitive Host expected trial number' -Positive)
+            if ([long]$trial.runner_expected_trial -ne [long]$trial.trial -or [string]$trial.workspace_baseline_revision -cne [string]$ExpectedSource.revision -or
+                [string]$trial.source_binding.status -cne 'bound' -or [string]$trial.source_binding.revision -cne [string]$ExpectedSource.revision -or
+                [string]$trial.source_binding.commit_tree_oid -cne [string]$ExpectedSource.commit_tree_oid -or [string]$trial.source_binding.verification -cne 'git-head-tree-clean/v1') {
+                throw 'cognitive Host trial source binding is invalid'
+            }
+        }
+    }
+}
+
+function Get-CognitiveHostDirectLatencyStatus {
+    param(
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource
+    )
+    $statuses = [Collections.Generic.List[string]]::new()
+    foreach ($group in @($Document.groups)) {
+        Assert-CognitiveHostGroupContract -Group $group -ExpectedSource $ExpectedSource
+        $metric = $group.performance.direct_latency
+        Assert-ReleaseNumberEquals -Actual $metric.threshold -Expected 1.25 -Label 'cognitive Host direct latency threshold'
+        $available = $true
+        $medians = @{}
+        foreach ($protocol in @('bare','v2')) {
+            $record = $group.protocols[$protocol]
+            if ([string]$record.status -ceq 'unavailable') { $available = $false; continue }
+            if ([string]$record.status -cne 'measured') { throw 'cognitive Host direct latency protocol status is invalid' }
+            $values = [Collections.Generic.List[double]]::new()
+            foreach ($trial in @($record.trials)) {
+                if ([string]$trial.status -cne 'measured') { $available = $false; break }
+                $values.Add((Assert-ReleaseNumber -Value $trial.total_duration_ms -Label "cognitive Host $protocol duration" -Positive))
+            }
+            if ($values.Count -eq 3) {
+                $median = [math]::Round((Get-ReleaseMedian -Values @($values)),2)
+                Assert-ReleaseNumberEquals -Actual $record.medians.total_duration_ms -Expected $median -Label "cognitive Host $protocol duration median"
+                $medians[$protocol] = $median
+            }
+        }
+        if (-not $available -or $medians.Count -ne 2) {
+            if ([string]$metric.status -cne 'unavailable' -or $null -ne $metric.ratio) { throw 'cognitive Host direct latency availability is inconsistent' }
+            $statuses.Add('unavailable')
+            continue
+        }
+        $ratio = [math]::Round(([double]$medians.v2 / [double]$medians.bare),4)
+        Assert-ReleaseNumberEquals -Actual $metric.ratio -Expected $ratio -Label 'cognitive Host direct latency ratio'
+        $status = if ($ratio -le 1.25) { 'pass' } else { 'fail' }
+        if ([string]$metric.status -cne $status) { throw 'cognitive Host direct latency status is inconsistent' }
+        $statuses.Add($status)
+    }
+    if (@($statuses | Where-Object { $_ -ceq 'fail' }).Count -gt 0) { return 'fail' }
+    if (@($statuses | Where-Object { $_ -ceq 'unavailable' }).Count -gt 0) { return 'unavailable' }
+    if ($statuses.Count -ne 3) { throw 'cognitive Host direct latency group set is incomplete' }
+    return 'pass'
+}
+
+function Get-CognitiveHostRequestReductionStatus {
+    param(
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource
+    )
+    $statuses = [Collections.Generic.List[string]]::new()
+    foreach ($group in @($Document.groups)) {
+        Assert-CognitiveHostGroupContract -Group $group -ExpectedSource $ExpectedSource
+        $metric = $group.performance.successful_request_send_reduction
+        Assert-ReleaseNumberEquals -Actual $metric.threshold -Expected 0.60 -Label 'cognitive Host request reduction threshold'
+        $available = $true
+        $medians = @{}
+        foreach ($protocol in @('v1','v2')) {
+            $record = $group.protocols[$protocol]
+            if ([string]$record.status -cnotin @('measured','unavailable')) { throw 'cognitive Host request-send protocol status is invalid' }
+            $values = [Collections.Generic.List[double]]::new()
+            foreach ($trial in @($record.trials)) {
+                $measurement = $trial.successful_request_sends
+                if ([string]$measurement.basis -cne 'codex-0.144.4-successful-websocket-send/v2') { throw 'cognitive Host request-send basis is invalid' }
+                if ([string]$measurement.status -ceq 'unavailable') {
+                    if ($null -ne $measurement.value) { throw 'cognitive Host unavailable request-send value is invalid' }
+                    $available = $false
+                    continue
+                }
+                if ([string]$measurement.status -cne 'measured' -or [string]$measurement.service_version -cne '0.144.4' -or [string]$measurement.transport -cne 'responses_websocket') {
+                    throw 'cognitive Host request-send identity is invalid'
+                }
+                $value = Assert-ReleaseInteger -Value $measurement.value -Label "cognitive Host $protocol request sends" -Positive
+                $perSession = @($measurement.per_session_counts)
+                foreach ($count in $perSession) { [void](Assert-ReleaseInteger -Value $count -Label "cognitive Host $protocol per-session request sends" -Positive) }
+                if ($perSession.Count -ne [long]$trial.fresh_sessions -or [long](($perSession | Measure-Object -Sum).Sum) -ne $value) { throw 'cognitive Host request-send count is inconsistent' }
+                $values.Add([double]$value)
+            }
+            if ($values.Count -eq 3 -and [string]$record.status -ceq 'measured') {
+                $median = [math]::Round((Get-ReleaseMedian -Values @($values)),2)
+                if ([string]$record.successful_request_sends.status -cne 'measured' -or [string]$record.successful_request_sends.basis -cne 'codex-0.144.4-successful-websocket-send/v2') { throw 'cognitive Host request-send aggregate is invalid' }
+                Assert-ReleaseNumberEquals -Actual $record.successful_request_sends.median -Expected $median -Label "cognitive Host $protocol request-send median"
+                Assert-ReleaseNumberEquals -Actual $record.medians.successful_request_sends -Expected $median -Label "cognitive Host $protocol duplicated request-send median"
+                $medians[$protocol] = $median
+            } else {
+                $available = $false
+                if ([string]$record.successful_request_sends.status -cne 'unavailable' -or $null -ne $record.successful_request_sends.median) { throw 'cognitive Host request-send availability is inconsistent' }
+            }
+        }
+        if (-not $available -or $medians.Count -ne 2) {
+            if ([string]$metric.status -cne 'unavailable' -or $null -ne $metric.reduction) { throw 'cognitive Host request reduction availability is inconsistent' }
+            $statuses.Add('unavailable')
+            continue
+        }
+        if ([double]$medians.v1 -le 0) { throw 'cognitive Host v1 request-send median is invalid' }
+        $reduction = [math]::Round((([double]$medians.v1 - [double]$medians.v2) / [double]$medians.v1),4)
+        Assert-ReleaseNumberEquals -Actual $metric.reduction -Expected $reduction -Label 'cognitive Host request reduction'
+        $status = if ($reduction -ge 0.60) { 'pass' } else { 'fail' }
+        if ([string]$metric.status -cne $status) { throw 'cognitive Host request reduction status is inconsistent' }
+        $statuses.Add($status)
+    }
+    if (@($statuses | Where-Object { $_ -ceq 'fail' }).Count -gt 0) { return 'fail' }
+    if (@($statuses | Where-Object { $_ -ceq 'unavailable' }).Count -gt 0) { return 'unavailable' }
+    if ($statuses.Count -ne 3) { throw 'cognitive Host request reduction group set is incomplete' }
+    return 'pass'
+}
+
+function Read-CognitiveHostRolloutEvidence {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Gates,
+        [Parameter(Mandatory)][string[]]$Names,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource,
+        [string[]]$ProtectedRoots = @()
+    )
+    try {
+        $normalizedPath = ''
+        $digest = ''
+        foreach ($name in $Names) {
+            $gate = $Gates[$name]
+            Assert-ReleaseKeys -Value $gate -Expected @('status','evidence_contract','artifact_path','evidence_digest','source_revision','producer_identity') -Label 'cognitive Host portable gate'
+            if ([string]$gate.evidence_contract -cne 'harness-host-benchmark-report/v2' -or [string]$gate.source_revision -cne [string]$ExpectedSource.revision -or
+                [string]::IsNullOrWhiteSpace([string]$gate.producer_identity) -or -not [IO.Path]::IsPathRooted([string]$gate.artifact_path)) { throw 'cognitive Host portable gate binding is invalid' }
+            Assert-ReleaseDigestValue -Value $gate.evidence_digest -Label 'cognitive Host portable gate'
+            $path = [IO.Path]::GetFullPath([string]$gate.artifact_path)
+            if ([string]::IsNullOrWhiteSpace($normalizedPath)) { $normalizedPath = $path; $digest = [string]$gate.evidence_digest }
+            elseif (-not $path.Equals($normalizedPath,[StringComparison]::OrdinalIgnoreCase) -or [string]$gate.evidence_digest -cne $digest) { throw 'cognitive Host Gates do not bind one Artifact' }
+        }
+        $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $RepoRoot -ProtectedRoots $ProtectedRoots
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath $normalizedPath -ExpectedDigest $digest -ProtectedRoots $protected -MaximumBytes 16MB
+        $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        Assert-InstalledDesktopSanitizedContent -Value $document
+        Assert-HarnessPortableAdditionalSanitizedContent -Value $document
+        Assert-HarnessPortableEvidenceSource -RepoRoot $RepoRoot -ExpectedSource $ExpectedSource
+        Assert-HostBenchmarkReportV2 -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource
+        if ([bool]$document.source_dirty -or -not [bool]$document.source_state_stable -or @($document.groups).Count -ne 3) { throw 'cognitive Host portable source or group set is invalid' }
+        return [ordered]@{
+            g02_status=[string]$document.status
+            g05_status=(Get-CognitiveHostDirectLatencyStatus -Document $document -ExpectedSource $ExpectedSource)
+            g06_status=(Get-CognitiveHostRequestReductionStatus -Document $document -ExpectedSource $ExpectedSource)
+            producer_identity='host-benchmark-cognitive/v2';source_revision=[string]$document.source_revision
+            path=[string]$artifact.path;raw_digest=[string]$artifact.digest;volume=[string]$artifact.physical.volume;file_id=[string]$artifact.physical.file_id
+        }
+    } catch { throw [IO.InvalidDataException]::new('rollout-evidence-cognitive-host-report-invalid',$_.Exception) }
 }
 
 function Assert-PresetLifecycleSanitizedContent {
@@ -641,6 +898,8 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
         [System.Collections.IDictionary]$ExpectedSource = $null,
         [string[]]$ProtectedRoots = @()
     )
+    $modelName = 'DP-G01-MODEL40'
+    $cognitiveNames = @('DP-G02-COGNITIVE-HOST-3X3','DP-G05-V2-BARE-1.25','DP-G06-REQUEST-SEND-REDUCTION')
     $installedNames = @('DP-G03-INSTALLED-DESKTOP-HOST-3X3','DP-G07-DISTINCT-INSTALLED-DESKTOP-GATE')
     $lifecyclePresets = [ordered]@{
         'DP-G18-CORE-LIFECYCLE'='core'
@@ -648,6 +907,24 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
         'DP-G20-FULL-LIFECYCLE'='full'
     }
     $lifecycleNames = @($lifecyclePresets.Keys)
+    $adapted = $false
+    if ($Gates.Contains($modelName)) {
+        if ([string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-model-report-invalid' }
+        $model = Read-ModelRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$modelName] -ExpectedSource $ExpectedSource -ProtectedRoots $ProtectedRoots
+        $Gates[$modelName].status = [string]$model.status
+        $Gates[$modelName].producer_identity = [string]$model.producer_identity
+        $adapted = $true
+    }
+    $cognitivePresent = @($cognitiveNames | Where-Object { $Gates.Contains($_) })
+    if ($cognitivePresent.Count -gt 0) {
+        if ($cognitivePresent.Count -ne 3 -or [string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-cognitive-gate-set-incomplete' }
+        $cognitive = Read-CognitiveHostRolloutEvidence -RepoRoot $RepoRoot -Gates $Gates -Names $cognitiveNames -ExpectedSource $ExpectedSource -ProtectedRoots $ProtectedRoots
+        $Gates[$cognitiveNames[0]].status = [string]$cognitive.g02_status
+        $Gates[$cognitiveNames[1]].status = [string]$cognitive.g05_status
+        $Gates[$cognitiveNames[2]].status = [string]$cognitive.g06_status
+        foreach ($name in $cognitiveNames) { $Gates[$name].producer_identity = [string]$cognitive.producer_identity }
+        $adapted = $true
+    }
     $installedPresent = @($installedNames | Where-Object { $Gates.Contains($_) })
     if ($installedPresent.Count -gt 0) {
         if ($installedPresent.Count -ne 2 -or [string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-installed-report-invalid' }
@@ -668,6 +945,7 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
             $gate.status = [string]$installed[$index].status
             $gate.producer_identity = [string]$installed[$index].producer_identity
         }
+        $adapted = $true
     }
     $lifecyclePresent = @($lifecycleNames | Where-Object { $Gates.Contains($_) })
     if ($lifecyclePresent.Count -gt 0) {
@@ -696,8 +974,10 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
             $gate.status = [string]$lifecycle[$index].status
             $gate.producer_identity = [string]$lifecycle[$index].producer_identity
         }
+        $adapted = $true
     }
-    foreach ($name in @($Gates.Keys | Where-Object { $_ -cnotin @($installedNames + $lifecycleNames) } | Sort-Object)) {
+    $adaptedNames = @($modelName) + $cognitiveNames + $installedNames + $lifecycleNames
+    foreach ($name in @($Gates.Keys | Where-Object { $_ -cnotin $adaptedNames } | Sort-Object)) {
         $gate = $Gates[$name]
         if ($gate -isnot [System.Collections.IDictionary] -or
             [string]::IsNullOrWhiteSpace([string]$gate.artifact_path) -or
@@ -706,7 +986,7 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
         [void](Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$gate.artifact_path) -ExpectedDigest ([string]$gate.evidence_digest) -ProtectedRoots $ProtectedRoots)
         throw "rollout-evidence-provenance-unwired-$name"
     }
-    if ($installedPresent.Count -eq 2 -or $lifecyclePresent.Count -eq 3) { return $true }
+    if ($adapted) { return $true }
     throw 'rollout-evidence-provenance-unverified'
 }
 
