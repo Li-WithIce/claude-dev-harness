@@ -243,6 +243,50 @@ function Invoke-PresetLifecycleReportSet($Module,[Collections.IDictionary]$Expec
     return Invoke-PresetLifecycleGatePaths -Module $Module -Expected $Expected -Paths @($paths) -Digests @($digests)
 }
 
+function New-V1StopLossReport([Collections.IDictionary]$Source,[string]$Seed,[ValidateSet('formal','test-only','diagnostic-smoke')][string]$ProducerMode='formal') {
+    $artifactV1=Get-TextDigest "Contract Fixture existing v1 $Seed";$artifactV2=Get-TextDigest "Contract Fixture existing v2 $Seed"
+    $probes=@(
+        [ordered]@{probe='environment-v1-new-task';status='pass';exit_code=0L;requested_protocol='v1';detected_protocol='new';selected_protocol='v1';preference_source='HARNESS_PROTOCOL';reason_code='explicit-v1-new-task';expected_write_kind='none';unexpected_writes=0L;artifact_digest_before=$null;artifact_digest_after=$null;command_digest=(Get-TextDigest "Contract Fixture command environment $Seed");output_digest=(Get-TextDigest "Contract Fixture output environment $Seed")},
+        [ordered]@{probe='disable-v2-new-task';status='pass';exit_code=0L;requested_protocol='v1';detected_protocol='new';selected_protocol='v1';preference_source='workspace-config';reason_code='workspace-v1-new-task';expected_write_kind='workspace-protocol-config';unexpected_writes=0L;artifact_digest_before=$null;artifact_digest_after=$null;command_digest=(Get-TextDigest "Contract Fixture command disable $Seed");output_digest=(Get-TextDigest "Contract Fixture output disable $Seed")},
+        [ordered]@{probe='existing-v1-artifact';status='pass';exit_code=0L;requested_protocol='v2';detected_protocol='v1';selected_protocol='v1';preference_source='existing-artifact';reason_code='existing-v1-plan';expected_write_kind='none';unexpected_writes=0L;artifact_digest_before=$artifactV1;artifact_digest_after=$artifactV1;command_digest=(Get-TextDigest "Contract Fixture command existing v1 $Seed");output_digest=(Get-TextDigest "Contract Fixture output existing v1 $Seed")},
+        [ordered]@{probe='existing-v2-artifact';status='pass';exit_code=0L;requested_protocol='v1';detected_protocol='v2';selected_protocol='v2';preference_source='existing-artifact';reason_code='existing-v2-task-state';expected_write_kind='none';unexpected_writes=0L;artifact_digest_before=$artifactV2;artifact_digest_after=$artifactV2;command_digest=(Get-TextDigest "Contract Fixture command existing v2 $Seed");output_digest=(Get-TextDigest "Contract Fixture output existing v2 $Seed")}
+    )
+    $report=[ordered]@{
+        schema_version='harness-v1-stop-loss-report/v1';generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o');source_revision=[string]$Source.revision;source_dirty=$false;source_state_stable=$true
+        source=[ordered]@{
+            commit_tree_oid=[string]$Source.commit_tree_oid;object_format=[string]$Source.object_format;start=(Copy-Document $Source);end=(Copy-Document $Source)
+            input_digests=[ordered]@{
+                producer_digest=Get-FileDigest (Join-Path $RepoRoot 'scripts\run-v1-stop-loss-qualification.ps1');task_entry_digest=Get-FileDigest (Join-Path $RepoRoot 'scripts\task.ps1')
+                advance_stage_digest=Get-FileDigest (Join-Path $RepoRoot 'scripts\advance-stage.ps1');protocol_module_digest=Get-FileDigest (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1')
+                task_state_module_digest=Get-FileDigest (Join-Path $RepoRoot 'scripts\lib\Harness.TaskState.psm1');atomic_write_digest=Get-FileDigest (Join-Path $RepoRoot 'scripts\lib\Harness.AtomicWrite.psm1');path_digest=Get-FileDigest (Join-Path $RepoRoot 'scripts\lib\Harness.Path.psm1')
+            }
+        }
+        report_run_id=(Get-TextDigest "Contract Fixture v1 stop-loss $Seed").Substring(7,32);producer_identity='v1-stop-loss-qualification/v1';producer_mode=$ProducerMode
+        execution=[ordered]@{sequence_contract='environment-v1-disable-v2-existing-v1-existing-v2-v1-lifecycle/v1';isolated_workspace=$true;isolated_profile=$true;workspace_identity_digest=(Get-TextDigest "Contract Fixture v1 stop-loss workspace $Seed");profile_identity_digest=(Get-TextDigest "Contract Fixture v1 stop-loss profile $Seed");duration_ms=1L;raw_output_persisted=$false;auth_bytes_persisted=$false;private_paths_persisted=$false}
+        route_probes=$probes
+        lifecycle=[ordered]@{status='pass';initial_stage='PLAN';final_stage='DONE';stage_sequence=@('PLAN','PLAN_REVIEW','IMPLEMENT','CODE_REVIEW','TEST','DONE');transition_count=5L;plan_digest_before=(Get-TextDigest "Contract Fixture plan before $Seed");plan_digest_after=(Get-TextDigest "Contract Fixture plan after $Seed");test_report_digest=(Get-TextDigest "Contract Fixture test report $Seed");unexpected_writes=0L;reason='lifecycle-pass'}
+        results=[ordered]@{environment_v1_selects_v1=$true;disable_v2_selects_v1=$true;existing_v1_artifact_remains_v1=$true;existing_v2_artifact_remains_v2=$true;existing_artifacts_unchanged_by_routing=$true;v1_lifecycle_reaches_done=$true;v1_stage_order_exact=$true;runtime_default_untouched=$true;auth_unchanged=$true;unrelated_user_config_unchanged=$true;cleanup_no_residue=$true}
+        status=$(if($ProducerMode-ceq'formal'){'pass'}else{'unavailable'});reason=$(if($ProducerMode-ceq'formal'){'all-stop-loss-checks-passed'}else{'non-formal-producer-mode'});report_digest=$null
+    }
+    Set-ReportDigest $report;return $report
+}
+
+function Set-V1StopLossUnavailable([Collections.IDictionary]$Report) {
+    foreach($probe in @($Report.route_probes)){$probe.status='not_run';$probe.exit_code=$null;$probe.detected_protocol=$null;$probe.selected_protocol=$null;$probe.preference_source=$null;$probe.reason_code='not-run';$probe.artifact_digest_before=$null;$probe.artifact_digest_after=$null}
+    $Report.lifecycle=[ordered]@{status='not_run';initial_stage=$null;final_stage=$null;stage_sequence=@();transition_count=0L;plan_digest_before=$null;plan_digest_after=$null;test_report_digest=$null;unexpected_writes=0L;reason='not-run'}
+    foreach($name in @('environment_v1_selects_v1','disable_v2_selects_v1','existing_v1_artifact_remains_v1','existing_v2_artifact_remains_v2','existing_artifacts_unchanged_by_routing','v1_lifecycle_reaches_done','v1_stage_order_exact')){$Report.results[$name]=$false}
+    $Report.status='unavailable';$Report.reason='route-or-lifecycle-result-failure';Set-ReportDigest $Report
+}
+
+function New-V1StopLossGate([Collections.IDictionary]$Expected,[string]$Path,[string]$Digest) {
+    return [ordered]@{'DP-G14-V1-STOP-LOSS'=[ordered]@{status='pass';evidence_contract='harness-v1-stop-loss-report/v1';artifact_path=$Path;evidence_digest=$Digest;source_revision=[string]$Expected.revision;producer_identity='forged-caller'}}
+}
+
+function Invoke-V1StopLossReport($Module,[Collections.IDictionary]$Expected,[string]$Root,[Collections.IDictionary]$Report,[string]$Name,[string[]]$ProtectedRoots=@()) {
+    $path=Join-Path $Root ("v1-stop-loss-$Name.json");Write-Document $path $Report -Compress
+    return Invoke-PortableGateSet -Module $Module -Expected $Expected -Gates (New-V1StopLossGate -Expected $Expected -Path $path -Digest (Get-FileDigest $path)) -ProtectedRoots $ProtectedRoots
+}
+
 function Invoke-PortableGateSet($Module,[Collections.IDictionary]$Expected,[Collections.IDictionary]$Gates,[string[]]$ProtectedRoots=@()) {
     try {
         $value=& $Module {param($Root,$Source,$GateSet,$Protected)Assert-HarnessRolloutEvidenceSetProvenance -RepoRoot $Root -ExpectedSource $Source -Gates $GateSet -ProtectedRoots $Protected} $RepoRoot $Expected $Gates $ProtectedRoots
@@ -721,8 +765,113 @@ try {
     $protectedLifecycleRoot=Join-Path $temp 'lifecycle-protected';[void][IO.Directory]::CreateDirectory($protectedLifecycleRoot);$protectedLifecyclePath=Join-Path $protectedLifecycleRoot 'core.json';Write-Document $protectedLifecyclePath $lifecycleFormal[0] -Compress
     $pathResult=Invoke-PresetLifecycleGatePaths -Module $module -Expected $cleanSource -Paths @($protectedLifecyclePath,$lifecycleGoodPaths[1],$lifecycleGoodPaths[2]) -Digests @((Get-FileDigest $protectedLifecyclePath),$lifecycleGoodDigests[1],$lifecycleGoodDigests[2]) -ProtectedRoots @($protectedLifecycleRoot);Check (-not $pathResult.Success) 'lifecycle Adapter rejects Protected Root overlap' 'lifecycle Adapter accepted Protected Root overlap'
 
+    $g14Formal=New-V1StopLossReport -Source $cleanSource -Seed 'Contract Fixture formal pass'
+    $g14FormalResult=Invoke-V1StopLossReport -Module $module -Expected $cleanSource -Root $temp -Report $g14Formal -Name 'formal-pass'
+    Check ($g14FormalResult.Success -and [string]$g14FormalResult.Gates['DP-G14-V1-STOP-LOSS'].status-ceq'pass' -and [string]$g14FormalResult.Gates['DP-G14-V1-STOP-LOSS'].producer_identity-ceq'v1-stop-loss-qualification/v1') 'G14 formal-shaped Contract Fixture derives pass and overrides caller status/identity' "valid G14 Contract Fixture was rejected: $($g14FormalResult.Reason) / $($g14FormalResult.Detail)"
+
+    $g14Fail=New-V1StopLossReport -Source $cleanSource -Seed 'Contract Fixture formal fail';$g14Fail.route_probes[0].status='fail';$g14Fail.route_probes[0].exit_code=86L;$g14Fail.results.environment_v1_selects_v1=$false;$g14Fail.status='fail';$g14Fail.reason='route-or-lifecycle-result-failure';Set-ReportDigest $g14Fail
+    $g14FailResult=Invoke-V1StopLossReport -Module $module -Expected $cleanSource -Root $temp -Report $g14Fail -Name 'formal-fail'
+    Check ($g14FailResult.Success -and [string]$g14FailResult.Gates['DP-G14-V1-STOP-LOSS'].status-ceq'fail' -and [string]$g14FailResult.Gates['DP-G14-V1-STOP-LOSS'].producer_identity-ceq'v1-stop-loss-qualification/v1') 'G14 formal failure overrides a forged caller pass' 'G14 formal failure was rejected or promoted'
+
+    $g14Unavailable=New-V1StopLossReport -Source $cleanSource -Seed 'Contract Fixture formal unavailable';Set-V1StopLossUnavailable $g14Unavailable
+    $g14UnavailableResult=Invoke-V1StopLossReport -Module $module -Expected $cleanSource -Root $temp -Report $g14Unavailable -Name 'formal-unavailable'
+    Check ($g14UnavailableResult.Success -and [string]$g14UnavailableResult.Gates['DP-G14-V1-STOP-LOSS'].status-ceq'unavailable' -and [string]$g14UnavailableResult.Gates['DP-G14-V1-STOP-LOSS'].producer_identity-ceq'v1-stop-loss-qualification/v1') 'G14 formal unavailability overrides a forged caller pass' 'G14 formal unavailable evidence was rejected or promoted'
+
+    foreach($mode in @('test-only','diagnostic-smoke')){
+        $report=New-V1StopLossReport -Source $cleanSource -Seed "Contract Fixture $mode" -ProducerMode $mode
+        $result=Invoke-V1StopLossReport -Module $module -Expected $cleanSource -Root $temp -Report $report -Name $mode
+        Check ($result.Success -and [string]$result.Gates['DP-G14-V1-STOP-LOSS'].status-ceq'unavailable') "G14 $mode Contract Fixture remains unavailable despite caller status=pass" "G14 $mode evidence became formal pass"
+    }
+
+    $script:g14MutationIndex=0
+    $rejectG14Mutation={
+        param([string]$Name,[scriptblock]$Mutation)
+        $script:g14MutationIndex++
+        $report=New-V1StopLossReport -Source $cleanSource -Seed "Contract Fixture mutation $($script:g14MutationIndex)"
+        & $Mutation $report
+        Set-ReportDigest $report
+        $result=Invoke-V1StopLossReport -Module $module -Expected $cleanSource -Root $temp -Report $report -Name "mutation-$($script:g14MutationIndex)"
+        Check (-not $result.Success) "G14 Adapter rejects $Name" "G14 Adapter accepted $Name"
+    }
+    & $rejectG14Mutation 'an unknown field' {param($r)$r['unexpected']='sentinel'}
+    & $rejectG14Mutation 'the wrong schema' {param($r)$r.schema_version='harness-v1-stop-loss-report/v2'}
+    & $rejectG14Mutation 'a stale source revision' {param($r)$r.source_revision='0'*40;$r.source.start.revision='0'*40;$r.source.end.revision='0'*40}
+    & $rejectG14Mutation 'the wrong tree OID' {param($r)$r.source.commit_tree_oid='0'*40;$r.source.start.commit_tree_oid='0'*40;$r.source.end.commit_tree_oid='0'*40}
+    & $rejectG14Mutation 'a dirty source' {param($r)$r.source_dirty=$true;$r.source.start.dirty=$true;$r.source.end.dirty=$true}
+    & $rejectG14Mutation 'an unstable source' {param($r)$r.source_state_stable=$false}
+    & $rejectG14Mutation 'the wrong producer identity' {param($r)$r.producer_identity='v1-stop-loss-fixture/v1'}
+    & $rejectG14Mutation 'an unknown producer mode' {param($r)$r.producer_mode='fixture'}
+    & $rejectG14Mutation 'a stale Producer input digest' {param($r)$r.source.input_digests.producer_digest='sha256:'+('0'*64)}
+    & $rejectG14Mutation 'a missing Route Probe' {param($r)$r.route_probes=@($r.route_probes|Select-Object -First 3)}
+    & $rejectG14Mutation 'reordered Route Probes' {param($r)$swap=$r.route_probes[0];$r.route_probes[0]=$r.route_probes[1];$r.route_probes[1]=$swap}
+    & $rejectG14Mutation 'a duplicate Route Probe' {param($r)$r.route_probes[1]=Copy-Document $r.route_probes[0]}
+    & $rejectG14Mutation 'environment v1 selecting v2' {param($r)$r.route_probes[0].selected_protocol='v2'}
+    & $rejectG14Mutation 'disable-v2 selecting v2' {param($r)$r.route_probes[1].selected_protocol='v2'}
+    & $rejectG14Mutation 'disable-v2 producing an extra write' {param($r)$r.route_probes[1].unexpected_writes=1L}
+    & $rejectG14Mutation 'Existing v1 being overridden by explicit v2' {param($r)$r.route_probes[2].selected_protocol='v2'}
+    & $rejectG14Mutation 'Existing v2 being downgraded by explicit v1' {param($r)$r.route_probes[3].selected_protocol='v1'}
+    & $rejectG14Mutation 'an Existing Artifact byte change' {param($r)$r.route_probes[2].artifact_digest_after='sha256:'+('0'*64)}
+    & $rejectG14Mutation 'a Runtime Default write' {param($r)$r.results.runtime_default_untouched=$false}
+    & $rejectG14Mutation 'a lifecycle missing a stage' {param($r)$r.lifecycle.stage_sequence=@($r.lifecycle.stage_sequence|Where-Object{$_-cne'CODE_REVIEW'})}
+    & $rejectG14Mutation 'a reordered lifecycle' {param($r)$swap=$r.lifecycle.stage_sequence[1];$r.lifecycle.stage_sequence[1]=$r.lifecycle.stage_sequence[2];$r.lifecycle.stage_sequence[2]=$swap}
+    & $rejectG14Mutation 'a lifecycle final_stage other than DONE' {param($r)$r.lifecycle.final_stage='TEST'}
+    & $rejectG14Mutation 'a wrong lifecycle transition_count' {param($r)$r.lifecycle.transition_count=4L}
+    & $rejectG14Mutation 'v1 migration to v2' {param($r)$r.route_probes[2].detected_protocol='v2';$r.route_probes[2].selected_protocol='v2'}
+    & $rejectG14Mutation 'v2 downgrade to v1' {param($r)$r.route_probes[3].detected_protocol='v1';$r.route_probes[3].selected_protocol='v1'}
+    & $rejectG14Mutation 'Auth changed' {param($r)$r.results.auth_unchanged=$false}
+    & $rejectG14Mutation 'unrelated config changed' {param($r)$r.results.unrelated_user_config_unchanged=$false}
+    & $rejectG14Mutation 'cleanup residue' {param($r)$r.results.cleanup_no_residue=$false}
+    & $rejectG14Mutation 'test-only presented with a formal pass result' {param($r)$r.producer_mode='test-only'}
+    & $rejectG14Mutation 'diagnostic-smoke presented with a formal pass result' {param($r)$r.producer_mode='diagnostic-smoke'}
+    & $rejectG14Mutation 'credential content' {param($r)$r.reason='authorization: bearer Contract Fixture secret'}
+    & $rejectG14Mutation 'a private absolute path' {param($r)$r.reason='C:\Users\private\Contract Fixture.json'}
+    & $rejectG14Mutation 'raw output content' {param($r)$r.reason='raw output: Contract Fixture stdout'}
+    & $rejectG14Mutation 'Plan body content' {param($r)$r.reason='# Contract Fixture Plan body'}
+    & $rejectG14Mutation 'Test body content' {param($r)$r.reason='# Contract Fixture Test Report body'}
+
+    $g14GoodPath=Join-Path $temp 'v1-stop-loss-good.json';Write-Document $g14GoodPath $g14Formal -Compress;$g14GoodDigest=Get-FileDigest $g14GoodPath
+    $missingG14=Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates (New-V1StopLossGate -Expected $cleanSource -Path (Join-Path $temp 'missing-v1-stop-loss.json') -Digest ('sha256:'+('0'*64)))
+    Check (-not $missingG14.Success) 'G14 Adapter rejects a missing Artifact' 'G14 Adapter accepted a missing Artifact'
+    $relativeG14=Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates (New-V1StopLossGate -Expected $cleanSource -Path 'relative-v1-stop-loss.json' -Digest $g14GoodDigest)
+    Check (-not $relativeG14.Success) 'G14 Adapter rejects a relative Artifact path' 'G14 Adapter accepted a relative Artifact path'
+    $rawMismatchG14=Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates (New-V1StopLossGate -Expected $cleanSource -Path $g14GoodPath -Digest ('sha256:'+('0'*64)))
+    Check (-not $rawMismatchG14.Success) 'G14 Adapter rejects a raw digest mismatch' 'G14 Adapter accepted a raw digest mismatch'
+    $staleGateG14=New-V1StopLossGate -Expected $cleanSource -Path $g14GoodPath -Digest $g14GoodDigest;$staleGateG14['DP-G14-V1-STOP-LOSS'].source_revision='0'*40
+    Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $staleGateG14).Success) 'G14 Adapter rejects a stale Gate revision' 'G14 Adapter accepted a stale Gate revision'
+    $extraCallerG14=New-V1StopLossGate -Expected $cleanSource -Path $g14GoodPath -Digest $g14GoodDigest;$extraCallerG14['DP-G14-V1-STOP-LOSS']['reason']='forged-caller-reason'
+    Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $extraCallerG14).Success) 'G14 Gate rejects caller reason as non-authoritative extra input' 'G14 Gate accepted caller reason as authority'
+
+    $script:g14RawIndex=0
+    $rejectG14Bytes={
+        param([string]$Name,[byte[]]$Bytes)
+        $script:g14RawIndex++;$path=Join-Path $temp "v1-stop-loss-raw-$($script:g14RawIndex).json";[IO.File]::WriteAllBytes($path,$Bytes)
+        $result=Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates (New-V1StopLossGate -Expected $cleanSource -Path $path -Digest (Get-FileDigest $path))
+        Check (-not $result.Success) "G14 Adapter rejects $Name" "G14 Adapter accepted $Name"
+    }
+    & $rejectG14Bytes 'malformed JSON' ([Text.UTF8Encoding]::new($false).GetBytes('{'))
+    & $rejectG14Bytes 'a UTF-8 BOM' ([Text.UTF8Encoding]::new($true).GetPreamble()+[Text.UTF8Encoding]::new($false).GetBytes('{}'))
+    & $rejectG14Bytes 'duplicate JSON keys' ([Text.UTF8Encoding]::new($false).GetBytes('{"schema_version":"one","schema_version":"two"}'))
+    & $rejectG14Bytes 'an oversized Artifact' ([byte[]]::new((1MB)+1))
+    $badReportDigest=Copy-Document $g14Formal;$badReportDigest.report_digest='sha256:'+('0'*64);$badReportDigestPath=Join-Path $temp 'v1-stop-loss-report-digest-mismatch.json';Write-Document $badReportDigestPath $badReportDigest -Compress
+    Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates (New-V1StopLossGate -Expected $cleanSource -Path $badReportDigestPath -Digest (Get-FileDigest $badReportDigestPath))).Success) 'G14 Adapter rejects report_digest mismatch' 'G14 Adapter accepted report_digest mismatch'
+    $g14Protected=Join-Path $temp 'v1-stop-loss-protected';[void][IO.Directory]::CreateDirectory($g14Protected);$g14ProtectedPath=Join-Path $g14Protected 'report.json';Write-Document $g14ProtectedPath $g14Formal -Compress
+    Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates (New-V1StopLossGate -Expected $cleanSource -Path $g14ProtectedPath -Digest (Get-FileDigest $g14ProtectedPath)) -ProtectedRoots @($g14Protected)).Success) 'G14 Adapter rejects Protected Root overlap' 'G14 Adapter accepted Protected Root overlap'
+    $g14HardlinkSource=Join-Path $temp 'v1-stop-loss-hardlink-source.json';$g14HardlinkAlias=Join-Path $temp 'v1-stop-loss-hardlink-alias.json';Write-Document $g14HardlinkSource $g14Formal -Compress
+    $g14HardlinkOutput=@(& fsutil hardlink create $g14HardlinkAlias $g14HardlinkSource 2>&1|ForEach-Object{[string]$_});if($LASTEXITCODE-ne0){throw "G14 hardlink fixture setup failed: $($g14HardlinkOutput-join' | ')"}
+    Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates (New-V1StopLossGate -Expected $cleanSource -Path $g14HardlinkAlias -Digest (Get-FileDigest $g14HardlinkAlias))).Success) 'G14 Adapter rejects a multiply-linked Artifact' 'G14 Adapter accepted a multiply-linked Artifact'
+    $g14Ads=Join-Path $temp 'v1-stop-loss-ads.json';Write-Document $g14Ads $g14Formal -Compress;Set-Content -LiteralPath $g14Ads -Stream 'hidden-evidence' -Value 'sentinel' -Encoding utf8NoBOM
+    Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates (New-V1StopLossGate -Expected $cleanSource -Path $g14Ads -Digest (Get-FileDigest $g14Ads))).Success) 'G14 Adapter rejects alternate data streams' 'G14 Adapter accepted alternate data streams'
+    $g14ReparseTarget=Join-Path $temp 'v1-stop-loss-reparse-target';[void][IO.Directory]::CreateDirectory($g14ReparseTarget);$g14ReparsePath=Join-Path $g14ReparseTarget 'report.json';Write-Document $g14ReparsePath $g14Formal -Compress
+    $g14ReparseAlias=Join-Path $temp 'v1-stop-loss-reparse-alias';[void](New-Item -ItemType Junction -Path $g14ReparseAlias -Target $g14ReparseTarget -ErrorAction Stop)
+    try{Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates (New-V1StopLossGate -Expected $cleanSource -Path (Join-Path $g14ReparseAlias 'report.json') -Digest (Get-FileDigest $g14ReparsePath))).Success) 'G14 Adapter rejects a reparse path' 'G14 Adapter accepted a reparse path'}finally{Remove-Item -LiteralPath $g14ReparseAlias -Force}
+
+    $runtimeG14Readers=@('scripts/task.ps1','scripts/lib/Harness.Recovery.psm1','scripts/lib/Harness.RuntimeDefault.psm1')
+    Check (@($runtimeG14Readers|Where-Object{(Get-Content -LiteralPath (Join-Path $RepoRoot $_) -Raw -Encoding utf8)-match'v1-stop-loss-report'}).Count-eq0) 'Runtime Core, ordinary Status, and Runtime Default do not read G14 reports' 'a Runtime path began reading G14 qualification evidence'
+    $workflowG14Readers=@(Get-ChildItem -LiteralPath (Join-Path $RepoRoot '.github\workflows') -File -Filter '*.yml'|Where-Object{(Get-Content -LiteralPath $_.FullName -Raw -Encoding utf8)-match'run-v1-stop-loss-qualification|v1-stop-loss-report'})
+    Check ($workflowG14Readers.Count-eq0) 'Release Workflow remains unwired for G14' 'Release Workflow was changed to run or consume G14'
+
     $unwiredPath=Join-Path $temp 'still-unwired.json';Write-Document $unwiredPath ([ordered]@{}) -Compress
-    foreach($unwiredName in @('DP-G00-ENGINEERING-BASELINE','DP-G04-RELEASE-ISOLATION','DP-G09-RELEASE-MODEL','DP-G10-RELEASE-HOST','DP-G11-RELEASE-FULL','DP-G14-V1-STOP-LOSS','DP-G13-PROMOTION','DP-G15-CANARY','DP-G16-STABLE')){
+    foreach($unwiredName in @('DP-G00-ENGINEERING-BASELINE','DP-G04-RELEASE-ISOLATION','DP-G09-RELEASE-MODEL','DP-G10-RELEASE-HOST','DP-G11-RELEASE-FULL','DP-G13-PROMOTION','DP-G15-CANARY','DP-G16-STABLE')){
         $unwiredGate=[ordered]@{};$unwiredGate[$unwiredName]=[ordered]@{status='pass';evidence_contract='fixture/v1';artifact_path=$unwiredPath;evidence_digest=(Get-FileDigest $unwiredPath);source_revision=[string]$cleanSource.revision;producer_identity='Contract Fixture producer'}
         $unwiredReason='';try{& $module {param($Root,$Source,$Gates)Assert-HarnessRolloutEvidenceSetProvenance -RepoRoot $Root -ExpectedSource $Source -Gates $Gates} $RepoRoot $cleanSource $unwiredGate}catch{$unwiredReason=[string]$_.Exception.Message}
         Check ($unwiredReason-ceq"rollout-evidence-provenance-unwired-$unwiredName") "$unwiredName remains provenance-unwired and fail closed" "$unwiredName was silently wired or promoted"

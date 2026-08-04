@@ -891,6 +891,169 @@ function Read-PresetLifecycleRolloutEvidence {
     } catch { throw [IO.InvalidDataException]::new('rollout-evidence-lifecycle-report-invalid',$_.Exception) }
 }
 
+function ConvertFrom-V1StopLossEvidenceBytes {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
+    return ConvertFrom-InstalledDesktopEvidenceBytes -Bytes $Bytes
+}
+
+function Assert-V1StopLossSanitizedContent {
+    param([AllowNull()][object]$Value)
+    Assert-InstalledDesktopSanitizedContent -Value $Value
+    Assert-HarnessPortableAdditionalSanitizedContent -Value $Value
+}
+
+function Assert-V1StopLossRouteProbe {
+    param(
+        [Parameter(Mandatory)][Collections.IDictionary]$Probe,
+        [Parameter(Mandatory)][Collections.IDictionary]$Expected
+    )
+    $keys = @('probe','status','exit_code','requested_protocol','detected_protocol','selected_protocol','preference_source','reason_code','expected_write_kind','unexpected_writes','artifact_digest_before','artifact_digest_after','command_digest','output_digest')
+    Assert-ReleaseKeys -Value $Probe -Expected $keys -Label "v1 stop-loss $($Expected.probe) probe"
+    if ([string]$Probe.probe -cne [string]$Expected.probe -or [string]$Probe.status -cnotin @('pass','fail','not_run') -or
+        [string]$Probe.requested_protocol -cne [string]$Expected.requested_protocol -or [string]$Probe.expected_write_kind -cne [string]$Expected.expected_write_kind) {
+        throw "v1 stop-loss $($Expected.probe) probe identity is invalid"
+    }
+    [void](Assert-ReleaseInteger -Value $Probe.unexpected_writes -Label "v1 stop-loss $($Expected.probe) unexpected writes" -NonNegative)
+    Assert-ReleaseDigestValue -Value $Probe.command_digest -Label "v1 stop-loss $($Expected.probe) command"
+    Assert-ReleaseDigestValue -Value $Probe.output_digest -Label "v1 stop-loss $($Expected.probe) output"
+    foreach ($name in @('artifact_digest_before','artifact_digest_after')) { if ($null -ne $Probe[$name]) { Assert-ReleaseDigestValue -Value $Probe[$name] -Label "v1 stop-loss $($Expected.probe) $name" } }
+    if ([string]$Probe.reason_code -cnotmatch '^[a-z0-9][a-z0-9-]{0,127}$') { throw "v1 stop-loss $($Expected.probe) reason is invalid" }
+    if ([string]$Probe.status -ceq 'pass') {
+        if ($Probe.exit_code -isnot [long] -or [long]$Probe.exit_code -ne 0 -or
+            [string]$Probe.detected_protocol -cne [string]$Expected.detected_protocol -or [string]$Probe.selected_protocol -cne [string]$Expected.selected_protocol -or
+            [string]$Probe.preference_source -cne [string]$Expected.preference_source -or [string]$Probe.reason_code -cne [string]$Expected.reason_code -or
+            [long]$Probe.unexpected_writes -ne 0) { throw "v1 stop-loss $($Expected.probe) pass result is invalid" }
+        if ([bool]$Expected.existing_artifact) {
+            Assert-ReleaseDigestValue -Value $Probe.artifact_digest_before -Label "v1 stop-loss $($Expected.probe) artifact before"
+            Assert-ReleaseDigestValue -Value $Probe.artifact_digest_after -Label "v1 stop-loss $($Expected.probe) artifact after"
+            if ([string]$Probe.artifact_digest_before -cne [string]$Probe.artifact_digest_after) { throw "v1 stop-loss $($Expected.probe) changed its existing Artifact" }
+        } elseif ($null -ne $Probe.artifact_digest_before -or $null -ne $Probe.artifact_digest_after) { throw "v1 stop-loss $($Expected.probe) unexpectedly reported an Artifact" }
+    } elseif ([string]$Probe.status -ceq 'fail') {
+        if ($Probe.exit_code -isnot [long] -or [long]$Probe.exit_code -eq 0) { throw "v1 stop-loss $($Expected.probe) failure exit code is invalid" }
+    } elseif ($null -ne $Probe.exit_code) { throw "v1 stop-loss $($Expected.probe) not-run exit code is invalid" }
+}
+
+function Assert-V1StopLossReport {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Collections.IDictionary]$ExpectedSource = $null,
+        [switch]$AllowNonFormalSource
+    )
+    $topKeys = @('schema_version','generated_at_utc','source_revision','source_dirty','source_state_stable','source','report_run_id','producer_identity','producer_mode','execution','route_probes','lifecycle','results','status','reason','report_digest')
+    Assert-ReleaseKeys -Value $Document -Expected $topKeys -Label 'v1 stop-loss report'
+    $schemaPath = Join-Path $RepoRoot 'schemas\v1-stop-loss-report.schema.json'
+    if (-not (Test-Path -LiteralPath $schemaPath -PathType Leaf) -or
+        -not (Test-Json -Json ($Document | ConvertTo-Json -Depth 100 -Compress) -SchemaFile $schemaPath -ErrorAction Stop -WarningAction SilentlyContinue)) {
+        throw 'v1 stop-loss report schema validation failed'
+    }
+    if ([string]$Document.schema_version -cne 'harness-v1-stop-loss-report/v1' -or [string]$Document.report_run_id -cnotmatch '^[0-9a-f]{32}$' -or
+        [string]$Document.producer_identity -cne 'v1-stop-loss-qualification/v1' -or [string]$Document.producer_mode -cnotin @('formal','test-only','diagnostic-smoke') -or
+        [string]$Document.status -cnotin @('pass','fail','unavailable')) { throw 'v1 stop-loss report identity is invalid' }
+    [void](Assert-PresetLifecycleUtcDate -Value $Document.generated_at_utc -Label 'v1 stop-loss report')
+    Assert-ReleaseReportDigest -Document $Document
+    Assert-V1StopLossSanitizedContent -Value $Document
+
+    Assert-ReleaseKeys -Value $Document.source -Expected @('commit_tree_oid','object_format','start','end','input_digests') -Label 'v1 stop-loss source'
+    $inputPaths = [ordered]@{
+        producer_digest='scripts/run-v1-stop-loss-qualification.ps1'
+        task_entry_digest='scripts/task.ps1'
+        advance_stage_digest='scripts/advance-stage.ps1'
+        protocol_module_digest='scripts/lib/Harness.Protocol.psm1'
+        task_state_module_digest='scripts/lib/Harness.TaskState.psm1'
+        atomic_write_digest='scripts/lib/Harness.AtomicWrite.psm1'
+        path_digest='scripts/lib/Harness.Path.psm1'
+    }
+    Assert-ReleaseKeys -Value $Document.source.input_digests -Expected @($inputPaths.Keys) -Label 'v1 stop-loss inputs'
+    foreach ($entry in $inputPaths.GetEnumerator()) { Assert-ReleaseCurrentFileDigest -RepoRoot $RepoRoot -Value $Document.source.input_digests[$entry.Key] -RelativePath ([string]$entry.Value) -Label ("v1 stop-loss {0}" -f $entry.Key) }
+    Assert-ReleaseSourceStateShape -Value $Document.source.start -Label 'v1 stop-loss source start'
+    Assert-ReleaseSourceStateShape -Value $Document.source.end -Label 'v1 stop-loss source end'
+    if ([string]$Document.source_revision -cne [string]$Document.source.start.revision -or [string]$Document.source.commit_tree_oid -cne [string]$Document.source.start.commit_tree_oid -or
+        [string]$Document.source.object_format -cne [string]$Document.source.start.object_format -or
+        [bool]$Document.source_dirty -ne ([bool]$Document.source.start.dirty -or [bool]$Document.source.end.dirty)) { throw 'v1 stop-loss source binding is invalid' }
+    $sourceStable = Test-HarnessReleaseSourceStable -Start $Document.source.start -End $Document.source.end
+    if ([bool]$Document.source_state_stable -ne $sourceStable) { throw 'v1 stop-loss source stability is inconsistent' }
+    if ($null -ne $ExpectedSource) {
+        Assert-ReleaseSourceStateMatchesExpected -Value $Document.source.start -Expected $ExpectedSource -Label 'v1 stop-loss source start'
+        Assert-ReleaseSourceStateMatchesExpected -Value $Document.source.end -Expected $ExpectedSource -Label 'v1 stop-loss source end'
+        Assert-HarnessPortableEvidenceSource -RepoRoot $RepoRoot -ExpectedSource $ExpectedSource
+    }
+    if (-not $AllowNonFormalSource -and ([bool]$Document.source_dirty -or -not [bool]$Document.source_state_stable)) { throw 'v1 stop-loss source is not clean and stable' }
+
+    Assert-ReleaseKeys -Value $Document.execution -Expected @('sequence_contract','isolated_workspace','isolated_profile','workspace_identity_digest','profile_identity_digest','duration_ms','raw_output_persisted','auth_bytes_persisted','private_paths_persisted') -Label 'v1 stop-loss execution'
+    if ([string]$Document.execution.sequence_contract -cne 'environment-v1-disable-v2-existing-v1-existing-v2-v1-lifecycle/v1' -or
+        $Document.execution.isolated_workspace -isnot [bool] -or -not [bool]$Document.execution.isolated_workspace -or $Document.execution.isolated_profile -isnot [bool] -or -not [bool]$Document.execution.isolated_profile -or
+        $Document.execution.raw_output_persisted -isnot [bool] -or [bool]$Document.execution.raw_output_persisted -or $Document.execution.auth_bytes_persisted -isnot [bool] -or [bool]$Document.execution.auth_bytes_persisted -or
+        $Document.execution.private_paths_persisted -isnot [bool] -or [bool]$Document.execution.private_paths_persisted) { throw 'v1 stop-loss execution identity is invalid' }
+    Assert-ReleaseDigestValue -Value $Document.execution.workspace_identity_digest -Label 'v1 stop-loss workspace identity'
+    Assert-ReleaseDigestValue -Value $Document.execution.profile_identity_digest -Label 'v1 stop-loss profile identity'
+    [void](Assert-ReleaseInteger -Value $Document.execution.duration_ms -Label 'v1 stop-loss duration' -Positive)
+
+    $routeExpectations = @(
+        [ordered]@{probe='environment-v1-new-task';requested_protocol='v1';detected_protocol='new';selected_protocol='v1';preference_source='HARNESS_PROTOCOL';reason_code='explicit-v1-new-task';expected_write_kind='none';existing_artifact=$false},
+        [ordered]@{probe='disable-v2-new-task';requested_protocol='v1';detected_protocol='new';selected_protocol='v1';preference_source='workspace-config';reason_code='workspace-v1-new-task';expected_write_kind='workspace-protocol-config';existing_artifact=$false},
+        [ordered]@{probe='existing-v1-artifact';requested_protocol='v2';detected_protocol='v1';selected_protocol='v1';preference_source='existing-artifact';reason_code='existing-v1-plan';expected_write_kind='none';existing_artifact=$true},
+        [ordered]@{probe='existing-v2-artifact';requested_protocol='v1';detected_protocol='v2';selected_protocol='v2';preference_source='existing-artifact';reason_code='existing-v2-task-state';expected_write_kind='none';existing_artifact=$true}
+    )
+    if (@($Document.route_probes).Count -ne 4) { throw 'v1 stop-loss route probe count is invalid' }
+    for ($index=0; $index -lt 4; $index++) { Assert-V1StopLossRouteProbe -Probe $Document.route_probes[$index] -Expected $routeExpectations[$index] }
+
+    $lifecycle = $Document.lifecycle
+    Assert-ReleaseKeys -Value $lifecycle -Expected @('status','initial_stage','final_stage','stage_sequence','transition_count','plan_digest_before','plan_digest_after','test_report_digest','unexpected_writes','reason') -Label 'v1 stop-loss lifecycle'
+    if ([string]$lifecycle.status -cnotin @('pass','fail','not_run')) { throw 'v1 stop-loss lifecycle status is invalid' }
+    [void](Assert-ReleaseInteger -Value $lifecycle.transition_count -Label 'v1 stop-loss lifecycle transition count' -NonNegative)
+    [void](Assert-ReleaseInteger -Value $lifecycle.unexpected_writes -Label 'v1 stop-loss lifecycle unexpected writes' -NonNegative)
+    foreach ($name in @('plan_digest_before','plan_digest_after','test_report_digest')) { if ($null -ne $lifecycle[$name]) { Assert-ReleaseDigestValue -Value $lifecycle[$name] -Label "v1 stop-loss lifecycle $name" } }
+    $expectedStages = @('PLAN','PLAN_REVIEW','IMPLEMENT','CODE_REVIEW','TEST','DONE')
+    $lifecyclePassed = [string]$lifecycle.status -ceq 'pass' -and [string]$lifecycle.initial_stage -ceq 'PLAN' -and [string]$lifecycle.final_stage -ceq 'DONE' -and
+        (@($lifecycle.stage_sequence) -join '>') -ceq ($expectedStages -join '>') -and [long]$lifecycle.transition_count -eq 5 -and [long]$lifecycle.unexpected_writes -eq 0 -and [string]$lifecycle.reason -ceq 'lifecycle-pass'
+    if ([string]$lifecycle.status -ceq 'pass') {
+        foreach ($name in @('plan_digest_before','plan_digest_after','test_report_digest')) { Assert-ReleaseDigestValue -Value $lifecycle[$name] -Label "v1 stop-loss lifecycle $name" }
+        if (-not $lifecyclePassed) { throw 'v1 stop-loss passing lifecycle is invalid' }
+    } elseif ([string]$lifecycle.status -ceq 'not_run' -and ($null -ne $lifecycle.initial_stage -or $null -ne $lifecycle.final_stage -or @($lifecycle.stage_sequence).Count -ne 0 -or [long]$lifecycle.transition_count -ne 0 -or [string]$lifecycle.reason -cne 'not-run')) { throw 'v1 stop-loss not-run lifecycle is invalid' }
+
+    $resultNames = @('environment_v1_selects_v1','disable_v2_selects_v1','existing_v1_artifact_remains_v1','existing_v2_artifact_remains_v2','existing_artifacts_unchanged_by_routing','v1_lifecycle_reaches_done','v1_stage_order_exact','runtime_default_untouched','auth_unchanged','unrelated_user_config_unchanged','cleanup_no_residue')
+    Assert-ReleaseKeys -Value $Document.results -Expected $resultNames -Label 'v1 stop-loss results'
+    foreach ($name in $resultNames) { Assert-ReleaseBoolean -Value $Document.results[$name] -Label "v1 stop-loss result $name" }
+    $routePasses = @($Document.route_probes | ForEach-Object { [string]$_.status -ceq 'pass' })
+    $derivedResults = [ordered]@{
+        environment_v1_selects_v1=$routePasses[0]
+        disable_v2_selects_v1=$routePasses[1]
+        existing_v1_artifact_remains_v1=$routePasses[2]
+        existing_v2_artifact_remains_v2=$routePasses[3]
+        existing_artifacts_unchanged_by_routing=($routePasses[2] -and $routePasses[3] -and [string]$Document.route_probes[2].artifact_digest_before -ceq [string]$Document.route_probes[2].artifact_digest_after -and [string]$Document.route_probes[3].artifact_digest_before -ceq [string]$Document.route_probes[3].artifact_digest_after)
+        v1_lifecycle_reaches_done=$lifecyclePassed
+        v1_stage_order_exact=$lifecyclePassed
+    }
+    foreach ($name in $derivedResults.Keys) { if ([bool]$Document.results[$name] -ne [bool]$derivedResults[$name]) { throw "v1 stop-loss result $name is inconsistent" } }
+    $hasUnavailable = @($Document.route_probes | Where-Object { [string]$_.status -ceq 'not_run' }).Count -gt 0 -or [string]$lifecycle.status -ceq 'not_run'
+    $hasFailure = @($Document.route_probes | Where-Object { [string]$_.status -ceq 'fail' }).Count -gt 0 -or [string]$lifecycle.status -ceq 'fail' -or (-not $hasUnavailable -and @($resultNames | Where-Object { -not [bool]$Document.results[$_] }).Count -gt 0)
+    $operationalPass = -not $hasFailure -and -not $hasUnavailable
+    $derivedStatus = if ($hasFailure) { 'fail' } elseif ($hasUnavailable) { 'unavailable' } elseif ([string]$Document.producer_mode -cne 'formal') { 'unavailable' } elseif (-not [bool]$Document.source_dirty -and [bool]$Document.source_state_stable -and $operationalPass) { 'pass' } else { 'fail' }
+    $derivedReason = if ($derivedStatus -ceq 'pass') { 'all-stop-loss-checks-passed' } elseif ($operationalPass -and [string]$Document.producer_mode -cne 'formal') { 'non-formal-producer-mode' } else { 'route-or-lifecycle-result-failure' }
+    if ([string]$Document.status -cne $derivedStatus -or [string]$Document.reason -cne $derivedReason) { throw 'v1 stop-loss aggregate status is inconsistent' }
+
+    return [ordered]@{status=$derivedStatus;producer_identity='v1-stop-loss-qualification/v1';source_revision=[string]$Document.source_revision;report_run_id=[string]$Document.report_run_id}
+}
+
+function Read-V1StopLossRolloutEvidence {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Gate,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource,
+        [string[]]$ProtectedRoots = @()
+    )
+    try {
+        Assert-ReleaseKeys -Value $Gate -Expected @('status','evidence_contract','artifact_path','evidence_digest','source_revision','producer_identity') -Label 'v1 stop-loss gate'
+        if ([string]$Gate.evidence_contract -cne 'harness-v1-stop-loss-report/v1' -or [string]$Gate.source_revision -cne [string]$ExpectedSource.revision -or [string]::IsNullOrWhiteSpace([string]$Gate.producer_identity)) { throw 'v1 stop-loss gate binding is invalid' }
+        $userProtected = if ([string]::IsNullOrWhiteSpace($env:USERPROFILE)) { @() } else { @('.claude','.agents','.dev-harness' | ForEach-Object { Join-Path $env:USERPROFILE $_ }) }
+        $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $RepoRoot -ProtectedRoots (@($ProtectedRoots) + $userProtected)
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$Gate.artifact_path) -ExpectedDigest ([string]$Gate.evidence_digest) -ProtectedRoots $protected -MaximumBytes 1MB
+        $document = ConvertFrom-V1StopLossEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        return Assert-V1StopLossReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource
+    } catch { throw [IO.InvalidDataException]::new('rollout-evidence-v1-stop-loss-report-invalid',$_.Exception) }
+}
+
 function Assert-HarnessRolloutEvidenceSetProvenance {
     param(
         [Parameter(Mandatory)][System.Collections.IDictionary]$Gates,
@@ -901,6 +1064,7 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
     $modelName = 'DP-G01-MODEL40'
     $cognitiveNames = @('DP-G02-COGNITIVE-HOST-3X3','DP-G05-V2-BARE-1.25','DP-G06-REQUEST-SEND-REDUCTION')
     $installedNames = @('DP-G03-INSTALLED-DESKTOP-HOST-3X3','DP-G07-DISTINCT-INSTALLED-DESKTOP-GATE')
+    $v1StopLossName = 'DP-G14-V1-STOP-LOSS'
     $lifecyclePresets = [ordered]@{
         'DP-G18-CORE-LIFECYCLE'='core'
         'DP-G19-GOVERNED-LIFECYCLE'='governed'
@@ -947,6 +1111,13 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
         }
         $adapted = $true
     }
+    if ($Gates.Contains($v1StopLossName)) {
+        if ([string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-v1-stop-loss-report-invalid' }
+        $v1StopLoss = Read-V1StopLossRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$v1StopLossName] -ExpectedSource $ExpectedSource -ProtectedRoots $ProtectedRoots
+        $Gates[$v1StopLossName].status = [string]$v1StopLoss.status
+        $Gates[$v1StopLossName].producer_identity = [string]$v1StopLoss.producer_identity
+        $adapted = $true
+    }
     $lifecyclePresent = @($lifecycleNames | Where-Object { $Gates.Contains($_) })
     if ($lifecyclePresent.Count -gt 0) {
         if ($lifecyclePresent.Count -ne 3 -or [string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-lifecycle-gate-set-incomplete' }
@@ -976,7 +1147,7 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
         }
         $adapted = $true
     }
-    $adaptedNames = @($modelName) + $cognitiveNames + $installedNames + $lifecycleNames
+    $adaptedNames = @($modelName,$v1StopLossName) + $cognitiveNames + $installedNames + $lifecycleNames
     foreach ($name in @($Gates.Keys | Where-Object { $_ -cnotin $adaptedNames } | Sort-Object)) {
         $gate = $Gates[$name]
         if ($gate -isnot [System.Collections.IDictionary] -or

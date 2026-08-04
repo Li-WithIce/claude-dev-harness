@@ -120,7 +120,8 @@ $expectedSchemaFiles = @(
     'rollout-review-payload.schema.json',
     'rollout-review-receipt.schema.json',
     'runtime-default-decision.schema.json',
-    'task-state.schema.json'
+    'task-state.schema.json',
+    'v1-stop-loss-report.schema.json'
 )
 $actualSchemaFiles = @(Get-ChildItem -LiteralPath $schemaRoot -Filter '*.json' -File | Select-Object -ExpandProperty Name | Sort-Object)
 Assert-True -Condition (@(Compare-Object $expectedSchemaFiles $actualSchemaFiles).Count -eq 0) -Success 'schema set contains the canonical and approved extension contracts' -Failure 'schema set drifted beyond the approved contracts'
