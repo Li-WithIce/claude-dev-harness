@@ -129,7 +129,7 @@
   },
   "definitions": {
     "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
-    "nullableDigest": { "type": ["string", "null"] },
+    "nullableDigest": { "oneOf": [{ "$ref": "#/definitions/digest" }, { "type": "null" }] },
     "objectId": { "type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" },
     "objectFormat": { "type": "string", "enum": ["sha1", "sha256"] },
     "utcDateTime": { "type": "string", "format": "date-time", "pattern": "(?:Z|\\+00:00)$" },

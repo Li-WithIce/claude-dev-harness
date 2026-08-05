@@ -871,7 +871,7 @@ try {
     Check ($workflowG14Readers.Count-eq0) 'Release Workflow remains unwired for G14' 'Release Workflow was changed to run or consume G14'
 
     $unwiredPath=Join-Path $temp 'still-unwired.json';Write-Document $unwiredPath ([ordered]@{}) -Compress
-    foreach($unwiredName in @('DP-G00-ENGINEERING-BASELINE','DP-G04-RELEASE-ISOLATION','DP-G09-RELEASE-MODEL','DP-G10-RELEASE-HOST','DP-G11-RELEASE-FULL','DP-G13-PROMOTION','DP-G15-CANARY','DP-G16-STABLE')){
+    foreach($unwiredName in @('DP-G00-EXACT-HEAD-ENGINEERING-CI','DP-G09-RELEASE-MODEL','DP-G10-RELEASE-HOST','DP-G11-RELEASE-FULL','DP-G13-PROMOTION-AUTO-PROBE','DP-G15-CANARY','DP-G16-STABLE-DECISION')){
         $unwiredGate=[ordered]@{};$unwiredGate[$unwiredName]=[ordered]@{status='pass';evidence_contract='fixture/v1';artifact_path=$unwiredPath;evidence_digest=(Get-FileDigest $unwiredPath);source_revision=[string]$cleanSource.revision;producer_identity='Contract Fixture producer'}
         $unwiredReason='';try{& $module {param($Root,$Source,$Gates)Assert-HarnessRolloutEvidenceSetProvenance -RepoRoot $Root -ExpectedSource $Source -Gates $Gates} $RepoRoot $cleanSource $unwiredGate}catch{$unwiredReason=[string]$_.Exception.Message}
         Check ($unwiredReason-ceq"rollout-evidence-provenance-unwired-$unwiredName") "$unwiredName remains provenance-unwired and fail closed" "$unwiredName was silently wired or promoted"

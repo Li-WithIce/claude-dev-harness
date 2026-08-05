@@ -112,6 +112,8 @@ $expectedSchemaFiles = @(
     'model-eval-observation.schema.json',
     'preset-lifecycle-report.schema.json',
     'protocol-config.schema.json',
+    'release-isolation-report.schema.json',
+    'release-runner-observation.schema.json',
     'requirement-contract.schema.json',
     'rollout-canary-authorization.schema.json',
     'rollout-eligibility-v2.schema.json',

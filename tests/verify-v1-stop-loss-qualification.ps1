@@ -33,6 +33,7 @@ try {
     $schema = Get-Content -LiteralPath $schemaPath -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable -Depth 100
     $strictObjects = @($schema,$schema.properties.source,$schema.properties.source.properties.input_digests,$schema.properties.execution,$schema.properties.lifecycle,$schema.properties.results,$schema.definitions.sourceState,$schema.definitions.routeProbe)
     Check ([string]$schema['$schema'] -ceq 'http://json-schema.org/draft-07/schema#' -and @($strictObjects | Where-Object { $_.additionalProperties -ne $false }).Count -eq 0) 'v1 stop-loss Schema is strict Draft 7 at every fixed object' 'v1 stop-loss Schema is not strict Draft 7'
+    Check (@($schema.definitions.nullableDigest.oneOf).Count -eq 2 -and [string]$schema.definitions.nullableDigest.oneOf[0]['$ref'] -ceq '#/definitions/digest' -and [string]$schema.definitions.nullableDigest.oneOf[1].type -ceq 'null') 'nullableDigest is exactly digest-or-null' 'nullableDigest still accepts unconstrained strings'
 
     $run = Complete (Start-RepoProcess -UserProfile $env:USERPROFILE -ScriptPath $producerPath -Arguments @('-RepoRoot',$RepoRoot,'-OutputPath',$outputPath,'-ProducerMode','diagnostic-smoke'))
     Check ($run.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($run.StdErr) -and (Test-Path -LiteralPath $outputPath -PathType Leaf)) 'diagnostic-smoke writes one report successfully' "diagnostic-smoke failed: $($run.StdErr)"
@@ -67,6 +68,28 @@ try {
     $validated = & $module { param($Bytes) ConvertFrom-V1StopLossEvidenceBytes -Bytes $Bytes } $bytes
     $derived = & $module { param($Root,$Document) Assert-V1StopLossReport -RepoRoot $Root -Document $Document -AllowNonFormalSource } $RepoRoot $validated
     Check ([string]$derived.status -ceq 'unavailable' -and [string]$derived.producer_identity -ceq 'v1-stop-loss-qualification/v1') 'portable validator reopens and derives non-formal authority from report content' 'portable validator did not derive the diagnostic report correctly'
+    Check ($null -eq $document.route_probes[0].artifact_digest_before -and [string]$document.lifecycle.plan_digest_before -match '^sha256:[0-9a-f]{64}$') 'valid null and sha256 nullable digests continue to pass the Schema and Adapter' 'valid nullable digest forms regressed'
+    $nullableCases = @(
+        [ordered]@{name='lifecycle.plan_digest_before';apply={param($d)$d.lifecycle.plan_digest_before='not-a-digest'}},
+        [ordered]@{name='lifecycle.plan_digest_after';apply={param($d)$d.lifecycle.plan_digest_after='not-a-digest'}},
+        [ordered]@{name='lifecycle.test_report_digest';apply={param($d)$d.lifecycle.test_report_digest='not-a-digest'}},
+        [ordered]@{name='route.artifact_digest_before';apply={param($d)$d.route_probes[2].artifact_digest_before='not-a-digest'}},
+        [ordered]@{name='route.artifact_digest_after';apply={param($d)$d.route_probes[2].artifact_digest_after='not-a-digest'}}
+    )
+    foreach ($case in $nullableCases) {
+        $invalid = ($document | ConvertTo-Json -Depth 100 -Compress) | ConvertFrom-Json -AsHashtable -Depth 100 -DateKind String
+        & $case.apply $invalid
+        $invalid.report_digest = $null
+        $invalid.report_digest = Get-TextDigest ($invalid | ConvertTo-Json -Depth 100 -Compress)
+        $invalidJson = $invalid | ConvertTo-Json -Depth 100 -Compress
+        $schemaRejected = -not (Test-Json -Json $invalidJson -SchemaFile $schemaPath -ErrorAction SilentlyContinue -WarningAction SilentlyContinue)
+        $adapterRejected = $false
+        try {
+            $invalidDocument = & $module { param($Value) ConvertFrom-V1StopLossEvidenceBytes -Bytes $Value } ([Text.UTF8Encoding]::new($false).GetBytes($invalidJson))
+            [void](& $module { param($Root,$Value) Assert-V1StopLossReport -RepoRoot $Root -Document $Value -AllowNonFormalSource } $RepoRoot $invalidDocument)
+        } catch { $adapterRejected = $true }
+        Check ($schemaRejected -and $adapterRejected) "$($case.name) rejects not-a-digest in both Schema and Adapter" "$($case.name) accepted not-a-digest"
+    }
 
     $existing = Complete (Start-RepoProcess -UserProfile $env:USERPROFILE -ScriptPath $producerPath -Arguments @('-RepoRoot',$RepoRoot,'-OutputPath',$outputPath,'-ProducerMode','diagnostic-smoke')) 30000
     Check ($existing.ExitCode -ne 0 -and $existing.StdErr -match 'release-output-already-exists') 'Producer refuses to overwrite an existing OutputPath before execution' 'Producer overwrote or accepted an existing OutputPath'

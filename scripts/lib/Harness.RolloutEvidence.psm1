@@ -1054,6 +1054,416 @@ function Read-V1StopLossRolloutEvidence {
     } catch { throw [IO.InvalidDataException]::new('rollout-evidence-v1-stop-loss-report-invalid',$_.Exception) }
 }
 
+function Get-ReleaseRunnerObservationInputPaths {
+    return [ordered]@{
+        boundary_script_digest='scripts/assert-release-runner-boundary.ps1'
+        observation_schema_digest='schemas/release-runner-observation.schema.json'
+        rollout_evidence_digest='scripts/lib/Harness.RolloutEvidence.psm1'
+        host_benchmark_trial_digest='scripts/host-benchmark/HostBenchmark.Trial.ps1'
+        atomic_write_digest='scripts/lib/Harness.AtomicWrite.psm1'
+        path_digest='scripts/lib/Harness.Path.psm1'
+    }
+}
+
+function Get-ReleaseIsolationInputPaths {
+    return [ordered]@{
+        producer_digest='scripts/generate-release-isolation-report.ps1'
+        report_schema_digest='schemas/release-isolation-report.schema.json'
+        observation_schema_digest='schemas/release-runner-observation.schema.json'
+        boundary_script_digest='scripts/assert-release-runner-boundary.ps1'
+        rollout_evidence_digest='scripts/lib/Harness.RolloutEvidence.psm1'
+        host_benchmark_trial_digest='scripts/host-benchmark/HostBenchmark.Trial.ps1'
+        atomic_write_digest='scripts/lib/Harness.AtomicWrite.psm1'
+        path_digest='scripts/lib/Harness.Path.psm1'
+    }
+}
+
+function Write-ReleaseIsolationArtifact {
+    param([Parameter(Mandatory)][string]$Target,[Parameter(Mandatory)][AllowEmptyString()][string]$Content)
+    if (Test-Path -LiteralPath $Target) { throw 'release-output-already-exists' }
+    Assert-ReleasePathHasNoReparseAncestor -Path $Target
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($Content)
+    $digest = Get-ReleaseSha256Bytes -Bytes $bytes
+    $writeRoot = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($Target))
+    while (-not (Test-Path -LiteralPath $writeRoot -PathType Container)) {
+        $parent = [IO.Path]::GetDirectoryName($writeRoot)
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -ceq $writeRoot) { throw 'release-output-parent-unavailable' }
+        $writeRoot = $parent
+    }
+    $written = & $script:RolloutAtomicModule {
+        param($Root,$Path,$Value,$Expected)
+        Write-HarnessAtomicBytes -WorkspaceRoot $Root -Path $Path -SourceBytes $Value -ExpectedSourceDigest $Expected -ExpectedCurrentDigest 'missing'
+    } $writeRoot $Target $bytes $digest
+    if ([string]$written -cne $digest) { throw 'release isolation atomic write digest mismatch' }
+    return $digest
+}
+
+function Assert-ReleaseIsolationSanitizedContent {
+    param([AllowNull()][object]$Value)
+    Assert-InstalledDesktopSanitizedContent -Value $Value
+    Assert-HarnessPortableAdditionalSanitizedContent -Value $Value
+    if ($null -eq $Value) { return }
+    if ($Value -is [Collections.IDictionary]) {
+        foreach ($entry in $Value.GetEnumerator()) { Assert-ReleaseIsolationSanitizedContent -Value $entry.Value }
+    } elseif ($Value -is [Collections.IEnumerable] -and $Value -isnot [string]) {
+        foreach ($item in $Value) { Assert-ReleaseIsolationSanitizedContent -Value $item }
+    } elseif ($Value -is [string] -and [string]$Value -match '(?i)(?:^|[^A-Za-z0-9])S-[0-9]+(?:-[0-9]+){2,}(?:$|[^A-Za-z0-9])') {
+        throw 'release isolation evidence contains private account identity'
+    }
+}
+
+function Assert-ReleaseIsolationContentDigest {
+    param(
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Parameter(Mandatory)][ValidateSet('observation_digest','report_digest')][string]$Property
+    )
+    Assert-ReleaseDigestValue -Value $Document[$Property] -Label $Property
+    $saved = $Document[$Property]
+    try {
+        $Document[$Property] = $null
+        $actual = Get-ReleaseSha256Text -Text ($Document | ConvertTo-Json -Depth 100 -Compress)
+    } finally { $Document[$Property] = $saved }
+    if ([string]$saved -cne $actual) { throw "$Property mismatch" }
+}
+
+function Test-ReleaseIsolationSourceStateEqual {
+    param([Collections.IDictionary]$Left,[Collections.IDictionary]$Right)
+    foreach ($name in @('revision','commit_tree_oid','object_format','status_digest','state_digest','state_basis')) {
+        if ([string]$Left[$name] -cne [string]$Right[$name]) { return $false }
+    }
+    return [bool]$Left.dirty -eq [bool]$Right.dirty -and [long]$Left.status_entry_count -eq [long]$Right.status_entry_count
+}
+
+function Assert-ReleaseIsolationSourceBinding {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Parameter(Mandatory)][Collections.IDictionary]$InputPaths,
+        [Collections.IDictionary]$ExpectedSource = $null,
+        [switch]$RequirePortableSource
+    )
+    Assert-ReleaseKeys -Value $Document.source -Expected @('commit_tree_oid','object_format','start','end','input_digests') -Label 'release isolation source'
+    Assert-ReleaseKeys -Value $Document.source.input_digests -Expected @($InputPaths.Keys) -Label 'release isolation source inputs'
+    foreach ($entry in $InputPaths.GetEnumerator()) {
+        Assert-ReleaseCurrentFileDigest -RepoRoot $RepoRoot -Value $Document.source.input_digests[$entry.Key] -RelativePath ([string]$entry.Value) -Label ("release isolation {0}" -f $entry.Key)
+    }
+    Assert-ReleaseSourceStateShape -Value $Document.source.start -Label 'release isolation source start'
+    Assert-ReleaseSourceStateShape -Value $Document.source.end -Label 'release isolation source end'
+    if ([string]$Document.source_revision -cne [string]$Document.source.start.revision -or
+        [string]$Document.source.commit_tree_oid -cne [string]$Document.source.start.commit_tree_oid -or
+        [string]$Document.source.object_format -cne [string]$Document.source.start.object_format -or
+        [bool]$Document.source_dirty -ne ([bool]$Document.source.start.dirty -or [bool]$Document.source.end.dirty)) {
+        throw 'release isolation source binding is invalid'
+    }
+    $stable = Test-HarnessReleaseSourceStable -Start $Document.source.start -End $Document.source.end
+    if ([bool]$Document.source_state_stable -ne $stable) { throw 'release isolation source stability is inconsistent' }
+    if ($null -ne $ExpectedSource) {
+        Assert-ReleaseSourceStateMatchesExpected -Value $Document.source.start -Expected $ExpectedSource -Label 'release isolation source start'
+        Assert-ReleaseSourceStateMatchesExpected -Value $Document.source.end -Expected $ExpectedSource -Label 'release isolation source end'
+        if ($RequirePortableSource) { Assert-HarnessPortableEvidenceSource -RepoRoot $RepoRoot -ExpectedSource $ExpectedSource }
+    }
+    return $stable
+}
+
+function Assert-ReleaseRunnerObservation {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Collections.IDictionary]$ExpectedSource = $null,
+        [switch]$RequirePortableSource
+    )
+    $topKeys = @('schema_version','generated_at_utc','source_revision','source_dirty','source_state_stable','source','observation_run_id','producer_identity','producer_mode','role','workflow','runner','codex_home','credential_boundary','status','reason','observation_digest')
+    Assert-ReleaseKeys -Value $Document -Expected $topKeys -Label 'release runner observation'
+    $schemaPath = Join-Path $RepoRoot 'schemas/release-runner-observation.schema.json'
+    if (-not (Test-Json -Json ($Document | ConvertTo-Json -Depth 100 -Compress) -SchemaFile $schemaPath -ErrorAction Stop -WarningAction SilentlyContinue)) { throw 'release runner observation schema validation failed' }
+    if ([string]$Document.schema_version -cne 'harness-release-runner-observation/v1' -or [string]$Document.observation_run_id -cnotmatch '^[0-9a-f]{32}$' -or
+        [string]$Document.producer_identity -cne 'release-runner-observation/v1' -or [string]$Document.producer_mode -cnotin @('formal','test-only','diagnostic-smoke') -or
+        [string]$Document.role -cnotin @('model-producer','host-producer','aggregator') -or [string]$Document.status -cnotin @('pass','fail','unavailable')) {
+        throw 'release runner observation identity is invalid'
+    }
+    Assert-ReleaseDate -Value $Document.generated_at_utc -Label 'release runner observation'
+    Assert-ReleaseIsolationContentDigest -Document $Document -Property observation_digest
+    Assert-ReleaseIsolationSanitizedContent -Value $Document
+    $stable = Assert-ReleaseIsolationSourceBinding -RepoRoot $RepoRoot -Document $Document -InputPaths (Get-ReleaseRunnerObservationInputPaths) -ExpectedSource $ExpectedSource -RequirePortableSource:$RequirePortableSource
+
+    Assert-ReleaseKeys -Value $Document.workflow -Expected @('run_id','run_attempt') -Label 'release runner workflow'
+    if ([string]$Document.workflow.run_id -cnotmatch '^[1-9][0-9]*$' -or ($Document.workflow.run_attempt -isnot [long] -and $Document.workflow.run_attempt -isnot [int]) -or [long]$Document.workflow.run_attempt -lt 1) { throw 'release runner workflow identity is invalid' }
+    Assert-ReleaseKeys -Value $Document.runner -Expected @('label_digest','account_digest','account_digest_basis','platform') -Label 'release runner identity'
+    Assert-ReleaseDigestValue -Value $Document.runner.label_digest -Label 'release runner label'
+    Assert-ReleaseDigestValue -Value $Document.runner.account_digest -Label 'release runner account'
+    if ([string]$Document.runner.account_digest_basis -cne 'windows-sid-workflow-run/v1' -or [string]$Document.runner.platform -cne 'windows') { throw 'release runner identity basis is invalid' }
+
+    Assert-ReleaseKeys -Value $Document.codex_home -Expected @('mode','identity_digest','layout_stable','auth_status','path_persisted') -Label 'release runner Codex Home'
+    Assert-ReleaseKeys -Value $Document.credential_boundary -Expected @('forbidden_process_credentials_absent','default_auth_absent','credential_values_persisted') -Label 'release runner credential boundary'
+    foreach ($name in @('layout_stable','path_persisted')) { Assert-ReleaseBoolean -Value $Document.codex_home[$name] -Label "release runner Codex Home $name" }
+    foreach ($name in @('forbidden_process_credentials_absent','default_auth_absent','credential_values_persisted')) { Assert-ReleaseBoolean -Value $Document.credential_boundary[$name] -Label "release runner credential boundary $name" }
+    if ([bool]$Document.codex_home.path_persisted -or [bool]$Document.credential_boundary.credential_values_persisted) { throw 'release runner observation persisted private data' }
+    if ([string]$Document.role -ceq 'aggregator') {
+        if ([string]$Document.codex_home.mode -cne 'absent' -or $null -ne $Document.codex_home.identity_digest -or -not [bool]$Document.codex_home.layout_stable -or
+            [string]$Document.codex_home.auth_status -cne 'absent' -or -not [bool]$Document.credential_boundary.forbidden_process_credentials_absent -or -not [bool]$Document.credential_boundary.default_auth_absent) {
+            throw 'release runner aggregator boundary is invalid'
+        }
+    } else {
+        if ([string]$Document.codex_home.mode -cne 'dedicated-auth-home' -or -not [bool]$Document.codex_home.layout_stable -or [string]$Document.codex_home.auth_status -cne 'present') { throw 'release runner producer Home is invalid' }
+        Assert-ReleaseDigestValue -Value $Document.codex_home.identity_digest -Label 'release runner producer Home identity'
+    }
+
+    $expectedReason = if ([string]$Document.status -ceq 'fail') { 'boundary-check-failed' } elseif ([string]$Document.producer_mode -cne 'formal') { 'non-formal-producer-mode' } elseif ([string]$Document.status -ceq 'unavailable') { 'boundary-unavailable' } else { 'all-boundary-checks-passed' }
+    if ([string]$Document.reason -cne $expectedReason -or ([string]$Document.producer_mode -cne 'formal' -and [string]$Document.status -ceq 'pass') -or
+        ([string]$Document.status -ceq 'pass' -and ([bool]$Document.source_dirty -or -not $stable))) { throw 'release runner observation status is inconsistent' }
+
+    return [ordered]@{
+        observation_run_id=[string]$Document.observation_run_id;observation_digest=[string]$Document.observation_digest;role=[string]$Document.role
+        runner_label_digest=[string]$Document.runner.label_digest;account_digest=[string]$Document.runner.account_digest;codex_home_identity_digest=$Document.codex_home.identity_digest
+        status=[string]$Document.status;producer_mode=[string]$Document.producer_mode;workflow=$Document.workflow;source=$Document.source
+        codex_home_mode=[string]$Document.codex_home.mode;codex_home_layout_stable=[bool]$Document.codex_home.layout_stable;codex_home_auth_status=[string]$Document.codex_home.auth_status
+        aggregator_credential_blind=([bool]$Document.credential_boundary.forbidden_process_credentials_absent -and [bool]$Document.credential_boundary.default_auth_absent -and -not [bool]$Document.credential_boundary.credential_values_persisted)
+    }
+}
+
+function New-ReleaseRunnerObservationArtifact {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][ValidateSet('producer','aggregator')][string]$Mode,
+        [Parameter(Mandatory)][ValidateSet('model-producer','host-producer','aggregator')][string]$Role,
+        [Parameter(Mandatory)][string]$ProducerRunnerLabel,
+        [Parameter(Mandatory)][string]$AggregatorRunnerLabel,
+        [Parameter(Mandatory)][string]$AccountDigest,
+        [Parameter(Mandatory)][string]$RunId,
+        [Parameter(Mandatory)][string]$RunAttempt,
+        [AllowEmptyString()][string]$CodexHome = '',
+        [Parameter(Mandatory)][ValidateSet('formal','test-only','diagnostic-smoke')][string]$ProducerMode,
+        [Parameter(Mandatory)][string]$OutputPath
+    )
+    $repo = (Resolve-Path -LiteralPath $RepoRoot).Path
+    if (($Mode -ceq 'aggregator') -ne ($Role -ceq 'aggregator')) { throw 'release runner observation role does not match boundary mode' }
+    Assert-ReleaseDigestValue -Value $AccountDigest -Label 'release runner account'
+    $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $repo -ProtectedRoots @($CodexHome)
+    $target = Resolve-HarnessReleaseArtifactPath -RepoRoot $repo -OutputPath $OutputPath -ProtectedRoots $protected
+    $sourceStart = Get-HarnessReleaseSourceState -RepoRoot $repo
+    $runnerLabel = if ($Role -ceq 'aggregator') { $AggregatorRunnerLabel } else { $ProducerRunnerLabel }
+    $labelDigest = Get-ReleaseSha256Text -Text "release-runner-label/v1`n$runnerLabel"
+    $credentialNames = @('CODEX_API_KEY','CODEX_ACCESS_TOKEN','OPENAI_API_KEY')
+    $credentialPresent = @($credentialNames | Where-Object { -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_,[EnvironmentVariableTarget]::Process)) }).Count -gt 0
+    $profileHome = if (-not [string]::IsNullOrWhiteSpace($HOME)) { [string]$HOME } elseif (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) { [string]$env:USERPROFILE } else { '' }
+    $defaultAuthPath = if ([string]::IsNullOrWhiteSpace($profileHome)) { '' } else { Join-Path $profileHome '.codex\auth.json' }
+    $defaultAuthAbsent = [string]::IsNullOrWhiteSpace($defaultAuthPath) -or -not (Test-Path -LiteralPath $defaultAuthPath)
+
+    if ($Role -ceq 'aggregator') {
+        if (-not [string]::IsNullOrWhiteSpace($CodexHome)) { throw 'release runner aggregator does not accept Codex Home' }
+        $aggregatorFields = @('HOST_BENCHMARK_CODEX_HOME','CODEX_HOME') + $credentialNames
+        $aggregatorCredentialFree = @($aggregatorFields | Where-Object { -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_,[EnvironmentVariableTarget]::Process)) }).Count -eq 0
+        if (-not $aggregatorCredentialFree -or -not $defaultAuthAbsent) { throw 'release runner aggregator credential boundary is not clean' }
+        $codexHomeRecord = [ordered]@{mode='absent';identity_digest=$null;layout_stable=$true;auth_status='absent';path_persisted=$false}
+        $credentialRecord = [ordered]@{forbidden_process_credentials_absent=$true;default_auth_absent=$true;credential_values_persisted=$false}
+    } else {
+        if ([string]::IsNullOrWhiteSpace($CodexHome) -or -not [IO.Path]::IsPathRooted($CodexHome)) { throw 'release runner producer Codex Home must be an absolute directory' }
+        $resolvedHome = if ($ProducerMode -ceq 'formal') {
+            Assert-HostCodexHome -Path $CodexHome -RepoRoot $repo -ScratchRoot $repo
+        } else { Assert-HostCodexHomeLayout -Path $CodexHome }
+        $homePhysical = Get-HostPhysicalPathInfo -Path $resolvedHome -RejectLinks
+        $repoPhysical = Get-HostPhysicalPathInfo -Path $repo -RejectLinks
+        if ((Test-ReleasePathAtOrBelow -Path ([string]$homePhysical.physical_path) -Root ([string]$repoPhysical.physical_path)) -or
+            (Test-ReleasePathAtOrBelow -Path ([string]$repoPhysical.physical_path) -Root ([string]$homePhysical.physical_path))) { throw 'release runner producer Codex Home overlaps source' }
+        $unsafeHomes = [Collections.Generic.List[string]]::new()
+        if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) { $unsafeHomes.Add((Join-Path $env:USERPROFILE '.codex')) }
+        $configuredCodexHome = [Environment]::GetEnvironmentVariable('CODEX_HOME',[EnvironmentVariableTarget]::Process)
+        if (-not [string]::IsNullOrWhiteSpace($configuredCodexHome)) { $unsafeHomes.Add($configuredCodexHome) }
+        foreach ($unsafeHome in $unsafeHomes) {
+            if ([string]::IsNullOrWhiteSpace($unsafeHome)) { continue }
+            $unsafePhysical = Get-HostPhysicalPathInfo -Path $unsafeHome -AllowMissing
+            if ((Test-ReleasePathAtOrBelow -Path ([string]$homePhysical.physical_path) -Root ([string]$unsafePhysical.physical_path)) -or
+                (Test-ReleasePathAtOrBelow -Path ([string]$unsafePhysical.physical_path) -Root ([string]$homePhysical.physical_path))) { throw 'release runner producer Codex Home is not dedicated' }
+        }
+        $homeIdentity = Get-ReleaseSha256Text -Text ("release-codex-home-physical-identity/v1`n{0}`n{1}" -f [string]$homePhysical.volume,[string]$homePhysical.file_id)
+        $codexHomeRecord = [ordered]@{mode='dedicated-auth-home';identity_digest=$homeIdentity;layout_stable=$true;auth_status='present';path_persisted=$false}
+        $credentialRecord = [ordered]@{forbidden_process_credentials_absent=(-not $credentialPresent);default_auth_absent=$defaultAuthAbsent;credential_values_persisted=$false}
+    }
+
+    $inputDigests = [ordered]@{}
+    foreach ($entry in (Get-ReleaseRunnerObservationInputPaths).GetEnumerator()) { $inputDigests[$entry.Key] = Get-ReleaseFileDigest -Path (Join-Path $repo ([string]$entry.Value)) }
+    $sourceEnd = Get-HarnessReleaseSourceState -RepoRoot $repo
+    $stable = Test-HarnessReleaseSourceStable -Start $sourceStart -End $sourceEnd
+    $status = if ($ProducerMode -cne 'formal') { 'unavailable' } elseif (-not [bool]$sourceStart.dirty -and $stable) { 'pass' } else { 'fail' }
+    $reason = if ($status -ceq 'pass') { 'all-boundary-checks-passed' } elseif ($status -ceq 'unavailable') { 'non-formal-producer-mode' } else { 'boundary-check-failed' }
+    $document = [ordered]@{
+        schema_version='harness-release-runner-observation/v1';generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o');source_revision=[string]$sourceStart.revision
+        source_dirty=([bool]$sourceStart.dirty -or [bool]$sourceEnd.dirty);source_state_stable=$stable
+        source=[ordered]@{commit_tree_oid=[string]$sourceStart.commit_tree_oid;object_format=[string]$sourceStart.object_format;start=$sourceStart;end=$sourceEnd;input_digests=$inputDigests}
+        observation_run_id=[guid]::NewGuid().ToString('N');producer_identity='release-runner-observation/v1';producer_mode=$ProducerMode;role=$Role
+        workflow=[ordered]@{run_id=$RunId;run_attempt=[long]$RunAttempt}
+        runner=[ordered]@{label_digest=$labelDigest;account_digest=$AccountDigest;account_digest_basis='windows-sid-workflow-run/v1';platform='windows'}
+        codex_home=$codexHomeRecord;credential_boundary=$credentialRecord;status=$status;reason=$reason;observation_digest=$null
+    }
+    $document.observation_digest = Get-ReleaseSha256Text -Text ($document | ConvertTo-Json -Depth 100 -Compress)
+    $json = $document | ConvertTo-Json -Depth 100 -Compress
+    $validatedDocument = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($json))
+    [void](Assert-ReleaseRunnerObservation -RepoRoot $repo -Document $validatedDocument -ExpectedSource $sourceStart)
+    $rawDigest = Write-ReleaseIsolationArtifact -Target $target -Content $json
+    $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath $target -ExpectedDigest $rawDigest -ProtectedRoots $protected -MaximumBytes 512KB
+    $reopened = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+    [void](Assert-ReleaseRunnerObservation -RepoRoot $repo -Document $reopened -ExpectedSource $sourceStart)
+    return $reopened
+}
+
+function Assert-ReleaseIsolationObservationSummary {
+    param([Collections.IDictionary]$Summary,[string]$ExpectedRole,[string]$Label)
+    Assert-ReleaseKeys -Value $Summary -Expected @('observation_run_id','observation_digest','role','runner_label_digest','account_digest','codex_home_identity_digest','status') -Label $Label
+    if ([string]$Summary.observation_run_id -cnotmatch '^[0-9a-f]{32}$' -or [string]$Summary.role -cne $ExpectedRole -or [string]$Summary.status -cnotin @('pass','fail','unavailable')) { throw "$Label identity is invalid" }
+    foreach ($name in @('observation_digest','runner_label_digest','account_digest')) { Assert-ReleaseDigestValue -Value $Summary[$name] -Label "$Label $name" }
+    if ($ExpectedRole -ceq 'aggregator') {
+        if ($null -ne $Summary.codex_home_identity_digest) { throw "$Label Codex Home identity is invalid" }
+    } else { Assert-ReleaseDigestValue -Value $Summary.codex_home_identity_digest -Label "$Label Codex Home identity" }
+}
+
+function Assert-ReleaseIsolationReport {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Collections.IDictionary]$ExpectedSource = $null,
+        [switch]$RequirePortableSource
+    )
+    $topKeys = @('schema_version','generated_at_utc','source_revision','source_dirty','source_state_stable','source','report_run_id','producer_identity','producer_mode','workflow','observations','results','status','reason','report_digest')
+    Assert-ReleaseKeys -Value $Document -Expected $topKeys -Label 'release isolation report'
+    $schemaPath = Join-Path $RepoRoot 'schemas/release-isolation-report.schema.json'
+    if (-not (Test-Json -Json ($Document | ConvertTo-Json -Depth 100 -Compress) -SchemaFile $schemaPath -ErrorAction Stop -WarningAction SilentlyContinue)) { throw 'release isolation report schema validation failed' }
+    if ([string]$Document.schema_version -cne 'harness-release-isolation-report/v1' -or [string]$Document.report_run_id -cnotmatch '^[0-9a-f]{32}$' -or
+        [string]$Document.producer_identity -cne 'release-isolation-qualification/v1' -or [string]$Document.producer_mode -cnotin @('formal','test-only','diagnostic-smoke') -or
+        [string]$Document.status -cnotin @('pass','fail','unavailable')) { throw 'release isolation report identity is invalid' }
+    Assert-ReleaseDate -Value $Document.generated_at_utc -Label 'release isolation report'
+    Assert-ReleaseIsolationContentDigest -Document $Document -Property report_digest
+    Assert-ReleaseIsolationSanitizedContent -Value $Document
+    $stable = Assert-ReleaseIsolationSourceBinding -RepoRoot $RepoRoot -Document $Document -InputPaths (Get-ReleaseIsolationInputPaths) -ExpectedSource $ExpectedSource -RequirePortableSource:$RequirePortableSource
+    Assert-ReleaseKeys -Value $Document.workflow -Expected @('run_id','run_attempt') -Label 'release isolation workflow'
+    if ([string]$Document.workflow.run_id -cnotmatch '^[1-9][0-9]*$' -or ($Document.workflow.run_attempt -isnot [long] -and $Document.workflow.run_attempt -isnot [int]) -or [long]$Document.workflow.run_attempt -lt 1) { throw 'release isolation workflow identity is invalid' }
+    Assert-ReleaseKeys -Value $Document.observations -Expected @('model_producer','host_producer','aggregator') -Label 'release isolation observations'
+    $model = $Document.observations.model_producer; $host = $Document.observations.host_producer; $aggregator = $Document.observations.aggregator
+    Assert-ReleaseIsolationObservationSummary -Summary $model -ExpectedRole 'model-producer' -Label 'release isolation model observation'
+    Assert-ReleaseIsolationObservationSummary -Summary $host -ExpectedRole 'host-producer' -Label 'release isolation host observation'
+    Assert-ReleaseIsolationObservationSummary -Summary $aggregator -ExpectedRole 'aggregator' -Label 'release isolation aggregator observation'
+    $resultNames = @('observations_distinct','workflow_identity_consistent','source_identity_consistent','producer_labels_consistent','producer_aggregator_labels_distinct','aggregator_account_distinct_from_model','aggregator_account_distinct_from_host','producer_codex_home_same','producer_codex_home_dedicated','producer_auth_present','aggregator_credential_blind','no_private_identity_persisted')
+    Assert-ReleaseKeys -Value $Document.results -Expected $resultNames -Label 'release isolation results'
+    foreach ($name in $resultNames) { Assert-ReleaseBoolean -Value $Document.results[$name] -Label "release isolation result $name" }
+    $summaries = @($model,$host,$aggregator)
+    $derived = [ordered]@{
+        observations_distinct=(@($summaries.observation_run_id | Select-Object -Unique).Count -eq 3 -and @($summaries.observation_digest | Select-Object -Unique).Count -eq 3)
+        workflow_identity_consistent=$true
+        source_identity_consistent=$true
+        producer_labels_consistent=([string]$model.runner_label_digest -ceq [string]$host.runner_label_digest)
+        producer_aggregator_labels_distinct=([string]$model.runner_label_digest -cne [string]$aggregator.runner_label_digest -and [string]$host.runner_label_digest -cne [string]$aggregator.runner_label_digest)
+        aggregator_account_distinct_from_model=([string]$aggregator.account_digest -cne [string]$model.account_digest)
+        aggregator_account_distinct_from_host=([string]$aggregator.account_digest -cne [string]$host.account_digest)
+        producer_codex_home_same=([string]$model.codex_home_identity_digest -ceq [string]$host.codex_home_identity_digest)
+        producer_codex_home_dedicated=($null -ne $model.codex_home_identity_digest -and $null -ne $host.codex_home_identity_digest)
+        no_private_identity_persisted=$true
+    }
+    foreach ($name in $derived.Keys) { if ([bool]$Document.results[$name] -ne [bool]$derived[$name]) { throw "release isolation result $name is inconsistent" } }
+    $hasFailure = @($summaries | Where-Object { [string]$_.status -ceq 'fail' }).Count -gt 0 -or @($resultNames | Where-Object { -not [bool]$Document.results[$_] }).Count -gt 0
+    $hasUnavailable = @($summaries | Where-Object { [string]$_.status -ceq 'unavailable' }).Count -gt 0
+    $derivedStatus = if ($hasFailure) { 'fail' } elseif ([string]$Document.producer_mode -cne 'formal') { 'unavailable' } elseif ($hasUnavailable) { 'unavailable' } elseif ([bool]$Document.source_dirty -or -not $stable) { 'fail' } else { 'pass' }
+    $derivedReason = if ($derivedStatus -ceq 'pass') { 'all-isolation-checks-passed' } elseif ($derivedStatus -ceq 'fail') { 'isolation-check-failed' } elseif ([string]$Document.producer_mode -cne 'formal') { 'non-formal-producer-mode' } else { 'isolation-unavailable' }
+    if ([string]$Document.status -cne $derivedStatus -or [string]$Document.reason -cne $derivedReason) { throw 'release isolation aggregate status is inconsistent' }
+    return [ordered]@{status=$derivedStatus;reason=$derivedReason;producer_identity='release-isolation-qualification/v1';source_revision=[string]$Document.source_revision;report_run_id=[string]$Document.report_run_id}
+}
+
+function New-ReleaseIsolationReportArtifact {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$ModelProducerObservationPath,
+        [Parameter(Mandatory)][string]$HostProducerObservationPath,
+        [Parameter(Mandatory)][string]$AggregatorObservationPath,
+        [Parameter(Mandatory)][string]$OutputPath,
+        [Parameter(Mandatory)][ValidateSet('formal','test-only','diagnostic-smoke')][string]$ProducerMode
+    )
+    $repo = (Resolve-Path -LiteralPath $RepoRoot).Path
+    $inputPaths = @($ModelProducerObservationPath,$HostProducerObservationPath,$AggregatorObservationPath)
+    $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $repo
+    $target = Resolve-HarnessReleaseArtifactPath -RepoRoot $repo -OutputPath $OutputPath -EvidencePaths $inputPaths -ProtectedRoots $protected
+    $sourceStart = Get-HarnessReleaseSourceState -RepoRoot $repo
+    $definitions = @(
+        [ordered]@{name='model_producer';role='model-producer';path=$ModelProducerObservationPath},
+        [ordered]@{name='host_producer';role='host-producer';path=$HostProducerObservationPath},
+        [ordered]@{name='aggregator';role='aggregator';path=$AggregatorObservationPath}
+    )
+    $records = [ordered]@{}
+    foreach ($definition in $definitions) {
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$definition.path) -ProtectedRoots $protected -MaximumBytes 512KB
+        $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        $validated = Assert-ReleaseRunnerObservation -RepoRoot $repo -Document $document -ExpectedSource $sourceStart
+        if ([string]$validated.role -cne [string]$definition.role -or [string]$validated.producer_mode -cne $ProducerMode) { throw 'release isolation observation role or producer mode is invalid' }
+        $records[$definition.name] = [ordered]@{artifact=$artifact;document=$document;validated=$validated}
+    }
+    $values = @($records.Values)
+    if (@($values.artifact.path | Sort-Object -Unique).Count -ne 3 -or @($values.artifact.digest | Sort-Object -Unique).Count -ne 3 -or
+        @($values | ForEach-Object { "{0}|{1}" -f [string]$_.artifact.physical.volume,[string]$_.artifact.physical.file_id } | Sort-Object -Unique).Count -ne 3 -or
+        @($values.validated.observation_run_id | Sort-Object -Unique).Count -ne 3) { throw 'release isolation observations are not independent' }
+    $workflowKeys = @($values | ForEach-Object { "{0}|{1}" -f [string]$_.document.workflow.run_id,[long]$_.document.workflow.run_attempt } | Sort-Object -Unique)
+    $sourceKeys = @($values | ForEach-Object { "{0}|{1}|{2}|{3}" -f [string]$_.document.source_revision,[string]$_.document.source.commit_tree_oid,[string]$_.document.source.object_format,[string]$_.document.source.start.state_digest } | Sort-Object -Unique)
+    if ($workflowKeys.Count -ne 1) { throw 'release isolation observation workflow identities differ' }
+    if ($sourceKeys.Count -ne 1) { throw 'release isolation observation source identities differ' }
+    $model = $records.model_producer.validated; $host = $records.host_producer.validated; $aggregator = $records.aggregator.validated
+    $results = [ordered]@{
+        observations_distinct=$true;workflow_identity_consistent=$true;source_identity_consistent=$true
+        producer_labels_consistent=([string]$model.runner_label_digest -ceq [string]$host.runner_label_digest)
+        producer_aggregator_labels_distinct=([string]$model.runner_label_digest -cne [string]$aggregator.runner_label_digest -and [string]$host.runner_label_digest -cne [string]$aggregator.runner_label_digest)
+        aggregator_account_distinct_from_model=([string]$aggregator.account_digest -cne [string]$model.account_digest)
+        aggregator_account_distinct_from_host=([string]$aggregator.account_digest -cne [string]$host.account_digest)
+        producer_codex_home_same=([string]$model.codex_home_identity_digest -ceq [string]$host.codex_home_identity_digest)
+        producer_codex_home_dedicated=([string]$model.codex_home_mode -ceq 'dedicated-auth-home' -and [string]$host.codex_home_mode -ceq 'dedicated-auth-home' -and [bool]$model.codex_home_layout_stable -and [bool]$host.codex_home_layout_stable)
+        producer_auth_present=([string]$model.codex_home_auth_status -ceq 'present' -and [string]$host.codex_home_auth_status -ceq 'present')
+        aggregator_credential_blind=[bool]$aggregator.aggregator_credential_blind
+        no_private_identity_persisted=$true
+    }
+    $inputDigests = [ordered]@{}
+    foreach ($entry in (Get-ReleaseIsolationInputPaths).GetEnumerator()) { $inputDigests[$entry.Key] = Get-ReleaseFileDigest -Path (Join-Path $repo ([string]$entry.Value)) }
+    $sourceEnd = Get-HarnessReleaseSourceState -RepoRoot $repo
+    if (-not (Test-ReleaseIsolationSourceStateEqual -Left $sourceStart -Right $sourceEnd)) { throw 'release isolation source changed during aggregation' }
+    $summaries = [ordered]@{}
+    foreach ($definition in $definitions) {
+        $item = $records[$definition.name].validated
+        $summaries[$definition.name] = [ordered]@{observation_run_id=$item.observation_run_id;observation_digest=$item.observation_digest;role=$item.role;runner_label_digest=$item.runner_label_digest;account_digest=$item.account_digest;codex_home_identity_digest=$item.codex_home_identity_digest;status=$item.status}
+    }
+    $hasFailure = @($summaries.Values | Where-Object { [string]$_.status -ceq 'fail' }).Count -gt 0 -or @($results.Keys | Where-Object { -not [bool]$results[$_] }).Count -gt 0
+    $hasUnavailable = @($summaries.Values | Where-Object { [string]$_.status -ceq 'unavailable' }).Count -gt 0
+    $stable = Test-HarnessReleaseSourceStable -Start $sourceStart -End $sourceEnd
+    $status = if ($hasFailure) { 'fail' } elseif ($ProducerMode -cne 'formal') { 'unavailable' } elseif ($hasUnavailable) { 'unavailable' } elseif ([bool]$sourceStart.dirty -or -not $stable) { 'fail' } else { 'pass' }
+    $reason = if ($status -ceq 'pass') { 'all-isolation-checks-passed' } elseif ($status -ceq 'fail') { 'isolation-check-failed' } elseif ($ProducerMode -cne 'formal') { 'non-formal-producer-mode' } else { 'isolation-unavailable' }
+    $document = [ordered]@{
+        schema_version='harness-release-isolation-report/v1';generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o');source_revision=[string]$sourceStart.revision
+        source_dirty=([bool]$sourceStart.dirty -or [bool]$sourceEnd.dirty);source_state_stable=$stable
+        source=[ordered]@{commit_tree_oid=[string]$sourceStart.commit_tree_oid;object_format=[string]$sourceStart.object_format;start=$sourceStart;end=$sourceEnd;input_digests=$inputDigests}
+        report_run_id=[guid]::NewGuid().ToString('N');producer_identity='release-isolation-qualification/v1';producer_mode=$ProducerMode
+        workflow=[ordered]@{run_id=[string]$records.model_producer.document.workflow.run_id;run_attempt=[long]$records.model_producer.document.workflow.run_attempt}
+        observations=$summaries;results=$results;status=$status;reason=$reason;report_digest=$null
+    }
+    $document.report_digest = Get-ReleaseSha256Text -Text ($document | ConvertTo-Json -Depth 100 -Compress)
+    $json = $document | ConvertTo-Json -Depth 100 -Compress
+    $validatedDocument = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($json))
+    [void](Assert-ReleaseIsolationReport -RepoRoot $repo -Document $validatedDocument -ExpectedSource $sourceStart)
+    $rawDigest = Write-ReleaseIsolationArtifact -Target $target -Content $json
+    $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath $target -ExpectedDigest $rawDigest -ProtectedRoots $protected -MaximumBytes 1MB
+    $reopened = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+    [void](Assert-ReleaseIsolationReport -RepoRoot $repo -Document $reopened -ExpectedSource $sourceStart)
+    return $reopened
+}
+
+function Read-ReleaseIsolationRolloutEvidence {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Gate,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource,
+        [string[]]$ProtectedRoots = @()
+    )
+    try {
+        Assert-ReleaseKeys -Value $Gate -Expected @('status','evidence_contract','artifact_path','evidence_digest','source_revision','producer_identity') -Label 'release isolation gate'
+        if ([string]$Gate.evidence_contract -cne 'harness-release-isolation-report/v1' -or [string]$Gate.source_revision -cne [string]$ExpectedSource.revision -or [string]::IsNullOrWhiteSpace([string]$Gate.producer_identity)) { throw 'release isolation gate binding is invalid' }
+        $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $RepoRoot -ProtectedRoots $ProtectedRoots
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$Gate.artifact_path) -ExpectedDigest ([string]$Gate.evidence_digest) -ProtectedRoots $protected -MaximumBytes 1MB
+        $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        return Assert-ReleaseIsolationReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource -RequirePortableSource
+    } catch { throw [IO.InvalidDataException]::new('rollout-evidence-release-isolation-report-invalid',$_.Exception) }
+}
+
 function Assert-HarnessRolloutEvidenceSetProvenance {
     param(
         [Parameter(Mandatory)][System.Collections.IDictionary]$Gates,
@@ -1064,6 +1474,7 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
     $modelName = 'DP-G01-MODEL40'
     $cognitiveNames = @('DP-G02-COGNITIVE-HOST-3X3','DP-G05-V2-BARE-1.25','DP-G06-REQUEST-SEND-REDUCTION')
     $installedNames = @('DP-G03-INSTALLED-DESKTOP-HOST-3X3','DP-G07-DISTINCT-INSTALLED-DESKTOP-GATE')
+    $isolationName = 'DP-G04-CODEX-HOME-RUNNER-ISOLATION'
     $v1StopLossName = 'DP-G14-V1-STOP-LOSS'
     $lifecyclePresets = [ordered]@{
         'DP-G18-CORE-LIFECYCLE'='core'
@@ -1118,6 +1529,13 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
         $Gates[$v1StopLossName].producer_identity = [string]$v1StopLoss.producer_identity
         $adapted = $true
     }
+    if ($Gates.Contains($isolationName)) {
+        if ([string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-release-isolation-report-invalid' }
+        $isolation = Read-ReleaseIsolationRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$isolationName] -ExpectedSource $ExpectedSource -ProtectedRoots $ProtectedRoots
+        $Gates[$isolationName].status = [string]$isolation.status
+        $Gates[$isolationName].producer_identity = [string]$isolation.producer_identity
+        $adapted = $true
+    }
     $lifecyclePresent = @($lifecycleNames | Where-Object { $Gates.Contains($_) })
     if ($lifecyclePresent.Count -gt 0) {
         if ($lifecyclePresent.Count -ne 3 -or [string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-lifecycle-gate-set-incomplete' }
@@ -1147,7 +1565,7 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
         }
         $adapted = $true
     }
-    $adaptedNames = @($modelName,$v1StopLossName) + $cognitiveNames + $installedNames + $lifecycleNames
+    $adaptedNames = @($modelName,$isolationName,$v1StopLossName) + $cognitiveNames + $installedNames + $lifecycleNames
     foreach ($name in @($Gates.Keys | Where-Object { $_ -cnotin $adaptedNames } | Sort-Object)) {
         $gate = $Gates[$name]
         if ($gate -isnot [System.Collections.IDictionary] -or

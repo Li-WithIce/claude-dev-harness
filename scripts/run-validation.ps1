@@ -149,6 +149,7 @@ $coreScriptGroups = [ordered]@{
         'verify-host-benchmark-otel.ps1',
         'verify-host-benchmark-qualification.ps1',
         'verify-release-runner-boundary.ps1',
+        'verify-release-isolation-qualification.ps1',
         'verify-ordinary-ci-receipt.ps1',
         'verify-v2-ci-routing.ps1'
     )
