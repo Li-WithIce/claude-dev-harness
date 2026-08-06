@@ -1,0 +1,252 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/exact-head-engineering-evidence.schema.json",
+  "title": "Thin Harness exact-head engineering evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at_utc",
+    "source_revision",
+    "source_dirty",
+    "source_state_stable",
+    "source",
+    "report_run_id",
+    "producer_identity",
+    "producer_mode",
+    "repository",
+    "pull_request",
+    "workflow",
+    "ordinary_receipts",
+    "independent_review",
+    "results",
+    "status",
+    "reason",
+    "report_digest"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["thin-harness-exact-head-engineering-evidence/v1"] },
+    "generated_at_utc": { "type": "string", "format": "date-time" },
+    "source_revision": { "$ref": "#/definitions/gitOid" },
+    "source_dirty": { "type": "boolean" },
+    "source_state_stable": { "type": "boolean" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit_tree_oid", "object_format", "start", "end", "input_digests"],
+      "properties": {
+        "commit_tree_oid": { "$ref": "#/definitions/gitOid" },
+        "object_format": { "type": "string", "enum": ["sha1", "sha256"] },
+        "start": { "$ref": "#/definitions/sourceState" },
+        "end": { "$ref": "#/definitions/sourceState" },
+        "input_digests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "producer_digest",
+            "report_schema_digest",
+            "ordinary_receipt_schema_digest",
+            "rollout_evidence_digest",
+            "atomic_write_digest",
+            "path_digest"
+          ],
+          "properties": {
+            "producer_digest": { "$ref": "#/definitions/digest" },
+            "report_schema_digest": { "$ref": "#/definitions/digest" },
+            "ordinary_receipt_schema_digest": { "$ref": "#/definitions/digest" },
+            "rollout_evidence_digest": { "$ref": "#/definitions/digest" },
+            "atomic_write_digest": { "$ref": "#/definitions/digest" },
+            "path_digest": { "$ref": "#/definitions/digest" }
+          }
+        }
+      }
+    },
+    "report_run_id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "producer_identity": { "type": "string", "enum": ["exact-head-engineering-evidence/v1"] },
+    "producer_mode": { "type": "string", "enum": ["formal", "test-only"] },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["full_name"],
+      "properties": {
+        "full_name": { "type": "string", "enum": ["Li-WithIce/claude-dev-harness"] }
+      }
+    },
+    "pull_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["number", "state", "draft", "merged", "base_ref", "base_sha", "head_ref", "head_sha", "metadata_observed_at_utc", "metadata_digest"],
+      "properties": {
+        "number": { "type": "integer", "minimum": 1 },
+        "state": { "type": "string", "enum": ["open", "closed"] },
+        "draft": { "type": "boolean" },
+        "merged": { "type": "boolean" },
+        "base_ref": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "base_sha": { "$ref": "#/definitions/githubSha" },
+        "head_ref": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "head_sha": { "$ref": "#/definitions/githubSha" },
+        "metadata_observed_at_utc": { "type": "string", "format": "date-time" },
+        "metadata_digest": { "$ref": "#/definitions/digest" }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workflow_name", "run_id", "run_attempt", "status", "conclusion", "head_sha", "ordinary_jobs", "release_jobs"],
+      "properties": {
+        "workflow_name": { "type": "string", "enum": ["Validation"] },
+        "run_id": { "type": "integer", "minimum": 1 },
+        "run_attempt": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "status": { "type": "string", "enum": ["queued", "in_progress", "completed"] },
+        "conclusion": { "$ref": "#/definitions/jobOutcome" },
+        "head_sha": { "$ref": "#/definitions/githubSha" },
+        "ordinary_jobs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["changed-optional", "entry-lifecycle", "evaluation-release", "install-evidence", "governance-approval", "harness-contracts", "core-rollback"],
+          "properties": {
+            "changed-optional": { "$ref": "#/definitions/jobOutcome" },
+            "entry-lifecycle": { "$ref": "#/definitions/jobOutcome" },
+            "evaluation-release": { "$ref": "#/definitions/jobOutcome" },
+            "install-evidence": { "$ref": "#/definitions/jobOutcome" },
+            "governance-approval": { "$ref": "#/definitions/jobOutcome" },
+            "harness-contracts": { "$ref": "#/definitions/jobOutcome" },
+            "core-rollback": { "$ref": "#/definitions/jobOutcome" }
+          }
+        },
+        "release_jobs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["release-model", "release-host", "release-full"],
+          "properties": {
+            "release-model": { "$ref": "#/definitions/jobOutcome" },
+            "release-host": { "$ref": "#/definitions/jobOutcome" },
+            "release-full": { "$ref": "#/definitions/jobOutcome" }
+          }
+        }
+      }
+    },
+    "ordinary_receipts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["receipt_set_digest", "receipt_set_bytes", "checks"],
+      "properties": {
+        "receipt_set_digest": { "$ref": "#/definitions/digest" },
+        "receipt_set_bytes": { "type": "integer", "minimum": 1 },
+        "checks": {
+          "type": "array",
+          "minItems": 7,
+          "maxItems": 7,
+          "additionalItems": false,
+          "items": [
+            { "allOf": [{ "$ref": "#/definitions/receiptCheck" }, { "properties": { "check_name": { "enum": ["changed-optional"] } } }] },
+            { "allOf": [{ "$ref": "#/definitions/receiptCheck" }, { "properties": { "check_name": { "enum": ["core-rollback"] } } }] },
+            { "allOf": [{ "$ref": "#/definitions/receiptCheck" }, { "properties": { "check_name": { "enum": ["entry-lifecycle"] } } }] },
+            { "allOf": [{ "$ref": "#/definitions/receiptCheck" }, { "properties": { "check_name": { "enum": ["evaluation-release"] } } }] },
+            { "allOf": [{ "$ref": "#/definitions/receiptCheck" }, { "properties": { "check_name": { "enum": ["governance-approval"] } } }] },
+            { "allOf": [{ "$ref": "#/definitions/receiptCheck" }, { "properties": { "check_name": { "enum": ["harness-contracts"] } } }] },
+            { "allOf": [{ "$ref": "#/definitions/receiptCheck" }, { "properties": { "check_name": { "enum": ["install-evidence"] } } }] }
+          ]
+        }
+      }
+    },
+    "independent_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["comment_id", "schema_version", "base_sha", "head_sha", "reviewed_diff_digest", "reviewed_diff_bytes", "task_starting_sha", "task_diff_digest", "task_diff_bytes", "ci_run_id", "ci_run_attempt", "receipt_set_digest", "reviewer_model", "reviewer_participated", "read_only", "verdict", "findings", "created_at_utc", "receipt_digest"],
+      "properties": {
+        "comment_id": { "type": "integer", "minimum": 1 },
+        "schema_version": { "type": "string", "enum": ["thin-harness-independent-review-receipt/v1"] },
+        "base_sha": { "$ref": "#/definitions/githubSha" },
+        "head_sha": { "$ref": "#/definitions/githubSha" },
+        "reviewed_diff_digest": { "$ref": "#/definitions/digest" },
+        "reviewed_diff_bytes": { "type": "integer", "minimum": 0 },
+        "task_starting_sha": { "$ref": "#/definitions/githubSha" },
+        "task_diff_digest": { "$ref": "#/definitions/digest" },
+        "task_diff_bytes": { "type": "integer", "minimum": 0 },
+        "ci_run_id": { "type": "integer", "minimum": 1 },
+        "ci_run_attempt": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "receipt_set_digest": { "$ref": "#/definitions/digest" },
+        "reviewer_model": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._/-]+$" },
+        "reviewer_participated": { "type": "boolean" },
+        "read_only": { "type": "boolean" },
+        "verdict": { "type": "string", "enum": ["pass", "fail", "unavailable"] },
+        "findings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["p0", "p1", "p2", "p3"],
+          "properties": {
+            "p0": { "type": "integer", "minimum": 0 },
+            "p1": { "type": "integer", "minimum": 0 },
+            "p2": { "type": "integer", "minimum": 0 },
+            "p3": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "created_at_utc": { "type": "string", "format": "date-time" },
+        "receipt_digest": { "$ref": "#/definitions/digest" }
+      }
+    },
+    "results": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pr_open", "pr_draft", "pr_unmerged", "exact_base", "exact_head", "exact_checkout", "ordinary_jobs_passed", "release_jobs_not_counted_as_pass", "seven_receipts_valid", "receipt_set_valid", "review_exact_head", "review_read_only", "review_independent", "review_verdict_pass", "review_findings_clear", "reviewed_diff_valid", "source_clean", "source_stable"],
+      "properties": {
+        "pr_open": { "type": "boolean" },
+        "pr_draft": { "type": "boolean" },
+        "pr_unmerged": { "type": "boolean" },
+        "exact_base": { "type": "boolean" },
+        "exact_head": { "type": "boolean" },
+        "exact_checkout": { "type": "boolean" },
+        "ordinary_jobs_passed": { "type": "boolean" },
+        "release_jobs_not_counted_as_pass": { "type": "boolean" },
+        "seven_receipts_valid": { "type": "boolean" },
+        "receipt_set_valid": { "type": "boolean" },
+        "review_exact_head": { "type": "boolean" },
+        "review_read_only": { "type": "boolean" },
+        "review_independent": { "type": "boolean" },
+        "review_verdict_pass": { "type": "boolean" },
+        "review_findings_clear": { "type": "boolean" },
+        "reviewed_diff_valid": { "type": "boolean" },
+        "source_clean": { "type": "boolean" },
+        "source_stable": { "type": "boolean" }
+      }
+    },
+    "status": { "type": "string", "enum": ["pass", "fail", "unavailable"] },
+    "reason": { "type": "string", "enum": ["all-exact-head-engineering-checks-passed", "exact-head-engineering-check-failed", "github-evidence-unavailable", "non-formal-producer-mode"] },
+    "report_digest": { "$ref": "#/definitions/digest" }
+  },
+  "definitions": {
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "gitOid": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+    "githubSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "jobOutcome": { "type": "string", "enum": ["success", "failure", "cancelled", "skipped", "timed_out", "action_required", "neutral", "startup_failure", "stale"] },
+    "sourceState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision", "commit_tree_oid", "object_format", "dirty", "status_entry_count", "status_digest", "state_digest", "state_basis"],
+      "properties": {
+        "revision": { "$ref": "#/definitions/gitOid" },
+        "commit_tree_oid": { "$ref": "#/definitions/gitOid" },
+        "object_format": { "type": "string", "enum": ["sha1", "sha256"] },
+        "dirty": { "type": "boolean" },
+        "status_entry_count": { "type": "integer", "minimum": 0 },
+        "status_digest": { "$ref": "#/definitions/digest" },
+        "state_digest": { "$ref": "#/definitions/digest" },
+        "state_basis": { "type": "string", "enum": ["git-revision-tree-status/v1"] }
+      }
+    },
+    "receiptCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["check_name", "job_id", "artifact_id", "artifact_name", "raw_receipt_digest", "outcome"],
+      "properties": {
+        "check_name": { "type": "string", "enum": ["changed-optional", "core-rollback", "entry-lifecycle", "evaluation-release", "governance-approval", "harness-contracts", "install-evidence"] },
+        "job_id": { "type": "string", "enum": ["changed-optional", "pr-core", "pr-core-checks"] },
+        "artifact_id": { "type": "integer", "minimum": 1 },
+        "artifact_name": { "type": "string", "pattern": "^thin-v2-pr-(?:changed-optional|core-(?:aggregate|entry-lifecycle|evaluation-release|governance-approval|harness-contracts|install-evidence))-[0-9a-f]{40}-[1-9][0-9]*$" },
+        "raw_receipt_digest": { "$ref": "#/definitions/digest" },
+        "outcome": { "type": "string", "enum": ["success"] }
+      }
+    }
+  }
+}

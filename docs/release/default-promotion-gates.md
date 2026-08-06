@@ -196,7 +196,7 @@ Cancelled, skipped, neutral, pending, unavailable, or missing checks and receipt
 - Maximum estimated runtime: 90 minutes.
 - Failure stop: stop and report a policy/environment blocker if authoritative machine observation would require a generic Writer, security platform, production identity system, or an authoritative host API that does not exist.
 
-DP-02A stops at the Rollout v2 core boundary above. The bounded DP-02B implementation adds the Installed Desktop producer/authority contract and G03/G07 portable Adapter only. The bounded DP-02C portions add the strict core/governed/full producer with G18/G19/G20 portable Adapters and the G14 v1 stop-loss producer/Adapter; current-branch release routing, aggregation, remaining Adapters, and real release inputs remain separate work.
+DP-02A stops at the Rollout v2 core boundary above. The bounded DP-02B implementation adds the Installed Desktop producer/authority contract and G03/G07 portable Adapter only. The bounded DP-02C portions add the G04 Release Isolation producer/Adapter, the G14 v1 stop-loss producer/Adapter, the strict core/governed/full producer with G18/G19/G20 portable Adapters, and the G00 Exact-head Engineering Portable Evidence contract; current-branch release routing, aggregation, remaining Adapters, and real release inputs remain separate work.
 
 ### DP-03 — Produce real qualification evidence
 

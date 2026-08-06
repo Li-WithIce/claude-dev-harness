@@ -107,6 +107,7 @@ $expectedSchemaFiles = @(
     'current-pointer.schema.json',
     'event.schema.json',
     'evidence.schema.json',
+    'exact-head-engineering-evidence.schema.json',
     'ordinary-ci-receipt.schema.json',
     'protected-actions-overlay.schema.json',
     'model-eval-observation.schema.json',

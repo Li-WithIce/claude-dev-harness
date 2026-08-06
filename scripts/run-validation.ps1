@@ -144,6 +144,7 @@ $coreScriptGroups = [ordered]@{
         'run-scenario-evals.ps1',
         'verify-model-eval-runner.ps1',
         'verify-rollout-evidence.ps1',
+        'verify-exact-head-engineering-evidence.ps1',
         'verify-v1-stop-loss-qualification.ps1',
         'verify-host-benchmark-runner.ps1',
         'verify-host-benchmark-otel.ps1',

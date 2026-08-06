@@ -1464,6 +1464,671 @@ function Read-ReleaseIsolationRolloutEvidence {
     } catch { throw [IO.InvalidDataException]::new('rollout-evidence-release-isolation-report-invalid',$_.Exception) }
 }
 
+function Get-ExactHeadEngineeringInputPaths {
+    return [ordered]@{
+        producer_digest = 'scripts/generate-exact-head-engineering-evidence.ps1'
+        report_schema_digest = 'schemas/exact-head-engineering-evidence.schema.json'
+        ordinary_receipt_schema_digest = 'schemas/ordinary-ci-receipt.schema.json'
+        rollout_evidence_digest = 'scripts/lib/Harness.RolloutEvidence.psm1'
+        atomic_write_digest = 'scripts/lib/Harness.AtomicWrite.psm1'
+        path_digest = 'scripts/lib/Harness.Path.psm1'
+    }
+}
+
+function Assert-ExactHeadUtcDate {
+    param([object]$Value,[string]$Label)
+    try { $parsed = [DateTimeOffset]::Parse([string]$Value,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None) }
+    catch { throw "$Label timestamp is invalid" }
+    if ($parsed.Offset -ne [TimeSpan]::Zero) { throw "$Label timestamp is not UTC" }
+}
+
+function ConvertTo-ExactHeadInt64 {
+    param([object]$Value,[string]$Label)
+    if ($Value -is [long] -or $Value -is [int]) {
+        $number = [long]$Value
+    } elseif ($Value -is [string]) {
+        $number = 0L
+        if (-not [long]::TryParse([string]$Value,[Globalization.NumberStyles]::None,[Globalization.CultureInfo]::InvariantCulture,[ref]$number)) { throw "$Label is not an integer" }
+    } else { throw "$Label is not an integer" }
+    if ($number -lt 1) { throw "$Label is not positive" }
+    return $number
+}
+
+function Invoke-ExactHeadNativeBytes {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [Parameter(Mandatory)][string]$Label
+    )
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $FilePath
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    foreach ($argument in $Arguments) { $start.ArgumentList.Add([string]$argument) }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    $buffer = [IO.MemoryStream]::new()
+    try {
+        if (-not $process.Start()) { throw "$Label unavailable" }
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.StandardOutput.BaseStream.CopyTo($buffer)
+        $process.WaitForExit()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0) { throw "$Label unavailable (exit $($process.ExitCode))" }
+        return $buffer.ToArray()
+    } finally {
+        $buffer.Dispose()
+        $process.Dispose()
+    }
+}
+
+function Get-ExactHeadGitDiff {
+    param([string]$RepoRoot,[string]$BaseSha,[string]$HeadSha)
+    $git = [string]@(Get-Command git -CommandType Application -ErrorAction Stop)[0].Source
+    $bytes = Invoke-ExactHeadNativeBytes -FilePath $git -Arguments @(
+        '-C',$RepoRoot,'diff','--binary','--full-index','--no-ext-diff','--no-color',$BaseSha,$HeadSha,'--'
+    ) -Label 'exact-head Git diff'
+    return [ordered]@{digest=(Get-ReleaseSha256Bytes -Bytes $bytes);bytes=[long]$bytes.Length}
+}
+
+function Read-ExactHeadJsonFile {
+    param([string]$Path,[long]$MaximumBytes,[string]$Label)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "$Label missing" }
+    Assert-ReleasePathHasNoReparseAncestor -Path $Path
+    Assert-ReleaseSingleLinkFile -Path $Path -Label $Label
+    Assert-ReleaseSingleDataStreamFile -Path $Path -Label $Label
+    $info = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if ($info.Length -gt $MaximumBytes) { throw "$Label too large" }
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -gt $MaximumBytes) { throw "$Label too large" }
+    return [ordered]@{bytes=$bytes;document=(ConvertFrom-InstalledDesktopEvidenceBytes -Bytes $bytes)}
+}
+
+function Invoke-ExactHeadGitHubJson {
+    param([string[]]$Arguments,[string]$Label)
+    $gh = [string]@(Get-Command gh -CommandType Application -ErrorAction Stop)[0].Source
+    $bytes = Invoke-ExactHeadNativeBytes -FilePath $gh -Arguments $Arguments -Label $Label
+    return ConvertFrom-InstalledDesktopEvidenceBytes -Bytes $bytes
+}
+
+function Resolve-ExactHeadFixtureFile {
+    param([string]$FixtureRoot,[string]$RelativePath,[string]$Label)
+    $root = (Resolve-Path -LiteralPath $FixtureRoot -ErrorAction Stop).Path
+    Assert-ReleasePathHasNoReparseAncestor -Path $root
+    $target = [IO.Path]::GetFullPath((Join-Path $root $RelativePath))
+    if (-not (Test-ReleasePathAtOrBelow -Path $target -Root $root)) { throw "$Label escaped fixture root" }
+    return $target
+}
+
+function Read-ExactHeadGitHubState {
+    param(
+        [string]$RepositoryFullName,
+        [long]$PullRequestNumber,
+        [long]$RunId,
+        [long]$ReviewCommentId,
+        [ValidateSet('formal','test-only')][string]$ProducerMode,
+        [AllowEmptyString()][string]$GitHubFixtureRoot
+    )
+    if ($ProducerMode -ceq 'formal') {
+        if (-not [string]::IsNullOrWhiteSpace($GitHubFixtureRoot)) { throw 'formal exact-head producer rejects GitHub fixtures' }
+        return [ordered]@{
+            pull_request = Invoke-ExactHeadGitHubJson -Arguments @('api',"repos/$RepositoryFullName/pulls/$PullRequestNumber") -Label 'GitHub pull request metadata'
+            workflow_run = Invoke-ExactHeadGitHubJson -Arguments @('api',"repos/$RepositoryFullName/actions/runs/$RunId") -Label 'GitHub workflow run'
+            workflow_jobs = Invoke-ExactHeadGitHubJson -Arguments @('api',"repos/$RepositoryFullName/actions/runs/$RunId/jobs?per_page=100") -Label 'GitHub workflow jobs'
+            workflow_artifacts = Invoke-ExactHeadGitHubJson -Arguments @('api',"repos/$RepositoryFullName/actions/runs/$RunId/artifacts?per_page=100") -Label 'GitHub workflow artifacts'
+            review_comment = Invoke-ExactHeadGitHubJson -Arguments @('api',"repos/$RepositoryFullName/issues/comments/$ReviewCommentId") -Label 'GitHub independent review comment'
+            fixture_root = ''
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($GitHubFixtureRoot)) { throw 'test-only exact-head producer requires GitHubFixtureRoot' }
+    $root = (Resolve-Path -LiteralPath $GitHubFixtureRoot -ErrorAction Stop).Path
+    return [ordered]@{
+        pull_request = (Read-ExactHeadJsonFile -Path (Resolve-ExactHeadFixtureFile -FixtureRoot $root -RelativePath 'pull-request.json' -Label 'pull request fixture') -MaximumBytes 128KB -Label 'pull request fixture').document
+        workflow_run = (Read-ExactHeadJsonFile -Path (Resolve-ExactHeadFixtureFile -FixtureRoot $root -RelativePath 'workflow-run.json' -Label 'workflow run fixture') -MaximumBytes 128KB -Label 'workflow run fixture').document
+        workflow_jobs = (Read-ExactHeadJsonFile -Path (Resolve-ExactHeadFixtureFile -FixtureRoot $root -RelativePath 'workflow-jobs.json' -Label 'workflow jobs fixture') -MaximumBytes 512KB -Label 'workflow jobs fixture').document
+        workflow_artifacts = (Read-ExactHeadJsonFile -Path (Resolve-ExactHeadFixtureFile -FixtureRoot $root -RelativePath 'workflow-artifacts.json' -Label 'workflow artifacts fixture') -MaximumBytes 512KB -Label 'workflow artifacts fixture').document
+        review_comment = (Read-ExactHeadJsonFile -Path (Resolve-ExactHeadFixtureFile -FixtureRoot $root -RelativePath 'review-comment.json' -Label 'review comment fixture') -MaximumBytes 512KB -Label 'review comment fixture').document
+        fixture_root = $root
+    }
+}
+
+function Get-ExactHeadArtifactDefinitions {
+    param([string]$HeadSha,[long]$RunAttempt)
+    return @(
+        [ordered]@{check_name='changed-optional';job_id='changed-optional';artifact_name="thin-v2-pr-changed-optional-$HeadSha-$RunAttempt"},
+        [ordered]@{check_name='core-rollback';job_id='pr-core';artifact_name="thin-v2-pr-core-aggregate-$HeadSha-$RunAttempt"},
+        [ordered]@{check_name='entry-lifecycle';job_id='pr-core-checks';artifact_name="thin-v2-pr-core-entry-lifecycle-$HeadSha-$RunAttempt"},
+        [ordered]@{check_name='evaluation-release';job_id='pr-core-checks';artifact_name="thin-v2-pr-core-evaluation-release-$HeadSha-$RunAttempt"},
+        [ordered]@{check_name='governance-approval';job_id='pr-core-checks';artifact_name="thin-v2-pr-core-governance-approval-$HeadSha-$RunAttempt"},
+        [ordered]@{check_name='harness-contracts';job_id='pr-core-checks';artifact_name="thin-v2-pr-core-harness-contracts-$HeadSha-$RunAttempt"},
+        [ordered]@{check_name='install-evidence';job_id='pr-core-checks';artifact_name="thin-v2-pr-core-install-evidence-$HeadSha-$RunAttempt"}
+    )
+}
+
+function New-ExactHeadTemporaryRoot {
+    $path = Join-Path ([IO.Path]::GetTempPath()) ('thin-v2-exact-head-' + [guid]::NewGuid().ToString('N'))
+    [void][IO.Directory]::CreateDirectory($path)
+    return $path
+}
+
+function Remove-ExactHeadTemporaryRoot {
+    param([AllowEmptyString()][string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return }
+    $full = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    $temp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+    if (-not $full.StartsWith($temp + '\thin-v2-exact-head-',[StringComparison]::OrdinalIgnoreCase) -or
+        [IO.Path]::GetFileName($full) -cnotmatch '^thin-v2-exact-head-[0-9a-f]{32}$') {
+        throw 'exact-head temporary cleanup target rejected'
+    }
+    [IO.Directory]::Delete($full,$true)
+}
+
+function Get-ExactHeadReceiptPath {
+    param(
+        [string]$RepositoryFullName,
+        [long]$RunId,
+        [Collections.IDictionary]$Artifact,
+        [string]$ProducerMode,
+        [string]$FixtureRoot,
+        [string]$DownloadRoot
+    )
+    if ($ProducerMode -ceq 'test-only') {
+        return Resolve-ExactHeadFixtureFile -FixtureRoot $FixtureRoot -RelativePath ("artifacts/{0}/ordinary-ci-receipt.json" -f [long]$Artifact.id) -Label 'ordinary receipt fixture'
+    }
+    $destination = Join-Path $DownloadRoot ([string]$Artifact.id)
+    [void][IO.Directory]::CreateDirectory($destination)
+    $gh = [string]@(Get-Command gh -CommandType Application -ErrorAction Stop)[0].Source
+    [void](Invoke-ExactHeadNativeBytes -FilePath $gh -Arguments @(
+        'run','download',[string]$RunId,'--repo',$RepositoryFullName,'--name',[string]$Artifact.name,'--dir',$destination
+    ) -Label 'GitHub ordinary receipt artifact')
+    $files = @(Get-ChildItem -LiteralPath $destination -File -Recurse -Force -ErrorAction Stop)
+    if ($files.Count -ne 1 -or $files[0].Name -cne 'ordinary-ci-receipt.json') { throw 'ordinary receipt artifact must contain exactly one receipt' }
+    return $files[0].FullName
+}
+
+function Assert-ExactHeadReceipt {
+    param(
+        [string]$RepoRoot,
+        [Collections.IDictionary]$Receipt,
+        [Collections.IDictionary]$Definition,
+        [Collections.IDictionary]$Artifact,
+        [long]$PullRequestNumber,
+        [long]$RunId,
+        [long]$RunAttempt,
+        [string]$BaseSha,
+        [string]$HeadSha
+    )
+    $schema = Join-Path $RepoRoot 'schemas\ordinary-ci-receipt.schema.json'
+    if (-not (Test-Json -Json ($Receipt | ConvertTo-Json -Depth 20 -Compress) -SchemaFile $schema -ErrorAction Stop -WarningAction SilentlyContinue)) { throw 'ordinary receipt schema validation failed' }
+    Assert-ReleaseKeys -Value $Receipt -Expected @('schema_version','pull_request_number','run_id','run_attempt','head_sha','base_sha','checkout_sha','job_id','check_name','outcome','created_at_utc') -Label 'ordinary receipt'
+    if ([string]$Receipt.schema_version -cne 'thin-harness-ordinary-ci-receipt/v1' -or
+        [long]$Receipt.pull_request_number -ne $PullRequestNumber -or
+        (ConvertTo-ExactHeadInt64 -Value $Receipt.run_id -Label 'ordinary receipt run_id') -ne $RunId -or
+        [long]$Receipt.run_attempt -ne $RunAttempt -or
+        [string]$Receipt.base_sha -cne $BaseSha -or
+        [string]$Receipt.head_sha -cne $HeadSha -or
+        [string]$Receipt.checkout_sha -cne $HeadSha -or
+        [string]$Receipt.job_id -cne [string]$Definition.job_id -or
+        [string]$Receipt.check_name -cne [string]$Definition.check_name -or
+        [string]$Receipt.outcome -cne 'success') {
+        throw 'ordinary receipt identity or outcome mismatch'
+    }
+    Assert-ExactHeadUtcDate -Value $Receipt.created_at_utc -Label 'ordinary receipt'
+    if ([long]$Artifact.id -lt 1 -or [string]$Artifact.name -cne [string]$Definition.artifact_name -or [bool]$Artifact.expired) { throw 'ordinary receipt Artifact identity is invalid' }
+}
+
+function Get-ExactHeadOrdinaryReceipts {
+    param(
+        [string]$RepoRoot,
+        [string]$RepositoryFullName,
+        [long]$PullRequestNumber,
+        [long]$RunId,
+        [long]$RunAttempt,
+        [string]$BaseSha,
+        [string]$HeadSha,
+        [Collections.IDictionary]$ArtifactsDocument,
+        [string]$ProducerMode,
+        [string]$FixtureRoot,
+        [string]$DownloadRoot
+    )
+    Assert-ReleaseKeys -Value $ArtifactsDocument -Expected @('total_count','artifacts') -Label 'workflow artifacts response'
+    $artifacts = @($ArtifactsDocument.artifacts)
+    if ([long]$ArtifactsDocument.total_count -ne $artifacts.Count -or $artifacts.Count -gt 100) { throw 'workflow artifacts response is incomplete' }
+    $definitions = @(Get-ExactHeadArtifactDefinitions -HeadSha $HeadSha -RunAttempt $RunAttempt)
+    $checks = [Collections.Generic.List[object]]::new()
+    $paths = [Collections.Generic.List[string]]::new()
+    foreach ($definition in $definitions) {
+        $matches = @($artifacts | Where-Object { [string]$_.name -ceq [string]$definition.artifact_name })
+        if ($matches.Count -ne 1) { throw "ordinary receipt Artifact is missing or ambiguous: $($definition.check_name)" }
+        $artifact = $matches[0]
+        $path = Get-ExactHeadReceiptPath -RepositoryFullName $RepositoryFullName -RunId $RunId -Artifact $artifact -ProducerMode $ProducerMode -FixtureRoot $FixtureRoot -DownloadRoot $DownloadRoot
+        $record = Read-ExactHeadJsonFile -Path $path -MaximumBytes 64KB -Label 'ordinary receipt'
+        Assert-ExactHeadReceipt -RepoRoot $RepoRoot -Receipt $record.document -Definition $definition -Artifact $artifact -PullRequestNumber $PullRequestNumber -RunId $RunId -RunAttempt $RunAttempt -BaseSha $BaseSha -HeadSha $HeadSha
+        $digest = Get-ReleaseSha256Bytes -Bytes ([byte[]]$record.bytes)
+        $checks.Add([ordered]@{
+            check_name=[string]$definition.check_name
+            job_id=[string]$definition.job_id
+            artifact_id=[long]$artifact.id
+            artifact_name=[string]$artifact.name
+            raw_receipt_digest=$digest
+            outcome='success'
+        })
+        $paths.Add($path)
+    }
+    $lines = @($checks | ForEach-Object { "{0}={1}" -f [string]$_.check_name,[string]$_.raw_receipt_digest })
+    $setBytes = [Text.UTF8Encoding]::new($false).GetBytes(($lines -join [char]10))
+    return [ordered]@{
+        receipt_set_digest=Get-ReleaseSha256Bytes -Bytes $setBytes
+        receipt_set_bytes=[long]$setBytes.Length
+        checks=@($checks)
+        paths=@($paths)
+    }
+}
+
+function Get-ExactHeadJobOutcome {
+    param([object[]]$Jobs,[string]$Name)
+    $matches = @($Jobs | Where-Object { [string]$_.name -ceq $Name })
+    if ($matches.Count -ne 1) { throw "workflow job is missing or ambiguous: $Name" }
+    if ([string]$matches[0].status -cne 'completed') { return [string]$matches[0].status }
+    return [string]$matches[0].conclusion
+}
+
+function Get-ExactHeadWorkflowSummary {
+    param([Collections.IDictionary]$Run,[Collections.IDictionary]$JobsDocument,[long]$ExpectedRunId)
+    Assert-ReleaseKeys -Value $JobsDocument -Expected @('total_count','jobs') -Label 'workflow jobs response'
+    $jobs = @($JobsDocument.jobs)
+    if ([long]$JobsDocument.total_count -ne $jobs.Count -or $jobs.Count -gt 100) { throw 'workflow jobs response is incomplete' }
+    $runId = ConvertTo-ExactHeadInt64 -Value $Run.id -Label 'workflow run id'
+    if ($runId -ne $ExpectedRunId) { throw 'workflow run id mismatch' }
+    $ordinary = [ordered]@{
+        'changed-optional'=Get-ExactHeadJobOutcome -Jobs $jobs -Name 'changed-optional'
+        'entry-lifecycle'=Get-ExactHeadJobOutcome -Jobs $jobs -Name 'pr-core-checks (entry-lifecycle)'
+        'evaluation-release'=Get-ExactHeadJobOutcome -Jobs $jobs -Name 'pr-core-checks (evaluation-release)'
+        'install-evidence'=Get-ExactHeadJobOutcome -Jobs $jobs -Name 'pr-core-checks (install-evidence)'
+        'governance-approval'=Get-ExactHeadJobOutcome -Jobs $jobs -Name 'pr-core-checks (governance-approval)'
+        'harness-contracts'=Get-ExactHeadJobOutcome -Jobs $jobs -Name 'pr-core-checks (harness-contracts)'
+        'core-rollback'=Get-ExactHeadJobOutcome -Jobs $jobs -Name 'pr-core'
+    }
+    $release = [ordered]@{
+        'release-model'=Get-ExactHeadJobOutcome -Jobs $jobs -Name 'release-model'
+        'release-host'=Get-ExactHeadJobOutcome -Jobs $jobs -Name 'release-host'
+        'release-full'=Get-ExactHeadJobOutcome -Jobs $jobs -Name 'release-full'
+    }
+    return [ordered]@{
+        workflow_name=[string]$Run.name
+        run_id=$runId
+        run_attempt=[long]$Run.run_attempt
+        status=[string]$Run.status
+        conclusion=[string]$Run.conclusion
+        head_sha=[string]$Run.head_sha
+        ordinary_jobs=$ordinary
+        release_jobs=$release
+    }
+}
+
+function Assert-ExactHeadReviewReceiptShape {
+    param([Collections.IDictionary]$Receipt)
+    Assert-ReleaseKeys -Value $Receipt -Expected @(
+        'schema_version','pull_request_number','base_sha','head_sha','reviewed_diff_digest','reviewed_diff_bytes',
+        'task_starting_sha','task_diff_digest','task_diff_bytes','reviewed_commits','ci_run_id','ci_run_attempt',
+        'ci_conclusion','receipt_set_digest','receipt_set_bytes','artifact_ids','runtime_hotfix_identity',
+        'reviewer_actor_id','reviewer_context_id','reviewer_model','reviewer_participated','read_only','zero_write',
+        'verdict','findings','skipped_jobs','created_at_utc'
+    ) -Label 'independent review receipt'
+    Assert-ReleaseKeys -Value $Receipt.findings -Expected @('p0','p1','p2','p3') -Label 'independent review findings'
+    foreach ($name in @('reviewed_diff_digest','task_diff_digest','receipt_set_digest','runtime_hotfix_identity')) { Assert-ReleaseDigestValue -Value $Receipt[$name] -Label "independent review $name" }
+    foreach ($name in @('reviewed_diff_bytes','task_diff_bytes','receipt_set_bytes')) {
+        if ($Receipt[$name] -isnot [long] -and $Receipt[$name] -isnot [int]) { throw "independent review $name is not an integer" }
+        if ([long]$Receipt[$name] -lt 0) { throw "independent review $name is negative" }
+    }
+    foreach ($name in @('p0','p1','p2','p3')) {
+        if ($Receipt.findings[$name] -isnot [long] -and $Receipt.findings[$name] -isnot [int]) { throw "independent review finding $name is not an integer" }
+        if ([long]$Receipt.findings[$name] -lt 0) { throw "independent review finding $name is negative" }
+    }
+    if ([string]$Receipt.schema_version -cne 'thin-harness-independent-review-receipt/v1' -or
+        [string]$Receipt.base_sha -cnotmatch '^[0-9a-f]{40}$' -or [string]$Receipt.head_sha -cnotmatch '^[0-9a-f]{40}$' -or
+        [string]$Receipt.task_starting_sha -cnotmatch '^[0-9a-f]{40}$' -or
+        [string]::IsNullOrWhiteSpace([string]$Receipt.reviewer_actor_id) -or [string]::IsNullOrWhiteSpace([string]$Receipt.reviewer_context_id) -or
+        [string]$Receipt.reviewer_model -cnotmatch '^[A-Za-z0-9._/-]{1,128}$' -or
+        $Receipt.reviewer_participated -isnot [bool] -or $Receipt.read_only -isnot [bool] -or $Receipt.zero_write -isnot [bool] -or
+        [string]$Receipt.verdict -cnotin @('pass','fail','unavailable')) {
+        throw 'independent review receipt shape is invalid'
+    }
+    Assert-ExactHeadUtcDate -Value $Receipt.created_at_utc -Label 'independent review receipt'
+}
+
+function Get-ExactHeadIndependentReview {
+    param(
+        [Collections.IDictionary]$Comment,
+        [long]$ReviewCommentId,
+        [long]$PullRequestNumber,
+        [string]$BaseSha,
+        [string]$HeadSha,
+        [long]$RunId,
+        [long]$RunAttempt,
+        [Collections.IDictionary]$OrdinaryReceipts,
+        [Collections.IDictionary]$ReviewedDiff,
+        [string]$RepoRoot
+    )
+    if ((ConvertTo-ExactHeadInt64 -Value $Comment.id -Label 'review comment id') -ne $ReviewCommentId) { throw 'independent review comment id mismatch' }
+    $fence = ([string]([char]96)) * 3
+    $pattern = '(?ms)^[ \t]*' + [regex]::Escape($fence) + '(?:json)?[ \t]*\r?\n(?<json>.*?)\r?\n[ \t]*' + [regex]::Escape($fence) + '[ \t]*$'
+    $matching = [Collections.Generic.List[object]]::new()
+    foreach ($match in [regex]::Matches([string]$Comment.body,$pattern)) {
+        $json = [string]$match.Groups['json'].Value
+        try {
+            $bytes = [Text.UTF8Encoding]::new($false).GetBytes($json)
+            $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes $bytes
+            if ([string]$document.schema_version -ceq 'thin-harness-independent-review-receipt/v1' -and [string]$document.head_sha -ceq $HeadSha) {
+                $matching.Add([ordered]@{bytes=$bytes;document=$document})
+            }
+        } catch {}
+    }
+    if ($matching.Count -ne 1) { throw 'independent review receipt is missing or ambiguous for exact Head' }
+    $raw = $matching[0]
+    $receipt = $raw.document
+    Assert-ExactHeadReviewReceiptShape -Receipt $receipt
+    $reviewRunId = ConvertTo-ExactHeadInt64 -Value $receipt.ci_run_id -Label 'independent review run id'
+    if ([long]$receipt.pull_request_number -ne $PullRequestNumber -or
+        [string]$receipt.base_sha -cne $BaseSha -or [string]$receipt.head_sha -cne $HeadSha -or
+        $reviewRunId -ne $RunId -or [long]$receipt.ci_run_attempt -ne $RunAttempt -or
+        [string]$receipt.ci_conclusion -cne 'success' -or
+        [string]$receipt.receipt_set_digest -cne [string]$OrdinaryReceipts.receipt_set_digest -or
+        [long]$receipt.receipt_set_bytes -ne [long]$OrdinaryReceipts.receipt_set_bytes -or
+        [string]$receipt.reviewed_diff_digest -cne [string]$ReviewedDiff.digest -or
+        [long]$receipt.reviewed_diff_bytes -ne [long]$ReviewedDiff.bytes) {
+        throw 'independent review receipt binding mismatch'
+    }
+    $expectedArtifactIds = @($OrdinaryReceipts.checks | ForEach-Object { [long]$_.artifact_id } | Sort-Object)
+    $actualArtifactIds = @($receipt.artifact_ids | ForEach-Object { [long]$_ } | Sort-Object)
+    if (@(Compare-Object $expectedArtifactIds $actualArtifactIds).Count -ne 0 -or $actualArtifactIds.Count -ne 7) { throw 'independent review Artifact set mismatch' }
+    $skipped = @($receipt.skipped_jobs | ForEach-Object { [string]$_ } | Sort-Object -CaseSensitive)
+    if (($skipped -join '|') -cne 'release-full|release-host|release-model') { throw 'independent review skipped Job set mismatch' }
+    $reviewedCommits = @($receipt.reviewed_commits | ForEach-Object { [string]$_ })
+    if ($reviewedCommits.Count -lt 1 -or $reviewedCommits -cnotcontains $HeadSha -or @($reviewedCommits | Where-Object { $_ -cnotmatch '^[0-9a-f]{40}$' }).Count -ne 0) { throw 'independent review commit set is invalid' }
+    $taskDiff = Get-ExactHeadGitDiff -RepoRoot $RepoRoot -BaseSha ([string]$receipt.task_starting_sha) -HeadSha $HeadSha
+    if ([string]$receipt.task_diff_digest -cne [string]$taskDiff.digest -or [long]$receipt.task_diff_bytes -ne [long]$taskDiff.bytes) { throw 'independent review task diff mismatch' }
+    return [ordered]@{
+        comment_id=$ReviewCommentId
+        schema_version=[string]$receipt.schema_version
+        base_sha=[string]$receipt.base_sha
+        head_sha=[string]$receipt.head_sha
+        reviewed_diff_digest=[string]$receipt.reviewed_diff_digest
+        reviewed_diff_bytes=[long]$receipt.reviewed_diff_bytes
+        task_starting_sha=[string]$receipt.task_starting_sha
+        task_diff_digest=[string]$receipt.task_diff_digest
+        task_diff_bytes=[long]$receipt.task_diff_bytes
+        ci_run_id=$reviewRunId
+        ci_run_attempt=[long]$receipt.ci_run_attempt
+        receipt_set_digest=[string]$receipt.receipt_set_digest
+        reviewer_model=[string]$receipt.reviewer_model
+        reviewer_participated=[bool]$receipt.reviewer_participated
+        read_only=([bool]$receipt.read_only -and [bool]$receipt.zero_write)
+        verdict=[string]$receipt.verdict
+        findings=[ordered]@{p0=[long]$receipt.findings.p0;p1=[long]$receipt.findings.p1;p2=[long]$receipt.findings.p2;p3=[long]$receipt.findings.p3}
+        created_at_utc=([DateTimeOffset]::Parse([string]$receipt.created_at_utc)).ToUniversalTime().ToString('o')
+        receipt_digest=Get-ReleaseSha256Bytes -Bytes ([byte[]]$raw.bytes)
+    }
+}
+
+function Get-ExactHeadMetadataDigest {
+    param([Collections.IDictionary]$PullRequest)
+    $basis = [ordered]@{
+        number=[long]$PullRequest.number
+        state=[string]$PullRequest.state
+        draft=[bool]$PullRequest.draft
+        merged=[bool]$PullRequest.merged
+        base_ref=[string]$PullRequest.base_ref
+        base_sha=[string]$PullRequest.base_sha
+        head_ref=[string]$PullRequest.head_ref
+        head_sha=[string]$PullRequest.head_sha
+    }
+    return Get-ReleaseSha256Text -Text ($basis | ConvertTo-Json -Depth 10 -Compress)
+}
+
+function Get-ExactHeadReceiptSet {
+    param([object[]]$Checks)
+    $lines = @($Checks | ForEach-Object { "{0}={1}" -f [string]$_.check_name,[string]$_.raw_receipt_digest })
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($lines -join [char]10))
+    return [ordered]@{digest=(Get-ReleaseSha256Bytes -Bytes $bytes);bytes=[long]$bytes.Length}
+}
+
+function Assert-ExactHeadEngineeringReport {
+    param(
+        [string]$RepoRoot,
+        [Collections.IDictionary]$Document,
+        [Collections.IDictionary]$ExpectedSource = $null
+    )
+    $topKeys = @('schema_version','generated_at_utc','source_revision','source_dirty','source_state_stable','source','report_run_id','producer_identity','producer_mode','repository','pull_request','workflow','ordinary_receipts','independent_review','results','status','reason','report_digest')
+    Assert-ReleaseKeys -Value $Document -Expected $topKeys -Label 'exact-head engineering report'
+    $schemaPath = Join-Path $RepoRoot 'schemas\exact-head-engineering-evidence.schema.json'
+    if (-not (Test-Json -Json ($Document | ConvertTo-Json -Depth 100 -Compress) -SchemaFile $schemaPath -ErrorAction Stop -WarningAction SilentlyContinue)) { throw 'exact-head engineering report schema validation failed' }
+    if ([string]$Document.schema_version -cne 'thin-harness-exact-head-engineering-evidence/v1' -or
+        [string]$Document.report_run_id -cnotmatch '^[0-9a-f]{32}$' -or
+        [string]$Document.producer_identity -cne 'exact-head-engineering-evidence/v1' -or
+        [string]$Document.producer_mode -cnotin @('formal','test-only')) { throw 'exact-head engineering report identity is invalid' }
+    Assert-ExactHeadUtcDate -Value $Document.generated_at_utc -Label 'exact-head engineering report'
+    Assert-ReleaseReportDigest -Document $Document
+    Assert-InstalledDesktopSanitizedContent -Value $Document
+    Assert-HarnessPortableAdditionalSanitizedContent -Value $Document
+
+    Assert-ReleaseKeys -Value $Document.source -Expected @('commit_tree_oid','object_format','start','end','input_digests') -Label 'exact-head source'
+    Assert-ReleaseSourceStateShape -Value $Document.source.start -Label 'exact-head source start'
+    Assert-ReleaseSourceStateShape -Value $Document.source.end -Label 'exact-head source end'
+    $stable = Test-HarnessReleaseSourceStable -Start $Document.source.start -End $Document.source.end
+    if ([string]$Document.source_revision -cne [string]$Document.source.start.revision -or
+        [string]$Document.source_revision -cne [string]$Document.source.end.revision -or
+        [string]$Document.source.commit_tree_oid -cne [string]$Document.source.start.commit_tree_oid -or
+        [string]$Document.source.commit_tree_oid -cne [string]$Document.source.end.commit_tree_oid -or
+        [string]$Document.source.object_format -cne [string]$Document.source.start.object_format -or
+        [string]$Document.source.object_format -cne [string]$Document.source.end.object_format -or
+        [bool]$Document.source_dirty -ne ([bool]$Document.source.start.dirty -or [bool]$Document.source.end.dirty) -or
+        [bool]$Document.source_state_stable -ne $stable) { throw 'exact-head source summary is inconsistent' }
+    if ($null -ne $ExpectedSource) {
+        Assert-HarnessPortableEvidenceSource -RepoRoot $RepoRoot -ExpectedSource $ExpectedSource
+        Assert-ReleaseSourceStateMatchesExpected -Value $Document.source.start -Expected $ExpectedSource -Label 'exact-head source start'
+        Assert-ReleaseSourceStateMatchesExpected -Value $Document.source.end -Expected $ExpectedSource -Label 'exact-head source end'
+    }
+    $inputPaths = Get-ExactHeadEngineeringInputPaths
+    Assert-ReleaseKeys -Value $Document.source.input_digests -Expected @($inputPaths.Keys) -Label 'exact-head input digests'
+    foreach ($entry in $inputPaths.GetEnumerator()) {
+        Assert-ReleaseCurrentFileDigest -RepoRoot $RepoRoot -Value $Document.source.input_digests[$entry.Key] -RelativePath ([string]$entry.Value) -Label "exact-head $($entry.Key)"
+    }
+
+    Assert-ReleaseKeys -Value $Document.repository -Expected @('full_name') -Label 'exact-head repository'
+    Assert-ReleaseKeys -Value $Document.pull_request -Expected @('number','state','draft','merged','base_ref','base_sha','head_ref','head_sha','metadata_observed_at_utc','metadata_digest') -Label 'exact-head pull request'
+    Assert-ExactHeadUtcDate -Value $Document.pull_request.metadata_observed_at_utc -Label 'exact-head pull request metadata'
+    if ([string]$Document.pull_request.metadata_digest -cne (Get-ExactHeadMetadataDigest -PullRequest $Document.pull_request)) { throw 'exact-head pull request metadata digest mismatch' }
+
+    Assert-ReleaseKeys -Value $Document.workflow -Expected @('workflow_name','run_id','run_attempt','status','conclusion','head_sha','ordinary_jobs','release_jobs') -Label 'exact-head workflow'
+    $ordinaryNames = @('changed-optional','entry-lifecycle','evaluation-release','install-evidence','governance-approval','harness-contracts','core-rollback')
+    $releaseNames = @('release-model','release-host','release-full')
+    Assert-ReleaseKeys -Value $Document.workflow.ordinary_jobs -Expected $ordinaryNames -Label 'exact-head ordinary jobs'
+    Assert-ReleaseKeys -Value $Document.workflow.release_jobs -Expected $releaseNames -Label 'exact-head release jobs'
+
+    Assert-ReleaseKeys -Value $Document.ordinary_receipts -Expected @('receipt_set_digest','receipt_set_bytes','checks') -Label 'exact-head ordinary receipts'
+    $checkOrder = @('changed-optional','core-rollback','entry-lifecycle','evaluation-release','governance-approval','harness-contracts','install-evidence')
+    $checks = @($Document.ordinary_receipts.checks)
+    if ($checks.Count -ne 7 -or (@($checks | ForEach-Object { [string]$_.check_name }) -join '|') -cne ($checkOrder -join '|')) { throw 'exact-head ordinary receipt order is invalid' }
+    $expectedDefinitions = @(Get-ExactHeadArtifactDefinitions -HeadSha ([string]$Document.pull_request.head_sha) -RunAttempt ([long]$Document.workflow.run_attempt))
+    $receiptSummariesValid = $true
+    for ($checkIndex=0; $checkIndex -lt $checks.Count; $checkIndex++) {
+        $check = $checks[$checkIndex]
+        $definition = $expectedDefinitions[$checkIndex]
+        Assert-ReleaseKeys -Value $check -Expected @('check_name','job_id','artifact_id','artifact_name','raw_receipt_digest','outcome') -Label 'exact-head ordinary receipt summary'
+        Assert-ReleaseDigestValue -Value $check.raw_receipt_digest -Label 'exact-head raw receipt'
+        if ([string]$check.check_name -cne [string]$definition.check_name -or [string]$check.job_id -cne [string]$definition.job_id -or
+            [string]$check.artifact_name -cne [string]$definition.artifact_name -or [string]$check.outcome -cne 'success') { $receiptSummariesValid = $false }
+    }
+    if (@($checks.artifact_id | Sort-Object -Unique).Count -ne 7 -or @($checks.raw_receipt_digest | Sort-Object -Unique).Count -ne 7) { throw 'exact-head ordinary receipts are not distinct' }
+    $receiptSet = Get-ExactHeadReceiptSet -Checks $checks
+    if ([string]$Document.ordinary_receipts.receipt_set_digest -cne [string]$receiptSet.digest -or [long]$Document.ordinary_receipts.receipt_set_bytes -ne [long]$receiptSet.bytes) { throw 'exact-head receipt set mismatch' }
+
+    $reviewKeys = @('comment_id','schema_version','base_sha','head_sha','reviewed_diff_digest','reviewed_diff_bytes','task_starting_sha','task_diff_digest','task_diff_bytes','ci_run_id','ci_run_attempt','receipt_set_digest','reviewer_model','reviewer_participated','read_only','verdict','findings','created_at_utc','receipt_digest')
+    Assert-ReleaseKeys -Value $Document.independent_review -Expected $reviewKeys -Label 'exact-head independent review'
+    Assert-ReleaseKeys -Value $Document.independent_review.findings -Expected @('p0','p1','p2','p3') -Label 'exact-head independent review findings'
+    foreach ($name in @('reviewed_diff_digest','task_diff_digest','receipt_set_digest','receipt_digest')) { Assert-ReleaseDigestValue -Value $Document.independent_review[$name] -Label "exact-head review $name" }
+    Assert-ExactHeadUtcDate -Value $Document.independent_review.created_at_utc -Label 'exact-head independent review'
+    $reviewedDiff = Get-ExactHeadGitDiff -RepoRoot $RepoRoot -BaseSha ([string]$Document.pull_request.base_sha) -HeadSha ([string]$Document.pull_request.head_sha)
+    $taskDiff = Get-ExactHeadGitDiff -RepoRoot $RepoRoot -BaseSha ([string]$Document.independent_review.task_starting_sha) -HeadSha ([string]$Document.pull_request.head_sha)
+
+    $resultNames = @('pr_open','pr_draft','pr_unmerged','exact_base','exact_head','exact_checkout','ordinary_jobs_passed','release_jobs_not_counted_as_pass','seven_receipts_valid','receipt_set_valid','review_exact_head','review_read_only','review_independent','review_verdict_pass','review_findings_clear','reviewed_diff_valid','source_clean','source_stable')
+    Assert-ReleaseKeys -Value $Document.results -Expected $resultNames -Label 'exact-head results'
+    foreach ($name in $resultNames) { Assert-ReleaseBoolean -Value $Document.results[$name] -Label "exact-head result $name" }
+    $derived = [ordered]@{
+        pr_open=([string]$Document.pull_request.state -ceq 'open')
+        pr_draft=[bool]$Document.pull_request.draft
+        pr_unmerged=(-not [bool]$Document.pull_request.merged)
+        exact_base=([long]$Document.pull_request.number -eq 2 -and [string]$Document.repository.full_name -ceq 'Li-WithIce/claude-dev-harness' -and [string]$Document.pull_request.base_ref -ceq 'codex/harness-v2-public-optin-beta' -and [string]$Document.pull_request.base_sha -ceq [string]$Document.independent_review.base_sha)
+        exact_head=([string]$Document.pull_request.head_ref -ceq 'codex/harness-v2-default-promotion' -and [string]$Document.pull_request.head_sha -ceq [string]$Document.source_revision -and [string]$Document.workflow.head_sha -ceq [string]$Document.pull_request.head_sha)
+        exact_checkout=($receiptSummariesValid -and [bool]$Document.results.exact_checkout)
+        ordinary_jobs_passed=([string]$Document.workflow.workflow_name -ceq 'Validation' -and [string]$Document.workflow.status -ceq 'completed' -and [string]$Document.workflow.conclusion -ceq 'success' -and @($ordinaryNames | Where-Object { [string]$Document.workflow.ordinary_jobs[$_] -cne 'success' }).Count -eq 0)
+        release_jobs_not_counted_as_pass=(@($releaseNames | Where-Object { [string]$Document.workflow.release_jobs[$_] -cne 'skipped' }).Count -eq 0)
+        seven_receipts_valid=($checks.Count -eq 7 -and $receiptSummariesValid)
+        receipt_set_valid=([string]$Document.independent_review.receipt_set_digest -ceq [string]$receiptSet.digest)
+        review_exact_head=([string]$Document.independent_review.base_sha -ceq [string]$Document.pull_request.base_sha -and [string]$Document.independent_review.head_sha -ceq [string]$Document.pull_request.head_sha -and [long]$Document.independent_review.ci_run_id -eq [long]$Document.workflow.run_id -and [long]$Document.independent_review.ci_run_attempt -eq [long]$Document.workflow.run_attempt)
+        review_read_only=[bool]$Document.independent_review.read_only
+        review_independent=(-not [bool]$Document.independent_review.reviewer_participated)
+        review_verdict_pass=([string]$Document.independent_review.verdict -ceq 'pass')
+        review_findings_clear=([long]$Document.independent_review.findings.p0 -eq 0 -and [long]$Document.independent_review.findings.p1 -eq 0 -and [long]$Document.independent_review.findings.p2 -eq 0)
+        reviewed_diff_valid=([string]$Document.independent_review.reviewed_diff_digest -ceq [string]$reviewedDiff.digest -and [long]$Document.independent_review.reviewed_diff_bytes -eq [long]$reviewedDiff.bytes -and [string]$Document.independent_review.task_diff_digest -ceq [string]$taskDiff.digest -and [long]$Document.independent_review.task_diff_bytes -eq [long]$taskDiff.bytes)
+        source_clean=(-not [bool]$Document.source_dirty)
+        source_stable=[bool]$Document.source_state_stable
+    }
+    foreach ($name in $derived.Keys) { if ([bool]$Document.results[$name] -ne [bool]$derived[$name]) { throw "exact-head result $name is inconsistent" } }
+    $allPassed = @($resultNames | Where-Object { -not [bool]$derived[$_] }).Count -eq 0
+    if ([string]$Document.producer_mode -ceq 'test-only') {
+        if ([string]$Document.status -cne 'unavailable' -or [string]$Document.reason -cne 'non-formal-producer-mode') { throw 'test-only exact-head report cannot pass' }
+    } elseif ($allPassed) {
+        if ([string]$Document.status -cne 'pass' -or [string]$Document.reason -cne 'all-exact-head-engineering-checks-passed') { throw 'formal exact-head passing status is inconsistent' }
+    } elseif (-not (([string]$Document.status -ceq 'fail' -and [string]$Document.reason -ceq 'exact-head-engineering-check-failed') -or
+        ([string]$Document.status -ceq 'unavailable' -and [string]$Document.reason -ceq 'github-evidence-unavailable'))) {
+        throw 'formal exact-head non-passing status is inconsistent'
+    }
+    return [ordered]@{status=[string]$Document.status;reason=[string]$Document.reason;producer_identity='exact-head-engineering-evidence/v1';source_revision=[string]$Document.source_revision;report_run_id=[string]$Document.report_run_id}
+}
+
+function New-ExactHeadEngineeringEvidenceArtifact {
+    param(
+        [string]$RepoRoot,
+        [string]$RepositoryFullName,
+        [long]$PullRequestNumber,
+        [long]$RunId,
+        [long]$ReviewCommentId,
+        [string]$OutputPath,
+        [ValidateSet('formal','test-only')][string]$ProducerMode,
+        [AllowEmptyString()][string]$GitHubFixtureRoot = ''
+    )
+    $repo = (Resolve-Path -LiteralPath $RepoRoot -ErrorAction Stop).Path
+    if ($RepositoryFullName -cne 'Li-WithIce/claude-dev-harness') { throw 'exact-head repository is not authorized' }
+    $sourceStart = Get-HarnessReleaseSourceState -RepoRoot $repo
+    $downloadRoot = if ($ProducerMode -ceq 'formal') { New-ExactHeadTemporaryRoot } else { '' }
+    try {
+        $github = Read-ExactHeadGitHubState -RepositoryFullName $RepositoryFullName -PullRequestNumber $PullRequestNumber -RunId $RunId -ReviewCommentId $ReviewCommentId -ProducerMode $ProducerMode -GitHubFixtureRoot $GitHubFixtureRoot
+        $pullApi = $github.pull_request
+        $pull = [ordered]@{
+            number=[long]$pullApi.number
+            state=[string]$pullApi.state
+            draft=[bool]$pullApi.draft
+            merged=[bool]$pullApi.merged
+            base_ref=[string]$pullApi.base.ref
+            base_sha=[string]$pullApi.base.sha
+            head_ref=[string]$pullApi.head.ref
+            head_sha=[string]$pullApi.head.sha
+            metadata_observed_at_utc=[DateTimeOffset]::UtcNow.ToString('o')
+            metadata_digest=$null
+        }
+        $pull.metadata_digest = Get-ExactHeadMetadataDigest -PullRequest $pull
+        $workflow = Get-ExactHeadWorkflowSummary -Run $github.workflow_run -JobsDocument $github.workflow_jobs -ExpectedRunId $RunId
+        $receipts = Get-ExactHeadOrdinaryReceipts -RepoRoot $repo -RepositoryFullName $RepositoryFullName -PullRequestNumber $PullRequestNumber -RunId $RunId -RunAttempt ([long]$workflow.run_attempt) -BaseSha ([string]$pull.base_sha) -HeadSha ([string]$pull.head_sha) -ArtifactsDocument $github.workflow_artifacts -ProducerMode $ProducerMode -FixtureRoot ([string]$github.fixture_root) -DownloadRoot $downloadRoot
+        $reviewedDiff = Get-ExactHeadGitDiff -RepoRoot $repo -BaseSha ([string]$pull.base_sha) -HeadSha ([string]$pull.head_sha)
+        $review = Get-ExactHeadIndependentReview -Comment $github.review_comment -ReviewCommentId $ReviewCommentId -PullRequestNumber $PullRequestNumber -BaseSha ([string]$pull.base_sha) -HeadSha ([string]$pull.head_sha) -RunId $RunId -RunAttempt ([long]$workflow.run_attempt) -OrdinaryReceipts $receipts -ReviewedDiff $reviewedDiff -RepoRoot $repo
+        $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $repo
+        $target = Resolve-HarnessReleaseArtifactPath -RepoRoot $repo -OutputPath $OutputPath -EvidencePaths @($receipts.paths) -ProtectedRoots $protected
+        $inputDigests = [ordered]@{}
+        foreach ($entry in (Get-ExactHeadEngineeringInputPaths).GetEnumerator()) { $inputDigests[$entry.Key] = Get-ReleaseFileDigest -Path (Join-Path $repo ([string]$entry.Value)) }
+        $sourceEnd = Get-HarnessReleaseSourceState -RepoRoot $repo
+        $stable = Test-HarnessReleaseSourceStable -Start $sourceStart -End $sourceEnd
+        $ordinaryNames = @('changed-optional','entry-lifecycle','evaluation-release','install-evidence','governance-approval','harness-contracts','core-rollback')
+        $releaseNames = @('release-model','release-host','release-full')
+        $results = [ordered]@{
+            pr_open=([string]$pull.state -ceq 'open')
+            pr_draft=[bool]$pull.draft
+            pr_unmerged=(-not [bool]$pull.merged)
+            exact_base=([long]$pull.number -eq 2 -and $RepositoryFullName -ceq 'Li-WithIce/claude-dev-harness' -and [string]$pull.base_ref -ceq 'codex/harness-v2-public-optin-beta' -and [string]$review.base_sha -ceq [string]$pull.base_sha)
+            exact_head=([string]$pull.head_ref -ceq 'codex/harness-v2-default-promotion' -and [string]$pull.head_sha -ceq [string]$sourceStart.revision -and [string]$workflow.head_sha -ceq [string]$pull.head_sha)
+            exact_checkout=$true
+            ordinary_jobs_passed=([string]$workflow.workflow_name -ceq 'Validation' -and [string]$workflow.status -ceq 'completed' -and [string]$workflow.conclusion -ceq 'success' -and @($ordinaryNames | Where-Object { [string]$workflow.ordinary_jobs[$_] -cne 'success' }).Count -eq 0)
+            release_jobs_not_counted_as_pass=(@($releaseNames | Where-Object { [string]$workflow.release_jobs[$_] -cne 'skipped' }).Count -eq 0)
+            seven_receipts_valid=(@($receipts.checks).Count -eq 7)
+            receipt_set_valid=([string]$review.receipt_set_digest -ceq [string]$receipts.receipt_set_digest)
+            review_exact_head=([string]$review.base_sha -ceq [string]$pull.base_sha -and [string]$review.head_sha -ceq [string]$pull.head_sha -and [long]$review.ci_run_id -eq $RunId -and [long]$review.ci_run_attempt -eq [long]$workflow.run_attempt)
+            review_read_only=[bool]$review.read_only
+            review_independent=(-not [bool]$review.reviewer_participated)
+            review_verdict_pass=([string]$review.verdict -ceq 'pass')
+            review_findings_clear=([long]$review.findings.p0 -eq 0 -and [long]$review.findings.p1 -eq 0 -and [long]$review.findings.p2 -eq 0)
+            reviewed_diff_valid=([string]$review.reviewed_diff_digest -ceq [string]$reviewedDiff.digest -and [long]$review.reviewed_diff_bytes -eq [long]$reviewedDiff.bytes)
+            source_clean=(-not [bool]$sourceStart.dirty -and -not [bool]$sourceEnd.dirty)
+            source_stable=$stable
+        }
+        $allPassed = @($results.Keys | Where-Object { -not [bool]$results[$_] }).Count -eq 0
+        $status = if ($ProducerMode -cne 'formal') { 'unavailable' } elseif ($allPassed) { 'pass' } else { 'fail' }
+        $reason = if ($ProducerMode -cne 'formal') { 'non-formal-producer-mode' } elseif ($allPassed) { 'all-exact-head-engineering-checks-passed' } else { 'exact-head-engineering-check-failed' }
+        $document = [ordered]@{
+            schema_version='thin-harness-exact-head-engineering-evidence/v1'
+            generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o')
+            source_revision=[string]$sourceStart.revision
+            source_dirty=([bool]$sourceStart.dirty -or [bool]$sourceEnd.dirty)
+            source_state_stable=$stable
+            source=[ordered]@{commit_tree_oid=[string]$sourceStart.commit_tree_oid;object_format=[string]$sourceStart.object_format;start=$sourceStart;end=$sourceEnd;input_digests=$inputDigests}
+            report_run_id=[guid]::NewGuid().ToString('N')
+            producer_identity='exact-head-engineering-evidence/v1'
+            producer_mode=$ProducerMode
+            repository=[ordered]@{full_name=$RepositoryFullName}
+            pull_request=$pull
+            workflow=$workflow
+            ordinary_receipts=[ordered]@{receipt_set_digest=[string]$receipts.receipt_set_digest;receipt_set_bytes=[long]$receipts.receipt_set_bytes;checks=@($receipts.checks)}
+            independent_review=$review
+            results=$results
+            status=$status
+            reason=$reason
+            report_digest=$null
+        }
+        $document.report_digest = Get-ReleaseSha256Text -Text ($document | ConvertTo-Json -Depth 100 -Compress)
+        $json = $document | ConvertTo-Json -Depth 100 -Compress
+        $validated = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($json))
+        [void](Assert-ExactHeadEngineeringReport -RepoRoot $repo -Document $validated -ExpectedSource $sourceStart)
+        $rawDigest = Write-ReleaseIsolationArtifact -Target $target -Content $json
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath $target -ExpectedDigest $rawDigest -ProtectedRoots $protected -MaximumBytes 2MB
+        $reopened = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        [void](Assert-ExactHeadEngineeringReport -RepoRoot $repo -Document $reopened -ExpectedSource $sourceStart)
+        return $reopened
+    } finally {
+        if (-not [string]::IsNullOrWhiteSpace($downloadRoot)) { Remove-ExactHeadTemporaryRoot -Path $downloadRoot }
+    }
+}
+
+function Read-ExactHeadRolloutEvidence {
+    param(
+        [string]$RepoRoot,
+        [Collections.IDictionary]$Gate,
+        [Collections.IDictionary]$ExpectedSource,
+        [string[]]$ProtectedRoots = @()
+    )
+    try {
+        Assert-ReleaseKeys -Value $Gate -Expected @('status','evidence_contract','artifact_path','evidence_digest','source_revision','producer_identity') -Label 'exact-head engineering gate'
+        if ([string]$Gate.evidence_contract -cne 'thin-harness-exact-head-engineering-evidence/v1' -or
+            [string]$Gate.source_revision -cne [string]$ExpectedSource.revision -or
+            [string]::IsNullOrWhiteSpace([string]$Gate.producer_identity)) { throw 'exact-head engineering gate binding is invalid' }
+        $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $RepoRoot -ProtectedRoots $ProtectedRoots
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$Gate.artifact_path) -ExpectedDigest ([string]$Gate.evidence_digest) -ProtectedRoots $protected -MaximumBytes 2MB
+        $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        return Assert-ExactHeadEngineeringReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource
+    } catch { throw [IO.InvalidDataException]::new('rollout-evidence-exact-head-engineering-report-invalid',$_.Exception) }
+}
+
 function Assert-HarnessRolloutEvidenceSetProvenance {
     param(
         [Parameter(Mandatory)][System.Collections.IDictionary]$Gates,
@@ -1471,6 +2136,7 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
         [System.Collections.IDictionary]$ExpectedSource = $null,
         [string[]]$ProtectedRoots = @()
     )
+    $exactHeadName = 'DP-G00-EXACT-HEAD-ENGINEERING-CI'
     $modelName = 'DP-G01-MODEL40'
     $cognitiveNames = @('DP-G02-COGNITIVE-HOST-3X3','DP-G05-V2-BARE-1.25','DP-G06-REQUEST-SEND-REDUCTION')
     $installedNames = @('DP-G03-INSTALLED-DESKTOP-HOST-3X3','DP-G07-DISTINCT-INSTALLED-DESKTOP-GATE')
@@ -1483,6 +2149,13 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
     }
     $lifecycleNames = @($lifecyclePresets.Keys)
     $adapted = $false
+    if ($Gates.Contains($exactHeadName)) {
+        if ([string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-exact-head-engineering-report-invalid' }
+        $exactHead = Read-ExactHeadRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$exactHeadName] -ExpectedSource $ExpectedSource -ProtectedRoots $ProtectedRoots
+        $Gates[$exactHeadName].status = [string]$exactHead.status
+        $Gates[$exactHeadName].producer_identity = [string]$exactHead.producer_identity
+        $adapted = $true
+    }
     if ($Gates.Contains($modelName)) {
         if ([string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-model-report-invalid' }
         $model = Read-ModelRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$modelName] -ExpectedSource $ExpectedSource -ProtectedRoots $ProtectedRoots
@@ -1565,7 +2238,7 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
         }
         $adapted = $true
     }
-    $adaptedNames = @($modelName,$isolationName,$v1StopLossName) + $cognitiveNames + $installedNames + $lifecycleNames
+    $adaptedNames = @($exactHeadName,$modelName,$isolationName,$v1StopLossName) + $cognitiveNames + $installedNames + $lifecycleNames
     foreach ($name in @($Gates.Keys | Where-Object { $_ -cnotin $adaptedNames } | Sort-Object)) {
         $gate = $Gates[$name]
         if ($gate -isnot [System.Collections.IDictionary] -or
