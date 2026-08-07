@@ -551,6 +551,13 @@ $aggregatorRunnerPattern = '(?ms)^\s*runs-on:\s*\r?\n\s*-\s*self-hosted\s*\r?\n\
 $modelUpload = [regex]::Match($releaseModelJob,'(?ms)^      - name: Upload model evidence\s*$.*\z').Value
 $hostUpload = [regex]::Match($releaseHostJob,'(?ms)^      - name: Upload host evidence\s*$.*\z').Value
 $releaseUpload = [regex]::Match($releaseJob,'(?ms)^      - name: Upload rollout evidence\s*$.*\z').Value
+$defaultPromotionRef = 'refs/heads/codex/harness-v2-default-promotion'
+$defaultPromotionCondition = "github.event_name == 'workflow_dispatch' && github.ref == '$defaultPromotionRef'"
+$pushBlock = [regex]::Match($workflow,'(?ms)^  push:\s*\r?$.*?(?=^  schedule:\s*\r?$)').Value
+$modelBundlePaths = @([regex]::Matches($modelUpload,'(?m)^\s+\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/(?<name>[a-z0-9-]+\.json)\s*$') | ForEach-Object { $_.Groups['name'].Value })
+$hostBundlePaths = @([regex]::Matches($hostUpload,'(?m)^\s+\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/(?<name>[a-z0-9-]+\.json)\s*$') | ForEach-Object { $_.Groups['name'].Value })
+$expectedModelBundlePaths = @('model-runner-observation.json','model-eval.json','release-model-receipt.json')
+$expectedHostBundlePaths = @('host-runner-observation.json','cognitive-host.json','installed-desktop-primary.json','installed-desktop-distinct.json','lifecycle-core.json','lifecycle-governed.json','lifecycle-full.json','v1-stop-loss.json','release-host-receipt.json')
 
 if ($runnerBoundaryParseErrors.Count -eq 0 -and $runnerBoundaryBytes.Length -ge 3 -and
     $runnerBoundaryBytes[0] -eq 0xEF -and $runnerBoundaryBytes[1] -eq 0xBB -and $runnerBoundaryBytes[2] -eq 0xBF) {
@@ -778,12 +785,34 @@ if ($runner -match '(?m)^\s*\[int\]\$CheckTimeoutSeconds = 360\s*$' -and
 }
 
 if ($releaseModelJob -match 'run-model-evals\.ps1[^\r\n]+-TimeoutSeconds 120[^\r\n]+-CodexHome \$env:HOST_BENCHMARK_CODEX_HOME[^\r\n]+model-eval\.json' -and
-    $releaseHostJob -match 'run-host-benchmark\.ps1[^\r\n]+-TimeoutSeconds 900[^\r\n]+-CodexHome \$env:HOST_BENCHMARK_CODEX_HOME[^\r\n]+-Groups 3[^\r\n]+-Trials 3[^\r\n]+host-benchmark\.json' -and
+    @([regex]::Matches($releaseModelJob,'scripts/write-release-producer-receipt\.ps1')).Count -eq 1 -and
+    $releaseModelJob -match 'write-release-producer-receipt\.ps1[^\r\n]+-Kind model[^\r\n]+model-runner-observation\.json[^\r\n]+-ModelReportPath[^\r\n]+model-eval\.json[^\r\n]+release-model-receipt\.json[^\r\n]+-CheckoutSha \$env:GITHUB_SHA[^\r\n]+-Conclusion success[^\r\n]+-ProducerMode formal' -and
+    @([regex]::Matches($releaseHostJob,'scripts/run-host-benchmark\.ps1')).Count -eq 3 -and
+    @([regex]::Matches($releaseHostJob,'-BenchmarkPath cognitive-fast-path')).Count -eq 1 -and
+    @([regex]::Matches($releaseHostJob,'-BenchmarkPath installed-desktop-path')).Count -eq 2 -and
+    @([regex]::Matches($releaseHostJob,"installed-desktop-primary\.json'")).Count -eq 2 -and
+    @([regex]::Matches($releaseHostJob,"installed-desktop-distinct\.json'")).Count -eq 2 -and
+    @([regex]::Matches($releaseHostJob,'scripts/run-preset-lifecycle-qualification\.ps1')).Count -eq 3 -and
+    @('core','governed','full' | Where-Object { @([regex]::Matches($releaseHostJob,("-Preset {0}\b" -f $_))).Count -eq 1 }).Count -eq 3 -and
+    @([regex]::Matches($releaseHostJob,'scripts/run-v1-stop-loss-qualification\.ps1')).Count -eq 1 -and
+    @([regex]::Matches($releaseHostJob,'scripts/write-release-producer-receipt\.ps1')).Count -eq 1 -and
+    $releaseHostJob -match 'write-release-producer-receipt\.ps1[^\r\n]+-Kind host[^\r\n]+host-runner-observation\.json[^\r\n]+cognitive-host\.json[^\r\n]+installed-desktop-primary\.json[^\r\n]+installed-desktop-distinct\.json[^\r\n]+release-host-receipt\.json[^\r\n]+-CheckoutSha \$env:GITHUB_SHA[^\r\n]+-Conclusion success[^\r\n]+-ProducerMode formal' -and
+    $releaseHostJob -notmatch '(?i)Fixture|ValidateOnly|diagnostic-smoke|EligibilityReportPath' -and
     $releaseHostJob -match '(?m)^\s*needs:\s*release-model\s*$' -and
     $releaseModelJob -notmatch '(?m)^\s*continue-on-error:' -and $releaseHostJob -notmatch '(?m)^\s*continue-on-error:') {
-    Add-Check 'release CI serializes and bounds real model and three-group host evidence without masking failures'
+    Add-Check 'release CI binds formal G09/G10 writers, distinct Host reports, lifecycle, and G14 without masking failures'
 } else {
-    Add-Failure 'release CI must run both real qualification reports before rollout generation'
+    Add-Failure 'release CI Producer orchestration or formal receipt binding is incomplete'
+}
+
+if (@(@($releaseModelJob,$releaseHostJob) | Where-Object { $_ -match [regex]::Escape($defaultPromotionCondition) }).Count -eq 2 -and
+    @([regex]::Matches($workflow,[regex]::Escape($defaultPromotionCondition))).Count -eq 2 -and
+    $pushBlock -notmatch [regex]::Escape($defaultPromotionRef) -and
+    $releaseJob -notmatch [regex]::Escape($defaultPromotionRef) -and
+    @(@($releaseModelJob,$releaseHostJob,$releaseJob) | Where-Object { $_ -match "github.event_name != 'pull_request'" }).Count -eq 3) {
+    Add-Check 'Default Promotion routes only manual model/host producers while push, PR, and release-full remain guarded'
+} else {
+    Add-Failure 'Default Promotion producer routing or release guard drifted'
 }
 
 if (@($releaseModelJob,$releaseHostJob | Where-Object { $_ -match $producerRunnerPattern -and $_ -match '(?m)^\s*HOST_BENCHMARK_CODEX_HOME:\s*\$\{\{\s*vars\.HOST_BENCHMARK_CODEX_HOME\s*\}\}\s*$' -and $_ -match '(?m)^\s*environment:\s*thin-v2-release\s*$' -and $_ -match '(?m)^\s*persist-credentials:\s*false\s*$' -and $_ -match 'refs/heads/codex/thin-harness-v2-refactor' -and $_ -notmatch '(?i)secrets\.' }).Count -eq 2 -and
@@ -793,18 +822,21 @@ if (@($releaseModelJob,$releaseHostJob | Where-Object { $_ -match $producerRunne
     Add-Failure 'release CI must map the approved runner and Codex-home repository variables without credential transport'
 }
 
-$producerBoundaryCount = 0
-foreach ($producer in @($releaseModelJob,$releaseHostJob)) {
-    $boundaryIndex = $producer.IndexOf('scripts/assert-release-runner-boundary.ps1',[StringComparison]::Ordinal)
-    $producerWorkIndex = $producer.IndexOf('evidence directory',[StringComparison]::Ordinal)
-    if ($producer -match '(?m)^\s*runner_account_digest:\s*\$\{\{\s*steps\.runner_boundary\.outputs\.runner_account_digest\s*\}\}\s*$' -and
-        $producer -match '(?ms)^\s*- name: Assert credentialed producer runner boundary\s*$\r?\n\s*id:\s*runner_boundary\s*$.*?assert-release-runner-boundary\.ps1 -Mode producer\b' -and
-        $boundaryIndex -ge 0 -and $producerWorkIndex -gt $boundaryIndex) { $producerBoundaryCount++ }
-}
+$modelPrepareIndex = $releaseModelJob.IndexOf('Prepare model evidence directory',[StringComparison]::Ordinal)
+$modelBoundaryIndex = $releaseModelJob.IndexOf('scripts/assert-release-runner-boundary.ps1',[StringComparison]::Ordinal)
+$modelWorkIndex = $releaseModelJob.IndexOf('scripts/run-model-evals.ps1',[StringComparison]::Ordinal)
+$hostPrepareIndex = $releaseHostJob.IndexOf('Prepare host evidence directory',[StringComparison]::Ordinal)
+$hostBoundaryIndex = $releaseHostJob.IndexOf('scripts/assert-release-runner-boundary.ps1',[StringComparison]::Ordinal)
+$hostWorkIndex = $releaseHostJob.IndexOf('scripts/run-host-benchmark.ps1',[StringComparison]::Ordinal)
+$producerBoundaryValid = @(@($releaseModelJob,$releaseHostJob) | Where-Object { $_ -match '(?m)^\s*runner_account_digest:\s*\$\{\{\s*steps\.runner_boundary\.outputs\.runner_account_digest\s*\}\}\s*$' }).Count -eq 2 -and
+    $releaseModelJob -match 'assert-release-runner-boundary\.ps1 -Mode producer\b[^\r\n]+-RunId \$env:GITHUB_RUN_ID[^\r\n]+-RunAttempt \$env:GITHUB_RUN_ATTEMPT[^\r\n]+-RepoRoot \$PWD[^\r\n]+-Role model-producer[^\r\n]+-CodexHome \$env:HOST_BENCHMARK_CODEX_HOME[^\r\n]+model-runner-observation\.json[^\r\n]+-ProducerMode formal' -and
+    $releaseHostJob -match 'assert-release-runner-boundary\.ps1 -Mode producer\b[^\r\n]+-RunId \$env:GITHUB_RUN_ID[^\r\n]+-RunAttempt \$env:GITHUB_RUN_ATTEMPT[^\r\n]+-RepoRoot \$PWD[^\r\n]+-Role host-producer[^\r\n]+-CodexHome \$env:HOST_BENCHMARK_CODEX_HOME[^\r\n]+host-runner-observation\.json[^\r\n]+-ProducerMode formal' -and
+    $modelPrepareIndex -ge 0 -and $modelBoundaryIndex -gt $modelPrepareIndex -and $modelWorkIndex -gt $modelBoundaryIndex -and
+    $hostPrepareIndex -ge 0 -and $hostBoundaryIndex -gt $hostPrepareIndex -and $hostWorkIndex -gt $hostBoundaryIndex
 $aggregatorBoundaryIndex = $releaseJob.IndexOf('scripts/assert-release-runner-boundary.ps1',[StringComparison]::Ordinal)
 $aggregatorDownloadIndex = $releaseJob.IndexOf('actions/download-artifact@',[StringComparison]::Ordinal)
 $aggregatorGenerateIndex = $releaseJob.IndexOf('scripts/generate-v2-rollout-report.ps1',[StringComparison]::Ordinal)
-if ($producerBoundaryCount -eq 2 -and
+if ($producerBoundaryValid -and
     $releaseJob -match '(?m)^\s*MODEL_PRODUCER_ACCOUNT_DIGEST:\s*\$\{\{\s*needs\.release-model\.outputs\.runner_account_digest\s*\}\}\s*$' -and
     $releaseJob -match '(?m)^\s*HOST_PRODUCER_ACCOUNT_DIGEST:\s*\$\{\{\s*needs\.release-host\.outputs\.runner_account_digest\s*\}\}\s*$' -and
     $releaseJob -match 'assert-release-runner-boundary\.ps1 -Mode aggregator\b[^\r\n]+-ModelProducerAccountDigest \$env:MODEL_PRODUCER_ACCOUNT_DIGEST[^\r\n]+-HostProducerAccountDigest \$env:HOST_PRODUCER_ACCOUNT_DIGEST' -and
@@ -839,22 +871,23 @@ if ($releaseJob -match '(?ms)^\s*needs:\s*\r?\n\s*- release-model\s*\r?\n\s*- re
     $rolloutGenerator -match 'Assert-HarnessRolloutEvidenceSetProvenance' -and
     $rolloutGenerator -match 'rollout-evidence-provenance-unverified' -and
     $rolloutGenerator -notmatch 'run-scenario-evals\.ps1 -Suite core' -and
-    $rolloutGenerator -notmatch 'benchmark-harness\.ps1 -Compare bare,v1,v2') {
+    $rolloutGenerator -notmatch 'benchmark-harness\.ps1 -Compare bare,v1,v2' -and
+    $releaseJob -notmatch 'release-(?:model|host)-receipt\.json|installed-desktop|lifecycle-|v1-stop-loss|GateEvidencePath') {
     Add-Check 'legacy release-full wiring fails closed until a later batch supplies the strict v2 evidence set'
 } else {
     Add-Failure 'DP-02A must not let the legacy two-report release-full path authorize rollout v2'
 }
 
-if ($modelUpload -match [regex]::Escape($uploadAction) -and $modelUpload -match '(?m)^\s*path:\s*\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/model-eval\.json\s*$' -and $modelUpload -match '(?m)^\s*if-no-files-found:\s*error\s*$' -and
-    $hostUpload -match [regex]::Escape($uploadAction) -and $hostUpload -match '(?m)^\s*path:\s*\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/host-benchmark\.json\s*$' -and $hostUpload -match '(?m)^\s*if-no-files-found:\s*error\s*$' -and
+if ($modelUpload -match [regex]::Escape($uploadAction) -and $modelUpload -match '\$\{\{ success\(\)' -and $modelUpload -match '(?m)^\s*if-no-files-found:\s*error\s*$' -and ($modelBundlePaths -join '|') -ceq ($expectedModelBundlePaths -join '|') -and
+    $hostUpload -match [regex]::Escape($uploadAction) -and $hostUpload -match '\$\{\{ success\(\)' -and $hostUpload -match '(?m)^\s*if-no-files-found:\s*error\s*$' -and ($hostBundlePaths -join '|') -ceq ($expectedHostBundlePaths -join '|') -and
     $releaseUpload -match '!cancelled\(\)' -and
     $releaseUpload -match [regex]::Escape($uploadAction) -and
     $releaseUpload -match '(?m)^\s*if-no-files-found:\s*warn\s*$' -and
     @([regex]::Matches($releaseUpload,'(?m)^\s+\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/[a-z0-9-]+\.json\s*$')).Count -eq 3 -and
     ($modelUpload + $hostUpload + $releaseUpload) -notmatch '(?i)auth\.json|CODEX_ACCESS_TOKEN|OPENAI_API_KEY|secrets\.') {
-    Add-Check 'release CI uses fresh one-file producer artifacts and limits final upload scope to three sanitized JSON paths'
+    Add-Check 'release CI uses exact fresh 3-file and 9-file Producer bundles and limits legacy final upload scope'
 } else {
-    Add-Failure 'release artifact upload must be always-on, exact, and credential-free'
+    Add-Failure 'release artifact uploads must be success-only, exact, and credential-free'
 }
 
 if (-not (Test-Path -LiteralPath $smokeRunnerPath -PathType Leaf)) {

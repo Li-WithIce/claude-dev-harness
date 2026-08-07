@@ -165,7 +165,7 @@ jobs:
           retention-days: 14
 
   release-model:
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/harness-distribution' || github.ref == 'refs/heads/codex/thin-harness-v2-refactor') }}
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/harness-distribution' || github.ref == 'refs/heads/codex/thin-harness-v2-refactor' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/harness-v2-default-promotion')) }}
     runs-on:
       - self-hosted
       - Windows
@@ -183,14 +183,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Assert credentialed producer runner boundary
-        id: runner_boundary
-        shell: pwsh
-        env:
-          PRODUCER_RUNNER_LABEL: ${{ vars.THIN_V2_RELEASE_RUNNER }}
-          AGGREGATOR_RUNNER_LABEL: ${{ vars.THIN_V2_RELEASE_AGGREGATOR_RUNNER }}
-        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/assert-release-runner-boundary.ps1 -Mode producer -ProducerRunnerLabel $env:PRODUCER_RUNNER_LABEL -AggregatorRunnerLabel $env:AGGREGATOR_RUNNER_LABEL -RunId $env:GITHUB_RUN_ID -RunAttempt $env:GITHUB_RUN_ATTEMPT
-
       - name: Prepare model evidence directory
         id: model_dir
         shell: pwsh
@@ -200,23 +192,40 @@ jobs:
           [void][System.IO.Directory]::CreateDirectory($releaseRoot)
           "RELEASE_EVIDENCE_ROOT=$releaseRoot" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Assert credentialed model producer runner boundary
+        id: runner_boundary
+        shell: pwsh
+        env:
+          PRODUCER_RUNNER_LABEL: ${{ vars.THIN_V2_RELEASE_RUNNER }}
+          AGGREGATOR_RUNNER_LABEL: ${{ vars.THIN_V2_RELEASE_AGGREGATOR_RUNNER }}
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/assert-release-runner-boundary.ps1 -Mode producer -ProducerRunnerLabel $env:PRODUCER_RUNNER_LABEL -AggregatorRunnerLabel $env:AGGREGATOR_RUNNER_LABEL -RunId $env:GITHUB_RUN_ID -RunAttempt $env:GITHUB_RUN_ATTEMPT -RepoRoot $PWD -Role model-producer -CodexHome $env:HOST_BENCHMARK_CODEX_HOME -ObservationOutputPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'model-runner-observation.json') -ProducerMode formal
+
       - name: Real model evaluation
         shell: pwsh
         run: |
           pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-model-evals.ps1 -RepoRoot $PWD -Model gpt-5.6-sol -Reasoning max -TimeoutSeconds 120 -CodexHome $env:HOST_BENCHMARK_CODEX_HOME -OutputPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'model-eval.json')
           exit $LASTEXITCODE
 
+      - name: Write release model receipt
+        shell: pwsh
+        run: |
+          pwsh -NoLogo -NoProfile -NonInteractive -File scripts/write-release-producer-receipt.ps1 -RepoRoot $PWD -Kind model -RunnerObservationPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'model-runner-observation.json') -ModelReportPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'model-eval.json') -OutputPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'release-model-receipt.json') -RunId $env:GITHUB_RUN_ID -RunAttempt $env:GITHUB_RUN_ATTEMPT -CheckoutSha $env:GITHUB_SHA -Conclusion success -ProducerMode formal
+          exit $LASTEXITCODE
+
       - name: Upload model evidence
-        if: ${{ !cancelled() && steps.model_dir.outcome == 'success' }}
+        if: ${{ success() && steps.model_dir.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: thin-v2-model-${{ github.sha }}-${{ github.run_attempt }}
-          path: ${{ env.RELEASE_EVIDENCE_ROOT }}/model-eval.json
+          path: |
+            ${{ env.RELEASE_EVIDENCE_ROOT }}/model-runner-observation.json
+            ${{ env.RELEASE_EVIDENCE_ROOT }}/model-eval.json
+            ${{ env.RELEASE_EVIDENCE_ROOT }}/release-model-receipt.json
           if-no-files-found: error
 
   release-host:
     needs: release-model
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/harness-distribution' || github.ref == 'refs/heads/codex/thin-harness-v2-refactor') }}
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/harness-distribution' || github.ref == 'refs/heads/codex/thin-harness-v2-refactor' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/harness-v2-default-promotion')) }}
     runs-on:
       - self-hosted
       - Windows
@@ -234,14 +243,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Assert credentialed producer runner boundary
-        id: runner_boundary
-        shell: pwsh
-        env:
-          PRODUCER_RUNNER_LABEL: ${{ vars.THIN_V2_RELEASE_RUNNER }}
-          AGGREGATOR_RUNNER_LABEL: ${{ vars.THIN_V2_RELEASE_AGGREGATOR_RUNNER }}
-        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/assert-release-runner-boundary.ps1 -Mode producer -ProducerRunnerLabel $env:PRODUCER_RUNNER_LABEL -AggregatorRunnerLabel $env:AGGREGATOR_RUNNER_LABEL -RunId $env:GITHUB_RUN_ID -RunAttempt $env:GITHUB_RUN_ATTEMPT
-
       - name: Prepare host evidence directory
         id: host_dir
         shell: pwsh
@@ -251,18 +252,77 @@ jobs:
           [void][System.IO.Directory]::CreateDirectory($releaseRoot)
           "RELEASE_EVIDENCE_ROOT=$releaseRoot" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Real bare v1 v2 host benchmark
+      - name: Assert credentialed host producer runner boundary
+        id: runner_boundary
+        shell: pwsh
+        env:
+          PRODUCER_RUNNER_LABEL: ${{ vars.THIN_V2_RELEASE_RUNNER }}
+          AGGREGATOR_RUNNER_LABEL: ${{ vars.THIN_V2_RELEASE_AGGREGATOR_RUNNER }}
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/assert-release-runner-boundary.ps1 -Mode producer -ProducerRunnerLabel $env:PRODUCER_RUNNER_LABEL -AggregatorRunnerLabel $env:AGGREGATOR_RUNNER_LABEL -RunId $env:GITHUB_RUN_ID -RunAttempt $env:GITHUB_RUN_ATTEMPT -RepoRoot $PWD -Role host-producer -CodexHome $env:HOST_BENCHMARK_CODEX_HOME -ObservationOutputPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'host-runner-observation.json') -ProducerMode formal
+
+      - name: Real cognitive host benchmark
         shell: pwsh
         run: |
-          pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-host-benchmark.ps1 -RepoRoot $PWD -Model gpt-5.6-sol -Reasoning max -TimeoutSeconds 900 -CodexHome $env:HOST_BENCHMARK_CODEX_HOME -Groups 3 -Trials 3 -OutputPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'host-benchmark.json')
+          pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-host-benchmark.ps1 -RepoRoot $PWD -BenchmarkPath cognitive-fast-path -Model gpt-5.6-sol -Reasoning max -TimeoutSeconds 900 -CodexHome $env:HOST_BENCHMARK_CODEX_HOME -Groups 3 -Trials 3 -OutputPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'cognitive-host.json')
+          exit $LASTEXITCODE
+
+      - name: Real installed Desktop primary benchmark
+        shell: pwsh
+        run: |
+          pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-host-benchmark.ps1 -RepoRoot $PWD -BenchmarkPath installed-desktop-path -Model gpt-5.6-sol -Reasoning max -TimeoutSeconds 900 -CodexHome $env:HOST_BENCHMARK_CODEX_HOME -Groups 3 -Trials 3 -OutputPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'installed-desktop-primary.json')
+          exit $LASTEXITCODE
+
+      - name: Real installed Desktop distinct benchmark
+        shell: pwsh
+        run: |
+          pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-host-benchmark.ps1 -RepoRoot $PWD -BenchmarkPath installed-desktop-path -Model gpt-5.6-sol -Reasoning max -TimeoutSeconds 900 -CodexHome $env:HOST_BENCHMARK_CODEX_HOME -Groups 3 -Trials 3 -OutputPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'installed-desktop-distinct.json')
+          exit $LASTEXITCODE
+
+      - name: Formal core preset lifecycle qualification
+        shell: pwsh
+        run: |
+          pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-preset-lifecycle-qualification.ps1 -RepoRoot $PWD -Preset core -OutputPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'lifecycle-core.json') -ProducerMode formal
+          exit $LASTEXITCODE
+
+      - name: Formal governed preset lifecycle qualification
+        shell: pwsh
+        run: |
+          pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-preset-lifecycle-qualification.ps1 -RepoRoot $PWD -Preset governed -OutputPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'lifecycle-governed.json') -ProducerMode formal
+          exit $LASTEXITCODE
+
+      - name: Formal full preset lifecycle qualification
+        shell: pwsh
+        run: |
+          pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-preset-lifecycle-qualification.ps1 -RepoRoot $PWD -Preset full -OutputPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'lifecycle-full.json') -ProducerMode formal
+          exit $LASTEXITCODE
+
+      - name: Formal v1 stop-loss qualification
+        shell: pwsh
+        run: |
+          pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-v1-stop-loss-qualification.ps1 -RepoRoot $PWD -OutputPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'v1-stop-loss.json') -ProducerMode formal
+          exit $LASTEXITCODE
+
+      - name: Write release host receipt
+        shell: pwsh
+        run: |
+          pwsh -NoLogo -NoProfile -NonInteractive -File scripts/write-release-producer-receipt.ps1 -RepoRoot $PWD -Kind host -RunnerObservationPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'host-runner-observation.json') -CognitiveHostReportPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'cognitive-host.json') -InstalledDesktopPrimaryReportPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'installed-desktop-primary.json') -InstalledDesktopDistinctReportPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'installed-desktop-distinct.json') -OutputPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'release-host-receipt.json') -RunId $env:GITHUB_RUN_ID -RunAttempt $env:GITHUB_RUN_ATTEMPT -CheckoutSha $env:GITHUB_SHA -Conclusion success -ProducerMode formal
           exit $LASTEXITCODE
 
       - name: Upload host evidence
-        if: ${{ !cancelled() && steps.host_dir.outcome == 'success' }}
+        if: ${{ success() && steps.host_dir.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: thin-v2-host-${{ github.sha }}-${{ github.run_attempt }}
-          path: ${{ env.RELEASE_EVIDENCE_ROOT }}/host-benchmark.json
+          path: |
+            ${{ env.RELEASE_EVIDENCE_ROOT }}/host-runner-observation.json
+            ${{ env.RELEASE_EVIDENCE_ROOT }}/cognitive-host.json
+            ${{ env.RELEASE_EVIDENCE_ROOT }}/installed-desktop-primary.json
+            ${{ env.RELEASE_EVIDENCE_ROOT }}/installed-desktop-distinct.json
+            ${{ env.RELEASE_EVIDENCE_ROOT }}/lifecycle-core.json
+            ${{ env.RELEASE_EVIDENCE_ROOT }}/lifecycle-governed.json
+            ${{ env.RELEASE_EVIDENCE_ROOT }}/lifecycle-full.json
+            ${{ env.RELEASE_EVIDENCE_ROOT }}/v1-stop-loss.json
+            ${{ env.RELEASE_EVIDENCE_ROOT }}/release-host-receipt.json
           if-no-files-found: error
 
   release-full:

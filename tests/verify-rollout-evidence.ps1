@@ -986,8 +986,10 @@ try {
 
     $runtimeG14Readers=@('scripts/task.ps1','scripts/lib/Harness.Recovery.psm1','scripts/lib/Harness.RuntimeDefault.psm1')
     Check (@($runtimeG14Readers|Where-Object{(Get-Content -LiteralPath (Join-Path $RepoRoot $_) -Raw -Encoding utf8)-match'v1-stop-loss-report'}).Count-eq0) 'Runtime Core, ordinary Status, and Runtime Default do not read G14 reports' 'a Runtime path began reading G14 qualification evidence'
-    $workflowG14Readers=@(Get-ChildItem -LiteralPath (Join-Path $RepoRoot '.github\workflows') -File -Filter '*.yml'|Where-Object{(Get-Content -LiteralPath $_.FullName -Raw -Encoding utf8)-match'run-v1-stop-loss-qualification|v1-stop-loss-report'})
-    Check ($workflowG14Readers.Count-eq0) 'Release Workflow remains unwired for G14' 'Release Workflow was changed to run or consume G14'
+    $workflow=Get-Content -LiteralPath (Join-Path $RepoRoot '.github\workflows\validation.yml') -Raw -Encoding utf8
+    $releaseHostJob=[regex]::Match($workflow,'(?ms)^  release-host:\s*$.*?(?=^  release-full:\s*$)').Value
+    $releaseFullJob=[regex]::Match($workflow,'(?ms)^  release-full:\s*$.*\z').Value
+    Check (@([regex]::Matches($workflow,'scripts/run-v1-stop-loss-qualification\.ps1')).Count-eq1 -and $releaseHostJob-match'run-v1-stop-loss-qualification\.ps1[^\r\n]+v1-stop-loss\.json[^\r\n]+-ProducerMode formal' -and $releaseFullJob-notmatch'run-v1-stop-loss-qualification|v1-stop-loss(?:-report)?\.json') 'Release Workflow runs formal G14 once in the Host Producer without wiring release-full' 'Release Workflow G14 Producer or release-full boundary is wrong'
 
     $unwiredPath=Join-Path $temp 'still-unwired.json';Write-Document $unwiredPath ([ordered]@{}) -Compress
     foreach($unwiredName in @('DP-G11-RELEASE-FULL','DP-G13-PROMOTION-AUTO-PROBE','DP-G15-CANARY','DP-G16-STABLE-DECISION')){
