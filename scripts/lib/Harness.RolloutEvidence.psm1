@@ -472,7 +472,7 @@ function Assert-InstalledDesktopReport {
     $trialPayloadDigests = [Collections.Generic.List[string]]::new()
     foreach ($group in @($base.groups)) { foreach ($protocol in @('bare','v1','v2')) { foreach ($trial in @($group.protocols[$protocol].trials)) { $trialPayloadDigests.Add((Get-HostBenchmarkTrialPayloadDigest -Protocol $protocol -Trial $trial)) } } }
     return [ordered]@{
-        status=$status;producer_identity=[string]$Document.producer_identity;source_revision=[string]$Document.source_revision;report_run_id=[string]$Document.report_run_id
+        status=$status;producer_identity=[string]$Document.producer_identity;source_revision=[string]$Document.source_revision;report_run_id=[string]$Document.report_run_id;report_digest=[string]$Document.report_digest
         group_run_ids=@($Document.groups.group_run_id);group_root_digests=@($Document.groups.group_root_digest)
         trial_run_ids=@($Document.groups | ForEach-Object { @($_.protocols.bare.trials + $_.protocols.v1.trials + $_.protocols.v2.trials) } | ForEach-Object { [string]$_.trial_run_id })
         trial_root_digests=@($Document.groups | ForEach-Object { @($_.protocols.bare.trials + $_.protocols.v1.trials + $_.protocols.v2.trials) } | ForEach-Object { [string]$_.trial_root_digest })
@@ -503,6 +503,18 @@ function Read-InstalledDesktopRolloutEvidence {
     } catch { throw [IO.InvalidDataException]::new('rollout-evidence-installed-report-invalid',$_.Exception) }
 }
 
+function Assert-InstalledDesktopEvidencePairDistinct {
+    param([Parameter(Mandatory)][object[]]$Installed)
+    if ($Installed.Count -ne 2 -or [string]$Installed[0].path -ceq [string]$Installed[1].path -or [string]$Installed[0].raw_digest -ceq [string]$Installed[1].raw_digest -or
+        ([string]$Installed[0].volume -ceq [string]$Installed[1].volume -and [string]$Installed[0].file_id -ceq [string]$Installed[1].file_id) -or
+        [string]$Installed[0].report_run_id -ceq [string]$Installed[1].report_run_id -or [string]$Installed[0].source_revision -cne [string]$Installed[1].source_revision) {
+        throw 'rollout-evidence-installed-reports-not-distinct'
+    }
+    foreach ($property in @('group_run_ids','group_root_digests','trial_run_ids','trial_root_digests','trial_payload_digests')) {
+        if (@($Installed[0][$property] | Where-Object { $_ -cin @($Installed[1][$property]) }).Count -gt 0) { throw 'rollout-evidence-installed-reports-not-distinct' }
+    }
+}
+
 function Read-ModelRolloutEvidence {
     param(
         [Parameter(Mandatory)][string]$RepoRoot,
@@ -524,7 +536,7 @@ function Read-ModelRolloutEvidence {
         Assert-ModelEvalReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource
         if ([bool]$document.source_dirty -or -not [bool]$document.source_state_stable) { throw 'model portable source is not clean and stable' }
         return [ordered]@{
-            status=[string]$document.status;producer_identity='model-eval/v2';source_revision=[string]$document.source_revision
+            status=[string]$document.status;producer_identity='model-eval/v2';source_revision=[string]$document.source_revision;report_digest=[string]$document.report_digest
             path=[string]$artifact.path;raw_digest=[string]$artifact.digest;volume=[string]$artifact.physical.volume;file_id=[string]$artifact.physical.file_id
         }
     } catch { throw [IO.InvalidDataException]::new('rollout-evidence-model-report-invalid',$_.Exception) }
@@ -698,7 +710,7 @@ function Read-CognitiveHostRolloutEvidence {
             g02_status=[string]$document.status
             g05_status=(Get-CognitiveHostDirectLatencyStatus -Document $document -ExpectedSource $ExpectedSource)
             g06_status=(Get-CognitiveHostRequestReductionStatus -Document $document -ExpectedSource $ExpectedSource)
-            producer_identity='host-benchmark-cognitive/v2';source_revision=[string]$document.source_revision
+            producer_identity='host-benchmark-cognitive/v2';source_revision=[string]$document.source_revision;report_digest=[string]$document.report_digest
             path=[string]$artifact.path;raw_digest=[string]$artifact.digest;volume=[string]$artifact.physical.volume;file_id=[string]$artifact.physical.file_id
         }
     } catch { throw [IO.InvalidDataException]::new('rollout-evidence-cognitive-host-report-invalid',$_.Exception) }
@@ -1115,7 +1127,7 @@ function Assert-ReleaseIsolationSanitizedContent {
 function Assert-ReleaseIsolationContentDigest {
     param(
         [Parameter(Mandatory)][Collections.IDictionary]$Document,
-        [Parameter(Mandatory)][ValidateSet('observation_digest','report_digest')][string]$Property
+        [Parameter(Mandatory)][ValidateSet('observation_digest','report_digest','receipt_digest')][string]$Property
     )
     Assert-ReleaseDigestValue -Value $Document[$Property] -Label $Property
     $saved = $Document[$Property]
@@ -1460,8 +1472,274 @@ function Read-ReleaseIsolationRolloutEvidence {
         $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $RepoRoot -ProtectedRoots $ProtectedRoots
         $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$Gate.artifact_path) -ExpectedDigest ([string]$Gate.evidence_digest) -ProtectedRoots $protected -MaximumBytes 1MB
         $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
-        return Assert-ReleaseIsolationReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource -RequirePortableSource
+        $result = Assert-ReleaseIsolationReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource -RequirePortableSource
+        $result['workflow'] = $document.workflow
+        $result['observations'] = $document.observations
+        return $result
     } catch { throw [IO.InvalidDataException]::new('rollout-evidence-release-isolation-report-invalid',$_.Exception) }
+}
+
+function Get-ReleaseProducerReceiptDefinition {
+    param([Parameter(Mandatory)][ValidateSet('model','host')][string]$Kind)
+    if ($Kind -ceq 'model') {
+        return [ordered]@{
+            schema_version='harness-release-model-receipt/v1';schema_path='schemas/release-model-receipt.schema.json'
+            producer_identity='release-model-receipt/v1';job_name='release-model';observation_role='model-producer'
+            artifacts=@([ordered]@{role='model40';evidence_contract='harness-model-eval-report/v2'})
+        }
+    }
+    return [ordered]@{
+        schema_version='harness-release-host-receipt/v1';schema_path='schemas/release-host-receipt.schema.json'
+        producer_identity='release-host-receipt/v1';job_name='release-host';observation_role='host-producer'
+        artifacts=@(
+            [ordered]@{role='cognitive-host';evidence_contract='harness-host-benchmark-report/v2'},
+            [ordered]@{role='installed-desktop-primary';evidence_contract='harness-installed-desktop-benchmark-report/v1'},
+            [ordered]@{role='installed-desktop-distinct';evidence_contract='harness-installed-desktop-benchmark-report/v1'}
+        )
+    }
+}
+
+function Get-ReleaseProducerReceiptInputPaths {
+    param([Parameter(Mandatory)][ValidateSet('model','host')][string]$Kind)
+    $definition = Get-ReleaseProducerReceiptDefinition -Kind $Kind
+    return [ordered]@{
+        producer_digest='scripts/write-release-producer-receipt.ps1'
+        receipt_schema_digest=[string]$definition.schema_path
+        observation_schema_digest='schemas/release-runner-observation.schema.json'
+        rollout_evidence_digest='scripts/lib/Harness.RolloutEvidence.psm1'
+    }
+}
+
+function Get-ReleaseProducerReceiptStatus {
+    param(
+        [Parameter(Mandatory)][ValidateSet('formal','test-only')][string]$ProducerMode,
+        [Parameter(Mandatory)][string]$Conclusion,
+        [Parameter(Mandatory)][string]$ObservationStatus,
+        [Parameter(Mandatory)][string[]]$ArtifactStatuses,
+        [Parameter(Mandatory)][bool]$SourceDirty,
+        [Parameter(Mandatory)][bool]$SourceStable
+    )
+    if ($ProducerMode -ceq 'test-only') { return 'unavailable' }
+    $statuses = @($ObservationStatus) + @($ArtifactStatuses)
+    if ($Conclusion -cne 'success' -or $SourceDirty -or -not $SourceStable -or @($statuses | Where-Object { $_ -ceq 'fail' }).Count -gt 0) { return 'fail' }
+    if (@($statuses | Where-Object { $_ -ceq 'unavailable' }).Count -gt 0) { return 'unavailable' }
+    return 'pass'
+}
+
+function Get-ReleaseProducerReceiptReason {
+    param([Parameter(Mandatory)][string]$ProducerMode,[Parameter(Mandatory)][string]$Status)
+    if ($ProducerMode -ceq 'test-only') { return 'non-formal-producer-mode' }
+    if ($Status -ceq 'pass') { return 'all-producer-checks-passed' }
+    if ($Status -ceq 'fail') { return 'producer-check-failed' }
+    return 'producer-check-unavailable'
+}
+
+function Assert-ReleaseProducerReceipt {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Parameter(Mandatory)][ValidateSet('model','host')][string]$Kind,
+        [Collections.IDictionary]$ExpectedSource = $null,
+        [switch]$RequirePortableSource
+    )
+    $definition = Get-ReleaseProducerReceiptDefinition -Kind $Kind
+    $topKeys = @('schema_version','generated_at_utc','source_revision','source_dirty','source_state_stable','source','receipt_run_id','producer_identity','producer_mode','workflow','runner_observation','artifacts','status','reason','receipt_digest')
+    Assert-ReleaseKeys -Value $Document -Expected $topKeys -Label "release $Kind receipt"
+    $schemaPath = Join-Path $RepoRoot ([string]$definition.schema_path)
+    if (-not (Test-Json -Json ($Document | ConvertTo-Json -Depth 100 -Compress) -SchemaFile $schemaPath -ErrorAction Stop -WarningAction SilentlyContinue)) { throw "release $Kind receipt schema validation failed" }
+    if ([string]$Document.schema_version -cne [string]$definition.schema_version -or [string]$Document.receipt_run_id -cnotmatch '^[0-9a-f]{32}$' -or
+        [string]$Document.producer_identity -cne [string]$definition.producer_identity -or [string]$Document.producer_mode -cnotin @('formal','test-only') -or
+        [string]$Document.status -cnotin @('pass','fail','unavailable')) { throw "release $Kind receipt identity is invalid" }
+    Assert-ReleaseDate -Value $Document.generated_at_utc -Label "release $Kind receipt"
+    Assert-ReleaseIsolationContentDigest -Document $Document -Property receipt_digest
+    Assert-ReleaseIsolationSanitizedContent -Value $Document
+    $stable = Assert-ReleaseIsolationSourceBinding -RepoRoot $RepoRoot -Document $Document -InputPaths (Get-ReleaseProducerReceiptInputPaths -Kind $Kind) -ExpectedSource $ExpectedSource -RequirePortableSource:$RequirePortableSource
+
+    Assert-ReleaseKeys -Value $Document.workflow -Expected @('run_id','run_attempt','job_name','checkout_sha','conclusion') -Label "release $Kind receipt workflow"
+    if ([string]$Document.workflow.run_id -cnotmatch '^[1-9][0-9]*$' -or ($Document.workflow.run_attempt -isnot [long] -and $Document.workflow.run_attempt -isnot [int]) -or [long]$Document.workflow.run_attempt -lt 1 -or
+        [string]$Document.workflow.job_name -cne [string]$definition.job_name -or [string]$Document.workflow.checkout_sha -cne [string]$Document.source_revision -or
+        [string]$Document.workflow.conclusion -cnotin @('success','failure','neutral','cancelled','skipped','timed_out','action_required','stale','startup_failure')) {
+        throw "release $Kind receipt workflow binding is invalid"
+    }
+    Assert-ReleaseKeys -Value $Document.runner_observation -Expected @('role','observation_digest','account_digest','runner_label_digest') -Label "release $Kind receipt runner observation"
+    if ([string]$Document.runner_observation.role -cne [string]$definition.observation_role) { throw "release $Kind receipt runner role is invalid" }
+    foreach ($name in @('observation_digest','account_digest','runner_label_digest')) { Assert-ReleaseDigestValue -Value $Document.runner_observation[$name] -Label "release $Kind receipt runner $name" }
+
+    $artifacts = @($Document.artifacts)
+    if ($artifacts.Count -ne @($definition.artifacts).Count) { throw "release $Kind receipt Artifact set is incomplete" }
+    for ($index=0; $index -lt $artifacts.Count; $index++) {
+        $artifact = $artifacts[$index]
+        $expected = $definition.artifacts[$index]
+        Assert-ReleaseKeys -Value $artifact -Expected @('role','evidence_contract','raw_digest','report_digest','source_revision','status') -Label "release $Kind receipt Artifact"
+        if ([string]$artifact.role -cne [string]$expected.role -or [string]$artifact.evidence_contract -cne [string]$expected.evidence_contract -or
+            [string]$artifact.source_revision -cne [string]$Document.source_revision -or [string]$artifact.status -cnotin @('pass','fail','unavailable')) {
+            throw "release $Kind receipt Artifact binding is invalid"
+        }
+        foreach ($name in @('raw_digest','report_digest')) { Assert-ReleaseDigestValue -Value $artifact[$name] -Label "release $Kind receipt Artifact $name" }
+    }
+    if ($Kind -ceq 'host' -and ([string]$artifacts[1].raw_digest -ceq [string]$artifacts[2].raw_digest -or [string]$artifacts[1].report_digest -ceq [string]$artifacts[2].report_digest)) {
+        throw 'release host receipt installed Desktop Artifacts are not distinct'
+    }
+
+    $expectedReason = Get-ReleaseProducerReceiptReason -ProducerMode ([string]$Document.producer_mode) -Status ([string]$Document.status)
+    if ([string]$Document.reason -cne $expectedReason) { throw "release $Kind receipt status reason is invalid" }
+    if ([string]$Document.producer_mode -ceq 'formal') {
+        $knownFailure = [string]$Document.workflow.conclusion -cne 'success' -or [bool]$Document.source_dirty -or -not $stable -or @($artifacts | Where-Object { [string]$_.status -ceq 'fail' }).Count -gt 0
+        $knownUnavailable = @($artifacts | Where-Object { [string]$_.status -ceq 'unavailable' }).Count -gt 0
+        if (($knownFailure -and [string]$Document.status -cne 'fail') -or (-not $knownFailure -and $knownUnavailable -and [string]$Document.status -ceq 'pass')) {
+            throw "release $Kind receipt status is inconsistent"
+        }
+    }
+    return [ordered]@{
+        status=[string]$Document.status;reason=[string]$Document.reason;producer_identity=[string]$definition.producer_identity;producer_mode=[string]$Document.producer_mode
+        source_revision=[string]$Document.source_revision;source_dirty=[bool]$Document.source_dirty;source_state_stable=$stable
+        receipt_run_id=[string]$Document.receipt_run_id;receipt_digest=[string]$Document.receipt_digest;workflow=$Document.workflow;runner_observation=$Document.runner_observation;artifacts=$artifacts
+    }
+}
+
+function New-ReleaseProducerReceiptArtifact {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][ValidateSet('model','host')][string]$Kind,
+        [Parameter(Mandatory)][string]$RunnerObservationPath,
+        [Parameter(Mandatory)][string]$OutputPath,
+        [Parameter(Mandatory)][string]$RunId,
+        [Parameter(Mandatory)][int]$RunAttempt,
+        [Parameter(Mandatory)][string]$CheckoutSha,
+        [Parameter(Mandatory)][ValidateSet('success','failure','neutral','cancelled','skipped','timed_out','action_required','stale','startup_failure')][string]$Conclusion,
+        [Parameter(Mandatory)][ValidateSet('formal','test-only')][string]$ProducerMode,
+        [string]$ModelReportPath = '',
+        [string]$CognitiveHostReportPath = '',
+        [string]$InstalledDesktopPrimaryReportPath = '',
+        [string]$InstalledDesktopDistinctReportPath = ''
+    )
+    $repo = (Resolve-Path -LiteralPath $RepoRoot).Path
+    $definition = Get-ReleaseProducerReceiptDefinition -Kind $Kind
+    if ($RunId -cnotmatch '^[1-9][0-9]*$' -or $RunAttempt -lt 1 -or $CheckoutSha -cnotmatch '^[0-9a-f]{40,64}$') { throw "release $Kind receipt workflow identity is invalid" }
+    if ($Kind -ceq 'model') {
+        if ([string]::IsNullOrWhiteSpace($ModelReportPath) -or -not [string]::IsNullOrWhiteSpace($CognitiveHostReportPath) -or -not [string]::IsNullOrWhiteSpace($InstalledDesktopPrimaryReportPath) -or -not [string]::IsNullOrWhiteSpace($InstalledDesktopDistinctReportPath)) { throw 'release model receipt input set is invalid' }
+        $reportPaths = @($ModelReportPath)
+    } else {
+        if (-not [string]::IsNullOrWhiteSpace($ModelReportPath) -or @(@($CognitiveHostReportPath,$InstalledDesktopPrimaryReportPath,$InstalledDesktopDistinctReportPath) | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) { throw 'release host receipt input set is invalid' }
+        $reportPaths = @($CognitiveHostReportPath,$InstalledDesktopPrimaryReportPath,$InstalledDesktopDistinctReportPath)
+    }
+    $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $repo
+    $target = Resolve-HarnessReleaseArtifactPath -RepoRoot $repo -OutputPath $OutputPath -EvidencePaths (@($RunnerObservationPath) + $reportPaths) -ProtectedRoots $protected
+    $sourceStart = Get-HarnessReleaseSourceState -RepoRoot $repo
+    if ($CheckoutSha -cne [string]$sourceStart.revision) { throw "release $Kind receipt checkout is stale" }
+
+    $observationArtifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath $RunnerObservationPath -ProtectedRoots $protected -MaximumBytes 512KB
+    $observationDocument = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$observationArtifact.bytes)
+    $observation = Assert-ReleaseRunnerObservation -RepoRoot $repo -Document $observationDocument -ExpectedSource $sourceStart
+    if ([string]$observation.role -cne [string]$definition.observation_role -or [string]$observation.producer_mode -cne $ProducerMode -or
+        [string]$observation.workflow.run_id -cne $RunId -or [long]$observation.workflow.run_attempt -ne $RunAttempt) {
+        throw "release $Kind receipt runner observation binding is invalid"
+    }
+
+    $artifactSummaries = [Collections.Generic.List[object]]::new()
+    if ($Kind -ceq 'model') {
+        $rawDigest = Get-ReleaseFileDigest -Path $ModelReportPath
+        $gate = [ordered]@{status='unavailable';evidence_contract='harness-model-eval-report/v2';artifact_path=$ModelReportPath;evidence_digest=$rawDigest;source_revision=[string]$sourceStart.revision;producer_identity='release-model-receipt-writer/v1'}
+        $model = Read-ModelRolloutEvidence -RepoRoot $repo -Gate $gate -ExpectedSource $sourceStart -ProtectedRoots $protected
+        $artifactSummaries.Add([ordered]@{role='model40';evidence_contract='harness-model-eval-report/v2';raw_digest=[string]$model.raw_digest;report_digest=[string]$model.report_digest;source_revision=[string]$model.source_revision;status=[string]$model.status})
+    } else {
+        $cognitiveDigest = Get-ReleaseFileDigest -Path $CognitiveHostReportPath
+        $cognitiveNames = @('DP-G02-COGNITIVE-HOST-3X3','DP-G05-V2-BARE-1.25','DP-G06-REQUEST-SEND-REDUCTION')
+        $cognitiveGates = [ordered]@{}
+        foreach ($name in $cognitiveNames) { $cognitiveGates[$name] = [ordered]@{status='unavailable';evidence_contract='harness-host-benchmark-report/v2';artifact_path=$CognitiveHostReportPath;evidence_digest=$cognitiveDigest;source_revision=[string]$sourceStart.revision;producer_identity='release-host-receipt-writer/v1'} }
+        $cognitive = Read-CognitiveHostRolloutEvidence -RepoRoot $repo -Gates $cognitiveGates -Names $cognitiveNames -ExpectedSource $sourceStart -ProtectedRoots $protected
+        $cognitiveStatus = Get-ReleaseProducerCombinedStatus -Statuses @([string]$cognitive.g02_status,[string]$cognitive.g05_status,[string]$cognitive.g06_status)
+        $installed = @()
+        foreach ($path in @($InstalledDesktopPrimaryReportPath,$InstalledDesktopDistinctReportPath)) {
+            $digest = Get-ReleaseFileDigest -Path $path
+            $gate = [ordered]@{status='unavailable';evidence_contract='harness-installed-desktop-benchmark-report/v1';artifact_path=$path;evidence_digest=$digest;source_revision=[string]$sourceStart.revision;producer_identity='release-host-receipt-writer/v1'}
+            $installed += ,(Read-InstalledDesktopRolloutEvidence -RepoRoot $repo -Gate $gate -ExpectedSource $sourceStart -ProtectedRoots $protected)
+        }
+        Assert-InstalledDesktopEvidencePairDistinct -Installed $installed
+        $artifactSummaries.Add([ordered]@{role='cognitive-host';evidence_contract='harness-host-benchmark-report/v2';raw_digest=[string]$cognitive.raw_digest;report_digest=[string]$cognitive.report_digest;source_revision=[string]$cognitive.source_revision;status=$cognitiveStatus})
+        for ($index=0; $index -lt 2; $index++) {
+            $artifactSummaries.Add([ordered]@{role=@('installed-desktop-primary','installed-desktop-distinct')[$index];evidence_contract='harness-installed-desktop-benchmark-report/v1';raw_digest=[string]$installed[$index].raw_digest;report_digest=[string]$installed[$index].report_digest;source_revision=[string]$installed[$index].source_revision;status=[string]$installed[$index].status})
+        }
+    }
+
+    $inputDigests = [ordered]@{}
+    foreach ($entry in (Get-ReleaseProducerReceiptInputPaths -Kind $Kind).GetEnumerator()) { $inputDigests[$entry.Key] = Get-ReleaseFileDigest -Path (Join-Path $repo ([string]$entry.Value)) }
+    $sourceEnd = Get-HarnessReleaseSourceState -RepoRoot $repo
+    if (-not (Test-ReleaseIsolationSourceStateEqual -Left $sourceStart -Right $sourceEnd)) { throw "release $Kind receipt source changed during aggregation" }
+    $stable = Test-HarnessReleaseSourceStable -Start $sourceStart -End $sourceEnd
+    $status = Get-ReleaseProducerReceiptStatus -ProducerMode $ProducerMode -Conclusion $Conclusion -ObservationStatus ([string]$observation.status) -ArtifactStatuses @($artifactSummaries.status) -SourceDirty ([bool]$sourceStart.dirty -or [bool]$sourceEnd.dirty) -SourceStable $stable
+    $reason = Get-ReleaseProducerReceiptReason -ProducerMode $ProducerMode -Status $status
+    $document = [ordered]@{
+        schema_version=[string]$definition.schema_version;generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o');source_revision=[string]$sourceStart.revision
+        source_dirty=([bool]$sourceStart.dirty -or [bool]$sourceEnd.dirty);source_state_stable=$stable
+        source=[ordered]@{commit_tree_oid=[string]$sourceStart.commit_tree_oid;object_format=[string]$sourceStart.object_format;start=$sourceStart;end=$sourceEnd;input_digests=$inputDigests}
+        receipt_run_id=[guid]::NewGuid().ToString('N');producer_identity=[string]$definition.producer_identity;producer_mode=$ProducerMode
+        workflow=[ordered]@{run_id=$RunId;run_attempt=[long]$RunAttempt;job_name=[string]$definition.job_name;checkout_sha=$CheckoutSha;conclusion=$Conclusion}
+        runner_observation=[ordered]@{role=[string]$observation.role;observation_digest=[string]$observation.observation_digest;account_digest=[string]$observation.account_digest;runner_label_digest=[string]$observation.runner_label_digest}
+        artifacts=@($artifactSummaries);status=$status;reason=$reason;receipt_digest=$null
+    }
+    $document.receipt_digest = Get-ReleaseSha256Text -Text ($document | ConvertTo-Json -Depth 100 -Compress)
+    $json = $document | ConvertTo-Json -Depth 100 -Compress
+    $validatedDocument = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($json))
+    [void](Assert-ReleaseProducerReceipt -RepoRoot $repo -Document $validatedDocument -Kind $Kind -ExpectedSource $sourceStart)
+    $rawDigest = Write-ReleaseIsolationArtifact -Target $target -Content $json
+    $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath $target -ExpectedDigest $rawDigest -ProtectedRoots $protected -MaximumBytes 1MB
+    $reopened = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+    [void](Assert-ReleaseProducerReceipt -RepoRoot $repo -Document $reopened -Kind $Kind -ExpectedSource $sourceStart)
+    return $reopened
+}
+
+function Read-ReleaseProducerReceiptRolloutEvidence {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Gate,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource,
+        [Parameter(Mandatory)][ValidateSet('model','host')][string]$Kind,
+        [string[]]$ProtectedRoots = @()
+    )
+    try {
+        $definition = Get-ReleaseProducerReceiptDefinition -Kind $Kind
+        Assert-ReleaseKeys -Value $Gate -Expected @('status','evidence_contract','artifact_path','evidence_digest','source_revision','producer_identity') -Label "release $Kind receipt gate"
+        if ([string]$Gate.evidence_contract -cne [string]$definition.schema_version -or [string]$Gate.source_revision -cne [string]$ExpectedSource.revision -or [string]::IsNullOrWhiteSpace([string]$Gate.producer_identity)) { throw "release $Kind receipt gate binding is invalid" }
+        $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $RepoRoot -ProtectedRoots $ProtectedRoots
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$Gate.artifact_path) -ExpectedDigest ([string]$Gate.evidence_digest) -ProtectedRoots $protected -MaximumBytes 1MB
+        $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        $result = Assert-ReleaseProducerReceipt -RepoRoot $RepoRoot -Document $document -Kind $Kind -ExpectedSource $ExpectedSource -RequirePortableSource
+        $result['path'] = [string]$artifact.path
+        $result['raw_digest'] = [string]$artifact.digest
+        return $result
+    } catch { throw [IO.InvalidDataException]::new("rollout-evidence-release-$Kind-receipt-invalid",$_.Exception) }
+}
+
+function Assert-ReleaseProducerReceiptObservationBinding {
+    param(
+        [Parameter(Mandatory)][Collections.IDictionary]$Receipt,
+        [Parameter(Mandatory)][Collections.IDictionary]$Observation,
+        [Parameter(Mandatory)][Collections.IDictionary]$IsolationWorkflow
+    )
+    if ([string]$Receipt.workflow.run_id -cne [string]$IsolationWorkflow.run_id -or [long]$Receipt.workflow.run_attempt -ne [long]$IsolationWorkflow.run_attempt -or
+        [string]$Receipt.runner_observation.role -cne [string]$Observation.role -or [string]$Receipt.runner_observation.observation_digest -cne [string]$Observation.observation_digest -or
+        [string]$Receipt.runner_observation.account_digest -cne [string]$Observation.account_digest -or [string]$Receipt.runner_observation.runner_label_digest -cne [string]$Observation.runner_label_digest) {
+        throw 'release producer receipt runner observation does not match G04'
+    }
+    $derived = Get-ReleaseProducerReceiptStatus -ProducerMode ([string]$Receipt.producer_mode) -Conclusion ([string]$Receipt.workflow.conclusion) -ObservationStatus ([string]$Observation.status) -ArtifactStatuses @($Receipt.artifacts.status) -SourceDirty ([bool]$Receipt.source_dirty) -SourceStable ([bool]$Receipt.source_state_stable)
+    if ([string]$Receipt.status -cne $derived -or [string]$Receipt.reason -cne (Get-ReleaseProducerReceiptReason -ProducerMode ([string]$Receipt.producer_mode) -Status $derived)) { throw 'release producer receipt status does not match G04' }
+    return $derived
+}
+
+function Assert-ReleaseProducerArtifactBinding {
+    param([Parameter(Mandatory)][Collections.IDictionary]$ReceiptArtifact,[Parameter(Mandatory)][Collections.IDictionary]$Evidence)
+    if ([string]$ReceiptArtifact.raw_digest -cne [string]$Evidence.raw_digest -or [string]$ReceiptArtifact.report_digest -cne [string]$Evidence.report_digest -or
+        [string]$ReceiptArtifact.source_revision -cne [string]$Evidence.source_revision -or [string]$ReceiptArtifact.status -cne [string]$Evidence.status) {
+        throw 'release producer receipt Artifact binding is invalid'
+    }
+}
+
+function Get-ReleaseProducerCombinedStatus {
+    param([Parameter(Mandatory)][string[]]$Statuses)
+    if (@($Statuses | Where-Object { $_ -ceq 'fail' }).Count -gt 0) { return 'fail' }
+    if (@($Statuses | Where-Object { $_ -ceq 'unavailable' }).Count -gt 0) { return 'unavailable' }
+    return 'pass'
 }
 
 function Get-ExactHeadEngineeringInputPaths {
@@ -2141,6 +2419,8 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
     $cognitiveNames = @('DP-G02-COGNITIVE-HOST-3X3','DP-G05-V2-BARE-1.25','DP-G06-REQUEST-SEND-REDUCTION')
     $installedNames = @('DP-G03-INSTALLED-DESKTOP-HOST-3X3','DP-G07-DISTINCT-INSTALLED-DESKTOP-GATE')
     $isolationName = 'DP-G04-CODEX-HOME-RUNNER-ISOLATION'
+    $releaseModelName = 'DP-G09-RELEASE-MODEL'
+    $releaseHostName = 'DP-G10-RELEASE-HOST'
     $v1StopLossName = 'DP-G14-V1-STOP-LOSS'
     $lifecyclePresets = [ordered]@{
         'DP-G18-CORE-LIFECYCLE'='core'
@@ -2180,14 +2460,7 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
             Read-InstalledDesktopRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$installedNames[0]] -ExpectedSource $ExpectedSource -ProtectedRoots $ProtectedRoots
             Read-InstalledDesktopRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$installedNames[1]] -ExpectedSource $ExpectedSource -ProtectedRoots $ProtectedRoots
         )
-        if ($installed.Count -ne 2 -or [string]$installed[0].path -ceq [string]$installed[1].path -or [string]$installed[0].raw_digest -ceq [string]$installed[1].raw_digest -or
-            ([string]$installed[0].volume -ceq [string]$installed[1].volume -and [string]$installed[0].file_id -ceq [string]$installed[1].file_id) -or
-            [string]$installed[0].report_run_id -ceq [string]$installed[1].report_run_id -or [string]$installed[0].source_revision -cne [string]$installed[1].source_revision) {
-            throw 'rollout-evidence-installed-reports-not-distinct'
-        }
-        foreach ($property in @('group_run_ids','group_root_digests','trial_run_ids','trial_root_digests','trial_payload_digests')) {
-            if (@($installed[0][$property] | Where-Object { $_ -cin @($installed[1][$property]) }).Count -gt 0) { throw 'rollout-evidence-installed-reports-not-distinct' }
-        }
+        Assert-InstalledDesktopEvidencePairDistinct -Installed $installed
         for ($index=0; $index -lt 2; $index++) {
             $gate = $Gates[$installedNames[$index]]
             $gate.status = [string]$installed[$index].status
@@ -2207,6 +2480,32 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
         $isolation = Read-ReleaseIsolationRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$isolationName] -ExpectedSource $ExpectedSource -ProtectedRoots $ProtectedRoots
         $Gates[$isolationName].status = [string]$isolation.status
         $Gates[$isolationName].producer_identity = [string]$isolation.producer_identity
+        $adapted = $true
+    }
+    if ($Gates.Contains($releaseModelName)) {
+        if (-not $Gates.Contains($modelName) -or -not $Gates.Contains($isolationName) -or [string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-release-model-gate-set-incomplete' }
+        $releaseModel = Read-ReleaseProducerReceiptRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$releaseModelName] -ExpectedSource $ExpectedSource -Kind model -ProtectedRoots $ProtectedRoots
+        Assert-ReleaseProducerArtifactBinding -ReceiptArtifact $releaseModel.artifacts[0] -Evidence $model
+        $releaseModelObservationStatus = Assert-ReleaseProducerReceiptObservationBinding -Receipt $releaseModel -Observation $isolation.observations.model_producer -IsolationWorkflow $isolation.workflow
+        $Gates[$releaseModelName].status = Get-ReleaseProducerCombinedStatus -Statuses @([string]$releaseModel.status,[string]$model.status,[string]$releaseModelObservationStatus)
+        $Gates[$releaseModelName].producer_identity = [string]$releaseModel.producer_identity
+        $adapted = $true
+    }
+    if ($Gates.Contains($releaseHostName)) {
+        $hostDependencies = @($cognitiveNames + $installedNames + @($isolationName))
+        if (@($hostDependencies | Where-Object { -not $Gates.Contains($_) }).Count -gt 0 -or [string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-release-host-gate-set-incomplete' }
+        $releaseHost = Read-ReleaseProducerReceiptRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$releaseHostName] -ExpectedSource $ExpectedSource -Kind host -ProtectedRoots $ProtectedRoots
+        $cognitiveStatus = Get-ReleaseProducerCombinedStatus -Statuses @([string]$cognitive.g02_status,[string]$cognitive.g05_status,[string]$cognitive.g06_status)
+        $cognitiveArtifact = [ordered]@{raw_digest=[string]$cognitive.raw_digest;report_digest=[string]$cognitive.report_digest;source_revision=[string]$cognitive.source_revision;status=$cognitiveStatus}
+        Assert-ReleaseProducerArtifactBinding -ReceiptArtifact $releaseHost.artifacts[0] -Evidence $cognitiveArtifact
+        Assert-ReleaseProducerArtifactBinding -ReceiptArtifact $releaseHost.artifacts[1] -Evidence $installed[0]
+        Assert-ReleaseProducerArtifactBinding -ReceiptArtifact $releaseHost.artifacts[2] -Evidence $installed[1]
+        $releaseHostObservationStatus = Assert-ReleaseProducerReceiptObservationBinding -Receipt $releaseHost -Observation $isolation.observations.host_producer -IsolationWorkflow $isolation.workflow
+        $Gates[$releaseHostName].status = Get-ReleaseProducerCombinedStatus -Statuses @(
+            [string]$releaseHost.status,[string]$releaseHostObservationStatus,[string]$cognitiveStatus,
+            [string]$installed[0].status,[string]$installed[1].status
+        )
+        $Gates[$releaseHostName].producer_identity = [string]$releaseHost.producer_identity
         $adapted = $true
     }
     $lifecyclePresent = @($lifecycleNames | Where-Object { $Gates.Contains($_) })
@@ -2238,7 +2537,7 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
         }
         $adapted = $true
     }
-    $adaptedNames = @($exactHeadName,$modelName,$isolationName,$v1StopLossName) + $cognitiveNames + $installedNames + $lifecycleNames
+    $adaptedNames = @($exactHeadName,$modelName,$isolationName,$releaseModelName,$releaseHostName,$v1StopLossName) + $cognitiveNames + $installedNames + $lifecycleNames
     foreach ($name in @($Gates.Keys | Where-Object { $_ -cnotin $adaptedNames } | Sort-Object)) {
         $gate = $Gates[$name]
         if ($gate -isnot [System.Collections.IDictionary] -or

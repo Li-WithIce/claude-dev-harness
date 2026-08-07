@@ -308,6 +308,59 @@ function New-CognitivePortableGateSet([Collections.IDictionary]$Expected,[string
     return $gates
 }
 
+function New-ReleaseIsolationFixture($Module,[Collections.IDictionary]$Expected,[ValidateSet('formal','test-only')][string]$ProducerMode) {
+    $inputPaths=& $Module {Get-ReleaseIsolationInputPaths}
+    $inputDigests=[ordered]@{};foreach($entry in $inputPaths.GetEnumerator()){$inputDigests[$entry.Key]=Get-FileDigest (Join-Path $RepoRoot ([string]$entry.Value))}
+    $status=if($ProducerMode-ceq'formal'){'pass'}else{'unavailable'}
+    $label=Get-TextDigest 'release producer label';$homeDigest=Get-TextDigest 'release producer Codex Home'
+    $observations=[ordered]@{
+        model_producer=[ordered]@{observation_run_id=(Get-TextDigest "release $ProducerMode model observation").Substring(7,32);observation_digest=Get-TextDigest "release $ProducerMode model observation digest";role='model-producer';runner_label_digest=$label;account_digest=Get-TextDigest 'release model account';codex_home_identity_digest=$homeDigest;status=$status}
+        host_producer=[ordered]@{observation_run_id=(Get-TextDigest "release $ProducerMode host observation").Substring(7,32);observation_digest=Get-TextDigest "release $ProducerMode host observation digest";role='host-producer';runner_label_digest=$label;account_digest=Get-TextDigest 'release host account';codex_home_identity_digest=$homeDigest;status=$status}
+        aggregator=[ordered]@{observation_run_id=(Get-TextDigest "release $ProducerMode aggregator observation").Substring(7,32);observation_digest=Get-TextDigest "release $ProducerMode aggregator observation digest";role='aggregator';runner_label_digest=Get-TextDigest 'release aggregator label';account_digest=Get-TextDigest 'release aggregator account';codex_home_identity_digest=$null;status=$status}
+    }
+    $results=[ordered]@{}
+    foreach($name in @('observations_distinct','workflow_identity_consistent','source_identity_consistent','producer_labels_consistent','producer_aggregator_labels_distinct','aggregator_account_distinct_from_model','aggregator_account_distinct_from_host','producer_codex_home_same','producer_codex_home_dedicated','producer_auth_present','aggregator_credential_blind','no_private_identity_persisted')){$results[$name]=$true}
+    $report=[ordered]@{
+        schema_version='harness-release-isolation-report/v1';generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o');source_revision=[string]$Expected.revision;source_dirty=$false;source_state_stable=$true
+        source=[ordered]@{commit_tree_oid=[string]$Expected.commit_tree_oid;object_format=[string]$Expected.object_format;start=(Copy-Document $Expected);end=(Copy-Document $Expected);input_digests=$inputDigests}
+        report_run_id=(Get-TextDigest "release $ProducerMode isolation").Substring(7,32);producer_identity='release-isolation-qualification/v1';producer_mode=$ProducerMode
+        workflow=[ordered]@{run_id='9001';run_attempt=1};observations=$observations;results=$results;status=$status
+        reason=$(if($ProducerMode-ceq'formal'){'all-isolation-checks-passed'}else{'non-formal-producer-mode'});report_digest=$null
+    }
+    Set-ReportDigest $report;return $report
+}
+
+function New-ReleaseRunnerObservationFixture($Module,[Collections.IDictionary]$Expected,[ValidateSet('model-producer','host-producer')][string]$Role,[ValidateSet('formal','test-only')][string]$ProducerMode) {
+    $inputPaths=& $Module {Get-ReleaseRunnerObservationInputPaths}
+    $inputDigests=[ordered]@{};foreach($entry in $inputPaths.GetEnumerator()){$inputDigests[$entry.Key]=Get-FileDigest (Join-Path $RepoRoot ([string]$entry.Value))}
+    $status=if($ProducerMode-ceq'formal'){'pass'}else{'unavailable'}
+    $document=[ordered]@{
+        schema_version='harness-release-runner-observation/v1';generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o');source_revision=[string]$Expected.revision;source_dirty=$false;source_state_stable=$true
+        source=[ordered]@{commit_tree_oid=[string]$Expected.commit_tree_oid;object_format=[string]$Expected.object_format;start=(Copy-Document $Expected);end=(Copy-Document $Expected);input_digests=$inputDigests}
+        observation_run_id=(Get-TextDigest "release $Role $ProducerMode observation artifact").Substring(7,32);producer_identity='release-runner-observation/v1';producer_mode=$ProducerMode;role=$Role
+        workflow=[ordered]@{run_id='9001';run_attempt=1};runner=[ordered]@{label_digest=Get-TextDigest 'release producer label';account_digest=Get-TextDigest "release $Role account";account_digest_basis='windows-sid-workflow-run/v1';platform='windows'}
+        codex_home=[ordered]@{mode='dedicated-auth-home';identity_digest=Get-TextDigest 'release producer Codex Home';layout_stable=$true;auth_status='present';path_persisted=$false}
+        credential_boundary=[ordered]@{forbidden_process_credentials_absent=$true;default_auth_absent=$true;credential_values_persisted=$false}
+        status=$status;reason=$(if($ProducerMode-ceq'formal'){'all-boundary-checks-passed'}else{'non-formal-producer-mode'});observation_digest=$null
+    }
+    $document.observation_digest=Get-TextDigest ($document|ConvertTo-Json -Depth 100 -Compress);return $document
+}
+
+function New-ReleaseProducerReceiptFixture($Module,[Collections.IDictionary]$Expected,[ValidateSet('model','host')][string]$Kind,[ValidateSet('formal','test-only')][string]$ProducerMode,[Collections.IDictionary]$Observation,[object[]]$Artifacts) {
+    $metadata=& $Module {param($ReceiptKind)[ordered]@{definition=Get-ReleaseProducerReceiptDefinition -Kind $ReceiptKind;inputs=Get-ReleaseProducerReceiptInputPaths -Kind $ReceiptKind}} $Kind
+    $inputDigests=[ordered]@{};foreach($entry in $metadata.inputs.GetEnumerator()){$inputDigests[$entry.Key]=Get-FileDigest (Join-Path $RepoRoot ([string]$entry.Value))}
+    $status=if($ProducerMode-ceq'formal'){'pass'}else{'unavailable'}
+    $receipt=[ordered]@{
+        schema_version=[string]$metadata.definition.schema_version;generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o');source_revision=[string]$Expected.revision;source_dirty=$false;source_state_stable=$true
+        source=[ordered]@{commit_tree_oid=[string]$Expected.commit_tree_oid;object_format=[string]$Expected.object_format;start=(Copy-Document $Expected);end=(Copy-Document $Expected);input_digests=$inputDigests}
+        receipt_run_id=(Get-TextDigest "release $Kind $ProducerMode receipt").Substring(7,32);producer_identity=[string]$metadata.definition.producer_identity;producer_mode=$ProducerMode
+        workflow=[ordered]@{run_id='9001';run_attempt=1;job_name=[string]$metadata.definition.job_name;checkout_sha=[string]$Expected.revision;conclusion='success'}
+        runner_observation=[ordered]@{role=[string]$Observation.role;observation_digest=[string]$Observation.observation_digest;account_digest=[string]$Observation.account_digest;runner_label_digest=[string]$Observation.runner_label_digest}
+        artifacts=$Artifacts;status=$status;reason=$(if($ProducerMode-ceq'formal'){'all-producer-checks-passed'}else{'non-formal-producer-mode'});receipt_digest=$null
+    }
+    $receipt.receipt_digest=$null;$receipt.receipt_digest=Get-TextDigest ($receipt|ConvertTo-Json -Depth 100 -Compress);return $receipt
+}
+
 $modulePath = Join-Path $RepoRoot 'scripts\lib\Harness.RolloutEvidence.psm1'
 $qualificationPath = Join-Path $RepoRoot 'scripts\lib\Harness.Qualification.psm1'
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('thin-v2-rollout-evidence-' + [guid]::NewGuid().ToString('N'))
@@ -621,6 +674,72 @@ try {
     $installedSmokeResult=Invoke-InstalledReportPair -Module $module -Expected $cleanSource -Root $temp -Left $installedSmokeA -Right $installedSmokeB
     Check ($installedSmokeResult.Success -and @($installedSmokeResult.Gates.Values | Where-Object { [string]$_.status -ceq 'unavailable' }).Count -eq 2) 'diagnostic smoke remains unavailable' 'diagnostic smoke became formal evidence'
 
+    $installedFormalPathA=Join-Path $temp ("installed-$($installedFormalA.report_run_id).json")
+    $installedFormalPathB=Join-Path $temp ("installed-$($installedFormalB.report_run_id).json")
+    $modelArtifact=[ordered]@{role='model40';evidence_contract='harness-model-eval-report/v2';raw_digest=Get-FileDigest $modelPath;report_digest=[string]$modelReport.report_digest;source_revision=[string]$cleanSource.revision;status='pass'}
+    $hostArtifacts=@(
+        [ordered]@{role='cognitive-host';evidence_contract='harness-host-benchmark-report/v2';raw_digest=$hostDigest;report_digest=[string]$hostReport.report_digest;source_revision=[string]$cleanSource.revision;status='pass'},
+        [ordered]@{role='installed-desktop-primary';evidence_contract='harness-installed-desktop-benchmark-report/v1';raw_digest=Get-FileDigest $installedFormalPathA;report_digest=[string]$installedFormalA.report_digest;source_revision=[string]$cleanSource.revision;status='pass'},
+        [ordered]@{role='installed-desktop-distinct';evidence_contract='harness-installed-desktop-benchmark-report/v1';raw_digest=Get-FileDigest $installedFormalPathB;report_digest=[string]$installedFormalB.report_digest;source_revision=[string]$cleanSource.revision;status='pass'}
+    )
+    $formalIsolation=New-ReleaseIsolationFixture -Module $module -Expected $cleanSource -ProducerMode formal
+    $formalIsolationPath=Join-Path $temp 'release-isolation-formal.json';Write-Document $formalIsolationPath $formalIsolation -Compress
+    $formalModelReceipt=New-ReleaseProducerReceiptFixture -Module $module -Expected $cleanSource -Kind model -ProducerMode formal -Observation $formalIsolation.observations.model_producer -Artifacts @($modelArtifact)
+    $formalHostReceipt=New-ReleaseProducerReceiptFixture -Module $module -Expected $cleanSource -Kind host -ProducerMode formal -Observation $formalIsolation.observations.host_producer -Artifacts $hostArtifacts
+    $formalModelReceiptPath=Join-Path $temp 'release-model-receipt-formal.json';Write-Document $formalModelReceiptPath $formalModelReceipt -Compress
+    $formalHostReceiptPath=Join-Path $temp 'release-host-receipt-formal.json';Write-Document $formalHostReceiptPath $formalHostReceipt -Compress
+    $formalReleaseGates=[ordered]@{}
+    foreach($set in @(
+        (New-ModelPortableGate -Expected $cleanSource -Path $modelPath -Digest (Get-FileDigest $modelPath)),
+        (New-CognitivePortableGateSet -Expected $cleanSource -Paths @($hostPath,$hostPath,$hostPath) -Digests @($hostDigest,$hostDigest,$hostDigest)),
+        $installedFormalResult.Gates
+    )){foreach($name in $set.Keys){$formalReleaseGates[$name]=$set[$name]}}
+    $formalReleaseGates['DP-G04-CODEX-HOME-RUNNER-ISOLATION']=[ordered]@{status='pass';evidence_contract='harness-release-isolation-report/v1';artifact_path=$formalIsolationPath;evidence_digest=Get-FileDigest $formalIsolationPath;source_revision=[string]$cleanSource.revision;producer_identity='caller-forged/v1'}
+    $formalReleaseGates['DP-G09-RELEASE-MODEL']=[ordered]@{status='pass';evidence_contract='harness-release-model-receipt/v1';artifact_path=$formalModelReceiptPath;evidence_digest=Get-FileDigest $formalModelReceiptPath;source_revision=[string]$cleanSource.revision;producer_identity='caller-forged/v1'}
+    $formalReleaseGates['DP-G10-RELEASE-HOST']=[ordered]@{status='pass';evidence_contract='harness-release-host-receipt/v1';artifact_path=$formalHostReceiptPath;evidence_digest=Get-FileDigest $formalHostReceiptPath;source_revision=[string]$cleanSource.revision;producer_identity='caller-forged/v1'}
+    $formalReleaseResult=Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $formalReleaseGates
+    Check ($formalReleaseResult.Success -and [string]$formalReleaseGates['DP-G09-RELEASE-MODEL'].status-ceq'pass' -and [string]$formalReleaseGates['DP-G09-RELEASE-MODEL'].producer_identity-ceq'release-model-receipt/v1') 'G09 cross-binds G01 and the G04 model producer summary and overrides caller identity' "G09 formal cross-binding failed: $($formalReleaseResult.Reason) / $($formalReleaseResult.Detail)"
+    Check ($formalReleaseResult.Success -and [string]$formalReleaseGates['DP-G10-RELEASE-HOST'].status-ceq'pass' -and [string]$formalReleaseGates['DP-G10-RELEASE-HOST'].producer_identity-ceq'release-host-receipt/v1') 'G10 cross-binds G02/G03/G05/G06/G07 and the G04 host producer summary' "G10 formal cross-binding failed: $($formalReleaseResult.Reason) / $($formalReleaseResult.Detail)"
+
+    $testIsolation=New-ReleaseIsolationFixture -Module $module -Expected $cleanSource -ProducerMode test-only
+    $testIsolationPath=Join-Path $temp 'release-isolation-test-only.json';Write-Document $testIsolationPath $testIsolation -Compress
+    $testModelReceipt=New-ReleaseProducerReceiptFixture -Module $module -Expected $cleanSource -Kind model -ProducerMode test-only -Observation $testIsolation.observations.model_producer -Artifacts @($modelArtifact)
+    $testHostReceipt=New-ReleaseProducerReceiptFixture -Module $module -Expected $cleanSource -Kind host -ProducerMode test-only -Observation $testIsolation.observations.host_producer -Artifacts $hostArtifacts
+    $testModelReceiptPath=Join-Path $temp 'release-model-receipt-test-only.json';Write-Document $testModelReceiptPath $testModelReceipt -Compress
+    $testHostReceiptPath=Join-Path $temp 'release-host-receipt-test-only.json';Write-Document $testHostReceiptPath $testHostReceipt -Compress
+    $testReleaseGates=Copy-Document $formalReleaseGates
+    foreach($name in $testReleaseGates.Keys){$testReleaseGates[$name].status='pass';$testReleaseGates[$name].producer_identity='caller-forged/v1'}
+    $testReleaseGates['DP-G04-CODEX-HOME-RUNNER-ISOLATION'].artifact_path=$testIsolationPath;$testReleaseGates['DP-G04-CODEX-HOME-RUNNER-ISOLATION'].evidence_digest=Get-FileDigest $testIsolationPath
+    $testReleaseGates['DP-G09-RELEASE-MODEL'].artifact_path=$testModelReceiptPath;$testReleaseGates['DP-G09-RELEASE-MODEL'].evidence_digest=Get-FileDigest $testModelReceiptPath
+    $testReleaseGates['DP-G10-RELEASE-HOST'].artifact_path=$testHostReceiptPath;$testReleaseGates['DP-G10-RELEASE-HOST'].evidence_digest=Get-FileDigest $testHostReceiptPath
+    $testReleaseResult=Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $testReleaseGates
+    Check ($testReleaseResult.Success -and [string]$testReleaseGates['DP-G09-RELEASE-MODEL'].status-ceq'unavailable' -and [string]$testReleaseGates['DP-G10-RELEASE-HOST'].status-ceq'unavailable' -and [string]$testReleaseGates['DP-G09-RELEASE-MODEL'].producer_identity-ceq'release-model-receipt/v1' -and [string]$testReleaseGates['DP-G10-RELEASE-HOST'].producer_identity-ceq'release-host-receipt/v1') 'G09/G10 test-only Receipts overwrite forged caller pass and identity with unavailable Artifact facts' "G09/G10 test-only cross-binding failed: $($testReleaseResult.Reason) / $($testReleaseResult.Detail)"
+
+    $wrongModelReceipt=Copy-Document $formalModelReceipt;$wrongModelReceipt.artifacts[0].raw_digest=Get-TextDigest 'wrong Model raw';$wrongModelReceipt.receipt_digest=$null;$wrongModelReceipt.receipt_digest=Get-TextDigest ($wrongModelReceipt|ConvertTo-Json -Depth 100 -Compress)
+    $wrongModelReceiptPath=Join-Path $temp 'release-model-receipt-wrong-model.json';Write-Document $wrongModelReceiptPath $wrongModelReceipt -Compress
+    $wrongModelGates=Copy-Document $formalReleaseGates;$wrongModelGates['DP-G09-RELEASE-MODEL'].artifact_path=$wrongModelReceiptPath;$wrongModelGates['DP-G09-RELEASE-MODEL'].evidence_digest=Get-FileDigest $wrongModelReceiptPath
+    Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $wrongModelGates).Success) 'G09 rejects a Receipt whose Model digest differs from G01' 'G09 accepted a Receipt whose Model digest differs from G01'
+    $callerReasonGates=Copy-Document $formalReleaseGates;$callerReasonGates['DP-G10-RELEASE-HOST']['reason']='caller-forged-pass'
+    Check (-not (Invoke-PortableGateSet -Module $module -Expected $cleanSource -Gates $callerReasonGates).Success) 'G10 rejects caller reason as non-authoritative extra input' 'G10 accepted caller reason as authority'
+
+    if (-not [bool]$actualSource.dirty) {
+        $writerError='';$writtenModel=$null;$writtenHost=$null;$writtenTestOnly=$null
+        try {
+            $modelObservation=New-ReleaseRunnerObservationFixture -Module $module -Expected $cleanSource -Role model-producer -ProducerMode formal
+            $hostObservation=New-ReleaseRunnerObservationFixture -Module $module -Expected $cleanSource -Role host-producer -ProducerMode formal
+            $testObservation=New-ReleaseRunnerObservationFixture -Module $module -Expected $cleanSource -Role model-producer -ProducerMode test-only
+            $modelObservationPath=Join-Path $temp 'writer-model-observation.json';Write-Document $modelObservationPath $modelObservation -Compress
+            $hostObservationPath=Join-Path $temp 'writer-host-observation.json';Write-Document $hostObservationPath $hostObservation -Compress
+            $testObservationPath=Join-Path $temp 'writer-test-observation.json';Write-Document $testObservationPath $testObservation -Compress
+            $writtenModel=& $module {param($Root,$Observation,$Report,$Output,$Revision)New-ReleaseProducerReceiptArtifact -RepoRoot $Root -Kind model -RunnerObservationPath $Observation -ModelReportPath $Report -OutputPath $Output -RunId '9001' -RunAttempt 1 -CheckoutSha $Revision -Conclusion success -ProducerMode formal} $RepoRoot $modelObservationPath $modelPath (Join-Path $temp 'writer-model-receipt.json') ([string]$cleanSource.revision)
+            $writtenHost=& $module {param($Root,$Observation,$Cognitive,$Primary,$Distinct,$Output,$Revision)New-ReleaseProducerReceiptArtifact -RepoRoot $Root -Kind host -RunnerObservationPath $Observation -CognitiveHostReportPath $Cognitive -InstalledDesktopPrimaryReportPath $Primary -InstalledDesktopDistinctReportPath $Distinct -OutputPath $Output -RunId '9001' -RunAttempt 1 -CheckoutSha $Revision -Conclusion success -ProducerMode formal} $RepoRoot $hostObservationPath $hostPath $installedFormalPathA $installedFormalPathB (Join-Path $temp 'writer-host-receipt.json') ([string]$cleanSource.revision)
+            $writtenTestOnly=& $module {param($Root,$Observation,$Report,$Output,$Revision)New-ReleaseProducerReceiptArtifact -RepoRoot $Root -Kind model -RunnerObservationPath $Observation -ModelReportPath $Report -OutputPath $Output -RunId '9001' -RunAttempt 1 -CheckoutSha $Revision -Conclusion success -ProducerMode test-only} $RepoRoot $testObservationPath $modelPath (Join-Path $temp 'writer-model-test-only-receipt.json') ([string]$cleanSource.revision)
+        } catch {$writerError=[string]$_.Exception.Message}
+        $writtenText=@($writtenModel,$writtenHost,$writtenTestOnly)|ConvertTo-Json -Depth 100 -Compress
+        Check ([string]::IsNullOrWhiteSpace($writerError) -and [string]$writtenModel.status-ceq'pass' -and [string]$writtenHost.status-ceq'pass' -and [string]$writtenTestOnly.status-ceq'unavailable') 'Receipt Writer reopens strict Model/Host/Observation inputs and derives formal pass or test-only unavailable' "Receipt Writer integration failed: $writerError"
+        Check ($writtenText -notmatch [regex]::Escape($temp) -and $writtenText -notmatch '(?i)runner[_ -]?label\s*[:=]|(?:account|sid|user)[_ -]?name\s*[:=]|codex[_ -]?home[_ -]?path\s*[:=]|authorization\s*:|bearer\s+') 'Receipt Writer persists digests without Artifact paths or private runner values' 'Receipt Writer persisted an Artifact path or private runner value'
+    }
+
     $lifecycleFormal=@(
         (New-PresetLifecycleReport -Source $cleanSource -Preset core -Seed 'Contract Fixture formal core'),
         (New-PresetLifecycleReport -Source $cleanSource -Preset governed -Seed 'Contract Fixture formal governed'),
@@ -871,7 +990,7 @@ try {
     Check ($workflowG14Readers.Count-eq0) 'Release Workflow remains unwired for G14' 'Release Workflow was changed to run or consume G14'
 
     $unwiredPath=Join-Path $temp 'still-unwired.json';Write-Document $unwiredPath ([ordered]@{}) -Compress
-    foreach($unwiredName in @('DP-G09-RELEASE-MODEL','DP-G10-RELEASE-HOST','DP-G11-RELEASE-FULL','DP-G13-PROMOTION-AUTO-PROBE','DP-G15-CANARY','DP-G16-STABLE-DECISION')){
+    foreach($unwiredName in @('DP-G11-RELEASE-FULL','DP-G13-PROMOTION-AUTO-PROBE','DP-G15-CANARY','DP-G16-STABLE-DECISION')){
         $unwiredGate=[ordered]@{};$unwiredGate[$unwiredName]=[ordered]@{status='pass';evidence_contract='fixture/v1';artifact_path=$unwiredPath;evidence_digest=(Get-FileDigest $unwiredPath);source_revision=[string]$cleanSource.revision;producer_identity='Contract Fixture producer'}
         $unwiredReason='';try{& $module {param($Root,$Source,$Gates)Assert-HarnessRolloutEvidenceSetProvenance -RepoRoot $Root -ExpectedSource $Source -Gates $Gates} $RepoRoot $cleanSource $unwiredGate}catch{$unwiredReason=[string]$_.Exception.Message}
         Check ($unwiredReason-ceq"rollout-evidence-provenance-unwired-$unwiredName") "$unwiredName remains provenance-unwired and fail closed" "$unwiredName was silently wired or promoted"

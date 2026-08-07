@@ -394,7 +394,7 @@ try {
     Check ($workflowReaders.Count -eq 0) 'Release Workflow remains unwired for formal G00 production' 'a Workflow began producing or consuming formal G00 evidence'
 
     $unwiredPath=Join-Path $temp 'still-unwired.json';Write-Document $unwiredPath ([ordered]@{}) -Compress
-    foreach($unwiredName in @('DP-G09-RELEASE-MODEL','DP-G10-RELEASE-HOST','DP-G11-RELEASE-FULL')){
+    foreach($unwiredName in @('DP-G11-RELEASE-FULL')){
         $unwiredGate=[ordered]@{};$unwiredGate[$unwiredName]=[ordered]@{status='pass';evidence_contract='fixture/v1';artifact_path=$unwiredPath;evidence_digest=(Get-FileDigest $unwiredPath);source_revision=[string]$source.revision;producer_identity='fixture'}
         $reason='';try{& $subjectModule {param($Root,$Source,$Gates)Assert-HarnessRolloutEvidenceSetProvenance -RepoRoot $Root -ExpectedSource $Source -Gates $Gates} $subject $source $unwiredGate}catch{$reason=[string]$_.Exception.Message}
         Check ($reason-ceq"rollout-evidence-provenance-unwired-$unwiredName") "$unwiredName remains provenance-unwired" "$unwiredName was silently wired"
