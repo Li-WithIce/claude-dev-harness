@@ -989,10 +989,13 @@ try {
     $workflow=Get-Content -LiteralPath (Join-Path $RepoRoot '.github\workflows\validation.yml') -Raw -Encoding utf8
     $releaseHostJob=[regex]::Match($workflow,'(?ms)^  release-host:\s*$.*?(?=^  release-full:\s*$)').Value
     $releaseFullJob=[regex]::Match($workflow,'(?ms)^  release-full:\s*$.*\z').Value
-    Check (@([regex]::Matches($workflow,'scripts/run-v1-stop-loss-qualification\.ps1')).Count-eq1 -and $releaseHostJob-match'run-v1-stop-loss-qualification\.ps1[^\r\n]+v1-stop-loss\.json[^\r\n]+-ProducerMode formal' -and $releaseFullJob-notmatch'run-v1-stop-loss-qualification|v1-stop-loss(?:-report)?\.json') 'Release Workflow runs formal G14 once in the Host Producer without wiring release-full' 'Release Workflow G14 Producer or release-full boundary is wrong'
+    Check (@([regex]::Matches($workflow,'scripts/run-v1-stop-loss-qualification\.ps1')).Count-eq1 -and $releaseHostJob-match'run-v1-stop-loss-qualification\.ps1[^\r\n]+v1-stop-loss\.json[^\r\n]+-ProducerMode formal' -and $releaseFullJob-notmatch'run-v1-stop-loss-qualification' -and $releaseFullJob-match'write-release-full-receipt\.ps1[^\r\n]+-V1StopLossReportPath[^\r\n]+v1-stop-loss\.json') 'Release Workflow produces formal G14 once and only aggregates it in G11' 'Release Workflow G14 Producer or G11 binding is wrong'
 
     $unwiredPath=Join-Path $temp 'still-unwired.json';Write-Document $unwiredPath ([ordered]@{}) -Compress
-    foreach($unwiredName in @('DP-G11-RELEASE-FULL','DP-G13-PROMOTION-AUTO-PROBE','DP-G15-CANARY','DP-G16-STABLE-DECISION')){
+    $g11Only=[ordered]@{'DP-G11-RELEASE-FULL'=[ordered]@{status='pass';evidence_contract='harness-release-full-receipt/v1';artifact_path=$unwiredPath;evidence_digest=(Get-FileDigest $unwiredPath);source_revision=[string]$cleanSource.revision;producer_identity='Contract Fixture producer'}}
+    $g11Reason='';try{& $module {param($Root,$Source,$Gates)Assert-HarnessRolloutEvidenceSetProvenance -RepoRoot $Root -ExpectedSource $Source -Gates $Gates} $RepoRoot $cleanSource $g11Only}catch{$g11Reason=[string]$_.Exception.Message}
+    Check ($g11Reason-ceq'rollout-evidence-release-full-gate-set-incomplete') 'DP-G11-RELEASE-FULL requires its complete upstream Gate Set' 'DP-G11-RELEASE-FULL did not fail closed on an incomplete Gate Set'
+    foreach($unwiredName in @('DP-G13-PROMOTION-AUTO-PROBE','DP-G15-CANARY','DP-G16-STABLE-DECISION')){
         $unwiredGate=[ordered]@{};$unwiredGate[$unwiredName]=[ordered]@{status='pass';evidence_contract='fixture/v1';artifact_path=$unwiredPath;evidence_digest=(Get-FileDigest $unwiredPath);source_revision=[string]$cleanSource.revision;producer_identity='Contract Fixture producer'}
         $unwiredReason='';try{& $module {param($Root,$Source,$Gates)Assert-HarnessRolloutEvidenceSetProvenance -RepoRoot $Root -ExpectedSource $Source -Gates $Gates} $RepoRoot $cleanSource $unwiredGate}catch{$unwiredReason=[string]$_.Exception.Message}
         Check ($unwiredReason-ceq"rollout-evidence-provenance-unwired-$unwiredName") "$unwiredName remains provenance-unwired and fail closed" "$unwiredName was silently wired or promoted"

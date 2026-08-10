@@ -897,6 +897,7 @@ function Read-PresetLifecycleRolloutEvidence {
         $result = Assert-PresetLifecycleReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource -ExpectedPreset $ExpectedPreset
         $result['path'] = [string]$artifact.path
         $result['raw_digest'] = [string]$artifact.digest
+        $result['report_digest'] = [string]$document.report_digest
         $result['volume'] = [string]$artifact.physical.volume
         $result['file_id'] = [string]$artifact.physical.file_id
         return $result
@@ -1062,7 +1063,11 @@ function Read-V1StopLossRolloutEvidence {
         $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $RepoRoot -ProtectedRoots (@($ProtectedRoots) + $userProtected)
         $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$Gate.artifact_path) -ExpectedDigest ([string]$Gate.evidence_digest) -ProtectedRoots $protected -MaximumBytes 1MB
         $document = ConvertFrom-V1StopLossEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
-        return Assert-V1StopLossReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource
+        $result = Assert-V1StopLossReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource
+        $result['path'] = [string]$artifact.path
+        $result['raw_digest'] = [string]$artifact.digest
+        $result['report_digest'] = [string]$document.report_digest
+        return $result
     } catch { throw [IO.InvalidDataException]::new('rollout-evidence-v1-stop-loss-report-invalid',$_.Exception) }
 }
 
@@ -1375,7 +1380,7 @@ function Assert-ReleaseIsolationReport {
     $derivedStatus = if ($hasFailure) { 'fail' } elseif ([string]$Document.producer_mode -cne 'formal') { 'unavailable' } elseif ($hasUnavailable) { 'unavailable' } elseif ([bool]$Document.source_dirty -or -not $stable) { 'fail' } else { 'pass' }
     $derivedReason = if ($derivedStatus -ceq 'pass') { 'all-isolation-checks-passed' } elseif ($derivedStatus -ceq 'fail') { 'isolation-check-failed' } elseif ([string]$Document.producer_mode -cne 'formal') { 'non-formal-producer-mode' } else { 'isolation-unavailable' }
     if ([string]$Document.status -cne $derivedStatus -or [string]$Document.reason -cne $derivedReason) { throw 'release isolation aggregate status is inconsistent' }
-    return [ordered]@{status=$derivedStatus;reason=$derivedReason;producer_identity='release-isolation-qualification/v1';source_revision=[string]$Document.source_revision;report_run_id=[string]$Document.report_run_id}
+    return [ordered]@{status=$derivedStatus;reason=$derivedReason;producer_identity='release-isolation-qualification/v1';producer_mode=[string]$Document.producer_mode;source_revision=[string]$Document.source_revision;report_run_id=[string]$Document.report_run_id}
 }
 
 function New-ReleaseIsolationReportArtifact {
@@ -1473,6 +1478,9 @@ function Read-ReleaseIsolationRolloutEvidence {
         $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$Gate.artifact_path) -ExpectedDigest ([string]$Gate.evidence_digest) -ProtectedRoots $protected -MaximumBytes 1MB
         $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
         $result = Assert-ReleaseIsolationReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource -RequirePortableSource
+        $result['path'] = [string]$artifact.path
+        $result['raw_digest'] = [string]$artifact.digest
+        $result['report_digest'] = [string]$document.report_digest
         $result['workflow'] = $document.workflow
         $result['observations'] = $document.observations
         return $result
@@ -2403,8 +2411,269 @@ function Read-ExactHeadRolloutEvidence {
         $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $RepoRoot -ProtectedRoots $ProtectedRoots
         $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$Gate.artifact_path) -ExpectedDigest ([string]$Gate.evidence_digest) -ProtectedRoots $protected -MaximumBytes 2MB
         $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
-        return Assert-ExactHeadEngineeringReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource
+        $result = Assert-ExactHeadEngineeringReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource
+        $result['path'] = [string]$artifact.path
+        $result['raw_digest'] = [string]$artifact.digest
+        $result['report_digest'] = [string]$document.report_digest
+        return $result
     } catch { throw [IO.InvalidDataException]::new('rollout-evidence-exact-head-engineering-report-invalid',$_.Exception) }
+}
+
+function Get-ReleaseFullReceiptDefinition {
+    return [ordered]@{
+        schema_version='harness-release-full-receipt/v1'
+        schema_path='schemas/release-full-receipt.schema.json'
+        producer_identity='release-full-receipt/v1'
+        input_contracts=[ordered]@{
+            exact_head='thin-harness-exact-head-engineering-evidence/v1'
+            release_isolation='harness-release-isolation-report/v1'
+            release_model='harness-release-model-receipt/v1'
+            release_host='harness-release-host-receipt/v1'
+            v1_stop_loss='harness-v1-stop-loss-report/v1'
+            lifecycle_core='harness-preset-lifecycle-report/v1'
+            lifecycle_governed='harness-preset-lifecycle-report/v1'
+            lifecycle_full='harness-preset-lifecycle-report/v1'
+        }
+    }
+}
+
+function Get-ReleaseFullReceiptInputPaths {
+    return [ordered]@{
+        producer_digest='scripts/write-release-full-receipt.ps1'
+        receipt_schema_digest='schemas/release-full-receipt.schema.json'
+        observation_schema_digest='schemas/release-runner-observation.schema.json'
+        rollout_evidence_digest='scripts/lib/Harness.RolloutEvidence.psm1'
+    }
+}
+
+function Get-ReleaseFullReceiptStatus {
+    param(
+        [Parameter(Mandatory)][ValidateSet('formal','test-only')][string]$ProducerMode,
+        [Parameter(Mandatory)][string]$Conclusion,
+        [Parameter(Mandatory)][string[]]$InputStatuses,
+        [Parameter(Mandatory)][bool]$SourceDirty,
+        [Parameter(Mandatory)][bool]$SourceStable
+    )
+    if ($ProducerMode -ceq 'test-only') { return 'unavailable' }
+    if ($Conclusion -cne 'success' -or $SourceDirty -or -not $SourceStable -or @($InputStatuses | Where-Object { $_ -ceq 'fail' }).Count -gt 0) { return 'fail' }
+    if (@($InputStatuses | Where-Object { $_ -ceq 'unavailable' }).Count -gt 0) { return 'unavailable' }
+    return 'pass'
+}
+
+function Get-ReleaseFullReceiptReason {
+    param([Parameter(Mandatory)][string]$ProducerMode,[Parameter(Mandatory)][string]$Status)
+    if ($ProducerMode -ceq 'test-only') { return 'non-formal-producer-mode' }
+    if ($Status -ceq 'pass') { return 'all-release-full-checks-passed' }
+    if ($Status -ceq 'fail') { return 'release-full-check-failed' }
+    return 'release-full-check-unavailable'
+}
+
+function Assert-ReleaseFullReceipt {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Collections.IDictionary]$ExpectedSource = $null,
+        [switch]$RequirePortableSource
+    )
+    $definition = Get-ReleaseFullReceiptDefinition
+    $topKeys = @('schema_version','generated_at_utc','source_revision','source_dirty','source_state_stable','source','receipt_run_id','producer_identity','producer_mode','workflow','aggregator_observation','inputs','status','reason','receipt_digest')
+    Assert-ReleaseKeys -Value $Document -Expected $topKeys -Label 'release full receipt'
+    $schemaPath = Join-Path $RepoRoot ([string]$definition.schema_path)
+    if (-not (Test-Json -Json ($Document | ConvertTo-Json -Depth 100 -Compress) -SchemaFile $schemaPath -ErrorAction Stop -WarningAction SilentlyContinue)) { throw 'release full receipt schema validation failed' }
+    if ([string]$Document.schema_version -cne [string]$definition.schema_version -or [string]$Document.receipt_run_id -cnotmatch '^[0-9a-f]{32}$' -or
+        [string]$Document.producer_identity -cne [string]$definition.producer_identity -or [string]$Document.producer_mode -cnotin @('formal','test-only') -or
+        [string]$Document.status -cnotin @('pass','fail','unavailable')) { throw 'release full receipt identity is invalid' }
+    Assert-ReleaseDate -Value $Document.generated_at_utc -Label 'release full receipt'
+    Assert-ReleaseIsolationContentDigest -Document $Document -Property receipt_digest
+    Assert-ReleaseIsolationSanitizedContent -Value $Document
+    $stable = Assert-ReleaseIsolationSourceBinding -RepoRoot $RepoRoot -Document $Document -InputPaths (Get-ReleaseFullReceiptInputPaths) -ExpectedSource $ExpectedSource -RequirePortableSource:$RequirePortableSource
+
+    Assert-ReleaseKeys -Value $Document.workflow -Expected @('run_id','run_attempt','job_name','checkout_sha','conclusion') -Label 'release full receipt workflow'
+    if ([string]$Document.workflow.run_id -cnotmatch '^[1-9][0-9]*$' -or ($Document.workflow.run_attempt -isnot [long] -and $Document.workflow.run_attempt -isnot [int]) -or [long]$Document.workflow.run_attempt -lt 1 -or
+        [string]$Document.workflow.job_name -cne 'release-full' -or [string]$Document.workflow.checkout_sha -cne [string]$Document.source_revision -or
+        [string]$Document.workflow.conclusion -cnotin @('success','failure','neutral','cancelled','skipped','timed_out','action_required','stale','startup_failure')) {
+        throw 'release full receipt workflow binding is invalid'
+    }
+    Assert-ReleaseKeys -Value $Document.aggregator_observation -Expected @('role','observation_digest','account_digest','runner_label_digest') -Label 'release full receipt aggregator observation'
+    if ([string]$Document.aggregator_observation.role -cne 'aggregator') { throw 'release full receipt aggregator role is invalid' }
+    foreach ($name in @('observation_digest','account_digest','runner_label_digest')) { Assert-ReleaseDigestValue -Value $Document.aggregator_observation[$name] -Label "release full receipt aggregator $name" }
+
+    Assert-ReleaseKeys -Value $Document.inputs -Expected @($definition.input_contracts.Keys) -Label 'release full receipt inputs'
+    foreach ($name in @($definition.input_contracts.Keys)) {
+        $input = $Document.inputs[$name]
+        Assert-ReleaseKeys -Value $input -Expected @('evidence_contract','raw_digest','document_digest','source_revision','status') -Label "release full receipt input $name"
+        if ([string]$input.evidence_contract -cne [string]$definition.input_contracts[$name] -or [string]$input.source_revision -cne [string]$Document.source_revision -or
+            [string]$input.status -cnotin @('pass','fail','unavailable')) { throw "release full receipt input $name binding is invalid" }
+        foreach ($digestName in @('raw_digest','document_digest')) { Assert-ReleaseDigestValue -Value $input[$digestName] -Label "release full receipt input $name $digestName" }
+    }
+
+    $derivedStatus = Get-ReleaseFullReceiptStatus -ProducerMode ([string]$Document.producer_mode) -Conclusion ([string]$Document.workflow.conclusion) `
+        -InputStatuses @($Document.inputs.Values | ForEach-Object { [string]$_.status }) -SourceDirty ([bool]$Document.source_dirty) -SourceStable $stable
+    $derivedReason = Get-ReleaseFullReceiptReason -ProducerMode ([string]$Document.producer_mode) -Status $derivedStatus
+    if ([string]$Document.status -cne $derivedStatus -or [string]$Document.reason -cne $derivedReason) { throw 'release full receipt status is inconsistent' }
+    return [ordered]@{
+        status=$derivedStatus;reason=$derivedReason;producer_identity=[string]$definition.producer_identity;producer_mode=[string]$Document.producer_mode
+        source_revision=[string]$Document.source_revision;source_dirty=[bool]$Document.source_dirty;source_state_stable=$stable;receipt_run_id=[string]$Document.receipt_run_id
+        receipt_digest=[string]$Document.receipt_digest;workflow=$Document.workflow;aggregator_observation=$Document.aggregator_observation;inputs=$Document.inputs
+    }
+}
+
+function Assert-ReleaseFullReceiptBindings {
+    param(
+        [Parameter(Mandatory)][Collections.IDictionary]$Receipt,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExactHead,
+        [Parameter(Mandatory)][Collections.IDictionary]$ReleaseIsolation,
+        [Parameter(Mandatory)][Collections.IDictionary]$ReleaseModel,
+        [Parameter(Mandatory)][Collections.IDictionary]$ReleaseHost,
+        [Parameter(Mandatory)][Collections.IDictionary]$V1StopLoss,
+        [Parameter(Mandatory)][Collections.IDictionary]$LifecycleCore,
+        [Parameter(Mandatory)][Collections.IDictionary]$LifecycleGoverned,
+        [Parameter(Mandatory)][Collections.IDictionary]$LifecycleFull
+    )
+    if ([string]$Receipt.workflow.run_id -cne [string]$ReleaseIsolation.workflow.run_id -or [long]$Receipt.workflow.run_attempt -ne [long]$ReleaseIsolation.workflow.run_attempt -or
+        [string]$Receipt.workflow.run_id -cne [string]$ReleaseModel.workflow.run_id -or [long]$Receipt.workflow.run_attempt -ne [long]$ReleaseModel.workflow.run_attempt -or
+        [string]$Receipt.workflow.run_id -cne [string]$ReleaseHost.workflow.run_id -or [long]$Receipt.workflow.run_attempt -ne [long]$ReleaseHost.workflow.run_attempt) {
+        throw 'release full receipt workflow does not match G04/G09/G10'
+    }
+    [void](Assert-ReleaseProducerReceiptObservationBinding -Receipt $ReleaseModel -Observation $ReleaseIsolation.observations.model_producer -IsolationWorkflow $ReleaseIsolation.workflow)
+    [void](Assert-ReleaseProducerReceiptObservationBinding -Receipt $ReleaseHost -Observation $ReleaseIsolation.observations.host_producer -IsolationWorkflow $ReleaseIsolation.workflow)
+    $aggregator = $ReleaseIsolation.observations.aggregator
+    foreach ($name in @('role','observation_digest','account_digest','runner_label_digest')) {
+        if ([string]$Receipt.aggregator_observation[$name] -cne [string]$aggregator[$name]) { throw 'release full receipt aggregator observation does not match G04' }
+    }
+    if ([string]$LifecycleCore.preset -cne 'core' -or [string]$LifecycleGoverned.preset -cne 'governed' -or [string]$LifecycleFull.preset -cne 'full') {
+        throw 'release full receipt lifecycle preset binding is invalid'
+    }
+    $bindings = [ordered]@{
+        exact_head=[ordered]@{evidence_contract='thin-harness-exact-head-engineering-evidence/v1';raw_digest=[string]$ExactHead.raw_digest;document_digest=[string]$ExactHead.report_digest;source_revision=[string]$ExactHead.source_revision;status=[string]$ExactHead.status}
+        release_isolation=[ordered]@{evidence_contract='harness-release-isolation-report/v1';raw_digest=[string]$ReleaseIsolation.raw_digest;document_digest=[string]$ReleaseIsolation.report_digest;source_revision=[string]$ReleaseIsolation.source_revision;status=[string]$ReleaseIsolation.status}
+        release_model=[ordered]@{evidence_contract='harness-release-model-receipt/v1';raw_digest=[string]$ReleaseModel.raw_digest;document_digest=[string]$ReleaseModel.receipt_digest;source_revision=[string]$ReleaseModel.source_revision;status=[string]$ReleaseModel.status}
+        release_host=[ordered]@{evidence_contract='harness-release-host-receipt/v1';raw_digest=[string]$ReleaseHost.raw_digest;document_digest=[string]$ReleaseHost.receipt_digest;source_revision=[string]$ReleaseHost.source_revision;status=[string]$ReleaseHost.status}
+        v1_stop_loss=[ordered]@{evidence_contract='harness-v1-stop-loss-report/v1';raw_digest=[string]$V1StopLoss.raw_digest;document_digest=[string]$V1StopLoss.report_digest;source_revision=[string]$V1StopLoss.source_revision;status=[string]$V1StopLoss.status}
+        lifecycle_core=[ordered]@{evidence_contract='harness-preset-lifecycle-report/v1';raw_digest=[string]$LifecycleCore.raw_digest;document_digest=[string]$LifecycleCore.report_digest;source_revision=[string]$LifecycleCore.source_revision;status=[string]$LifecycleCore.status}
+        lifecycle_governed=[ordered]@{evidence_contract='harness-preset-lifecycle-report/v1';raw_digest=[string]$LifecycleGoverned.raw_digest;document_digest=[string]$LifecycleGoverned.report_digest;source_revision=[string]$LifecycleGoverned.source_revision;status=[string]$LifecycleGoverned.status}
+        lifecycle_full=[ordered]@{evidence_contract='harness-preset-lifecycle-report/v1';raw_digest=[string]$LifecycleFull.raw_digest;document_digest=[string]$LifecycleFull.report_digest;source_revision=[string]$LifecycleFull.source_revision;status=[string]$LifecycleFull.status}
+    }
+    foreach ($name in @($bindings.Keys)) {
+        foreach ($property in @('evidence_contract','raw_digest','document_digest','source_revision','status')) {
+            if ([string]$Receipt.inputs[$name][$property] -cne [string]$bindings[$name][$property]) { throw "release full receipt input $name does not match its Gate Artifact" }
+        }
+    }
+    return [string]$Receipt.status
+}
+
+function New-ReleaseFullReceiptGate {
+    param([string]$Contract,[string]$Path,[Collections.IDictionary]$Source)
+    return [ordered]@{status='unavailable';evidence_contract=$Contract;artifact_path=$Path;evidence_digest=(Get-ReleaseFileDigest -Path $Path);source_revision=[string]$Source.revision;producer_identity='release-full-receipt-writer/v1'}
+}
+
+function New-ReleaseFullReceiptArtifact {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$ExactHeadReportPath,
+        [Parameter(Mandatory)][string]$ReleaseIsolationReportPath,
+        [Parameter(Mandatory)][string]$ReleaseModelReceiptPath,
+        [Parameter(Mandatory)][string]$ReleaseHostReceiptPath,
+        [Parameter(Mandatory)][string]$V1StopLossReportPath,
+        [Parameter(Mandatory)][string]$LifecycleCoreReportPath,
+        [Parameter(Mandatory)][string]$LifecycleGovernedReportPath,
+        [Parameter(Mandatory)][string]$LifecycleFullReportPath,
+        [Parameter(Mandatory)][string]$AggregatorObservationPath,
+        [Parameter(Mandatory)][string]$OutputPath,
+        [Parameter(Mandatory)][string]$RunId,
+        [Parameter(Mandatory)][int]$RunAttempt,
+        [Parameter(Mandatory)][string]$CheckoutSha,
+        [Parameter(Mandatory)][ValidateSet('success','failure','neutral','cancelled','skipped','timed_out','action_required','stale','startup_failure')][string]$Conclusion,
+        [Parameter(Mandatory)][ValidateSet('formal','test-only')][string]$ProducerMode
+    )
+    $repo = (Resolve-Path -LiteralPath $RepoRoot).Path
+    if ($RunId -cnotmatch '^[1-9][0-9]*$' -or $RunAttempt -lt 1 -or $CheckoutSha -cnotmatch '^[0-9a-f]{40,64}$') { throw 'release full receipt workflow identity is invalid' }
+    $inputPaths = @($ExactHeadReportPath,$ReleaseIsolationReportPath,$ReleaseModelReceiptPath,$ReleaseHostReceiptPath,$V1StopLossReportPath,$LifecycleCoreReportPath,$LifecycleGovernedReportPath,$LifecycleFullReportPath,$AggregatorObservationPath)
+    $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $repo
+    $target = Resolve-HarnessReleaseArtifactPath -RepoRoot $repo -OutputPath $OutputPath -EvidencePaths $inputPaths -ProtectedRoots $protected
+    $sourceStart = Get-HarnessReleaseSourceState -RepoRoot $repo
+    if ($CheckoutSha -cne [string]$sourceStart.revision) { throw 'release full receipt checkout is stale' }
+
+    $exactHead = Read-ExactHeadRolloutEvidence -RepoRoot $repo -Gate (New-ReleaseFullReceiptGate -Contract 'thin-harness-exact-head-engineering-evidence/v1' -Path $ExactHeadReportPath -Source $sourceStart) -ExpectedSource $sourceStart -ProtectedRoots $protected
+    $releaseIsolation = Read-ReleaseIsolationRolloutEvidence -RepoRoot $repo -Gate (New-ReleaseFullReceiptGate -Contract 'harness-release-isolation-report/v1' -Path $ReleaseIsolationReportPath -Source $sourceStart) -ExpectedSource $sourceStart -ProtectedRoots $protected
+    $releaseModel = Read-ReleaseProducerReceiptRolloutEvidence -RepoRoot $repo -Gate (New-ReleaseFullReceiptGate -Contract 'harness-release-model-receipt/v1' -Path $ReleaseModelReceiptPath -Source $sourceStart) -ExpectedSource $sourceStart -Kind model -ProtectedRoots $protected
+    $releaseHost = Read-ReleaseProducerReceiptRolloutEvidence -RepoRoot $repo -Gate (New-ReleaseFullReceiptGate -Contract 'harness-release-host-receipt/v1' -Path $ReleaseHostReceiptPath -Source $sourceStart) -ExpectedSource $sourceStart -Kind host -ProtectedRoots $protected
+    $v1StopLoss = Read-V1StopLossRolloutEvidence -RepoRoot $repo -Gate (New-ReleaseFullReceiptGate -Contract 'harness-v1-stop-loss-report/v1' -Path $V1StopLossReportPath -Source $sourceStart) -ExpectedSource $sourceStart -ProtectedRoots $protected
+    $lifecycle = @(
+        Read-PresetLifecycleRolloutEvidence -RepoRoot $repo -Gate (New-ReleaseFullReceiptGate -Contract 'harness-preset-lifecycle-report/v1' -Path $LifecycleCoreReportPath -Source $sourceStart) -ExpectedSource $sourceStart -ExpectedPreset core -ProtectedRoots $protected
+        Read-PresetLifecycleRolloutEvidence -RepoRoot $repo -Gate (New-ReleaseFullReceiptGate -Contract 'harness-preset-lifecycle-report/v1' -Path $LifecycleGovernedReportPath -Source $sourceStart) -ExpectedSource $sourceStart -ExpectedPreset governed -ProtectedRoots $protected
+        Read-PresetLifecycleRolloutEvidence -RepoRoot $repo -Gate (New-ReleaseFullReceiptGate -Contract 'harness-preset-lifecycle-report/v1' -Path $LifecycleFullReportPath -Source $sourceStart) -ExpectedSource $sourceStart -ExpectedPreset full -ProtectedRoots $protected
+    )
+    $observationArtifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath $AggregatorObservationPath -ProtectedRoots $protected -MaximumBytes 512KB
+    $observationDocument = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$observationArtifact.bytes)
+    $aggregator = Assert-ReleaseRunnerObservation -RepoRoot $repo -Document $observationDocument -ExpectedSource $sourceStart -RequirePortableSource
+    if ([string]$aggregator.role -cne 'aggregator' -or [string]$aggregator.producer_mode -cne $ProducerMode -or
+        [string]$aggregator.workflow.run_id -cne $RunId -or [long]$aggregator.workflow.run_attempt -ne $RunAttempt) { throw 'release full receipt aggregator observation binding is invalid' }
+    if ([string]$releaseIsolation.producer_mode -cne $ProducerMode) { throw 'release full receipt isolation producer mode is invalid' }
+    foreach ($name in @('observation_run_id','observation_digest','role','runner_label_digest','account_digest','codex_home_identity_digest','status')) {
+        if ([string]$aggregator[$name] -cne [string]$releaseIsolation.observations.aggregator[$name]) {
+            throw 'release full receipt aggregator observation does not match G04'
+        }
+    }
+
+    $inputs = [ordered]@{
+        exact_head=[ordered]@{evidence_contract='thin-harness-exact-head-engineering-evidence/v1';raw_digest=[string]$exactHead.raw_digest;document_digest=[string]$exactHead.report_digest;source_revision=[string]$exactHead.source_revision;status=[string]$exactHead.status}
+        release_isolation=[ordered]@{evidence_contract='harness-release-isolation-report/v1';raw_digest=[string]$releaseIsolation.raw_digest;document_digest=[string]$releaseIsolation.report_digest;source_revision=[string]$releaseIsolation.source_revision;status=[string]$releaseIsolation.status}
+        release_model=[ordered]@{evidence_contract='harness-release-model-receipt/v1';raw_digest=[string]$releaseModel.raw_digest;document_digest=[string]$releaseModel.receipt_digest;source_revision=[string]$releaseModel.source_revision;status=[string]$releaseModel.status}
+        release_host=[ordered]@{evidence_contract='harness-release-host-receipt/v1';raw_digest=[string]$releaseHost.raw_digest;document_digest=[string]$releaseHost.receipt_digest;source_revision=[string]$releaseHost.source_revision;status=[string]$releaseHost.status}
+        v1_stop_loss=[ordered]@{evidence_contract='harness-v1-stop-loss-report/v1';raw_digest=[string]$v1StopLoss.raw_digest;document_digest=[string]$v1StopLoss.report_digest;source_revision=[string]$v1StopLoss.source_revision;status=[string]$v1StopLoss.status}
+        lifecycle_core=[ordered]@{evidence_contract='harness-preset-lifecycle-report/v1';raw_digest=[string]$lifecycle[0].raw_digest;document_digest=[string]$lifecycle[0].report_digest;source_revision=[string]$lifecycle[0].source_revision;status=[string]$lifecycle[0].status}
+        lifecycle_governed=[ordered]@{evidence_contract='harness-preset-lifecycle-report/v1';raw_digest=[string]$lifecycle[1].raw_digest;document_digest=[string]$lifecycle[1].report_digest;source_revision=[string]$lifecycle[1].source_revision;status=[string]$lifecycle[1].status}
+        lifecycle_full=[ordered]@{evidence_contract='harness-preset-lifecycle-report/v1';raw_digest=[string]$lifecycle[2].raw_digest;document_digest=[string]$lifecycle[2].report_digest;source_revision=[string]$lifecycle[2].source_revision;status=[string]$lifecycle[2].status}
+    }
+    $sourceEnd = Get-HarnessReleaseSourceState -RepoRoot $repo
+    if (-not (Test-ReleaseIsolationSourceStateEqual -Left $sourceStart -Right $sourceEnd)) { throw 'release full receipt source changed during aggregation' }
+    $stable = Test-HarnessReleaseSourceStable -Start $sourceStart -End $sourceEnd
+    $status = Get-ReleaseFullReceiptStatus -ProducerMode $ProducerMode -Conclusion $Conclusion -InputStatuses @($inputs.Values | ForEach-Object { [string]$_.status }) -SourceDirty ([bool]$sourceStart.dirty -or [bool]$sourceEnd.dirty) -SourceStable $stable
+    $reason = Get-ReleaseFullReceiptReason -ProducerMode $ProducerMode -Status $status
+    $inputDigests = [ordered]@{}
+    foreach ($entry in (Get-ReleaseFullReceiptInputPaths).GetEnumerator()) { $inputDigests[$entry.Key] = Get-ReleaseFileDigest -Path (Join-Path $repo ([string]$entry.Value)) }
+    $document = [ordered]@{
+        schema_version='harness-release-full-receipt/v1';generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o');source_revision=[string]$sourceStart.revision
+        source_dirty=([bool]$sourceStart.dirty -or [bool]$sourceEnd.dirty);source_state_stable=$stable
+        source=[ordered]@{commit_tree_oid=[string]$sourceStart.commit_tree_oid;object_format=[string]$sourceStart.object_format;start=$sourceStart;end=$sourceEnd;input_digests=$inputDigests}
+        receipt_run_id=[guid]::NewGuid().ToString('N');producer_identity='release-full-receipt/v1';producer_mode=$ProducerMode
+        workflow=[ordered]@{run_id=$RunId;run_attempt=[long]$RunAttempt;job_name='release-full';checkout_sha=$CheckoutSha;conclusion=$Conclusion}
+        aggregator_observation=[ordered]@{role='aggregator';observation_digest=[string]$aggregator.observation_digest;account_digest=[string]$aggregator.account_digest;runner_label_digest=[string]$aggregator.runner_label_digest}
+        inputs=$inputs;status=$status;reason=$reason;receipt_digest=$null
+    }
+    $document.receipt_digest = Get-ReleaseSha256Text -Text ($document | ConvertTo-Json -Depth 100 -Compress)
+    $json = $document | ConvertTo-Json -Depth 100 -Compress
+    $validated = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($json))
+    $receipt = Assert-ReleaseFullReceipt -RepoRoot $repo -Document $validated -ExpectedSource $sourceStart
+    [void](Assert-ReleaseFullReceiptBindings -Receipt $receipt -ExactHead $exactHead -ReleaseIsolation $releaseIsolation -ReleaseModel $releaseModel -ReleaseHost $releaseHost -V1StopLoss $v1StopLoss -LifecycleCore $lifecycle[0] -LifecycleGoverned $lifecycle[1] -LifecycleFull $lifecycle[2])
+    $rawDigest = Write-ReleaseIsolationArtifact -Target $target -Content $json
+    $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath $target -ExpectedDigest $rawDigest -ProtectedRoots $protected -MaximumBytes 1MB
+    $reopenedDocument = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+    $reopened = Assert-ReleaseFullReceipt -RepoRoot $repo -Document $reopenedDocument -ExpectedSource $sourceStart
+    [void](Assert-ReleaseFullReceiptBindings -Receipt $reopened -ExactHead $exactHead -ReleaseIsolation $releaseIsolation -ReleaseModel $releaseModel -ReleaseHost $releaseHost -V1StopLoss $v1StopLoss -LifecycleCore $lifecycle[0] -LifecycleGoverned $lifecycle[1] -LifecycleFull $lifecycle[2])
+    return $reopenedDocument
+}
+
+function Read-ReleaseFullReceiptRolloutEvidence {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Gate,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource,
+        [string[]]$ProtectedRoots = @()
+    )
+    try {
+        Assert-ReleaseKeys -Value $Gate -Expected @('status','evidence_contract','artifact_path','evidence_digest','source_revision','producer_identity') -Label 'release full receipt gate'
+        if ([string]$Gate.evidence_contract -cne 'harness-release-full-receipt/v1' -or [string]$Gate.source_revision -cne [string]$ExpectedSource.revision -or
+            [string]::IsNullOrWhiteSpace([string]$Gate.producer_identity)) { throw 'release full receipt gate binding is invalid' }
+        $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $RepoRoot -ProtectedRoots $ProtectedRoots
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$Gate.artifact_path) -ExpectedDigest ([string]$Gate.evidence_digest) -ProtectedRoots $protected -MaximumBytes 1MB
+        $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        $result = Assert-ReleaseFullReceipt -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource -RequirePortableSource
+        $result['path'] = [string]$artifact.path
+        $result['raw_digest'] = [string]$artifact.digest
+        return $result
+    } catch { throw [IO.InvalidDataException]::new('rollout-evidence-release-full-receipt-invalid',$_.Exception) }
 }
 
 function Assert-HarnessRolloutEvidenceSetProvenance {
@@ -2421,6 +2690,7 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
     $isolationName = 'DP-G04-CODEX-HOME-RUNNER-ISOLATION'
     $releaseModelName = 'DP-G09-RELEASE-MODEL'
     $releaseHostName = 'DP-G10-RELEASE-HOST'
+    $releaseFullName = 'DP-G11-RELEASE-FULL'
     $v1StopLossName = 'DP-G14-V1-STOP-LOSS'
     $lifecyclePresets = [ordered]@{
         'DP-G18-CORE-LIFECYCLE'='core'
@@ -2428,6 +2698,13 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
         'DP-G20-FULL-LIFECYCLE'='full'
     }
     $lifecycleNames = @($lifecyclePresets.Keys)
+    $releaseFullDependencies = @($exactHeadName,$modelName) + $cognitiveNames + $installedNames + @($isolationName,$releaseModelName,$releaseHostName,$v1StopLossName) + $lifecycleNames
+    if ($Gates.Contains($releaseFullName) -and [string]$Gates[$releaseFullName].evidence_contract -cne 'harness-release-full-receipt/v1') {
+        throw "rollout-evidence-provenance-unwired-$releaseFullName"
+    }
+    if ($Gates.Contains($releaseFullName) -and @($releaseFullDependencies | Where-Object { -not $Gates.Contains($_) }).Count -gt 0) {
+        throw 'rollout-evidence-release-full-gate-set-incomplete'
+    }
     $adapted = $false
     if ($Gates.Contains($exactHeadName)) {
         if ([string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-exact-head-engineering-report-invalid' }
@@ -2537,7 +2814,18 @@ function Assert-HarnessRolloutEvidenceSetProvenance {
         }
         $adapted = $true
     }
-    $adaptedNames = @($exactHeadName,$modelName,$isolationName,$releaseModelName,$releaseHostName,$v1StopLossName) + $cognitiveNames + $installedNames + $lifecycleNames
+    if ($Gates.Contains($releaseFullName)) {
+        if ([string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) {
+            throw 'rollout-evidence-release-full-gate-set-incomplete'
+        }
+        $releaseFull = Read-ReleaseFullReceiptRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$releaseFullName] -ExpectedSource $ExpectedSource -ProtectedRoots $ProtectedRoots
+        $releaseFullStatus = Assert-ReleaseFullReceiptBindings -Receipt $releaseFull -ExactHead $exactHead -ReleaseIsolation $isolation -ReleaseModel $releaseModel -ReleaseHost $releaseHost `
+            -V1StopLoss $v1StopLoss -LifecycleCore $lifecycle[0] -LifecycleGoverned $lifecycle[1] -LifecycleFull $lifecycle[2]
+        $Gates[$releaseFullName].status = [string]$releaseFullStatus
+        $Gates[$releaseFullName].producer_identity = [string]$releaseFull.producer_identity
+        $adapted = $true
+    }
+    $adaptedNames = @($exactHeadName,$modelName,$isolationName,$releaseModelName,$releaseHostName,$releaseFullName,$v1StopLossName) + $cognitiveNames + $installedNames + $lifecycleNames
     foreach ($name in @($Gates.Keys | Where-Object { $_ -cnotin $adaptedNames } | Sort-Object)) {
         $gate = $Gates[$name]
         if ($gate -isnot [System.Collections.IDictionary] -or

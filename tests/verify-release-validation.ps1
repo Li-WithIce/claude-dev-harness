@@ -550,7 +550,8 @@ $producerRunnerPattern = '(?ms)^\s*runs-on:\s*\r?\n\s*-\s*self-hosted\s*\r?\n\s*
 $aggregatorRunnerPattern = '(?ms)^\s*runs-on:\s*\r?\n\s*-\s*self-hosted\s*\r?\n\s*-\s*Windows\s*\r?\n\s*-\s*\$\{\{\s*vars\.THIN_V2_RELEASE_AGGREGATOR_RUNNER\s*\}\}\s*$'
 $modelUpload = [regex]::Match($releaseModelJob,'(?ms)^      - name: Upload model evidence\s*$.*\z').Value
 $hostUpload = [regex]::Match($releaseHostJob,'(?ms)^      - name: Upload host evidence\s*$.*\z').Value
-$releaseUpload = [regex]::Match($releaseJob,'(?ms)^      - name: Upload rollout evidence\s*$.*\z').Value
+$currentReleaseUpload = [regex]::Match($releaseJob,'(?ms)^      - name: Upload current rollout evidence\s*$.*?(?=^      - name:|\z)').Value
+$legacyReleaseUpload = [regex]::Match($releaseJob,'(?ms)^      - name: Upload legacy rollout evidence\s*$.*\z').Value
 $defaultPromotionRef = 'refs/heads/codex/harness-v2-default-promotion'
 $defaultPromotionCondition = "github.event_name == 'workflow_dispatch' && github.ref == '$defaultPromotionRef'"
 $pushBlock = [regex]::Match($workflow,'(?ms)^  push:\s*\r?$.*?(?=^  schedule:\s*\r?$)').Value
@@ -805,12 +806,11 @@ if ($releaseModelJob -match 'run-model-evals\.ps1[^\r\n]+-TimeoutSeconds 120[^\r
     Add-Failure 'release CI Producer orchestration or formal receipt binding is incomplete'
 }
 
-if (@(@($releaseModelJob,$releaseHostJob) | Where-Object { $_ -match [regex]::Escape($defaultPromotionCondition) }).Count -eq 2 -and
-    @([regex]::Matches($workflow,[regex]::Escape($defaultPromotionCondition))).Count -eq 2 -and
+if (@(@($releaseModelJob,$releaseHostJob,$releaseJob) | Where-Object { $_ -match [regex]::Escape($defaultPromotionCondition) }).Count -eq 3 -and
+    @([regex]::Matches($workflow,[regex]::Escape($defaultPromotionCondition))).Count -eq 3 -and
     $pushBlock -notmatch [regex]::Escape($defaultPromotionRef) -and
-    $releaseJob -notmatch [regex]::Escape($defaultPromotionRef) -and
     @(@($releaseModelJob,$releaseHostJob,$releaseJob) | Where-Object { $_ -match "github.event_name != 'pull_request'" }).Count -eq 3) {
-    Add-Check 'Default Promotion routes only manual model/host producers while push, PR, and release-full remain guarded'
+    Add-Check 'Default Promotion routes model, host, and release-full only through workflow_dispatch while push remains guarded'
 } else {
     Add-Failure 'Default Promotion producer routing or release guard drifted'
 }
@@ -835,13 +835,14 @@ $producerBoundaryValid = @(@($releaseModelJob,$releaseHostJob) | Where-Object { 
     $hostPrepareIndex -ge 0 -and $hostBoundaryIndex -gt $hostPrepareIndex -and $hostWorkIndex -gt $hostBoundaryIndex
 $aggregatorBoundaryIndex = $releaseJob.IndexOf('scripts/assert-release-runner-boundary.ps1',[StringComparison]::Ordinal)
 $aggregatorDownloadIndex = $releaseJob.IndexOf('actions/download-artifact@',[StringComparison]::Ordinal)
-$aggregatorGenerateIndex = $releaseJob.IndexOf('scripts/generate-v2-rollout-report.ps1',[StringComparison]::Ordinal)
+$aggregatorObservationIndex = $releaseJob.IndexOf("aggregator-runner-observation.json",[StringComparison]::Ordinal)
+$releaseFullReceiptIndex = $releaseJob.IndexOf('scripts/write-release-full-receipt.ps1',[StringComparison]::Ordinal)
 if ($producerBoundaryValid -and
     $releaseJob -match '(?m)^\s*MODEL_PRODUCER_ACCOUNT_DIGEST:\s*\$\{\{\s*needs\.release-model\.outputs\.runner_account_digest\s*\}\}\s*$' -and
     $releaseJob -match '(?m)^\s*HOST_PRODUCER_ACCOUNT_DIGEST:\s*\$\{\{\s*needs\.release-host\.outputs\.runner_account_digest\s*\}\}\s*$' -and
     $releaseJob -match 'assert-release-runner-boundary\.ps1 -Mode aggregator\b[^\r\n]+-ModelProducerAccountDigest \$env:MODEL_PRODUCER_ACCOUNT_DIGEST[^\r\n]+-HostProducerAccountDigest \$env:HOST_PRODUCER_ACCOUNT_DIGEST' -and
-    $aggregatorBoundaryIndex -ge 0 -and $aggregatorDownloadIndex -gt $aggregatorBoundaryIndex -and $aggregatorGenerateIndex -gt $aggregatorBoundaryIndex) {
-    Add-Check 'release producers publish account digests and the aggregator verifies both before consuming evidence'
+    $aggregatorDownloadIndex -ge 0 -and $aggregatorObservationIndex -gt $aggregatorDownloadIndex -and $releaseFullReceiptIndex -gt $aggregatorObservationIndex) {
+    Add-Check 'release producers publish account digests and current aggregation binds both after fail-closed downloads'
 } else {
     Add-Failure 'release account boundary must bind both producer outputs before evidence download or rollout generation'
 }
@@ -851,8 +852,8 @@ $uploadAction = 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa0
 $downloadAction = 'actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093'
 
 if (@([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($checkoutAction)))).Count -eq 6 -and
-    @([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($uploadAction)))).Count -eq 6 -and
-    @([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($downloadAction)))).Count -eq 2 -and
+    @([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($uploadAction)))).Count -eq 7 -and
+    @([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($downloadAction)))).Count -eq 4 -and
     $workflow -notmatch '(?m)^\s*uses:\s*actions/(?:checkout|upload-artifact|download-artifact)@v\d+') {
     Add-Check 'release workflow pins every GitHub Action dependency to a verified full commit SHA'
 } else {
@@ -861,8 +862,9 @@ if (@([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f 
 
 if ($releaseJob -match '(?ms)^\s*needs:\s*\r?\n\s*- release-model\s*\r?\n\s*- release-host' -and
     $releaseJob -match '!cancelled\(\)' -and $releaseJob -notmatch 'always\(\)' -and
-    @([regex]::Matches($releaseJob,[regex]::Escape($downloadAction))).Count -eq 2 -and
-    $releaseJob -match 'generate-v2-rollout-report\.ps1[^\r\n]+-ModelEvalReportPath[^\r\n]+model-eval\.json[^\r\n]+-HostBenchmarkReportPath[^\r\n]+host-benchmark\.json[^\r\n]+v2-rollout-eligibility\.json[^\r\n]+-RequireEligible' -and
+    @([regex]::Matches($releaseJob,[regex]::Escape($downloadAction))).Count -eq 4 -and
+    $releaseJob -match 'write-release-full-receipt\.ps1[^\r\n]+exact-head-engineering\.json[^\r\n]+release-isolation\.json[^\r\n]+release-model-receipt\.json[^\r\n]+release-host-receipt\.json[^\r\n]+v1-stop-loss\.json[^\r\n]+lifecycle-core\.json[^\r\n]+lifecycle-governed\.json[^\r\n]+lifecycle-full\.json[^\r\n]+aggregator-runner-observation\.json[^\r\n]+release-full-receipt\.json' -and
+    $releaseJob -match '(?s)Legacy full validation.*?generate-v2-rollout-report\.ps1[^\r\n]+-ModelEvalReportPath[^\r\n]+model-eval\.json[^\r\n]+-HostBenchmarkReportPath[^\r\n]+host-benchmark\.json' -and
     $releaseJob -match 'GITHUB_RUN_ID-\$env:GITHUB_RUN_ATTEMPT\\aggregate' -and
     $rolloutGenerator -match 'ModelEvalReportPath' -and
     $rolloutGenerator -match 'HostBenchmarkReportPath' -and
@@ -872,20 +874,20 @@ if ($releaseJob -match '(?ms)^\s*needs:\s*\r?\n\s*- release-model\s*\r?\n\s*- re
     $rolloutGenerator -match 'rollout-evidence-provenance-unverified' -and
     $rolloutGenerator -notmatch 'run-scenario-evals\.ps1 -Suite core' -and
     $rolloutGenerator -notmatch 'benchmark-harness\.ps1 -Compare bare,v1,v2' -and
-    $releaseJob -notmatch 'release-(?:model|host)-receipt\.json|installed-desktop|lifecycle-|v1-stop-loss|GateEvidencePath') {
-    Add-Check 'legacy release-full wiring fails closed until a later batch supplies the strict v2 evidence set'
+    $releaseJob -notmatch 'GateEvidencePath') {
+    Add-Check 'current release-full closes G11 without allowing the legacy path to authorize rollout v2'
 } else {
     Add-Failure 'DP-02A must not let the legacy two-report release-full path authorize rollout v2'
 }
 
 if ($modelUpload -match [regex]::Escape($uploadAction) -and $modelUpload -match '\$\{\{ success\(\)' -and $modelUpload -match '(?m)^\s*if-no-files-found:\s*error\s*$' -and ($modelBundlePaths -join '|') -ceq ($expectedModelBundlePaths -join '|') -and
     $hostUpload -match [regex]::Escape($uploadAction) -and $hostUpload -match '\$\{\{ success\(\)' -and $hostUpload -match '(?m)^\s*if-no-files-found:\s*error\s*$' -and ($hostBundlePaths -join '|') -ceq ($expectedHostBundlePaths -join '|') -and
-    $releaseUpload -match '!cancelled\(\)' -and
-    $releaseUpload -match [regex]::Escape($uploadAction) -and
-    $releaseUpload -match '(?m)^\s*if-no-files-found:\s*warn\s*$' -and
-    @([regex]::Matches($releaseUpload,'(?m)^\s+\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/[a-z0-9-]+\.json\s*$')).Count -eq 3 -and
-    ($modelUpload + $hostUpload + $releaseUpload) -notmatch '(?i)auth\.json|CODEX_ACCESS_TOKEN|OPENAI_API_KEY|secrets\.') {
-    Add-Check 'release CI uses exact fresh 3-file and 9-file Producer bundles and limits legacy final upload scope'
+    $currentReleaseUpload -match [regex]::Escape($uploadAction) -and $currentReleaseUpload -match '(?m)^\s*if-no-files-found:\s*error\s*$' -and
+    @([regex]::Matches($currentReleaseUpload,'(?m)^\s+\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/[a-z0-9-]+\.json\s*$')).Count -eq 4 -and
+    $legacyReleaseUpload -match '!cancelled\(\)' -and $legacyReleaseUpload -match [regex]::Escape($uploadAction) -and $legacyReleaseUpload -match '(?m)^\s*if-no-files-found:\s*warn\s*$' -and
+    @([regex]::Matches($legacyReleaseUpload,'(?m)^\s+\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/[a-z0-9-]+\.json\s*$')).Count -eq 3 -and
+    ($modelUpload + $hostUpload + $currentReleaseUpload + $legacyReleaseUpload) -notmatch '(?i)auth\.json|CODEX_ACCESS_TOKEN|OPENAI_API_KEY|secrets\.') {
+    Add-Check 'release CI uses exact fresh 3-file, 9-file, current 4-file, and legacy 3-file bundles'
 } else {
     Add-Failure 'release artifact uploads must be success-only, exact, and credential-free'
 }
