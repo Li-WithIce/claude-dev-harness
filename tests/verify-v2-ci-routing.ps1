@@ -54,9 +54,9 @@ Check (@($dataset.cases | Where-Object { $_.critical }).Count -ge 8) 'eval datas
 $core = Get-Route @('src/core.ps1')
 Check (@($core.modules).Count -eq 0 -and @($core.tests).Count -eq 0 -and -not $core.run_all_optional) 'ordinary core changes select no optional suite' 'ordinary core change selected optional validation'
 $memory = Get-Route @('skills/obsidian-memory/SKILL.md')
-Check ((@($memory.modules) -join ',') -ceq 'memory' -and @($memory.tests) -ccontains 'verify-memory-provider-boundary.ps1') 'Memory changes select only Memory validation' 'Memory changed-path routing is wrong'
+Check ((@($memory.modules) -join ',') -ceq 'memory' -and @($memory.tests).Count -eq 9 -and @($memory.tests) -ccontains 'verify-memory-provider-boundary.ps1') 'Memory changes select only complete Memory validation' 'Memory changed-path routing is wrong or incomplete'
 $team = Get-Route @('skills/workflow-team/SKILL.md')
-Check ((@($team.modules) -join ',') -ceq 'team' -and @($team.tests) -ccontains 'verify-aiteamcode-skill-contract.ps1') 'Team changes select Team validation' 'Team changed-path routing is wrong'
+Check ((@($team.modules) -join ',') -ceq 'team' -and @($team.tests).Count -eq 3 -and @($team.tests) -ccontains 'verify-aiteamcode-skill-contract.ps1') 'Team changes select complete Team validation' 'Team changed-path routing is wrong or incomplete'
 $adapterDispatch = Get-Route @('scripts/invoke-harness-skill-dispatcher.ps1')
 Check ((@($adapterDispatch.modules) -join ',') -ceq 'team' -and @($adapterDispatch.tests) -ccontains 'verify-aiteamcode-skill-contract.ps1') 'Harness adapter dispatcher changes select lifecycle validation' 'Harness adapter dispatcher change skipped lifecycle validation'
 $html = Get-Route @('skills/md-html/SKILL.md')
@@ -64,9 +64,11 @@ Check ((@($html.modules) -join ',') -ceq 'md-html' -and @($html.tests).Count -eq
 $codex = Get-Route @('skills/codex/SKILL.md')
 Check ((@($codex.modules) -join ',') -ceq 'codex-adapter' -and @($codex.tests) -ccontains 'verify-ask-codex.ps1') 'Codex adapter changes select adapter validation' 'Codex adapter changed-path routing is wrong'
 $providers = Get-Route @('policies/context-provider-policy.json')
-Check ((@($providers.modules) -join ',') -ceq 'providers' -and @($providers.tests).Count -eq 4) 'Provider changes select provider boundary validation' 'Provider changed-path routing is wrong'
+Check ((@($providers.modules) -join ',') -ceq 'providers' -and @($providers.tests).Count -eq 7) 'Provider changes select complete provider validation' 'Provider changed-path routing is wrong or incomplete'
+$maintenance = Get-Route @('scripts/benchmark-harness.ps1')
+Check ((@($maintenance.modules) -join ',') -ceq 'harness-maintenance' -and @($maintenance.tests).Count -eq 7) 'Harness maintenance changes select the remaining verifier set' 'Harness maintenance routing is wrong or incomplete'
 $routing = Get-Route @('.github/workflows/validation.yml')
-Check ($routing.run_all_optional -and @($routing.modules).Count -eq 5 -and @($routing.tests).Count -eq 12) 'routing-surface changes fail safe to every optional suite' 'routing-surface changes did not select all optional suites'
+Check ($routing.run_all_optional -and @($routing.modules).Count -eq 6 -and @($routing.tests).Count -eq 30) 'routing-surface changes fail safe to every optional verifier' 'routing-surface changes did not select all optional verifiers'
 
 $workflow = Get-Content -LiteralPath $workflowPath -Raw -Encoding utf8
 $rolloutGenerator = Get-Content -LiteralPath $rolloutGeneratorPath -Raw -Encoding utf8
@@ -233,10 +235,13 @@ if($coreGroupValidateSet.Count -eq 1){
     $coreGroupAllowed = @($coreGroupValidateSet[0].PositionalArguments | ForEach-Object {$_.SafeGetValue()})
 }
 $coreGroupDefault = if($coreGroupParameters.Count -eq 1){$coreGroupParameters[0].DefaultValue.SafeGetValue()}else{''}
-$optionalNames = @('verify-ask-codex.ps1','verify-codex-entry-autoload.ps1','verify-code-intel-provider-boundary.ps1','verify-context-provider-boundary.ps1','verify-context-provider-install-isolation.ps1','verify-memory-provider-boundary.ps1','verify-md-html-review-renderer.ps1','verify-provider-usage-recording.ps1','verify-render-review-html.ps1','verify-aiteamcode-skill-contract.ps1')
+$optionalCoreOverlap = @($routing.tests | Where-Object {$actualCoreScripts -ccontains $_})
 Check ($coreShapeValid -and ($coreGroupNames -join '|') -ceq (@($expectedGroupSizes.Keys) -join '|') -and ($coreGroupSizes -join '|') -ceq (@($expectedGroupSizes.Values) -join '|') -and $actualCoreScripts.Count -eq 49 -and @($actualCoreScripts | Sort-Object -CaseSensitive -Unique).Count -eq 49 -and ($actualCoreScripts -join '|') -ceq ($expectedCoreScripts -join '|') -and @($actualCoreScripts | Where-Object {-not(Test-Path -LiteralPath (Join-Path $RepoRoot "tests\$_") -PathType Leaf)}).Count -eq 0) 'five core groups contain the exact forty-nine unique scripts in registered order' 'core group shape, boundary, membership, uniqueness, order, or files drifted'
 Check ($flattenValid -and $groupSelectionValid -and $coreGroupDefault -ceq 'all' -and ($coreGroupAllowed -join '|') -ceq ((@('all')+$expectedCoreGroups) -join '|') -and $validation -match "'-CoreGroup',\`$CoreGroup" -and $validation -match "\`$Suite -ne 'core'.*\`$CoreGroup -ne 'all'") 'CoreGroup defaults to the full legacy suite, bridges safely, and rejects non-core use' 'CoreGroup parameter, flattening, bridge, or selection contract drifted'
-Check (@($optionalNames | Where-Object {$actualCoreScripts -ccontains $_}).Count -eq 0) 'core suite excludes changed-path optional modules' 'core suite still runs optional heavy modules unconditionally'
+Check (($optionalCoreOverlap -join '|') -ceq 'verify-shared-memory-layers.ps1|verify-v2-runtime-memory-decoupling.ps1') 'optional routes reuse only the two established lightweight core verifiers' 'optional routes unexpectedly duplicate core verifier work'
+$verifierInventory = @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'tests') -Filter 'verify-*.ps1' -File | Select-Object -ExpandProperty Name | Sort-Object -CaseSensitive -Unique)
+$ordinaryCiVerifiers = @(@($actualCoreScripts | Where-Object { $_ -clike 'verify-*.ps1' }) + @($routing.tests) + 'verify-installation.ps1' | Sort-Object -CaseSensitive -Unique)
+Check (($ordinaryCiVerifiers -join '|') -ceq ($verifierInventory -join '|')) 'ordinary PR CI has a traceable route for every repository verifier' 'one or more repository verifiers have no traceable ordinary PR CI route'
 
 $readme = Get-Content -LiteralPath $readmePath -Raw -Encoding utf8
 $scenarioDoc = Get-Content -LiteralPath $scenarioDocPath -Raw -Encoding utf8

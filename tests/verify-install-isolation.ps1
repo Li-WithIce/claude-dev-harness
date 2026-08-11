@@ -1539,6 +1539,39 @@ if ($verifyResult.ExitCode -ne 0 -or $verifyOutput -notmatch '(?im)^STATUS:\s+PA
     $checks.Add('verify-installation.ps1 passes after installing with a host-only local system skill') | Out-Null
 }
 
+$workspaceAgentsPath = Join-Path $workspaceRoot 'AGENTS.md'
+$workspaceAgentsRaw = Get-Content -LiteralPath $workspaceAgentsPath -Raw -Encoding utf8
+try {
+    [System.IO.File]::WriteAllText($workspaceAgentsPath, ($workspaceAgentsRaw + "`n# drift"), (New-Object System.Text.UTF8Encoding($false)))
+    $workspaceAgentsAuditResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $RepoRoot 'tests\verify-installation.ps1') -Arguments @{
+        WorkspaceRoot = $workspaceRoot
+        RepoRoot      = $RepoRoot
+    }
+    $workspaceAgentsAuditOutput = $workspaceAgentsAuditResult.Output -join [Environment]::NewLine
+} finally {
+    [System.IO.File]::WriteAllText($workspaceAgentsPath, $workspaceAgentsRaw, (New-Object System.Text.UTF8Encoding($false)))
+}
+$workspaceAgentsMarkerCount = [regex]::Matches($workspaceAgentsAuditOutput, '(?im)^- LIVE_UPDATE_REQUIRED:').Count
+if ($workspaceAgentsAuditResult.ExitCode -eq 1 -and
+    $workspaceAgentsAuditOutput -match '(?im)^STATUS:\s+LIVE_UPDATE_REQUIRED\s*$' -and
+    $workspaceAgentsAuditOutput -match '(?ms)^Warnings:\r?\n- LIVE_UPDATE_REQUIRED: workspace-agents-template-drift\r?\n\r?\nErrors:\r?\n- none(?:\r?\n|$)' -and
+    $workspaceAgentsMarkerCount -eq 1) {
+    $checks.Add('verify-installation detects installed workspace root AGENTS drift with only the existing template marker') | Out-Null
+} else {
+    $failures.Add('installed workspace root AGENTS-only drift should emit only LIVE_UPDATE_REQUIRED: workspace-agents-template-drift') | Out-Null
+}
+
+$workspaceAgentsRestoreResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $RepoRoot 'tests\verify-installation.ps1') -Arguments @{
+    WorkspaceRoot = $workspaceRoot
+    RepoRoot      = $RepoRoot
+}
+$workspaceAgentsRestoreOutput = $workspaceAgentsRestoreResult.Output -join [Environment]::NewLine
+if ($workspaceAgentsRestoreResult.ExitCode -eq 0 -and $workspaceAgentsRestoreOutput -match '(?im)^STATUS:\s+PASS\s*$') {
+    $checks.Add('verify-installation returns to PASS after restoring installed workspace root AGENTS') | Out-Null
+} else {
+    $failures.Add('verify-installation should return to PASS after restoring installed workspace root AGENTS') | Out-Null
+}
+
 $workspaceEntryAgentsPath = Join-Path $workspaceRoot '.assistant\entry\AGENTS.md'
 $workspaceEntryAgentsRaw = Get-Content -LiteralPath $workspaceEntryAgentsPath -Raw -Encoding utf8
 try {
