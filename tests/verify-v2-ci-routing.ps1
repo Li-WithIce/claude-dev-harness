@@ -27,6 +27,7 @@ $script:router = Join-Path $RepoRoot 'scripts\run-changed-optional-validation.ps
 $runner = Join-Path $RepoRoot 'tests\run-scenario-evals.ps1'
 $datasetPath = Join-Path $RepoRoot 'tests\evals\core-scenarios.json'
 $workflowPath = Join-Path $RepoRoot '.github\workflows\validation.yml'
+$fullValidationWorkflowPath = Join-Path $RepoRoot '.github\workflows\full-validation.yml'
 $validationPath = Join-Path $RepoRoot 'scripts\run-validation.ps1'
 $rolloutGeneratorPath = Join-Path $RepoRoot 'scripts\generate-v2-rollout-report.ps1'
 $runnerBoundaryPath = Join-Path $RepoRoot 'scripts\assert-release-runner-boundary.ps1'
@@ -69,8 +70,15 @@ $maintenance = Get-Route @('scripts/benchmark-harness.ps1')
 Check ((@($maintenance.modules) -join ',') -ceq 'harness-maintenance' -and @($maintenance.tests).Count -eq 7) 'Harness maintenance changes select the remaining verifier set' 'Harness maintenance routing is wrong or incomplete'
 $routing = Get-Route @('.github/workflows/validation.yml')
 Check ($routing.run_all_optional -and @($routing.modules).Count -eq 6 -and @($routing.tests).Count -eq 30) 'routing-surface changes fail safe to every optional verifier' 'routing-surface changes did not select all optional verifiers'
+$fullValidationRouting = Get-Route @('.github/workflows/full-validation.yml')
+$allOptionalModules = @($routing.modules | Sort-Object -CaseSensitive -Unique)
+$allOptionalTests = @($routing.tests | Sort-Object -CaseSensitive -Unique)
+$fullValidationModules = @($fullValidationRouting.modules | Sort-Object -CaseSensitive -Unique)
+$fullValidationTests = @($fullValidationRouting.tests | Sort-Object -CaseSensitive -Unique)
+Check ($fullValidationRouting.run_all_optional -and @($fullValidationRouting.modules).Count -eq $fullValidationModules.Count -and @($fullValidationRouting.tests).Count -eq $fullValidationTests.Count -and ($fullValidationModules -join '|') -ceq ($allOptionalModules -join '|') -and ($fullValidationTests -join '|') -ceq ($allOptionalTests -join '|')) 'full-validation changes fail safe to the complete current optional verifier set' 'full-validation changes do not select the complete current optional verifier set'
 
 $workflow = Get-Content -LiteralPath $workflowPath -Raw -Encoding utf8
+$fullValidationWorkflow = Get-Content -LiteralPath $fullValidationWorkflowPath -Raw -Encoding utf8
 $rolloutGenerator = Get-Content -LiteralPath $rolloutGeneratorPath -Raw -Encoding utf8
 $prCoreChecksBlock = Get-WorkflowJobBlock -Text $workflow -JobId 'pr-core-checks'
 $prCoreBlock = Get-WorkflowJobBlock -Text $workflow -JobId 'pr-core'
@@ -78,12 +86,16 @@ $changedOptionalBlock = Get-WorkflowJobBlock -Text $workflow -JobId 'changed-opt
 $releaseModelBlock = Get-WorkflowJobBlock -Text $workflow -JobId 'release-model'
 $releaseHostBlock = Get-WorkflowJobBlock -Text $workflow -JobId 'release-host'
 $releaseBlock = Get-WorkflowJobBlock -Text $workflow -JobId 'release-full'
+$allVerifiersBlock = Get-WorkflowJobBlock -Text $fullValidationWorkflow -JobId 'all-verifiers'
+$presetSmokeBlock = Get-WorkflowJobBlock -Text $fullValidationWorkflow -JobId 'preset-smoke'
 $prCoreChecksJob = $prCoreChecksBlock.Value
 $prCoreJob = $prCoreBlock.Value
 $changedOptionalJob = $changedOptionalBlock.Value
 $releaseModelJob = $releaseModelBlock.Value
 $releaseHostJob = $releaseHostBlock.Value
 $releaseJob = $releaseBlock.Value
+$allVerifiersJob = $allVerifiersBlock.Value
+$presetSmokeJob = $presetSmokeBlock.Value
 $producerRunnerPattern = '(?ms)^\s*runs-on:\s*\r?\n\s*-\s*self-hosted\s*\r?\n\s*-\s*Windows\s*\r?\n\s*-\s*\$\{\{\s*vars\.THIN_V2_RELEASE_RUNNER\s*\}\}\s*$'
 $aggregatorRunnerPattern = '(?ms)^\s*runs-on:\s*\r?\n\s*-\s*self-hosted\s*\r?\n\s*-\s*Windows\s*\r?\n\s*-\s*\$\{\{\s*vars\.THIN_V2_RELEASE_AGGREGATOR_RUNNER\s*\}\}\s*$'
 $modelUpload = [regex]::Match($releaseModelJob,'(?ms)^      - name: Upload model evidence\s*$.*\z').Value
@@ -97,6 +109,11 @@ $trustedRefs = @('refs/heads/main','refs/heads/codex/harness-distribution','refs
 $defaultPromotionRef = 'refs/heads/codex/harness-v2-default-promotion'
 $defaultPromotionCondition = "github.event_name == 'workflow_dispatch' && github.ref == '$defaultPromotionRef'"
 $pushBlock = [regex]::Match($workflow,'(?ms)^  push:\s*\r?$.*?(?=^  schedule:\s*\r?$)').Value
+$fullTriggerMatches = [regex]::Matches($fullValidationWorkflow,'(?ms)^on:[ \t]*\r?$.*?(?=^[A-Za-z][A-Za-z0-9_-]*:[ \t]*\r?$|\z)')
+$fullTriggerBlock = if($fullTriggerMatches.Count -eq 1){$fullTriggerMatches[0].Value}else{''}
+$fullPermissionsMatches = [regex]::Matches($fullValidationWorkflow,'(?ms)^permissions:[ \t]*\r?$.*?(?=^[A-Za-z][A-Za-z0-9_-]*:[ \t]*\r?$|\z)')
+$fullPermissionsBlock = if($fullPermissionsMatches.Count -eq 1){$fullPermissionsMatches[0].Value}else{''}
+$fullCheckoutAction = 'actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5'
 $modelBundlePaths = @([regex]::Matches($modelUpload,'(?m)^\s+\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/(?<name>[a-z0-9-]+\.json)\s*$') | ForEach-Object { $_.Groups['name'].Value })
 $hostBundlePaths = @([regex]::Matches($hostUpload,'(?m)^\s+\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/(?<name>[a-z0-9-]+\.json)\s*$') | ForEach-Object { $_.Groups['name'].Value })
 $expectedModelBundlePaths = @('model-runner-observation.json','model-eval.json','release-model-receipt.json')
@@ -114,6 +131,21 @@ Check ($workflow -match '(?m)^\s*schedule:\s*$' -and $workflow -match '(?m)^\s*w
 Check (@($prCoreChecksBlock,$prCoreBlock,$changedOptionalBlock,$releaseModelBlock,$releaseHostBlock,$releaseBlock | Where-Object Count -eq 1).Count -eq 6) 'CI declares each PR and release job exactly once' 'CI job layering is missing or duplicated'
 Check (@(@($releaseModelJob,$releaseHostJob,$releaseJob) | Where-Object { $_ -match [regex]::Escape($defaultPromotionCondition) }).Count -eq 3 -and @([regex]::Matches($workflow,[regex]::Escape($defaultPromotionCondition))).Count -eq 3 -and $pushBlock -notmatch [regex]::Escape($defaultPromotionRef) -and @(@($releaseModelJob,$releaseHostJob,$releaseJob) | Where-Object { $_ -match "github.event_name != 'pull_request'" }).Count -eq 3) 'Default Promotion routes model, host, and release-full only through workflow_dispatch' 'Default Promotion manual release routing or push guard drifted'
 Check (@([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($checkoutAction)))).Count -eq 6 -and @([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($uploadAction)))).Count -eq 7 -and @([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($downloadAction)))).Count -eq 4 -and $workflow -notmatch '(?m)^\s*uses:\s*actions/(?:checkout|upload-artifact|download-artifact)@v\d+') 'every GitHub Action dependency is pinned to a verified full commit SHA' 'GitHub Action dependencies are movable or not pinned to the approved commits'
+$fullScheduleMatches = [regex]::Matches($fullTriggerBlock,'(?m)^  schedule:[ \t]*\r?$')
+$fullDispatchMatches = [regex]::Matches($fullTriggerBlock,'(?m)^  workflow_dispatch:[ \t]*\r?$')
+$fullCronMatches = [regex]::Matches($fullTriggerBlock,"(?m)^    - cron:[ \t]*'43 4 \* \* \*'[ \t]*\r?$")
+Check ($fullTriggerMatches.Count -eq 1 -and $fullScheduleMatches.Count -eq 1 -and $fullCronMatches.Count -eq 1 -and $fullDispatchMatches.Count -eq 1 -and $fullTriggerBlock -notmatch '(?m)^    inputs:[ \t]*\r?$' -and $fullTriggerBlock -notmatch '(?m)^  (?:pull_request|push|repository_dispatch|workflow_run):') 'full-validation exposes only fixed daily schedule and input-free manual dispatch' 'full-validation trigger set, cron, or manual input boundary drifted'
+Check ($allVerifiersBlock.Count -eq 1 -and $presetSmokeBlock.Count -eq 1 -and (Get-WorkflowJobBlock -Text $fullValidationWorkflow -JobId 'release-model').Count -eq 0 -and (Get-WorkflowJobBlock -Text $fullValidationWorkflow -JobId 'release-host').Count -eq 0 -and (Get-WorkflowJobBlock -Text $fullValidationWorkflow -JobId 'release-full').Count -eq 0) 'full-validation declares the two engineering jobs exactly once without release jobs' 'full-validation job layering is missing, duplicated, or includes release jobs'
+$allVerifierCommand = '(?m)^        run: >[ \t]*\r?\n          pwsh -NoLogo -NoProfile -NonInteractive[ \t]*\r?\n          -File scripts/run-validation\.ps1[ \t]*\r?\n          -Suite all[ \t]*\r?\n          -CheckTimeoutSeconds 900[ \t]*\r?$'
+Check (@([regex]::Matches($allVerifiersJob,$allVerifierCommand)).Count -eq 1 -and $allVerifiersJob -match '(?m)^    runs-on:[ \t]*windows-latest[ \t]*\r?$' -and $allVerifiersJob -match '(?m)^    timeout-minutes:[ \t]*180[ \t]*\r?$' -and $allVerifiersJob -notmatch '(?i)-CoreGroup|-WorkspaceRoot|continue-on-error') 'all-verifiers runs the exact unmasked Suite all command on windows-latest' 'all-verifiers command, timeout, runner, or failure semantics drifted'
+$presetMatrixPattern = '(?m)^    strategy:[ \t]*\r?\n^      fail-fast:[ \t]*false[ \t]*\r?\n^      matrix:[ \t]*\r?\n^        preset:[ \t]*\r?\n(?<items>(?:^          - (?<preset>[a-z]+)[ \t]*\r?(?:\n|\z))+)(?=^    runs-on:[ \t])'
+$presetMatrixMatches = [regex]::Matches($presetSmokeJob,$presetMatrixPattern)
+$presetMatrixValues = if($presetMatrixMatches.Count -eq 1){@($presetMatrixMatches[0].Groups['preset'].Captures | ForEach-Object Value)}else{@()}
+$presetSmokeCommand = '(?m)^        run: >[ \t]*\r?\n          pwsh -NoLogo -NoProfile -NonInteractive[ \t]*\r?\n          -File scripts/run-isolated-install-smoke\.ps1[ \t]*\r?\n          -RepoRoot \$PWD[ \t]*\r?\n          -Preset \$\{\{ matrix\.preset \}\}[ \t]*\r?$'
+Check ($presetMatrixMatches.Count -eq 1 -and ($presetMatrixValues -join '|') -ceq 'core|governed|full' -and @($presetMatrixValues | Sort-Object -CaseSensitive -Unique).Count -eq 3 -and @([regex]::Matches($presetSmokeJob,$presetSmokeCommand)).Count -eq 1 -and $presetSmokeJob -match '(?m)^    runs-on:[ \t]*windows-latest[ \t]*\r?$' -and $presetSmokeJob -match '(?m)^    timeout-minutes:[ \t]*90[ \t]*\r?$' -and $presetSmokeJob -notmatch '(?i)continue-on-error') 'preset-smoke runs the exact core governed full matrix without masked failures' 'preset-smoke matrix, command, timeout, runner, or failure semantics drifted'
+$fullCheckoutJobs = @(@($allVerifiersJob,$presetSmokeJob) | Where-Object { @([regex]::Matches($_,('(?m)^        uses: {0}[ \t]*\r?$' -f [regex]::Escape($fullCheckoutAction)))).Count -eq 1 -and @([regex]::Matches($_,'(?m)^          fetch-depth:[ \t]*0[ \t]*\r?$')).Count -eq 1 -and @([regex]::Matches($_,'(?m)^          persist-credentials:[ \t]*false[ \t]*\r?$')).Count -eq 1 })
+Check ($fullCheckoutJobs.Count -eq 2 -and @([regex]::Matches($fullValidationWorkflow,'(?m)^\s*uses:[ \t]+')).Count -eq 2 -and $fullValidationWorkflow -notmatch '(?m)^\s*uses:\s*actions/checkout@(?:v\d+|main)\s*$') 'full-validation checkout steps use the approved immutable SHA without persisted credentials' 'full-validation Action pin or checkout safety drifted'
+Check ($fullPermissionsMatches.Count -eq 1 -and $fullPermissionsBlock -match '(?ms)^permissions:[ \t]*\r?\n  contents:[ \t]*read[ \t]*\r?\n(?:[ \t]*\r?\n)*$' -and $fullValidationWorkflow -notmatch '(?im)^\s*[A-Za-z-]+:\s*write\s*$' -and $fullValidationWorkflow -notmatch '(?im)secrets\.|vars\.THIN_V2_RELEASE_|THIN_V2_RELEASE_(?:RUNNER|AGGREGATOR_RUNNER)|HOST_BENCHMARK_CODEX_HOME|thin-v2-release|self-hosted|^\s*environment:|release-(?:model|host|full)|CODEX_API_KEY|OPENAI_API_KEY|CODEX_ACCESS_TOKEN|auth\.json') 'full-validation is contents-read engineering CI with no release or credential surface' 'full-validation permissions, release isolation, or credential boundary drifted'
 $expectedCoreGroups = @('entry-lifecycle','evaluation-release','install-evidence','governance-approval','harness-contracts')
 $matrixPattern = '(?m)^    strategy:[ \t]*\r?\n^      fail-fast:[ \t]*false[ \t]*\r?\n^      matrix:[ \t]*\r?\n^        core_group:[ \t]*\r?\n(?<items>(?:^          - (?<group>[a-z0-9-]+)[ \t]*\r?(?:\n|\z))+)(?=^    runs-on:[ \t])'
 $matrixMatches = [regex]::Matches($prCoreChecksJob,$matrixPattern)
