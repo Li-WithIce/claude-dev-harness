@@ -59,7 +59,8 @@ function Start-RepoProcess {
     param(
         [string]$UserProfile,
         [string]$ScriptPath,
-        [string[]]$Arguments
+        [string[]]$Arguments,
+        [string]$WorkingDirectory = ''
     )
 
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
@@ -69,6 +70,10 @@ function Start-RepoProcess {
     $psi.RedirectStandardError = $true
     $psi.CreateNoWindow = $true
     $psi.Environment['USERPROFILE'] = $UserProfile
+    $psi.Environment['HOME'] = $UserProfile
+    if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+        $psi.WorkingDirectory = $WorkingDirectory
+    }
     foreach ($argument in @('-NoProfile', '-NonInteractive', '-File', $ScriptPath) + $Arguments) {
         $psi.ArgumentList.Add($argument)
     }
