@@ -13,13 +13,28 @@ function Invoke-RepoScript {
         [string]$UserProfile,
         [string]$ScriptPath,
         [hashtable]$Arguments,
-        [string]$WorkingDirectory = ''
+        [string]$WorkingDirectory = '',
+        [switch]$ClearWorkspaceEnvironment
     )
 
     $originalUserProfile = $env:USERPROFILE
+    $originalHome = [Environment]::GetEnvironmentVariable('HOME', [EnvironmentVariableTarget]::Process)
+    $workspaceEnvironmentNames = @('DEV_HARNESS_WORKSPACE_ROOT','CLAUDE_DEV_HARNESS_WORKSPACE_ROOT','WORKSPACE_ROOT')
+    $savedWorkspaceEnvironment = [ordered]@{}
+    $presentWorkspaceEnvironment = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $originalLocation = $null
     try {
         $env:USERPROFILE = $UserProfile
+        $env:HOME = $UserProfile
+        if ($ClearWorkspaceEnvironment) {
+            foreach ($name in $workspaceEnvironmentNames) {
+                if (Test-Path -LiteralPath "Env:$name") {
+                    [void]$presentWorkspaceEnvironment.Add($name)
+                    $savedWorkspaceEnvironment[$name] = (Get-Item -LiteralPath "Env:$name").Value
+                }
+                Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+            }
+        }
         if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
             $originalLocation = (Get-Location).Path
             Set-Location -LiteralPath $WorkingDirectory
@@ -37,6 +52,20 @@ function Invoke-RepoScript {
         }
 
         $env:USERPROFILE = $originalUserProfile
+        if ($null -eq $originalHome) {
+            Remove-Item -LiteralPath 'Env:HOME' -ErrorAction SilentlyContinue
+        } else {
+            $env:HOME = $originalHome
+        }
+        if ($ClearWorkspaceEnvironment) {
+            foreach ($name in $workspaceEnvironmentNames) {
+                if ($presentWorkspaceEnvironment.Contains($name)) {
+                    Set-Item -LiteralPath "Env:$name" -Value ([string]$savedWorkspaceEnvironment[$name])
+                } else {
+                    Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+                }
+            }
+        }
     }
 }
 
@@ -783,12 +812,57 @@ New-Item -ItemType Directory -Path $repoRootUserProfile -Force | Out-Null
 
 $guardResult = Invoke-RepoScript -UserProfile $repoRootUserProfile -ScriptPath $harnessPath -Arguments @{
     RepoRoot = $RepoRoot
-} -WorkingDirectory $RepoRoot
+} -WorkingDirectory $RepoRoot -ClearWorkspaceEnvironment
 
 if ((Get-StatusLineValue -Output $guardResult.Output -Prefix 'STATUS') -ne 'FAIL') {
     Add-Failure 'harness.ps1 should fail safely when run from the harness repo root without WorkspaceRoot'
 } else {
     Add-Check 'harness.ps1 fails safely when run from the harness repo root without WorkspaceRoot'
+}
+
+# Case 10: a Harness source RepoRoot nested inside an installed workspace cannot escape to that parent.
+$caseRoot = Join-Path $scratchRoot 'repo-boundary'
+$userProfile = Join-Path $caseRoot 'u'
+$workspaceRoot = Join-Path $caseRoot 'w'
+$nestedRepo = Join-Path $workspaceRoot 'r'
+New-Item -ItemType Directory -Path $userProfile,$workspaceRoot -Force | Out-Null
+
+$boundaryInstall = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @{
+    WorkspaceRoot = $workspaceRoot
+    RepoRoot      = $RepoRoot
+    Preset        = 'core'
+}
+if ($boundaryInstall.ExitCode -ne 0) {
+    Add-Failure 'install.ps1 should succeed before the nested Harness RepoRoot boundary regression runs'
+} else {
+    [void](Invoke-GitChecked -Arguments @('clone','--quiet','--no-hardlinks',$RepoRoot,$nestedRepo) -Label 'nested Harness RepoRoot clone')
+    Copy-Item -LiteralPath $harnessPath -Destination (Join-Path $nestedRepo 'harness.ps1') -Force
+
+    $parentAssistantBefore = Get-TestTreeState -Root (Join-Path $workspaceRoot '.assistant')
+    $parentAgentsBefore = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'AGENTS.md') -Algorithm SHA256).Hash
+    $nestedRepoBefore = @(& git -C $nestedRepo status --porcelain --untracked-files=all)
+    $boundaryResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $nestedRepo 'harness.ps1') -Arguments @{
+        RepoRoot = $nestedRepo
+    } -WorkingDirectory $nestedRepo -ClearWorkspaceEnvironment
+    $parentAssistantAfter = Get-TestTreeState -Root (Join-Path $workspaceRoot '.assistant')
+    $parentAgentsAfter = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'AGENTS.md') -Algorithm SHA256).Hash
+    $nestedRepoAfter = @(& git -C $nestedRepo status --porcelain --untracked-files=all)
+
+    if ($boundaryResult.ExitCode -eq 2 -and
+        (Get-StatusLineValue -Output $boundaryResult.Output -Prefix 'STATUS') -eq 'FAIL' -and
+        ($boundaryResult.Output -join "`n") -match 'Unable to infer WorkspaceRoot') {
+        Add-Check 'harness.ps1 does not cross its RepoRoot boundary to select an installed parent workspace'
+    } else {
+        Add-Failure 'harness.ps1 should fail closed instead of selecting an installed workspace above RepoRoot'
+    }
+
+    if (@(Compare-Object $parentAssistantBefore $parentAssistantAfter).Count -eq 0 -and
+        $parentAgentsBefore -eq $parentAgentsAfter -and
+        @(Compare-Object $nestedRepoBefore $nestedRepoAfter).Count -eq 0) {
+        Add-Check 'RepoRoot boundary failure changes neither the installed parent nor the Harness source repo'
+    } else {
+        Add-Failure 'RepoRoot boundary failure should leave the installed parent and Harness source repo unchanged'
+    }
 }
 } finally {
     Remove-DirectoryWithRetry -Path $scratchRoot

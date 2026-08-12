@@ -169,6 +169,11 @@ function Find-AncestorContaining {
             }
         }
 
+        if (-not [string]::IsNullOrWhiteSpace($RepoRoot) -and
+            $candidateRoot.Equals($RepoRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            break
+        }
+
         $parent = Split-Path -Parent $candidateRoot
         if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $candidateRoot) {
             break
