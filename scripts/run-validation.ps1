@@ -129,6 +129,7 @@ $coreScriptGroups = [ordered]@{
         'verify-entry-routing-clarification.ps1',
         'verify-v2-entry-contract.ps1',
         'verify-v2-protocol-config.ps1',
+        'verify-runtime-qualification-decoupling.ps1',
         'verify-v2-direct-no-artifacts.ps1',
         'verify-v2-requirement-gate.ps1',
         'verify-v2-json-compat.ps1',
@@ -143,15 +144,21 @@ $coreScriptGroups = [ordered]@{
         'run-scenario-evals.ps1',
         'verify-model-eval-runner.ps1',
         'verify-rollout-evidence.ps1',
+        'verify-exact-head-engineering-evidence.ps1',
+        'verify-v1-stop-loss-qualification.ps1',
         'verify-host-benchmark-runner.ps1',
         'verify-host-benchmark-otel.ps1',
         'verify-host-benchmark-qualification.ps1',
         'verify-release-runner-boundary.ps1',
+        'verify-release-isolation-qualification.ps1',
+        'verify-release-full-receipt.ps1',
+        'verify-release-producer-receipts.ps1',
         'verify-ordinary-ci-receipt.ps1',
         'verify-v2-ci-routing.ps1'
     )
     'install-evidence' = @(
         'verify-v2-install-presets.ps1',
+        'verify-preset-lifecycle-qualification.ps1',
         'verify-v2-evidence.ps1'
     )
     'governance-approval' = @(

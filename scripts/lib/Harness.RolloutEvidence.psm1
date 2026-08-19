@@ -2,6 +2,7 @@
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop
+$script:RolloutAtomicModule = Import-Module (Join-Path $PSScriptRoot 'Harness.AtomicWrite.psm1') -Force -PassThru -ErrorAction Stop
 . (Join-Path $PSScriptRoot '..\host-benchmark\HostBenchmark.Trial.ps1')
 
 function Get-ReleaseSha256Bytes {
@@ -140,24 +141,2918 @@ function Resolve-HarnessRolloutPromotionPaths {
         }
     }
 
-    $targetRelative = '.assistant/runtime/rollout/v2-eligibility.json'
-    $target = Resolve-HarnessContainedPath -WorkspaceRoot $workspace -Path $targetRelative -Label 'rollout promotion target' -AllowMissing
-    Assert-ReleasePathHasNoReparseAncestor -Path $target
-    if ((Test-Path -LiteralPath $target) -and -not (Test-Path -LiteralPath $target -PathType Leaf)) { throw 'rollout-promotion-target-not-file' }
-    if (Test-Path -LiteralPath $target -PathType Leaf) {
-        Assert-ReleaseSingleLinkFile -Path $target -Label 'target'
-        Assert-ReleaseSingleDataStreamFile -Path $target -Label 'target'
+    $targetDefinitions = [ordered]@{
+        final = '.assistant/runtime/rollout/v2-eligibility.json'
+        candidate = '.assistant/runtime/rollout/v2-canary-candidate.json'
+        authorization = '.assistant/runtime/rollout/v2-canary-authorization.json'
+        runtime_default = '.assistant/runtime/protocol-default.json'
     }
-    $physicalTarget = Get-HostPhysicalPathInfo -Path $target -AllowMissing -RejectLinks
-    if ([string]$physicalSource.volume -ceq [string]$physicalTarget.volume -and [string]$physicalSource.file_id -ceq [string]$physicalTarget.file_id) { throw 'rollout-promotion-input-overlaps-target' }
-    foreach ($root in @(@($gitDirectory,$gitCommonDirectory) + @($ProtectedRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }))) {
-        $physicalRoot = Get-HostPhysicalPathInfo -Path ([IO.Path]::GetFullPath($root)) -AllowMissing
-        if ((Test-ReleasePathAtOrBelow -Path $target -Root $root) -or
-            (Test-ReleasePathAtOrBelow -Path ([string]$physicalTarget.physical_path) -Root ([string]$physicalRoot.physical_path))) {
-            throw 'rollout-promotion-target-overlaps-protected-root'
+    $targets = [ordered]@{}
+    foreach ($name in $targetDefinitions.Keys) {
+        $relative = [string]$targetDefinitions[$name]
+        $target = Resolve-HarnessContainedPath -WorkspaceRoot $workspace -Path $relative -Label "rollout $name target" -AllowMissing
+        Assert-ReleasePathHasNoReparseAncestor -Path $target
+        if ((Test-Path -LiteralPath $target) -and -not (Test-Path -LiteralPath $target -PathType Leaf)) { throw "rollout-promotion-$name-target-not-file" }
+        if (Test-Path -LiteralPath $target -PathType Leaf) {
+            Assert-ReleaseSingleLinkFile -Path $target -Label "$name-target"
+            Assert-ReleaseSingleDataStreamFile -Path $target -Label "$name-target"
+        }
+        $physicalTarget = Get-HostPhysicalPathInfo -Path $target -AllowMissing -RejectLinks
+        if ([string]$physicalSource.volume -ceq [string]$physicalTarget.volume -and [string]$physicalSource.file_id -ceq [string]$physicalTarget.file_id) { throw "rollout-promotion-input-overlaps-$name-target" }
+        foreach ($root in @(@($gitDirectory,$gitCommonDirectory) + @($ProtectedRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }))) {
+            $physicalRoot = Get-HostPhysicalPathInfo -Path ([IO.Path]::GetFullPath($root)) -AllowMissing
+            if ((Test-ReleasePathAtOrBelow -Path $target -Root $root) -or
+                (Test-ReleasePathAtOrBelow -Path ([string]$physicalTarget.physical_path) -Root ([string]$physicalRoot.physical_path))) {
+                throw "rollout-promotion-$name-target-overlaps-protected-root"
+            }
+        }
+        $targets[$name] = [ordered]@{relative=$relative;path=$target}
+    }
+    return [ordered]@{
+        source=$source
+        final_target=[string]$targets.final.path;final_target_relative=[string]$targets.final.relative
+        candidate_target=[string]$targets.candidate.path;candidate_target_relative=[string]$targets.candidate.relative
+        authorization_target=[string]$targets.authorization.path;authorization_target_relative=[string]$targets.authorization.relative
+        runtime_default_target=[string]$targets.runtime_default.path;runtime_default_target_relative=[string]$targets.runtime_default.relative
+        workspace=$workspace;workspace_identity=$workspaceIdentity
+    }
+}
+
+function Read-HarnessRolloutEvidenceArtifact {
+    param(
+        [Parameter(Mandatory)][string]$ArtifactPath,
+        [AllowEmptyString()][string]$ExpectedDigest = '',
+        [string[]]$ProtectedRoots = @(),
+        [long]$MaximumBytes = 16MB
+    )
+    if (-not [IO.Path]::IsPathRooted($ArtifactPath)) { throw 'rollout-evidence-artifact-path-must-be-absolute' }
+    $path = [IO.Path]::GetFullPath($ArtifactPath)
+    Assert-ReleasePathHasNoReparseAncestor -Path $path
+    Assert-ReleaseSingleLinkFile -Path $path -Label 'evidence-artifact'
+    Assert-ReleaseSingleDataStreamFile -Path $path -Label 'evidence-artifact'
+    $physical = Get-HostPhysicalPathInfo -Path $path -RejectLinks
+    foreach ($root in @($ProtectedRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+        $protected = [IO.Path]::GetFullPath($root)
+        $physicalProtected = Get-HostPhysicalPathInfo -Path $protected -AllowMissing
+        if ((Test-ReleasePathAtOrBelow -Path $path -Root $protected) -or
+            (Test-ReleasePathAtOrBelow -Path ([string]$physical.physical_path) -Root ([string]$physicalProtected.physical_path)) -or
+            (Test-ReleasePathAtOrBelow -Path ([string]$physicalProtected.physical_path) -Root ([string]$physical.physical_path))) {
+            throw 'rollout-evidence-artifact-overlaps-protected-root'
         }
     }
-    return [ordered]@{source=$source;target=$target;target_relative=$targetRelative;workspace=$workspace;workspace_identity=$workspaceIdentity}
+    $info = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+    if ($info.Length -gt $MaximumBytes) { throw 'rollout-evidence-artifact-too-large' }
+    $bytes = [IO.File]::ReadAllBytes($path)
+    if ($bytes.Length -gt $MaximumBytes) { throw 'rollout-evidence-artifact-too-large' }
+    $digest = Get-ReleaseSha256Bytes -Bytes $bytes
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedDigest) -and $digest -cne $ExpectedDigest) { throw 'rollout-evidence-artifact-digest-mismatch' }
+    return [ordered]@{path=$path;bytes=$bytes;digest=$digest;physical=$physical}
+}
+
+function Get-HarnessPortableEvidenceProtectedRoots {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [string[]]$ProtectedRoots = @()
+    )
+    $values = [Collections.Generic.List[string]]::new()
+    foreach ($argument in @('--git-dir','--git-common-dir')) { $values.Add((Resolve-ReleaseGitPath -RepoRoot $RepoRoot -Argument $argument)) }
+    if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) { $values.Add((Join-Path $env:USERPROFILE '.codex')) }
+    foreach ($name in @('CODEX_HOME','HOST_BENCHMARK_CODEX_HOME')) {
+        $value = [Environment]::GetEnvironmentVariable($name,[EnvironmentVariableTarget]::Process)
+        if (-not [string]::IsNullOrWhiteSpace($value)) { $values.Add($value) }
+    }
+    foreach ($value in @($ProtectedRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) { $values.Add($value) }
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    return @($values | ForEach-Object { [IO.Path]::GetFullPath($_) } | Where-Object { $seen.Add($_) })
+}
+
+function Assert-HarnessPortableEvidenceSource {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource
+    )
+    Assert-ReleaseKeys -Value $ExpectedSource -Expected @('revision','commit_tree_oid','object_format','dirty','status_entry_count','status_digest','state_digest','state_basis') -Label 'portable evidence source'
+    if ([string]$ExpectedSource.revision -cnotmatch '^[0-9a-f]{40,64}$' -or [string]$ExpectedSource.commit_tree_oid -cnotmatch '^[0-9a-f]{40,64}$' -or
+        $ExpectedSource.dirty -isnot [bool] -or ($ExpectedSource.status_entry_count -isnot [int] -and $ExpectedSource.status_entry_count -isnot [long]) -or
+        [long]$ExpectedSource.status_entry_count -lt 0 -or [string]$ExpectedSource.state_basis -cne 'git-revision-tree-status/v1') { throw 'portable evidence source shape is invalid' }
+    Assert-ReleaseDigestValue -Value $ExpectedSource.status_digest -Label 'portable evidence source status'
+    Assert-ReleaseDigestValue -Value $ExpectedSource.state_digest -Label 'portable evidence source state'
+    $cleanStatusDigest = Get-ReleaseSha256Text -Text ''
+    $cleanStateDigest = Get-ReleaseSha256Text -Text ("{0}`n{1}`n{2}`n" -f [string]$ExpectedSource.revision,[string]$ExpectedSource.commit_tree_oid,[string]$ExpectedSource.object_format)
+    if ([bool]$ExpectedSource.dirty -or [long]$ExpectedSource.status_entry_count -ne 0 -or
+        [string]$ExpectedSource.status_digest -cne $cleanStatusDigest -or [string]$ExpectedSource.state_digest -cne $cleanStateDigest) {
+        throw 'portable evidence source is not clean'
+    }
+    $revision = (@(Invoke-ReleaseGit -RepoRoot $RepoRoot -Arguments @('rev-parse','--verify','HEAD')) -join '').Trim()
+    $tree = (@(Invoke-ReleaseGit -RepoRoot $RepoRoot -Arguments @('rev-parse',"$revision`^{tree}")) -join '').Trim()
+    $objectFormat = (@(Invoke-ReleaseGit -RepoRoot $RepoRoot -Arguments @('rev-parse','--show-object-format')) -join '').Trim()
+    if ($revision -cne [string]$ExpectedSource.revision -or $tree -cne [string]$ExpectedSource.commit_tree_oid -or $objectFormat -cne [string]$ExpectedSource.object_format) {
+        throw 'portable evidence source identity changed'
+    }
+}
+
+function Assert-InstalledDesktopStrictJsonElement {
+    param([Parameter(Mandatory)][System.Text.Json.JsonElement]$Element)
+    if ($Element.ValueKind -ceq [System.Text.Json.JsonValueKind]::Object) {
+        $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($property in $Element.EnumerateObject()) {
+            if (-not $names.Add($property.Name)) { throw 'duplicate JSON property' }
+            Assert-InstalledDesktopStrictJsonElement -Element $property.Value
+        }
+    } elseif ($Element.ValueKind -ceq [System.Text.Json.JsonValueKind]::Array) {
+        foreach ($item in $Element.EnumerateArray()) { Assert-InstalledDesktopStrictJsonElement -Element $item }
+    }
+}
+
+function ConvertFrom-InstalledDesktopEvidenceBytes {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
+    $jsonDocument = $null
+    try {
+        if ($Bytes.Length -ge 3 -and $Bytes[0] -eq 0xEF -and $Bytes[1] -eq 0xBB -and $Bytes[2] -eq 0xBF) { throw 'UTF-8 BOM is not allowed' }
+        $text = [Text.UTF8Encoding]::new($false,$true).GetString($Bytes)
+        $options = [System.Text.Json.JsonDocumentOptions]::new()
+        $options.MaxDepth = 100
+        $options.AllowTrailingCommas = $false
+        $options.CommentHandling = [System.Text.Json.JsonCommentHandling]::Disallow
+        $jsonDocument = [System.Text.Json.JsonDocument]::Parse($text,$options)
+        if ($jsonDocument.RootElement.ValueKind -cne [System.Text.Json.JsonValueKind]::Object) { throw 'root must be an object' }
+        Assert-InstalledDesktopStrictJsonElement -Element $jsonDocument.RootElement
+        $document = $text | ConvertFrom-HarnessJson -Depth 100 -ErrorAction Stop
+        if ($document -isnot [Collections.IDictionary]) { throw 'root must be an object' }
+        return $document
+    } finally {
+        if ($null -ne $jsonDocument) { $jsonDocument.Dispose() }
+    }
+}
+
+function Assert-InstalledDesktopSanitizedContent {
+    param([AllowNull()][object]$Value)
+    if ($null -eq $Value) { return }
+    if ($Value -is [Collections.IDictionary]) {
+        foreach ($entry in $Value.GetEnumerator()) { Assert-InstalledDesktopSanitizedContent -Value $entry.Value }
+        return
+    }
+    if ($Value -is [Collections.IEnumerable] -and $Value -isnot [string]) {
+        foreach ($item in $Value) { Assert-InstalledDesktopSanitizedContent -Value $item }
+        return
+    }
+    if ($Value -isnot [string]) { return }
+    $text = [string]$Value
+    if ($text.Length -gt 1024 -or $text -match '[\r\n]' -or $text -match '(?:[A-Za-z]:[\\/]|\\\\|/(?:home|Users|private|tmp|var)(?:/|$))' -or
+        $text -match '(?i)(?:access[_-]?token|refresh[_-]?token|api[_-]?key|bearer\s+|authorization\s*:|cookie\s*:|password\s*:|credential\s*:|prompt\s*:|raw[ _-]?(?:trace|log)\s*:|thread[ _-]?id\s*:)') {
+        throw 'installed Desktop report contains non-portable or sensitive content'
+    }
+}
+
+function Assert-HarnessPortableAdditionalSanitizedContent {
+    param([AllowNull()][object]$Value)
+    if ($null -eq $Value) { return }
+    if ($Value -is [Collections.IDictionary]) {
+        foreach ($entry in $Value.GetEnumerator()) { Assert-HarnessPortableAdditionalSanitizedContent -Value $entry.Value }
+        return
+    }
+    if ($Value -is [Collections.IEnumerable] -and $Value -isnot [string]) {
+        foreach ($item in $Value) { Assert-HarnessPortableAdditionalSanitizedContent -Value $item }
+        return
+    }
+    if ($Value -is [string] -and [string]$Value -match '(?i)raw[ _-]?(?:command|prompt)\s*:') { throw 'portable evidence contains raw command or prompt content' }
+}
+
+function Assert-InstalledDesktopProfileConfig {
+    param([AllowNull()][object]$Value,[string]$Label)
+    Assert-ReleaseKeys -Value $Value -Expected @('status','digest') -Label $Label
+    if ([string]$Value.status -ceq 'absent') {
+        if ($null -ne $Value.digest) { throw "$Label is invalid" }
+    } elseif ([string]$Value.status -ceq 'present') {
+        Assert-ReleaseDigestValue -Value $Value.digest -Label $Label
+    } else { throw "$Label is invalid" }
+}
+
+function Test-InstalledDesktopProfileConfigEqual {
+    param([Collections.IDictionary]$Left,[Collections.IDictionary]$Right)
+    return [string]$Left.status -ceq [string]$Right.status -and [string]$Left.digest -ceq [string]$Right.digest
+}
+
+function ConvertTo-InstalledDesktopBaseHostReport {
+    param([Parameter(Mandatory)][Collections.IDictionary]$Document)
+    $copy = ($Document | ConvertTo-Json -Depth 100 -Compress) | ConvertFrom-HarnessJson -Depth 100
+    $copy.schema_version = 'harness-host-benchmark-report/v2'
+    foreach ($name in @('report_run_id','producer_identity','producer_mode','benchmark_path','qualification')) { [void]$copy.Remove($name) }
+    [void]$copy.source.Remove('installed_inputs')
+    foreach ($name in @('benchmark_path','host_surface','user_config_mode','profile_config','profile_config_consistent')) { [void]$copy.execution.Remove($name) }
+    $copy.execution.codex_home = 'dedicated-config-isolated-auth-home-path-not-persisted'
+    foreach ($name in @('measurement_passed_groups','measurement_passed')) { [void]$copy.performance.Remove($name) }
+    foreach ($group in @($copy.groups)) {
+        [void]$group.Remove('qualification')
+        [void]$group.source.Remove('installed_inputs')
+        foreach ($name in @('benchmark_path','host_surface','user_config_mode','profile_config','profile_config_consistent')) { [void]$group.execution.Remove($name) }
+        $group.execution.codex_home = 'dedicated-config-isolated-auth-home-path-not-persisted'
+        [void]$group.performance.Remove('measurement_passed')
+        foreach ($protocol in @('bare','v1','v2')) {
+            foreach ($trial in @($group.protocols[$protocol].trials)) { [void]$trial.Remove('installed_desktop') }
+        }
+    }
+    if ([bool]$Document.performance.measurement_passed) {
+        foreach ($group in @($copy.groups)) { $group.status='pass';$group.performance.eligible=$true }
+        $copy.status='pass';$copy.performance.eligible=$true;$copy.performance.release_group_set.status='pass';$copy.performance.release_group_set.passed_groups=[long]@($copy.groups).Count
+    }
+    foreach ($group in @($copy.groups)) {
+        $group.group_digest = $null
+        $group.group_digest = Get-ReleaseSha256Text -Text ($group | ConvertTo-Json -Depth 100 -Compress)
+    }
+    $copy.report_digest = $null
+    $copy.report_digest = Get-ReleaseSha256Text -Text ($copy | ConvertTo-Json -Depth 100 -Compress)
+    return $copy
+}
+
+function Assert-InstalledDesktopReport {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource
+    )
+    $topKeys = @('schema_version','generated_at_utc','source_revision','source_dirty','source_state_stable','source','execution','groups','performance','status','report_digest','report_run_id','producer_identity','producer_mode','benchmark_path','qualification')
+    Assert-ReleaseKeys -Value $Document -Expected $topKeys -Label 'installed Desktop report'
+    if ([string]$Document.schema_version -cne 'harness-installed-desktop-benchmark-report/v1' -or [string]$Document.report_run_id -cnotmatch '^[0-9a-f]{32}$' -or
+        [string]$Document.producer_identity -cne 'host-benchmark-installed-desktop/v1' -or [string]$Document.producer_mode -cnotin @('formal','test-only','diagnostic-smoke') -or
+        [string]$Document.benchmark_path -cne 'installed-desktop-path' -or [string]$Document.status -cnotin @('pass','fail','unavailable')) { throw 'installed Desktop report identity is invalid' }
+    Assert-ReleaseReportDigest -Document $Document
+    Assert-InstalledDesktopSanitizedContent -Value $Document
+
+    $sourceKeys = @('runner_digest','wrapper_digest','observation_schema_digest','otlp_collector_digest','atomic_write_module_digest','path_module_digest','otel_contract_digest','trial_helper_digest','installed_inputs','input_head_binding','execution_mode','commit_tree_oid','object_format','start','end')
+    Assert-ReleaseKeys -Value $Document.source -Expected $sourceKeys -Label 'installed Desktop source'
+    Assert-ReleaseKeys -Value $Document.source.installed_inputs -Expected @('install_digest','uninstall_digest','verification_digest','protocol_digest') -Label 'installed Desktop inputs'
+    $installedInputs = [ordered]@{install_digest='install.ps1';uninstall_digest='uninstall.ps1';verification_digest='tests/verify-installation.ps1';protocol_digest='scripts/lib/Harness.Protocol.psm1'}
+    foreach ($entry in $installedInputs.GetEnumerator()) { Assert-ReleaseCurrentFileDigest -RepoRoot $RepoRoot -Value $Document.source.installed_inputs[$entry.Key] -RelativePath ([string]$entry.Value) -Label ("installed Desktop {0}" -f $entry.Key) }
+
+    $executionKeys = @('model','reasoning','groups','required_groups','trials_per_protocol_per_group','required_trials_per_protocol_per_group','group_order_strategy','max_fresh_sessions','fresh_workspace_per_trial','fresh_ephemeral_session_per_invocation','codex_home','duration_ms','benchmark_path','host_surface','user_config_mode','profile_config','profile_config_consistent')
+    Assert-ReleaseKeys -Value $Document.execution -Expected $executionKeys -Label 'installed Desktop execution'
+    Assert-InstalledDesktopProfileConfig -Value $Document.execution.profile_config -Label 'installed Desktop profile config'
+    if ([string]$Document.execution.benchmark_path -cne 'installed-desktop-path' -or [string]$Document.execution.host_surface -cne 'installed-desktop-path' -or
+        [string]$Document.execution.user_config_mode -cne 'loaded' -or [string]$Document.execution.codex_home -cne 'dedicated-installed-desktop-profile-path-not-persisted' -or
+        $Document.execution.profile_config_consistent -isnot [bool]) { throw 'installed Desktop execution identity is invalid' }
+
+    Assert-ReleaseKeys -Value $Document.performance -Expected @('release_group_set','eligible','measurement_passed_groups','measurement_passed') -Label 'installed Desktop performance'
+    if ($Document.performance.measurement_passed -isnot [bool] -or $Document.performance.measurement_passed_groups -isnot [long]) { throw 'installed Desktop measurement status is invalid' }
+    Assert-ReleaseKeys -Value $Document.qualification -Expected @('status','hard_result_contract','hook_trust','hook_callability','hook_observations_blocking','reason') -Label 'installed Desktop qualification'
+    if ([string]$Document.qualification.hard_result_contract -cne 'installed-desktop-authoritative-observation/v1' -or [string]$Document.qualification.hook_trust -cne 'manual' -or
+        [string]$Document.qualification.hook_callability -cne 'manual' -or $Document.qualification.hook_observations_blocking -isnot [bool] -or [bool]$Document.qualification.hook_observations_blocking) {
+        throw 'installed Desktop qualification identity is invalid'
+    }
+
+    $groupKeys = @('group_index','group_run_id','group_root_digest','source_revision','source_dirty','source_state_stable','source','execution','protocols','performance','status','group_digest','qualification')
+    $groupExecutionKeys = @('model','reasoning','trials_per_protocol','release_trials_required','max_fresh_sessions','fresh_workspace_per_trial','fresh_ephemeral_session_per_invocation','v1_comparator','bare_and_v2_start','semantic_task','host_turn_basis','successful_request_send_measurement','expected_codex_service_version','trial_order_strategy','actual_trial_order','cache_state','codex_home','sandbox','approval_policy','workspace_boundary','prompt_persisted','raw_command_persisted','thread_id_persisted','raw_trace_persisted','raw_trace_cleanup_confirmed','scratch_persisted','install_duration_included','duration_ms','benchmark_path','host_surface','user_config_mode','profile_config','profile_config_consistent')
+    $trialKeys = @('trial_run_id','trial_root_digest','trial','runner_expected_trial','runner_evidence_passed','workspace_baseline_revision','status','diagnostic','completion_passed','outcome','reason_code','source_binding','workflow_contract','workflow_completed','v1_stage_journal','v1_target_journal','v1_validator_passed','fresh_sessions','host_turns','successful_request_sends','completed_agent_messages','total_duration_ms','sum_codex_process_duration_ms','first_useful_action_ms','tool_calls','loaded_skills','skill_file_command_matches','loaded_files','artifact_writes','runtime_writes','unexpected_writes','raw_trace_deleted','post_trial_diagnostics','tokens','installed_desktop')
+    $desktopKeys = @('benchmark_path','host_surface','user_config_mode','workspace_config_loaded','profile_config','protocol_environment','install_status','verification_status','auth_unchanged','workspace_protocol_config','route_probe','cleanup_status','hook_installed','hook_trust','hook_callability')
+    $routeKeys = @('requested_protocol','detected_protocol','selected_protocol','preference_source','default_source','reason','workspace_config_status','workspace_config_protocol','runtime_default_status','artifact_kind')
+    $measurementPassedGroups = 0
+    foreach ($group in @($Document.groups)) {
+        Assert-ReleaseKeys -Value $group -Expected $groupKeys -Label 'installed Desktop group'
+        if ([string]$group.status -cnotin @('pass','fail','unavailable') -or [string]$group.qualification.status -cnotin @('pass','fail','unavailable')) { throw 'installed Desktop group status is invalid' }
+        Assert-HostBenchmarkGroupDigest -Group $group
+        Assert-ReleaseKeys -Value $group.source -Expected $sourceKeys -Label 'installed Desktop group source'
+        Assert-ReleaseKeys -Value $group.execution -Expected $groupExecutionKeys -Label 'installed Desktop group execution'
+        Assert-InstalledDesktopProfileConfig -Value $group.execution.profile_config -Label 'installed Desktop group profile config'
+        if (-not (Test-InstalledDesktopProfileConfigEqual -Left $Document.execution.profile_config -Right $group.execution.profile_config) -or
+            ($group.source.installed_inputs | ConvertTo-Json -Compress) -cne ($Document.source.installed_inputs | ConvertTo-Json -Compress) -or
+            [string]$group.execution.benchmark_path -cne 'installed-desktop-path' -or [string]$group.execution.host_surface -cne 'installed-desktop-path' -or
+            [string]$group.execution.user_config_mode -cne 'loaded' -or [string]$group.execution.codex_home -cne 'dedicated-installed-desktop-profile-path-not-persisted' -or
+            $group.execution.profile_config_consistent -isnot [bool]) { throw 'installed Desktop group binding is invalid' }
+        Assert-ReleaseKeys -Value $group.performance -Expected @('release_trial_set','direct_latency','successful_request_send_reduction','eligible','measurement_passed') -Label 'installed Desktop group performance'
+        Assert-ReleaseKeys -Value $group.qualification -Expected @('status','reason') -Label 'installed Desktop group qualification'
+        if ($group.performance.measurement_passed -isnot [bool]) { throw 'installed Desktop group measurement status is invalid' }
+        if ([bool]$group.performance.measurement_passed) { $measurementPassedGroups++ }
+        foreach ($protocol in @('bare','v1','v2')) {
+            Assert-ReleaseKeys -Value $group.protocols[$protocol] -Expected @('status','runner_contract_failures','trials','successful_request_sends','medians') -Label "installed Desktop $protocol record"
+            foreach ($trial in @($group.protocols[$protocol].trials)) {
+                Assert-ReleaseKeys -Value $trial -Expected $trialKeys -Label "installed Desktop $protocol trial"
+                $desktop = $trial.installed_desktop
+                Assert-ReleaseKeys -Value $desktop -Expected $desktopKeys -Label "installed Desktop $protocol observation"
+                Assert-InstalledDesktopProfileConfig -Value $desktop.profile_config -Label "installed Desktop $protocol profile config"
+                if (-not (Test-InstalledDesktopProfileConfigEqual -Left $Document.execution.profile_config -Right $desktop.profile_config) -or
+                    [string]$desktop.benchmark_path -cne 'installed-desktop-path' -or [string]$desktop.host_surface -cne 'installed-desktop-path' -or [string]$desktop.user_config_mode -cne 'loaded' -or
+                    [string]$desktop.protocol_environment -cne 'cleared' -or [string]$desktop.hook_trust -cne 'manual' -or [string]$desktop.hook_callability -cne 'manual') { throw "installed Desktop $protocol observation is invalid" }
+                if ($protocol -ceq 'bare') {
+                    if ($desktop.workspace_config_loaded -isnot [bool] -or [bool]$desktop.workspace_config_loaded -or [string]$desktop.install_status -cne 'not-applicable' -or [string]$desktop.verification_status -cne 'not-applicable' -or
+                        [string]$desktop.cleanup_status -cne 'not-required' -or [string]$desktop.hook_installed -cne 'not-applicable' -or $null -ne $desktop.auth_unchanged -or $null -ne $desktop.workspace_protocol_config -or $null -ne $desktop.route_probe) { throw 'installed Desktop bare observation is invalid' }
+                } else {
+                    if ($desktop.workspace_config_loaded -isnot [bool] -or -not [bool]$desktop.workspace_config_loaded -or [string]$desktop.install_status -cne 'pass' -or [string]$desktop.verification_status -cne 'pass' -or
+                        $desktop.auth_unchanged -isnot [bool] -or -not [bool]$desktop.auth_unchanged -or [string]$desktop.cleanup_status -cne 'passed' -or [string]$desktop.hook_installed -cne 'verified') { throw "installed Desktop $protocol hard result is invalid" }
+                    Assert-ReleaseKeys -Value $desktop.route_probe -Expected $routeKeys -Label "installed Desktop $protocol route"
+                    if ([string]$desktop.route_probe.selected_protocol -cne $protocol -or [string]$desktop.route_probe.runtime_default_status -cne 'not-read') { throw "installed Desktop $protocol route is invalid" }
+                    if ($protocol -ceq 'v2') {
+                        Assert-ReleaseKeys -Value $desktop.workspace_protocol_config -Expected @('status','new_task_protocol','preference_source','config_digest') -Label 'installed Desktop v2 workspace config'
+                        Assert-ReleaseDigestValue -Value $desktop.workspace_protocol_config.config_digest -Label 'installed Desktop v2 workspace config'
+                        if ([string]$desktop.workspace_protocol_config.status -cne 'pass' -or [string]$desktop.workspace_protocol_config.new_task_protocol -cne 'v2' -or [string]$desktop.workspace_protocol_config.preference_source -cne 'workspace-config' -or
+                            [string]$desktop.route_probe.requested_protocol -cne 'v2' -or [string]$desktop.route_probe.detected_protocol -cne 'new' -or [string]$desktop.route_probe.preference_source -cne 'workspace-config' -or
+                            [string]$desktop.route_probe.default_source -cne 'workspace-config' -or [string]$desktop.route_probe.reason -cne 'workspace-v2-new-task' -or [string]$desktop.route_probe.workspace_config_status -cne 'present' -or
+                            [string]$desktop.route_probe.workspace_config_protocol -cne 'v2' -or [string]$desktop.route_probe.artifact_kind -cne 'new-task' -or [long]$trial.artifact_writes -ne 0 -or [long]$trial.runtime_writes -ne 0) {
+                            throw 'installed Desktop v2 did not use workspace-owned explicit selection'
+                        }
+                    } elseif ($null -ne $desktop.workspace_protocol_config -or [string]$desktop.route_probe.requested_protocol -cne 'auto' -or [string]$desktop.route_probe.detected_protocol -cne 'v1' -or
+                        [string]$desktop.route_probe.default_source -cne 'existing-artifact' -or [string]$desktop.route_probe.reason -cne 'existing-v1-plan' -or [string]$desktop.route_probe.artifact_kind -cne 'v1-plan') {
+                        throw 'installed Desktop v1 artifact behavior is invalid'
+                    }
+                }
+            }
+        }
+    }
+    if ([long]$Document.performance.measurement_passed_groups -ne $measurementPassedGroups -or [bool]$Document.performance.measurement_passed -ne ($measurementPassedGroups -eq 3 -and @($Document.groups).Count -eq 3)) { throw 'installed Desktop measurement aggregate is invalid' }
+
+    $base = ConvertTo-InstalledDesktopBaseHostReport -Document $Document
+    Assert-HostBenchmarkReportV2 -RepoRoot $RepoRoot -Document $base -ExpectedSource $ExpectedSource
+    $formal = [string]$Document.producer_mode -ceq 'formal'
+    if ($formal) {
+        if ([string]$Document.qualification.status -cne [string]$Document.status -or @($Document.groups | Where-Object { [string]$_.qualification.status -cne [string]$_.status }).Count -ne 0) { throw 'installed Desktop formal qualification status is inconsistent' }
+        if ([string]$Document.status -ceq 'pass' -and (-not [bool]$Document.performance.measurement_passed -or -not [bool]$Document.performance.eligible -or -not [bool]$Document.execution.profile_config_consistent)) { throw 'installed Desktop formal pass lacks hard results' }
+    } else {
+        if ([string]$Document.qualification.status -cne 'unavailable' -or @($Document.groups | Where-Object { [string]$_.qualification.status -cne 'unavailable' }).Count -ne 0 -or [bool]$Document.performance.eligible) { throw 'installed Desktop non-formal result was promoted' }
+    }
+    $status = if (-not $formal -and [string]$Document.status -cne 'fail') { 'unavailable' } else { [string]$Document.status }
+    $trialPayloadDigests = [Collections.Generic.List[string]]::new()
+    foreach ($group in @($base.groups)) { foreach ($protocol in @('bare','v1','v2')) { foreach ($trial in @($group.protocols[$protocol].trials)) { $trialPayloadDigests.Add((Get-HostBenchmarkTrialPayloadDigest -Protocol $protocol -Trial $trial)) } } }
+    return [ordered]@{
+        status=$status;producer_identity=[string]$Document.producer_identity;source_revision=[string]$Document.source_revision;report_run_id=[string]$Document.report_run_id;report_digest=[string]$Document.report_digest
+        group_run_ids=@($Document.groups.group_run_id);group_root_digests=@($Document.groups.group_root_digest)
+        trial_run_ids=@($Document.groups | ForEach-Object { @($_.protocols.bare.trials + $_.protocols.v1.trials + $_.protocols.v2.trials) } | ForEach-Object { [string]$_.trial_run_id })
+        trial_root_digests=@($Document.groups | ForEach-Object { @($_.protocols.bare.trials + $_.protocols.v1.trials + $_.protocols.v2.trials) } | ForEach-Object { [string]$_.trial_root_digest })
+        trial_payload_digests=@($trialPayloadDigests)
+    }
+}
+
+function Read-InstalledDesktopRolloutEvidence {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Gate,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource,
+        [string[]]$ProtectedRoots = @()
+    )
+    try {
+        Assert-ReleaseKeys -Value $Gate -Expected @('status','evidence_contract','artifact_path','evidence_digest','source_revision','producer_identity') -Label 'installed Desktop gate'
+        if ([string]$Gate.evidence_contract -cne 'harness-installed-desktop-benchmark-report/v1' -or [string]$Gate.source_revision -cne [string]$ExpectedSource.revision -or
+            [string]::IsNullOrWhiteSpace([string]$Gate.producer_identity)) { throw 'installed Desktop gate binding is invalid' }
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$Gate.artifact_path) -ExpectedDigest ([string]$Gate.evidence_digest) -ProtectedRoots $ProtectedRoots
+        $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        $result = Assert-InstalledDesktopReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource
+        $physical = $artifact.physical
+        $result['path'] = [string]$artifact.path
+        $result['raw_digest'] = [string]$artifact.digest
+        $result['volume'] = [string]$physical.volume
+        $result['file_id'] = [string]$physical.file_id
+        return $result
+    } catch { throw [IO.InvalidDataException]::new('rollout-evidence-installed-report-invalid',$_.Exception) }
+}
+
+function Assert-InstalledDesktopEvidencePairDistinct {
+    param([Parameter(Mandatory)][object[]]$Installed)
+    if ($Installed.Count -ne 2 -or [string]$Installed[0].path -ceq [string]$Installed[1].path -or [string]$Installed[0].raw_digest -ceq [string]$Installed[1].raw_digest -or
+        ([string]$Installed[0].volume -ceq [string]$Installed[1].volume -and [string]$Installed[0].file_id -ceq [string]$Installed[1].file_id) -or
+        [string]$Installed[0].report_run_id -ceq [string]$Installed[1].report_run_id -or [string]$Installed[0].source_revision -cne [string]$Installed[1].source_revision) {
+        throw 'rollout-evidence-installed-reports-not-distinct'
+    }
+    foreach ($property in @('group_run_ids','group_root_digests','trial_run_ids','trial_root_digests','trial_payload_digests')) {
+        if (@($Installed[0][$property] | Where-Object { $_ -cin @($Installed[1][$property]) }).Count -gt 0) { throw 'rollout-evidence-installed-reports-not-distinct' }
+    }
+}
+
+function Read-ModelRolloutEvidence {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Gate,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource,
+        [string[]]$ProtectedRoots = @()
+    )
+    try {
+        Assert-ReleaseKeys -Value $Gate -Expected @('status','evidence_contract','artifact_path','evidence_digest','source_revision','producer_identity') -Label 'model portable gate'
+        if ([string]$Gate.evidence_contract -cne 'harness-model-eval-report/v2' -or [string]$Gate.source_revision -cne [string]$ExpectedSource.revision -or
+            [string]::IsNullOrWhiteSpace([string]$Gate.producer_identity)) { throw 'model portable gate binding is invalid' }
+        Assert-ReleaseDigestValue -Value $Gate.evidence_digest -Label 'model portable gate'
+        $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $RepoRoot -ProtectedRoots $ProtectedRoots
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$Gate.artifact_path) -ExpectedDigest ([string]$Gate.evidence_digest) -ProtectedRoots $protected -MaximumBytes 4MB
+        $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        Assert-InstalledDesktopSanitizedContent -Value $document
+        Assert-HarnessPortableAdditionalSanitizedContent -Value $document
+        Assert-HarnessPortableEvidenceSource -RepoRoot $RepoRoot -ExpectedSource $ExpectedSource
+        Assert-ModelEvalReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource
+        if ([bool]$document.source_dirty -or -not [bool]$document.source_state_stable) { throw 'model portable source is not clean and stable' }
+        return [ordered]@{
+            status=[string]$document.status;producer_identity='model-eval/v2';source_revision=[string]$document.source_revision;report_digest=[string]$document.report_digest
+            path=[string]$artifact.path;raw_digest=[string]$artifact.digest;volume=[string]$artifact.physical.volume;file_id=[string]$artifact.physical.file_id
+        }
+    } catch { throw [IO.InvalidDataException]::new('rollout-evidence-model-report-invalid',$_.Exception) }
+}
+
+function Assert-CognitiveHostGroupContract {
+    param(
+        [Parameter(Mandatory)][Collections.IDictionary]$Group,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource
+    )
+    Assert-ReleaseBoolean -Value $Group.source_dirty -Label 'cognitive Host source dirty'
+    Assert-ReleaseBoolean -Value $Group.source_state_stable -Label 'cognitive Host source stability'
+    foreach ($name in @('trials_per_protocol','release_trials_required')) { [void](Assert-ReleaseInteger -Value $Group.execution[$name] -Label "cognitive Host $name" -Positive) }
+    if ([bool]$Group.source_dirty -or -not [bool]$Group.source_state_stable -or [string]$Group.source_revision -cne [string]$ExpectedSource.revision -or
+        [string]$Group.source.commit_tree_oid -cne [string]$ExpectedSource.commit_tree_oid -or [string]$Group.source.object_format -cne [string]$ExpectedSource.object_format -or
+        [string]$Group.execution.model -cne 'gpt-5.6-sol' -or [string]$Group.execution.reasoning -cne 'max' -or
+        [long]$Group.execution.trials_per_protocol -ne 3 -or [long]$Group.execution.release_trials_required -ne 3 -or
+        [string]$Group.execution.successful_request_send_measurement -cne 'codex-0.144.4-successful-websocket-send/v2' -or
+        [string]$Group.execution.expected_codex_service_version -cne '0.144.4') { throw 'cognitive Host group contract is invalid' }
+    foreach ($protocol in @('bare','v1','v2')) {
+        $trials = @($Group.protocols[$protocol].trials)
+        if ($trials.Count -ne 3 -or (@($trials | ForEach-Object { [long]$_.trial } | Sort-Object) -join ',') -cne '1,2,3') { throw 'cognitive Host trial set is incomplete' }
+        foreach ($trial in $trials) {
+            [void](Assert-ReleaseInteger -Value $trial.trial -Label 'cognitive Host trial number' -Positive)
+            [void](Assert-ReleaseInteger -Value $trial.runner_expected_trial -Label 'cognitive Host expected trial number' -Positive)
+            if ([long]$trial.runner_expected_trial -ne [long]$trial.trial -or [string]$trial.workspace_baseline_revision -cne [string]$ExpectedSource.revision -or
+                [string]$trial.source_binding.status -cne 'bound' -or [string]$trial.source_binding.revision -cne [string]$ExpectedSource.revision -or
+                [string]$trial.source_binding.commit_tree_oid -cne [string]$ExpectedSource.commit_tree_oid -or [string]$trial.source_binding.verification -cne 'git-head-tree-clean/v1') {
+                throw 'cognitive Host trial source binding is invalid'
+            }
+        }
+    }
+}
+
+function Get-CognitiveHostDirectLatencyStatus {
+    param(
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource
+    )
+    $statuses = [Collections.Generic.List[string]]::new()
+    foreach ($group in @($Document.groups)) {
+        Assert-CognitiveHostGroupContract -Group $group -ExpectedSource $ExpectedSource
+        $metric = $group.performance.direct_latency
+        Assert-ReleaseNumberEquals -Actual $metric.threshold -Expected 1.25 -Label 'cognitive Host direct latency threshold'
+        $available = $true
+        $medians = @{}
+        foreach ($protocol in @('bare','v2')) {
+            $record = $group.protocols[$protocol]
+            if ([string]$record.status -ceq 'unavailable') { $available = $false; continue }
+            if ([string]$record.status -cne 'measured') { throw 'cognitive Host direct latency protocol status is invalid' }
+            $values = [Collections.Generic.List[double]]::new()
+            foreach ($trial in @($record.trials)) {
+                if ([string]$trial.status -cne 'measured') { $available = $false; break }
+                $values.Add((Assert-ReleaseNumber -Value $trial.total_duration_ms -Label "cognitive Host $protocol duration" -Positive))
+            }
+            if ($values.Count -eq 3) {
+                $median = [math]::Round((Get-ReleaseMedian -Values @($values)),2)
+                Assert-ReleaseNumberEquals -Actual $record.medians.total_duration_ms -Expected $median -Label "cognitive Host $protocol duration median"
+                $medians[$protocol] = $median
+            }
+        }
+        if (-not $available -or $medians.Count -ne 2) {
+            if ([string]$metric.status -cne 'unavailable' -or $null -ne $metric.ratio) { throw 'cognitive Host direct latency availability is inconsistent' }
+            $statuses.Add('unavailable')
+            continue
+        }
+        $ratio = [math]::Round(([double]$medians.v2 / [double]$medians.bare),4)
+        Assert-ReleaseNumberEquals -Actual $metric.ratio -Expected $ratio -Label 'cognitive Host direct latency ratio'
+        $status = if ($ratio -le 1.25) { 'pass' } else { 'fail' }
+        if ([string]$metric.status -cne $status) { throw 'cognitive Host direct latency status is inconsistent' }
+        $statuses.Add($status)
+    }
+    if (@($statuses | Where-Object { $_ -ceq 'fail' }).Count -gt 0) { return 'fail' }
+    if (@($statuses | Where-Object { $_ -ceq 'unavailable' }).Count -gt 0) { return 'unavailable' }
+    if ($statuses.Count -ne 3) { throw 'cognitive Host direct latency group set is incomplete' }
+    return 'pass'
+}
+
+function Get-CognitiveHostRequestReductionStatus {
+    param(
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource
+    )
+    $statuses = [Collections.Generic.List[string]]::new()
+    foreach ($group in @($Document.groups)) {
+        Assert-CognitiveHostGroupContract -Group $group -ExpectedSource $ExpectedSource
+        $metric = $group.performance.successful_request_send_reduction
+        Assert-ReleaseNumberEquals -Actual $metric.threshold -Expected 0.60 -Label 'cognitive Host request reduction threshold'
+        $available = $true
+        $medians = @{}
+        foreach ($protocol in @('v1','v2')) {
+            $record = $group.protocols[$protocol]
+            if ([string]$record.status -cnotin @('measured','unavailable')) { throw 'cognitive Host request-send protocol status is invalid' }
+            $values = [Collections.Generic.List[double]]::new()
+            foreach ($trial in @($record.trials)) {
+                $measurement = $trial.successful_request_sends
+                if ([string]$measurement.basis -cne 'codex-0.144.4-successful-websocket-send/v2') { throw 'cognitive Host request-send basis is invalid' }
+                if ([string]$measurement.status -ceq 'unavailable') {
+                    if ($null -ne $measurement.value) { throw 'cognitive Host unavailable request-send value is invalid' }
+                    $available = $false
+                    continue
+                }
+                if ([string]$measurement.status -cne 'measured' -or [string]$measurement.service_version -cne '0.144.4' -or [string]$measurement.transport -cne 'responses_websocket') {
+                    throw 'cognitive Host request-send identity is invalid'
+                }
+                $value = Assert-ReleaseInteger -Value $measurement.value -Label "cognitive Host $protocol request sends" -Positive
+                $perSession = @($measurement.per_session_counts)
+                foreach ($count in $perSession) { [void](Assert-ReleaseInteger -Value $count -Label "cognitive Host $protocol per-session request sends" -Positive) }
+                if ($perSession.Count -ne [long]$trial.fresh_sessions -or [long](($perSession | Measure-Object -Sum).Sum) -ne $value) { throw 'cognitive Host request-send count is inconsistent' }
+                $values.Add([double]$value)
+            }
+            if ($values.Count -eq 3 -and [string]$record.status -ceq 'measured') {
+                $median = [math]::Round((Get-ReleaseMedian -Values @($values)),2)
+                if ([string]$record.successful_request_sends.status -cne 'measured' -or [string]$record.successful_request_sends.basis -cne 'codex-0.144.4-successful-websocket-send/v2') { throw 'cognitive Host request-send aggregate is invalid' }
+                Assert-ReleaseNumberEquals -Actual $record.successful_request_sends.median -Expected $median -Label "cognitive Host $protocol request-send median"
+                Assert-ReleaseNumberEquals -Actual $record.medians.successful_request_sends -Expected $median -Label "cognitive Host $protocol duplicated request-send median"
+                $medians[$protocol] = $median
+            } else {
+                $available = $false
+                if ([string]$record.successful_request_sends.status -cne 'unavailable' -or $null -ne $record.successful_request_sends.median) { throw 'cognitive Host request-send availability is inconsistent' }
+            }
+        }
+        if (-not $available -or $medians.Count -ne 2) {
+            if ([string]$metric.status -cne 'unavailable' -or $null -ne $metric.reduction) { throw 'cognitive Host request reduction availability is inconsistent' }
+            $statuses.Add('unavailable')
+            continue
+        }
+        if ([double]$medians.v1 -le 0) { throw 'cognitive Host v1 request-send median is invalid' }
+        $reduction = [math]::Round((([double]$medians.v1 - [double]$medians.v2) / [double]$medians.v1),4)
+        Assert-ReleaseNumberEquals -Actual $metric.reduction -Expected $reduction -Label 'cognitive Host request reduction'
+        $status = if ($reduction -ge 0.60) { 'pass' } else { 'fail' }
+        if ([string]$metric.status -cne $status) { throw 'cognitive Host request reduction status is inconsistent' }
+        $statuses.Add($status)
+    }
+    if (@($statuses | Where-Object { $_ -ceq 'fail' }).Count -gt 0) { return 'fail' }
+    if (@($statuses | Where-Object { $_ -ceq 'unavailable' }).Count -gt 0) { return 'unavailable' }
+    if ($statuses.Count -ne 3) { throw 'cognitive Host request reduction group set is incomplete' }
+    return 'pass'
+}
+
+function Read-CognitiveHostRolloutEvidence {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Gates,
+        [Parameter(Mandatory)][string[]]$Names,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource,
+        [string[]]$ProtectedRoots = @()
+    )
+    try {
+        $normalizedPath = ''
+        $digest = ''
+        foreach ($name in $Names) {
+            $gate = $Gates[$name]
+            Assert-ReleaseKeys -Value $gate -Expected @('status','evidence_contract','artifact_path','evidence_digest','source_revision','producer_identity') -Label 'cognitive Host portable gate'
+            if ([string]$gate.evidence_contract -cne 'harness-host-benchmark-report/v2' -or [string]$gate.source_revision -cne [string]$ExpectedSource.revision -or
+                [string]::IsNullOrWhiteSpace([string]$gate.producer_identity) -or -not [IO.Path]::IsPathRooted([string]$gate.artifact_path)) { throw 'cognitive Host portable gate binding is invalid' }
+            Assert-ReleaseDigestValue -Value $gate.evidence_digest -Label 'cognitive Host portable gate'
+            $path = [IO.Path]::GetFullPath([string]$gate.artifact_path)
+            if ([string]::IsNullOrWhiteSpace($normalizedPath)) { $normalizedPath = $path; $digest = [string]$gate.evidence_digest }
+            elseif (-not $path.Equals($normalizedPath,[StringComparison]::OrdinalIgnoreCase) -or [string]$gate.evidence_digest -cne $digest) { throw 'cognitive Host Gates do not bind one Artifact' }
+        }
+        $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $RepoRoot -ProtectedRoots $ProtectedRoots
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath $normalizedPath -ExpectedDigest $digest -ProtectedRoots $protected -MaximumBytes 16MB
+        $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        Assert-InstalledDesktopSanitizedContent -Value $document
+        Assert-HarnessPortableAdditionalSanitizedContent -Value $document
+        Assert-HarnessPortableEvidenceSource -RepoRoot $RepoRoot -ExpectedSource $ExpectedSource
+        Assert-HostBenchmarkReportV2 -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource
+        if ([bool]$document.source_dirty -or -not [bool]$document.source_state_stable -or @($document.groups).Count -ne 3) { throw 'cognitive Host portable source or group set is invalid' }
+        return [ordered]@{
+            g02_status=[string]$document.status
+            g05_status=(Get-CognitiveHostDirectLatencyStatus -Document $document -ExpectedSource $ExpectedSource)
+            g06_status=(Get-CognitiveHostRequestReductionStatus -Document $document -ExpectedSource $ExpectedSource)
+            producer_identity='host-benchmark-cognitive/v2';source_revision=[string]$document.source_revision;report_digest=[string]$document.report_digest
+            path=[string]$artifact.path;raw_digest=[string]$artifact.digest;volume=[string]$artifact.physical.volume;file_id=[string]$artifact.physical.file_id
+        }
+    } catch { throw [IO.InvalidDataException]::new('rollout-evidence-cognitive-host-report-invalid',$_.Exception) }
+}
+
+function Assert-PresetLifecycleSanitizedContent {
+    param([AllowNull()][object]$Value)
+    if ($null -eq $Value) { return }
+    if ($Value -is [Collections.IDictionary]) {
+        foreach ($entry in $Value.GetEnumerator()) { Assert-PresetLifecycleSanitizedContent -Value $entry.Value }
+        return
+    }
+    if ($Value -is [Collections.IEnumerable] -and $Value -isnot [string]) {
+        foreach ($item in $Value) { Assert-PresetLifecycleSanitizedContent -Value $item }
+        return
+    }
+    if ($Value -isnot [string]) { return }
+    $text = [string]$Value
+    if ($text.Length -gt 1024 -or $text -match '[\r\n]' -or $text -match '(?:[A-Za-z]:[\\/]|\\\\|/(?:home|Users|private|tmp|var)(?:/|$))' -or
+        $text -match '(?i)(?:access[_-]?token|refresh[_-]?token|api[_-]?key|bearer\s+|authorization\s*:|cookie\s*:|password\s*:|credential\s*:|prompt\s*:|raw[ _-]?(?:output|trace|log)\s*:|thread[ _-]?id\s*:)') {
+        throw 'preset lifecycle report contains non-portable or sensitive content'
+    }
+}
+
+function ConvertFrom-PresetLifecycleEvidenceBytes {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
+    return ConvertFrom-InstalledDesktopEvidenceBytes -Bytes $Bytes
+}
+
+function Assert-PresetLifecycleUtcDate {
+    param([object]$Value,[string]$Label)
+    try { $parsed = [DateTimeOffset]::Parse([string]$Value,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None) }
+    catch { throw "$Label timestamp is invalid" }
+    if ($parsed.Offset -ne [TimeSpan]::Zero) { throw "$Label timestamp is not UTC" }
+    return $parsed
+}
+
+function Assert-PresetLifecycleStage {
+    param(
+        [Parameter(Mandatory)][Collections.IDictionary]$Stage,
+        [Parameter(Mandatory)][string]$ExpectedName
+    )
+    Assert-ReleaseKeys -Value $Stage -Expected @('stage','status','exit_code','started_at_utc','ended_at_utc','duration_ms','command_digest','output_digest','reason') -Label "preset lifecycle $ExpectedName stage"
+    if ([string]$Stage.stage -cne $ExpectedName -or [string]$Stage.status -cnotin @('pass','fail','not_run')) { throw "preset lifecycle $ExpectedName stage identity is invalid" }
+    $started = Assert-PresetLifecycleUtcDate -Value $Stage.started_at_utc -Label "preset lifecycle $ExpectedName start"
+    $ended = Assert-PresetLifecycleUtcDate -Value $Stage.ended_at_utc -Label "preset lifecycle $ExpectedName end"
+    if ($ended -lt $started) { throw "preset lifecycle $ExpectedName time order is invalid" }
+    $duration = Assert-ReleaseInteger -Value $Stage.duration_ms -Label "preset lifecycle $ExpectedName duration" -NonNegative
+    $expectedDuration = [long][Math]::Round(($ended - $started).TotalMilliseconds,0,[MidpointRounding]::AwayFromZero)
+    if ($duration -ne $expectedDuration) { throw "preset lifecycle $ExpectedName duration is inconsistent" }
+    Assert-ReleaseDigestValue -Value $Stage.command_digest -Label "preset lifecycle $ExpectedName command"
+    Assert-ReleaseDigestValue -Value $Stage.output_digest -Label "preset lifecycle $ExpectedName output"
+    if ([string]::IsNullOrWhiteSpace([string]$Stage.reason)) { throw "preset lifecycle $ExpectedName reason is invalid" }
+    if ([string]$Stage.status -ceq 'pass') {
+        if ($Stage.exit_code -isnot [long] -or [long]$Stage.exit_code -ne 0) { throw "preset lifecycle $ExpectedName pass exit code is invalid" }
+    } elseif ([string]$Stage.status -ceq 'fail') {
+        if ($Stage.exit_code -isnot [long] -or [long]$Stage.exit_code -eq 0) { throw "preset lifecycle $ExpectedName failure exit code is invalid" }
+    } elseif ($null -ne $Stage.exit_code) { throw "preset lifecycle $ExpectedName not-run exit code is invalid" }
+}
+
+function Assert-PresetLifecycleReport {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Collections.IDictionary]$ExpectedSource = $null,
+        [AllowEmptyString()][string]$ExpectedPreset = '',
+        [switch]$AllowNonFormalSource
+    )
+    $topKeys = @('schema_version','generated_at_utc','source_revision','source_dirty','source_state_stable','source','preset','report_run_id','producer_identity','producer_mode','execution','stages','results','status','reason','report_digest')
+    Assert-ReleaseKeys -Value $Document -Expected $topKeys -Label 'preset lifecycle report'
+    $schemaPath = Join-Path $RepoRoot 'schemas\preset-lifecycle-report.schema.json'
+    if (-not (Test-Path -LiteralPath $schemaPath -PathType Leaf) -or
+        -not (Test-Json -Json ($Document | ConvertTo-Json -Depth 100 -Compress) -SchemaFile $schemaPath -ErrorAction Stop -WarningAction SilentlyContinue)) {
+        throw 'preset lifecycle report schema validation failed'
+    }
+    if ([string]$Document.schema_version -cne 'harness-preset-lifecycle-report/v1' -or
+        [string]$Document.report_run_id -cnotmatch '^[0-9a-f]{32}$' -or
+        [string]$Document.producer_identity -cne 'preset-lifecycle-qualification/v1' -or
+        [string]$Document.producer_mode -cnotin @('formal','test-only','diagnostic-smoke') -or
+        [string]$Document.preset -cnotin @('core','governed','full') -or
+        [string]$Document.status -cnotin @('pass','fail','unavailable')) { throw 'preset lifecycle report identity is invalid' }
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedPreset) -and [string]$Document.preset -cne $ExpectedPreset) { throw 'preset lifecycle report preset does not match its Gate' }
+    [void](Assert-PresetLifecycleUtcDate -Value $Document.generated_at_utc -Label 'preset lifecycle report')
+    Assert-ReleaseReportDigest -Document $Document
+    Assert-PresetLifecycleSanitizedContent -Value $Document
+
+    Assert-ReleaseKeys -Value $Document.source -Expected @('commit_tree_oid','object_format','start','end','input_digests') -Label 'preset lifecycle source'
+    Assert-ReleaseKeys -Value $Document.source.input_digests -Expected @('install_digest','uninstall_digest','verification_digest','producer_digest','atomic_write_digest','path_digest') -Label 'preset lifecycle inputs'
+    $inputPaths = [ordered]@{
+        install_digest='install.ps1'
+        uninstall_digest='uninstall.ps1'
+        verification_digest='tests/verify-installation.ps1'
+        producer_digest='scripts/run-preset-lifecycle-qualification.ps1'
+        atomic_write_digest='scripts/lib/Harness.AtomicWrite.psm1'
+        path_digest='scripts/lib/Harness.Path.psm1'
+    }
+    foreach ($entry in $inputPaths.GetEnumerator()) { Assert-ReleaseCurrentFileDigest -RepoRoot $RepoRoot -Value $Document.source.input_digests[$entry.Key] -RelativePath ([string]$entry.Value) -Label ("preset lifecycle {0}" -f $entry.Key) }
+    Assert-ReleaseSourceStateShape -Value $Document.source.start -Label 'preset lifecycle source start'
+    Assert-ReleaseSourceStateShape -Value $Document.source.end -Label 'preset lifecycle source end'
+    if ([string]$Document.source_revision -cne [string]$Document.source.start.revision -or
+        [string]$Document.source.commit_tree_oid -cne [string]$Document.source.start.commit_tree_oid -or
+        [string]$Document.source.object_format -cne [string]$Document.source.start.object_format -or
+        [bool]$Document.source_dirty -ne ([bool]$Document.source.start.dirty -or [bool]$Document.source.end.dirty)) { throw 'preset lifecycle source binding is invalid' }
+    $stable = Test-HarnessReleaseSourceStable -Start $Document.source.start -End $Document.source.end
+    if ([bool]$Document.source_state_stable -ne $stable) { throw 'preset lifecycle source stability is inconsistent' }
+    if ($null -ne $ExpectedSource) {
+        Assert-ReleaseSourceStateMatchesExpected -Value $Document.source.start -Expected $ExpectedSource -Label 'preset lifecycle source start'
+        Assert-ReleaseSourceStateMatchesExpected -Value $Document.source.end -Expected $ExpectedSource -Label 'preset lifecycle source end'
+        if ([string]$Document.source_revision -cne [string]$ExpectedSource.revision -or [string]$Document.source.commit_tree_oid -cne [string]$ExpectedSource.commit_tree_oid -or [string]$Document.source.object_format -cne [string]$ExpectedSource.object_format) { throw 'preset lifecycle source does not match the qualified source' }
+    }
+    if (-not $AllowNonFormalSource -and ([bool]$Document.source_dirty -or -not [bool]$Document.source_state_stable)) { throw 'preset lifecycle source is not clean and stable' }
+
+    Assert-ReleaseKeys -Value $Document.execution -Expected @('sequence_contract','effective_preset','isolated_workspace','isolated_profile','workspace_identity_digest','profile_identity_digest','duration_ms','raw_output_persisted','auth_bytes_persisted','private_paths_persisted') -Label 'preset lifecycle execution'
+    if ([string]$Document.execution.sequence_contract -cne 'install-verify-update-verify-uninstall-cleanup/v1' -or
+        [string]$Document.execution.effective_preset -cne [string]$Document.preset -or
+        $Document.execution.isolated_workspace -isnot [bool] -or -not [bool]$Document.execution.isolated_workspace -or
+        $Document.execution.isolated_profile -isnot [bool] -or -not [bool]$Document.execution.isolated_profile -or
+        $Document.execution.raw_output_persisted -isnot [bool] -or [bool]$Document.execution.raw_output_persisted -or
+        $Document.execution.auth_bytes_persisted -isnot [bool] -or [bool]$Document.execution.auth_bytes_persisted -or
+        $Document.execution.private_paths_persisted -isnot [bool] -or [bool]$Document.execution.private_paths_persisted) { throw 'preset lifecycle execution identity is invalid' }
+    Assert-ReleaseDigestValue -Value $Document.execution.workspace_identity_digest -Label 'preset lifecycle workspace identity'
+    Assert-ReleaseDigestValue -Value $Document.execution.profile_identity_digest -Label 'preset lifecycle profile identity'
+    [void](Assert-ReleaseInteger -Value $Document.execution.duration_ms -Label 'preset lifecycle execution duration' -Positive)
+
+    $stageNames = @('install','verify-after-install','update','verify-after-update','uninstall','cleanup')
+    if (@($Document.stages).Count -ne $stageNames.Count) { throw 'preset lifecycle stage count is invalid' }
+    for ($index=0; $index -lt $stageNames.Count; $index++) { Assert-PresetLifecycleStage -Stage $Document.stages[$index] -ExpectedName $stageNames[$index] }
+    if ([string]$Document.stages[0].status -ceq 'not_run' -or [string]$Document.stages[4].status -ceq 'not_run' -or [string]$Document.stages[5].status -ceq 'not_run') { throw 'preset lifecycle required attempt was not recorded' }
+    if ([string]$Document.stages[0].status -ceq 'fail') {
+        if (@($Document.stages[1..3] | Where-Object { [string]$_.status -cne 'not_run' }).Count -gt 0) { throw 'preset lifecycle install failure did not block dependent stages' }
+    } else {
+        if ([string]$Document.stages[1].status -ceq 'not_run') { throw 'preset lifecycle verify-after-install was not attempted' }
+        if ([string]$Document.stages[1].status -ceq 'fail') {
+            if (@($Document.stages[2..3] | Where-Object { [string]$_.status -cne 'not_run' }).Count -gt 0) { throw 'preset lifecycle verification failure did not block update stages' }
+        } else {
+            if ([string]$Document.stages[2].status -ceq 'not_run') { throw 'preset lifecycle update was not attempted' }
+            if ([string]$Document.stages[2].status -ceq 'fail' -and [string]$Document.stages[3].status -cne 'not_run') { throw 'preset lifecycle update failure did not block verification' }
+            if ([string]$Document.stages[2].status -ceq 'pass' -and [string]$Document.stages[3].status -ceq 'not_run') { throw 'preset lifecycle verify-after-update was not attempted' }
+        }
+    }
+    Assert-ReleaseKeys -Value $Document.results -Expected @('all_required_stages_passed','preset_consistent','auth_unchanged','unrelated_user_config_unchanged','cleanup_no_residue','installation_verified','update_verified') -Label 'preset lifecycle results'
+    foreach ($name in @($Document.results.Keys)) { Assert-ReleaseBoolean -Value $Document.results[$name] -Label "preset lifecycle result $name" }
+    $allStagesPassed = @($Document.stages | Where-Object { [string]$_.status -cne 'pass' }).Count -eq 0
+    $hasFailedStage = @($Document.stages | Where-Object { [string]$_.status -ceq 'fail' }).Count -gt 0
+    if ([bool]$Document.results.all_required_stages_passed -ne $allStagesPassed -or
+        [bool]$Document.results.installation_verified -ne ([string]$Document.stages[1].status -ceq 'pass') -or
+        [bool]$Document.results.update_verified -ne ([string]$Document.stages[3].status -ceq 'pass') -or
+        ([string]$Document.stages[5].status -ceq 'pass' -and -not [bool]$Document.results.cleanup_no_residue)) { throw 'preset lifecycle result aggregate is inconsistent' }
+    $formal = [string]$Document.producer_mode -ceq 'formal'
+    $allResultsPassed = @($Document.results.Keys | Where-Object { -not [bool]$Document.results[$_] }).Count -eq 0
+    $sourceUnchanged = [string]$Document.source.start.revision -ceq [string]$Document.source.end.revision -and [string]$Document.source.start.commit_tree_oid -ceq [string]$Document.source.end.commit_tree_oid -and [string]$Document.source.start.object_format -ceq [string]$Document.source.end.object_format -and [string]$Document.source.start.state_digest -ceq [string]$Document.source.end.state_digest
+    $operationalPass = $allStagesPassed -and $allResultsPassed -and $sourceUnchanged
+    $derivedStatus = if (-not $operationalPass) { 'fail' } elseif (-not $formal) { 'unavailable' } elseif (-not [bool]$Document.source_dirty -and [bool]$Document.source_state_stable) { 'pass' } else { 'fail' }
+    $derivedReason = if ($derivedStatus -ceq 'pass') { 'all-required-stages-passed' } elseif ($derivedStatus -ceq 'unavailable') { 'non-formal-producer-mode' } else { 'lifecycle-stage-or-result-failure' }
+    if ([string]$Document.status -cne $derivedStatus -or [string]$Document.reason -cne $derivedReason -or ($hasFailedStage -and $derivedStatus -cne 'fail')) { throw 'preset lifecycle aggregate status is inconsistent' }
+
+    return [ordered]@{
+        status=$derivedStatus
+        producer_identity=[string]$Document.producer_identity
+        source_revision=[string]$Document.source_revision
+        commit_tree_oid=[string]$Document.source.commit_tree_oid
+        object_format=[string]$Document.source.object_format
+        preset=[string]$Document.preset
+        report_run_id=[string]$Document.report_run_id
+        workspace_identity_digest=[string]$Document.execution.workspace_identity_digest
+        profile_identity_digest=[string]$Document.execution.profile_identity_digest
+    }
+}
+
+function Read-PresetLifecycleRolloutEvidence {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Gate,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource,
+        [Parameter(Mandatory)][string]$ExpectedPreset,
+        [string[]]$ProtectedRoots = @()
+    )
+    try {
+        Assert-ReleaseKeys -Value $Gate -Expected @('status','evidence_contract','artifact_path','evidence_digest','source_revision','producer_identity') -Label 'preset lifecycle gate'
+        if ([string]$Gate.evidence_contract -cne 'harness-preset-lifecycle-report/v1' -or [string]$Gate.source_revision -cne [string]$ExpectedSource.revision -or
+            [string]::IsNullOrWhiteSpace([string]$Gate.producer_identity)) { throw 'preset lifecycle gate binding is invalid' }
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$Gate.artifact_path) -ExpectedDigest ([string]$Gate.evidence_digest) -ProtectedRoots $ProtectedRoots -MaximumBytes 1MB
+        $document = ConvertFrom-PresetLifecycleEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        $result = Assert-PresetLifecycleReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource -ExpectedPreset $ExpectedPreset
+        $result['path'] = [string]$artifact.path
+        $result['raw_digest'] = [string]$artifact.digest
+        $result['report_digest'] = [string]$document.report_digest
+        $result['volume'] = [string]$artifact.physical.volume
+        $result['file_id'] = [string]$artifact.physical.file_id
+        return $result
+    } catch { throw [IO.InvalidDataException]::new('rollout-evidence-lifecycle-report-invalid',$_.Exception) }
+}
+
+function ConvertFrom-V1StopLossEvidenceBytes {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
+    return ConvertFrom-InstalledDesktopEvidenceBytes -Bytes $Bytes
+}
+
+function Assert-V1StopLossSanitizedContent {
+    param([AllowNull()][object]$Value)
+    Assert-InstalledDesktopSanitizedContent -Value $Value
+    Assert-HarnessPortableAdditionalSanitizedContent -Value $Value
+}
+
+function Assert-V1StopLossRouteProbe {
+    param(
+        [Parameter(Mandatory)][Collections.IDictionary]$Probe,
+        [Parameter(Mandatory)][Collections.IDictionary]$Expected
+    )
+    $keys = @('probe','status','exit_code','requested_protocol','detected_protocol','selected_protocol','preference_source','reason_code','expected_write_kind','unexpected_writes','artifact_digest_before','artifact_digest_after','command_digest','output_digest')
+    Assert-ReleaseKeys -Value $Probe -Expected $keys -Label "v1 stop-loss $($Expected.probe) probe"
+    if ([string]$Probe.probe -cne [string]$Expected.probe -or [string]$Probe.status -cnotin @('pass','fail','not_run') -or
+        [string]$Probe.requested_protocol -cne [string]$Expected.requested_protocol -or [string]$Probe.expected_write_kind -cne [string]$Expected.expected_write_kind) {
+        throw "v1 stop-loss $($Expected.probe) probe identity is invalid"
+    }
+    [void](Assert-ReleaseInteger -Value $Probe.unexpected_writes -Label "v1 stop-loss $($Expected.probe) unexpected writes" -NonNegative)
+    Assert-ReleaseDigestValue -Value $Probe.command_digest -Label "v1 stop-loss $($Expected.probe) command"
+    Assert-ReleaseDigestValue -Value $Probe.output_digest -Label "v1 stop-loss $($Expected.probe) output"
+    foreach ($name in @('artifact_digest_before','artifact_digest_after')) { if ($null -ne $Probe[$name]) { Assert-ReleaseDigestValue -Value $Probe[$name] -Label "v1 stop-loss $($Expected.probe) $name" } }
+    if ([string]$Probe.reason_code -cnotmatch '^[a-z0-9][a-z0-9-]{0,127}$') { throw "v1 stop-loss $($Expected.probe) reason is invalid" }
+    if ([string]$Probe.status -ceq 'pass') {
+        if ($Probe.exit_code -isnot [long] -or [long]$Probe.exit_code -ne 0 -or
+            [string]$Probe.detected_protocol -cne [string]$Expected.detected_protocol -or [string]$Probe.selected_protocol -cne [string]$Expected.selected_protocol -or
+            [string]$Probe.preference_source -cne [string]$Expected.preference_source -or [string]$Probe.reason_code -cne [string]$Expected.reason_code -or
+            [long]$Probe.unexpected_writes -ne 0) { throw "v1 stop-loss $($Expected.probe) pass result is invalid" }
+        if ([bool]$Expected.existing_artifact) {
+            Assert-ReleaseDigestValue -Value $Probe.artifact_digest_before -Label "v1 stop-loss $($Expected.probe) artifact before"
+            Assert-ReleaseDigestValue -Value $Probe.artifact_digest_after -Label "v1 stop-loss $($Expected.probe) artifact after"
+            if ([string]$Probe.artifact_digest_before -cne [string]$Probe.artifact_digest_after) { throw "v1 stop-loss $($Expected.probe) changed its existing Artifact" }
+        } elseif ($null -ne $Probe.artifact_digest_before -or $null -ne $Probe.artifact_digest_after) { throw "v1 stop-loss $($Expected.probe) unexpectedly reported an Artifact" }
+    } elseif ([string]$Probe.status -ceq 'fail') {
+        if ($Probe.exit_code -isnot [long] -or [long]$Probe.exit_code -eq 0) { throw "v1 stop-loss $($Expected.probe) failure exit code is invalid" }
+    } elseif ($null -ne $Probe.exit_code) { throw "v1 stop-loss $($Expected.probe) not-run exit code is invalid" }
+}
+
+function Assert-V1StopLossReport {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Collections.IDictionary]$ExpectedSource = $null,
+        [switch]$AllowNonFormalSource
+    )
+    $topKeys = @('schema_version','generated_at_utc','source_revision','source_dirty','source_state_stable','source','report_run_id','producer_identity','producer_mode','execution','route_probes','lifecycle','results','status','reason','report_digest')
+    Assert-ReleaseKeys -Value $Document -Expected $topKeys -Label 'v1 stop-loss report'
+    $schemaPath = Join-Path $RepoRoot 'schemas\v1-stop-loss-report.schema.json'
+    if (-not (Test-Path -LiteralPath $schemaPath -PathType Leaf) -or
+        -not (Test-Json -Json ($Document | ConvertTo-Json -Depth 100 -Compress) -SchemaFile $schemaPath -ErrorAction Stop -WarningAction SilentlyContinue)) {
+        throw 'v1 stop-loss report schema validation failed'
+    }
+    if ([string]$Document.schema_version -cne 'harness-v1-stop-loss-report/v1' -or [string]$Document.report_run_id -cnotmatch '^[0-9a-f]{32}$' -or
+        [string]$Document.producer_identity -cne 'v1-stop-loss-qualification/v1' -or [string]$Document.producer_mode -cnotin @('formal','test-only','diagnostic-smoke') -or
+        [string]$Document.status -cnotin @('pass','fail','unavailable')) { throw 'v1 stop-loss report identity is invalid' }
+    [void](Assert-PresetLifecycleUtcDate -Value $Document.generated_at_utc -Label 'v1 stop-loss report')
+    Assert-ReleaseReportDigest -Document $Document
+    Assert-V1StopLossSanitizedContent -Value $Document
+
+    Assert-ReleaseKeys -Value $Document.source -Expected @('commit_tree_oid','object_format','start','end','input_digests') -Label 'v1 stop-loss source'
+    $inputPaths = [ordered]@{
+        producer_digest='scripts/run-v1-stop-loss-qualification.ps1'
+        task_entry_digest='scripts/task.ps1'
+        advance_stage_digest='scripts/advance-stage.ps1'
+        protocol_module_digest='scripts/lib/Harness.Protocol.psm1'
+        task_state_module_digest='scripts/lib/Harness.TaskState.psm1'
+        atomic_write_digest='scripts/lib/Harness.AtomicWrite.psm1'
+        path_digest='scripts/lib/Harness.Path.psm1'
+    }
+    Assert-ReleaseKeys -Value $Document.source.input_digests -Expected @($inputPaths.Keys) -Label 'v1 stop-loss inputs'
+    foreach ($entry in $inputPaths.GetEnumerator()) { Assert-ReleaseCurrentFileDigest -RepoRoot $RepoRoot -Value $Document.source.input_digests[$entry.Key] -RelativePath ([string]$entry.Value) -Label ("v1 stop-loss {0}" -f $entry.Key) }
+    Assert-ReleaseSourceStateShape -Value $Document.source.start -Label 'v1 stop-loss source start'
+    Assert-ReleaseSourceStateShape -Value $Document.source.end -Label 'v1 stop-loss source end'
+    if ([string]$Document.source_revision -cne [string]$Document.source.start.revision -or [string]$Document.source.commit_tree_oid -cne [string]$Document.source.start.commit_tree_oid -or
+        [string]$Document.source.object_format -cne [string]$Document.source.start.object_format -or
+        [bool]$Document.source_dirty -ne ([bool]$Document.source.start.dirty -or [bool]$Document.source.end.dirty)) { throw 'v1 stop-loss source binding is invalid' }
+    $sourceStable = Test-HarnessReleaseSourceStable -Start $Document.source.start -End $Document.source.end
+    if ([bool]$Document.source_state_stable -ne $sourceStable) { throw 'v1 stop-loss source stability is inconsistent' }
+    if ($null -ne $ExpectedSource) {
+        Assert-ReleaseSourceStateMatchesExpected -Value $Document.source.start -Expected $ExpectedSource -Label 'v1 stop-loss source start'
+        Assert-ReleaseSourceStateMatchesExpected -Value $Document.source.end -Expected $ExpectedSource -Label 'v1 stop-loss source end'
+        Assert-HarnessPortableEvidenceSource -RepoRoot $RepoRoot -ExpectedSource $ExpectedSource
+    }
+    if (-not $AllowNonFormalSource -and ([bool]$Document.source_dirty -or -not [bool]$Document.source_state_stable)) { throw 'v1 stop-loss source is not clean and stable' }
+
+    Assert-ReleaseKeys -Value $Document.execution -Expected @('sequence_contract','isolated_workspace','isolated_profile','workspace_identity_digest','profile_identity_digest','duration_ms','raw_output_persisted','auth_bytes_persisted','private_paths_persisted') -Label 'v1 stop-loss execution'
+    if ([string]$Document.execution.sequence_contract -cne 'environment-v1-disable-v2-existing-v1-existing-v2-v1-lifecycle/v1' -or
+        $Document.execution.isolated_workspace -isnot [bool] -or -not [bool]$Document.execution.isolated_workspace -or $Document.execution.isolated_profile -isnot [bool] -or -not [bool]$Document.execution.isolated_profile -or
+        $Document.execution.raw_output_persisted -isnot [bool] -or [bool]$Document.execution.raw_output_persisted -or $Document.execution.auth_bytes_persisted -isnot [bool] -or [bool]$Document.execution.auth_bytes_persisted -or
+        $Document.execution.private_paths_persisted -isnot [bool] -or [bool]$Document.execution.private_paths_persisted) { throw 'v1 stop-loss execution identity is invalid' }
+    Assert-ReleaseDigestValue -Value $Document.execution.workspace_identity_digest -Label 'v1 stop-loss workspace identity'
+    Assert-ReleaseDigestValue -Value $Document.execution.profile_identity_digest -Label 'v1 stop-loss profile identity'
+    [void](Assert-ReleaseInteger -Value $Document.execution.duration_ms -Label 'v1 stop-loss duration' -Positive)
+
+    $routeExpectations = @(
+        [ordered]@{probe='environment-v1-new-task';requested_protocol='v1';detected_protocol='new';selected_protocol='v1';preference_source='HARNESS_PROTOCOL';reason_code='explicit-v1-new-task';expected_write_kind='none';existing_artifact=$false},
+        [ordered]@{probe='disable-v2-new-task';requested_protocol='v1';detected_protocol='new';selected_protocol='v1';preference_source='workspace-config';reason_code='workspace-v1-new-task';expected_write_kind='workspace-protocol-config';existing_artifact=$false},
+        [ordered]@{probe='existing-v1-artifact';requested_protocol='v2';detected_protocol='v1';selected_protocol='v1';preference_source='existing-artifact';reason_code='existing-v1-plan';expected_write_kind='none';existing_artifact=$true},
+        [ordered]@{probe='existing-v2-artifact';requested_protocol='v1';detected_protocol='v2';selected_protocol='v2';preference_source='existing-artifact';reason_code='existing-v2-task-state';expected_write_kind='none';existing_artifact=$true}
+    )
+    if (@($Document.route_probes).Count -ne 4) { throw 'v1 stop-loss route probe count is invalid' }
+    for ($index=0; $index -lt 4; $index++) { Assert-V1StopLossRouteProbe -Probe $Document.route_probes[$index] -Expected $routeExpectations[$index] }
+
+    $lifecycle = $Document.lifecycle
+    Assert-ReleaseKeys -Value $lifecycle -Expected @('status','initial_stage','final_stage','stage_sequence','transition_count','plan_digest_before','plan_digest_after','test_report_digest','unexpected_writes','reason') -Label 'v1 stop-loss lifecycle'
+    if ([string]$lifecycle.status -cnotin @('pass','fail','not_run')) { throw 'v1 stop-loss lifecycle status is invalid' }
+    [void](Assert-ReleaseInteger -Value $lifecycle.transition_count -Label 'v1 stop-loss lifecycle transition count' -NonNegative)
+    [void](Assert-ReleaseInteger -Value $lifecycle.unexpected_writes -Label 'v1 stop-loss lifecycle unexpected writes' -NonNegative)
+    foreach ($name in @('plan_digest_before','plan_digest_after','test_report_digest')) { if ($null -ne $lifecycle[$name]) { Assert-ReleaseDigestValue -Value $lifecycle[$name] -Label "v1 stop-loss lifecycle $name" } }
+    $expectedStages = @('PLAN','PLAN_REVIEW','IMPLEMENT','CODE_REVIEW','TEST','DONE')
+    $lifecyclePassed = [string]$lifecycle.status -ceq 'pass' -and [string]$lifecycle.initial_stage -ceq 'PLAN' -and [string]$lifecycle.final_stage -ceq 'DONE' -and
+        (@($lifecycle.stage_sequence) -join '>') -ceq ($expectedStages -join '>') -and [long]$lifecycle.transition_count -eq 5 -and [long]$lifecycle.unexpected_writes -eq 0 -and [string]$lifecycle.reason -ceq 'lifecycle-pass'
+    if ([string]$lifecycle.status -ceq 'pass') {
+        foreach ($name in @('plan_digest_before','plan_digest_after','test_report_digest')) { Assert-ReleaseDigestValue -Value $lifecycle[$name] -Label "v1 stop-loss lifecycle $name" }
+        if (-not $lifecyclePassed) { throw 'v1 stop-loss passing lifecycle is invalid' }
+    } elseif ([string]$lifecycle.status -ceq 'not_run' -and ($null -ne $lifecycle.initial_stage -or $null -ne $lifecycle.final_stage -or @($lifecycle.stage_sequence).Count -ne 0 -or [long]$lifecycle.transition_count -ne 0 -or [string]$lifecycle.reason -cne 'not-run')) { throw 'v1 stop-loss not-run lifecycle is invalid' }
+
+    $resultNames = @('environment_v1_selects_v1','disable_v2_selects_v1','existing_v1_artifact_remains_v1','existing_v2_artifact_remains_v2','existing_artifacts_unchanged_by_routing','v1_lifecycle_reaches_done','v1_stage_order_exact','runtime_default_untouched','auth_unchanged','unrelated_user_config_unchanged','cleanup_no_residue')
+    Assert-ReleaseKeys -Value $Document.results -Expected $resultNames -Label 'v1 stop-loss results'
+    foreach ($name in $resultNames) { Assert-ReleaseBoolean -Value $Document.results[$name] -Label "v1 stop-loss result $name" }
+    $routePasses = @($Document.route_probes | ForEach-Object { [string]$_.status -ceq 'pass' })
+    $derivedResults = [ordered]@{
+        environment_v1_selects_v1=$routePasses[0]
+        disable_v2_selects_v1=$routePasses[1]
+        existing_v1_artifact_remains_v1=$routePasses[2]
+        existing_v2_artifact_remains_v2=$routePasses[3]
+        existing_artifacts_unchanged_by_routing=($routePasses[2] -and $routePasses[3] -and [string]$Document.route_probes[2].artifact_digest_before -ceq [string]$Document.route_probes[2].artifact_digest_after -and [string]$Document.route_probes[3].artifact_digest_before -ceq [string]$Document.route_probes[3].artifact_digest_after)
+        v1_lifecycle_reaches_done=$lifecyclePassed
+        v1_stage_order_exact=$lifecyclePassed
+    }
+    foreach ($name in $derivedResults.Keys) { if ([bool]$Document.results[$name] -ne [bool]$derivedResults[$name]) { throw "v1 stop-loss result $name is inconsistent" } }
+    $hasUnavailable = @($Document.route_probes | Where-Object { [string]$_.status -ceq 'not_run' }).Count -gt 0 -or [string]$lifecycle.status -ceq 'not_run'
+    $hasFailure = @($Document.route_probes | Where-Object { [string]$_.status -ceq 'fail' }).Count -gt 0 -or [string]$lifecycle.status -ceq 'fail' -or (-not $hasUnavailable -and @($resultNames | Where-Object { -not [bool]$Document.results[$_] }).Count -gt 0)
+    $operationalPass = -not $hasFailure -and -not $hasUnavailable
+    $derivedStatus = if ($hasFailure) { 'fail' } elseif ($hasUnavailable) { 'unavailable' } elseif ([string]$Document.producer_mode -cne 'formal') { 'unavailable' } elseif (-not [bool]$Document.source_dirty -and [bool]$Document.source_state_stable -and $operationalPass) { 'pass' } else { 'fail' }
+    $derivedReason = if ($derivedStatus -ceq 'pass') { 'all-stop-loss-checks-passed' } elseif ($operationalPass -and [string]$Document.producer_mode -cne 'formal') { 'non-formal-producer-mode' } else { 'route-or-lifecycle-result-failure' }
+    if ([string]$Document.status -cne $derivedStatus -or [string]$Document.reason -cne $derivedReason) { throw 'v1 stop-loss aggregate status is inconsistent' }
+
+    return [ordered]@{status=$derivedStatus;producer_identity='v1-stop-loss-qualification/v1';source_revision=[string]$Document.source_revision;report_run_id=[string]$Document.report_run_id}
+}
+
+function Read-V1StopLossRolloutEvidence {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Gate,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource,
+        [string[]]$ProtectedRoots = @()
+    )
+    try {
+        Assert-ReleaseKeys -Value $Gate -Expected @('status','evidence_contract','artifact_path','evidence_digest','source_revision','producer_identity') -Label 'v1 stop-loss gate'
+        if ([string]$Gate.evidence_contract -cne 'harness-v1-stop-loss-report/v1' -or [string]$Gate.source_revision -cne [string]$ExpectedSource.revision -or [string]::IsNullOrWhiteSpace([string]$Gate.producer_identity)) { throw 'v1 stop-loss gate binding is invalid' }
+        $userProtected = if ([string]::IsNullOrWhiteSpace($env:USERPROFILE)) { @() } else { @('.claude','.agents','.dev-harness' | ForEach-Object { Join-Path $env:USERPROFILE $_ }) }
+        $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $RepoRoot -ProtectedRoots (@($ProtectedRoots) + $userProtected)
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$Gate.artifact_path) -ExpectedDigest ([string]$Gate.evidence_digest) -ProtectedRoots $protected -MaximumBytes 1MB
+        $document = ConvertFrom-V1StopLossEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        $result = Assert-V1StopLossReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource
+        $result['path'] = [string]$artifact.path
+        $result['raw_digest'] = [string]$artifact.digest
+        $result['report_digest'] = [string]$document.report_digest
+        return $result
+    } catch { throw [IO.InvalidDataException]::new('rollout-evidence-v1-stop-loss-report-invalid',$_.Exception) }
+}
+
+function Get-ReleaseRunnerObservationInputPaths {
+    return [ordered]@{
+        boundary_script_digest='scripts/assert-release-runner-boundary.ps1'
+        observation_schema_digest='schemas/release-runner-observation.schema.json'
+        rollout_evidence_digest='scripts/lib/Harness.RolloutEvidence.psm1'
+        host_benchmark_trial_digest='scripts/host-benchmark/HostBenchmark.Trial.ps1'
+        atomic_write_digest='scripts/lib/Harness.AtomicWrite.psm1'
+        path_digest='scripts/lib/Harness.Path.psm1'
+    }
+}
+
+function Get-ReleaseIsolationInputPaths {
+    return [ordered]@{
+        producer_digest='scripts/generate-release-isolation-report.ps1'
+        report_schema_digest='schemas/release-isolation-report.schema.json'
+        observation_schema_digest='schemas/release-runner-observation.schema.json'
+        boundary_script_digest='scripts/assert-release-runner-boundary.ps1'
+        rollout_evidence_digest='scripts/lib/Harness.RolloutEvidence.psm1'
+        host_benchmark_trial_digest='scripts/host-benchmark/HostBenchmark.Trial.ps1'
+        atomic_write_digest='scripts/lib/Harness.AtomicWrite.psm1'
+        path_digest='scripts/lib/Harness.Path.psm1'
+    }
+}
+
+function Write-ReleaseIsolationArtifact {
+    param([Parameter(Mandatory)][string]$Target,[Parameter(Mandatory)][AllowEmptyString()][string]$Content)
+    if (Test-Path -LiteralPath $Target) { throw 'release-output-already-exists' }
+    Assert-ReleasePathHasNoReparseAncestor -Path $Target
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($Content)
+    $digest = Get-ReleaseSha256Bytes -Bytes $bytes
+    $writeRoot = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($Target))
+    while (-not (Test-Path -LiteralPath $writeRoot -PathType Container)) {
+        $parent = [IO.Path]::GetDirectoryName($writeRoot)
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -ceq $writeRoot) { throw 'release-output-parent-unavailable' }
+        $writeRoot = $parent
+    }
+    $written = & $script:RolloutAtomicModule {
+        param($Root,$Path,$Value,$Expected)
+        Write-HarnessAtomicBytes -WorkspaceRoot $Root -Path $Path -SourceBytes $Value -ExpectedSourceDigest $Expected -ExpectedCurrentDigest 'missing'
+    } $writeRoot $Target $bytes $digest
+    if ([string]$written -cne $digest) { throw 'release isolation atomic write digest mismatch' }
+    return $digest
+}
+
+function Assert-ReleaseIsolationSanitizedContent {
+    param([AllowNull()][object]$Value)
+    Assert-InstalledDesktopSanitizedContent -Value $Value
+    Assert-HarnessPortableAdditionalSanitizedContent -Value $Value
+    if ($null -eq $Value) { return }
+    if ($Value -is [Collections.IDictionary]) {
+        foreach ($entry in $Value.GetEnumerator()) { Assert-ReleaseIsolationSanitizedContent -Value $entry.Value }
+    } elseif ($Value -is [Collections.IEnumerable] -and $Value -isnot [string]) {
+        foreach ($item in $Value) { Assert-ReleaseIsolationSanitizedContent -Value $item }
+    } elseif ($Value -is [string] -and [string]$Value -match '(?i)(?:^|[^A-Za-z0-9])S-[0-9]+(?:-[0-9]+){2,}(?:$|[^A-Za-z0-9])') {
+        throw 'release isolation evidence contains private account identity'
+    }
+}
+
+function Assert-ReleaseIsolationContentDigest {
+    param(
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Parameter(Mandatory)][ValidateSet('observation_digest','report_digest','receipt_digest')][string]$Property
+    )
+    Assert-ReleaseDigestValue -Value $Document[$Property] -Label $Property
+    $saved = $Document[$Property]
+    try {
+        $Document[$Property] = $null
+        $actual = Get-ReleaseSha256Text -Text ($Document | ConvertTo-Json -Depth 100 -Compress)
+    } finally { $Document[$Property] = $saved }
+    if ([string]$saved -cne $actual) { throw "$Property mismatch" }
+}
+
+function Test-ReleaseIsolationSourceStateEqual {
+    param([Collections.IDictionary]$Left,[Collections.IDictionary]$Right)
+    foreach ($name in @('revision','commit_tree_oid','object_format','status_digest','state_digest','state_basis')) {
+        if ([string]$Left[$name] -cne [string]$Right[$name]) { return $false }
+    }
+    return [bool]$Left.dirty -eq [bool]$Right.dirty -and [long]$Left.status_entry_count -eq [long]$Right.status_entry_count
+}
+
+function Assert-ReleaseIsolationSourceBinding {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Parameter(Mandatory)][Collections.IDictionary]$InputPaths,
+        [Collections.IDictionary]$ExpectedSource = $null,
+        [switch]$RequirePortableSource
+    )
+    Assert-ReleaseKeys -Value $Document.source -Expected @('commit_tree_oid','object_format','start','end','input_digests') -Label 'release isolation source'
+    Assert-ReleaseKeys -Value $Document.source.input_digests -Expected @($InputPaths.Keys) -Label 'release isolation source inputs'
+    foreach ($entry in $InputPaths.GetEnumerator()) {
+        Assert-ReleaseCurrentFileDigest -RepoRoot $RepoRoot -Value $Document.source.input_digests[$entry.Key] -RelativePath ([string]$entry.Value) -Label ("release isolation {0}" -f $entry.Key)
+    }
+    Assert-ReleaseSourceStateShape -Value $Document.source.start -Label 'release isolation source start'
+    Assert-ReleaseSourceStateShape -Value $Document.source.end -Label 'release isolation source end'
+    if ([string]$Document.source_revision -cne [string]$Document.source.start.revision -or
+        [string]$Document.source.commit_tree_oid -cne [string]$Document.source.start.commit_tree_oid -or
+        [string]$Document.source.object_format -cne [string]$Document.source.start.object_format -or
+        [bool]$Document.source_dirty -ne ([bool]$Document.source.start.dirty -or [bool]$Document.source.end.dirty)) {
+        throw 'release isolation source binding is invalid'
+    }
+    $stable = Test-HarnessReleaseSourceStable -Start $Document.source.start -End $Document.source.end
+    if ([bool]$Document.source_state_stable -ne $stable) { throw 'release isolation source stability is inconsistent' }
+    if ($null -ne $ExpectedSource) {
+        Assert-ReleaseSourceStateMatchesExpected -Value $Document.source.start -Expected $ExpectedSource -Label 'release isolation source start'
+        Assert-ReleaseSourceStateMatchesExpected -Value $Document.source.end -Expected $ExpectedSource -Label 'release isolation source end'
+        if ($RequirePortableSource) { Assert-HarnessPortableEvidenceSource -RepoRoot $RepoRoot -ExpectedSource $ExpectedSource }
+    }
+    return $stable
+}
+
+function Assert-ReleaseRunnerObservation {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Collections.IDictionary]$ExpectedSource = $null,
+        [switch]$RequirePortableSource
+    )
+    $topKeys = @('schema_version','generated_at_utc','source_revision','source_dirty','source_state_stable','source','observation_run_id','producer_identity','producer_mode','role','workflow','runner','codex_home','credential_boundary','status','reason','observation_digest')
+    Assert-ReleaseKeys -Value $Document -Expected $topKeys -Label 'release runner observation'
+    $schemaPath = Join-Path $RepoRoot 'schemas/release-runner-observation.schema.json'
+    if (-not (Test-Json -Json ($Document | ConvertTo-Json -Depth 100 -Compress) -SchemaFile $schemaPath -ErrorAction Stop -WarningAction SilentlyContinue)) { throw 'release runner observation schema validation failed' }
+    if ([string]$Document.schema_version -cne 'harness-release-runner-observation/v1' -or [string]$Document.observation_run_id -cnotmatch '^[0-9a-f]{32}$' -or
+        [string]$Document.producer_identity -cne 'release-runner-observation/v1' -or [string]$Document.producer_mode -cnotin @('formal','test-only','diagnostic-smoke') -or
+        [string]$Document.role -cnotin @('model-producer','host-producer','aggregator') -or [string]$Document.status -cnotin @('pass','fail','unavailable')) {
+        throw 'release runner observation identity is invalid'
+    }
+    Assert-ReleaseDate -Value $Document.generated_at_utc -Label 'release runner observation'
+    Assert-ReleaseIsolationContentDigest -Document $Document -Property observation_digest
+    Assert-ReleaseIsolationSanitizedContent -Value $Document
+    $stable = Assert-ReleaseIsolationSourceBinding -RepoRoot $RepoRoot -Document $Document -InputPaths (Get-ReleaseRunnerObservationInputPaths) -ExpectedSource $ExpectedSource -RequirePortableSource:$RequirePortableSource
+
+    Assert-ReleaseKeys -Value $Document.workflow -Expected @('run_id','run_attempt') -Label 'release runner workflow'
+    if ([string]$Document.workflow.run_id -cnotmatch '^[1-9][0-9]*$' -or ($Document.workflow.run_attempt -isnot [long] -and $Document.workflow.run_attempt -isnot [int]) -or [long]$Document.workflow.run_attempt -lt 1) { throw 'release runner workflow identity is invalid' }
+    Assert-ReleaseKeys -Value $Document.runner -Expected @('label_digest','account_digest','account_digest_basis','platform') -Label 'release runner identity'
+    Assert-ReleaseDigestValue -Value $Document.runner.label_digest -Label 'release runner label'
+    Assert-ReleaseDigestValue -Value $Document.runner.account_digest -Label 'release runner account'
+    if ([string]$Document.runner.account_digest_basis -cne 'windows-sid-workflow-run/v1' -or [string]$Document.runner.platform -cne 'windows') { throw 'release runner identity basis is invalid' }
+
+    Assert-ReleaseKeys -Value $Document.codex_home -Expected @('mode','identity_digest','layout_stable','auth_status','path_persisted') -Label 'release runner Codex Home'
+    Assert-ReleaseKeys -Value $Document.credential_boundary -Expected @('forbidden_process_credentials_absent','default_auth_absent','credential_values_persisted') -Label 'release runner credential boundary'
+    foreach ($name in @('layout_stable','path_persisted')) { Assert-ReleaseBoolean -Value $Document.codex_home[$name] -Label "release runner Codex Home $name" }
+    foreach ($name in @('forbidden_process_credentials_absent','default_auth_absent','credential_values_persisted')) { Assert-ReleaseBoolean -Value $Document.credential_boundary[$name] -Label "release runner credential boundary $name" }
+    if ([bool]$Document.codex_home.path_persisted -or [bool]$Document.credential_boundary.credential_values_persisted) { throw 'release runner observation persisted private data' }
+    if ([string]$Document.role -ceq 'aggregator') {
+        if ([string]$Document.codex_home.mode -cne 'absent' -or $null -ne $Document.codex_home.identity_digest -or -not [bool]$Document.codex_home.layout_stable -or
+            [string]$Document.codex_home.auth_status -cne 'absent' -or -not [bool]$Document.credential_boundary.forbidden_process_credentials_absent -or -not [bool]$Document.credential_boundary.default_auth_absent) {
+            throw 'release runner aggregator boundary is invalid'
+        }
+    } else {
+        if ([string]$Document.codex_home.mode -cne 'dedicated-auth-home' -or -not [bool]$Document.codex_home.layout_stable -or [string]$Document.codex_home.auth_status -cne 'present') { throw 'release runner producer Home is invalid' }
+        Assert-ReleaseDigestValue -Value $Document.codex_home.identity_digest -Label 'release runner producer Home identity'
+    }
+
+    $expectedReason = if ([string]$Document.status -ceq 'fail') { 'boundary-check-failed' } elseif ([string]$Document.producer_mode -cne 'formal') { 'non-formal-producer-mode' } elseif ([string]$Document.status -ceq 'unavailable') { 'boundary-unavailable' } else { 'all-boundary-checks-passed' }
+    if ([string]$Document.reason -cne $expectedReason -or ([string]$Document.producer_mode -cne 'formal' -and [string]$Document.status -ceq 'pass') -or
+        ([string]$Document.status -ceq 'pass' -and ([bool]$Document.source_dirty -or -not $stable))) { throw 'release runner observation status is inconsistent' }
+
+    return [ordered]@{
+        observation_run_id=[string]$Document.observation_run_id;observation_digest=[string]$Document.observation_digest;role=[string]$Document.role
+        runner_label_digest=[string]$Document.runner.label_digest;account_digest=[string]$Document.runner.account_digest;codex_home_identity_digest=$Document.codex_home.identity_digest
+        status=[string]$Document.status;producer_mode=[string]$Document.producer_mode;workflow=$Document.workflow;source=$Document.source
+        codex_home_mode=[string]$Document.codex_home.mode;codex_home_layout_stable=[bool]$Document.codex_home.layout_stable;codex_home_auth_status=[string]$Document.codex_home.auth_status
+        aggregator_credential_blind=([bool]$Document.credential_boundary.forbidden_process_credentials_absent -and [bool]$Document.credential_boundary.default_auth_absent -and -not [bool]$Document.credential_boundary.credential_values_persisted)
+    }
+}
+
+function New-ReleaseRunnerObservationArtifact {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][ValidateSet('producer','aggregator')][string]$Mode,
+        [Parameter(Mandatory)][ValidateSet('model-producer','host-producer','aggregator')][string]$Role,
+        [Parameter(Mandatory)][string]$ProducerRunnerLabel,
+        [Parameter(Mandatory)][string]$AggregatorRunnerLabel,
+        [Parameter(Mandatory)][string]$AccountDigest,
+        [Parameter(Mandatory)][string]$RunId,
+        [Parameter(Mandatory)][string]$RunAttempt,
+        [AllowEmptyString()][string]$CodexHome = '',
+        [Parameter(Mandatory)][ValidateSet('formal','test-only','diagnostic-smoke')][string]$ProducerMode,
+        [Parameter(Mandatory)][string]$OutputPath
+    )
+    $repo = (Resolve-Path -LiteralPath $RepoRoot).Path
+    if (($Mode -ceq 'aggregator') -ne ($Role -ceq 'aggregator')) { throw 'release runner observation role does not match boundary mode' }
+    Assert-ReleaseDigestValue -Value $AccountDigest -Label 'release runner account'
+    $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $repo -ProtectedRoots @($CodexHome)
+    $target = Resolve-HarnessReleaseArtifactPath -RepoRoot $repo -OutputPath $OutputPath -ProtectedRoots $protected
+    $sourceStart = Get-HarnessReleaseSourceState -RepoRoot $repo
+    $runnerLabel = if ($Role -ceq 'aggregator') { $AggregatorRunnerLabel } else { $ProducerRunnerLabel }
+    $labelDigest = Get-ReleaseSha256Text -Text "release-runner-label/v1`n$runnerLabel"
+    $credentialNames = @('CODEX_API_KEY','CODEX_ACCESS_TOKEN','OPENAI_API_KEY')
+    $credentialPresent = @($credentialNames | Where-Object { -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_,[EnvironmentVariableTarget]::Process)) }).Count -gt 0
+    $profileHome = if (-not [string]::IsNullOrWhiteSpace($HOME)) { [string]$HOME } elseif (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) { [string]$env:USERPROFILE } else { '' }
+    $defaultAuthPath = if ([string]::IsNullOrWhiteSpace($profileHome)) { '' } else { Join-Path $profileHome '.codex\auth.json' }
+    $defaultAuthAbsent = [string]::IsNullOrWhiteSpace($defaultAuthPath) -or -not (Test-Path -LiteralPath $defaultAuthPath)
+
+    if ($Role -ceq 'aggregator') {
+        if (-not [string]::IsNullOrWhiteSpace($CodexHome)) { throw 'release runner aggregator does not accept Codex Home' }
+        $aggregatorFields = @('HOST_BENCHMARK_CODEX_HOME','CODEX_HOME') + $credentialNames
+        $aggregatorCredentialFree = @($aggregatorFields | Where-Object { -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_,[EnvironmentVariableTarget]::Process)) }).Count -eq 0
+        if (-not $aggregatorCredentialFree -or -not $defaultAuthAbsent) { throw 'release runner aggregator credential boundary is not clean' }
+        $codexHomeRecord = [ordered]@{mode='absent';identity_digest=$null;layout_stable=$true;auth_status='absent';path_persisted=$false}
+        $credentialRecord = [ordered]@{forbidden_process_credentials_absent=$true;default_auth_absent=$true;credential_values_persisted=$false}
+    } else {
+        if ([string]::IsNullOrWhiteSpace($CodexHome) -or -not [IO.Path]::IsPathRooted($CodexHome)) { throw 'release runner producer Codex Home must be an absolute directory' }
+        $resolvedHome = if ($ProducerMode -ceq 'formal') {
+            Assert-HostCodexHome -Path $CodexHome -RepoRoot $repo -ScratchRoot $repo
+        } else { Assert-HostCodexHomeLayout -Path $CodexHome }
+        $homePhysical = Get-HostPhysicalPathInfo -Path $resolvedHome -RejectLinks
+        $repoPhysical = Get-HostPhysicalPathInfo -Path $repo -RejectLinks
+        if ((Test-ReleasePathAtOrBelow -Path ([string]$homePhysical.physical_path) -Root ([string]$repoPhysical.physical_path)) -or
+            (Test-ReleasePathAtOrBelow -Path ([string]$repoPhysical.physical_path) -Root ([string]$homePhysical.physical_path))) { throw 'release runner producer Codex Home overlaps source' }
+        $unsafeHomes = [Collections.Generic.List[string]]::new()
+        if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) { $unsafeHomes.Add((Join-Path $env:USERPROFILE '.codex')) }
+        $configuredCodexHome = [Environment]::GetEnvironmentVariable('CODEX_HOME',[EnvironmentVariableTarget]::Process)
+        if (-not [string]::IsNullOrWhiteSpace($configuredCodexHome)) { $unsafeHomes.Add($configuredCodexHome) }
+        foreach ($unsafeHome in $unsafeHomes) {
+            if ([string]::IsNullOrWhiteSpace($unsafeHome)) { continue }
+            $unsafePhysical = Get-HostPhysicalPathInfo -Path $unsafeHome -AllowMissing
+            if ((Test-ReleasePathAtOrBelow -Path ([string]$homePhysical.physical_path) -Root ([string]$unsafePhysical.physical_path)) -or
+                (Test-ReleasePathAtOrBelow -Path ([string]$unsafePhysical.physical_path) -Root ([string]$homePhysical.physical_path))) { throw 'release runner producer Codex Home is not dedicated' }
+        }
+        $homeIdentity = Get-ReleaseSha256Text -Text ("release-codex-home-physical-identity/v1`n{0}`n{1}" -f [string]$homePhysical.volume,[string]$homePhysical.file_id)
+        $codexHomeRecord = [ordered]@{mode='dedicated-auth-home';identity_digest=$homeIdentity;layout_stable=$true;auth_status='present';path_persisted=$false}
+        $credentialRecord = [ordered]@{forbidden_process_credentials_absent=(-not $credentialPresent);default_auth_absent=$defaultAuthAbsent;credential_values_persisted=$false}
+    }
+
+    $inputDigests = [ordered]@{}
+    foreach ($entry in (Get-ReleaseRunnerObservationInputPaths).GetEnumerator()) { $inputDigests[$entry.Key] = Get-ReleaseFileDigest -Path (Join-Path $repo ([string]$entry.Value)) }
+    $sourceEnd = Get-HarnessReleaseSourceState -RepoRoot $repo
+    $stable = Test-HarnessReleaseSourceStable -Start $sourceStart -End $sourceEnd
+    $status = if ($ProducerMode -cne 'formal') { 'unavailable' } elseif (-not [bool]$sourceStart.dirty -and $stable) { 'pass' } else { 'fail' }
+    $reason = if ($status -ceq 'pass') { 'all-boundary-checks-passed' } elseif ($status -ceq 'unavailable') { 'non-formal-producer-mode' } else { 'boundary-check-failed' }
+    $document = [ordered]@{
+        schema_version='harness-release-runner-observation/v1';generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o');source_revision=[string]$sourceStart.revision
+        source_dirty=([bool]$sourceStart.dirty -or [bool]$sourceEnd.dirty);source_state_stable=$stable
+        source=[ordered]@{commit_tree_oid=[string]$sourceStart.commit_tree_oid;object_format=[string]$sourceStart.object_format;start=$sourceStart;end=$sourceEnd;input_digests=$inputDigests}
+        observation_run_id=[guid]::NewGuid().ToString('N');producer_identity='release-runner-observation/v1';producer_mode=$ProducerMode;role=$Role
+        workflow=[ordered]@{run_id=$RunId;run_attempt=[long]$RunAttempt}
+        runner=[ordered]@{label_digest=$labelDigest;account_digest=$AccountDigest;account_digest_basis='windows-sid-workflow-run/v1';platform='windows'}
+        codex_home=$codexHomeRecord;credential_boundary=$credentialRecord;status=$status;reason=$reason;observation_digest=$null
+    }
+    $document.observation_digest = Get-ReleaseSha256Text -Text ($document | ConvertTo-Json -Depth 100 -Compress)
+    $json = $document | ConvertTo-Json -Depth 100 -Compress
+    $validatedDocument = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($json))
+    [void](Assert-ReleaseRunnerObservation -RepoRoot $repo -Document $validatedDocument -ExpectedSource $sourceStart)
+    $rawDigest = Write-ReleaseIsolationArtifact -Target $target -Content $json
+    $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath $target -ExpectedDigest $rawDigest -ProtectedRoots $protected -MaximumBytes 512KB
+    $reopened = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+    [void](Assert-ReleaseRunnerObservation -RepoRoot $repo -Document $reopened -ExpectedSource $sourceStart)
+    return $reopened
+}
+
+function Assert-ReleaseIsolationObservationSummary {
+    param([Collections.IDictionary]$Summary,[string]$ExpectedRole,[string]$Label)
+    Assert-ReleaseKeys -Value $Summary -Expected @('observation_run_id','observation_digest','role','runner_label_digest','account_digest','codex_home_identity_digest','status') -Label $Label
+    if ([string]$Summary.observation_run_id -cnotmatch '^[0-9a-f]{32}$' -or [string]$Summary.role -cne $ExpectedRole -or [string]$Summary.status -cnotin @('pass','fail','unavailable')) { throw "$Label identity is invalid" }
+    foreach ($name in @('observation_digest','runner_label_digest','account_digest')) { Assert-ReleaseDigestValue -Value $Summary[$name] -Label "$Label $name" }
+    if ($ExpectedRole -ceq 'aggregator') {
+        if ($null -ne $Summary.codex_home_identity_digest) { throw "$Label Codex Home identity is invalid" }
+    } else { Assert-ReleaseDigestValue -Value $Summary.codex_home_identity_digest -Label "$Label Codex Home identity" }
+}
+
+function Assert-ReleaseIsolationReport {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Collections.IDictionary]$ExpectedSource = $null,
+        [switch]$RequirePortableSource
+    )
+    $topKeys = @('schema_version','generated_at_utc','source_revision','source_dirty','source_state_stable','source','report_run_id','producer_identity','producer_mode','workflow','observations','results','status','reason','report_digest')
+    Assert-ReleaseKeys -Value $Document -Expected $topKeys -Label 'release isolation report'
+    $schemaPath = Join-Path $RepoRoot 'schemas/release-isolation-report.schema.json'
+    if (-not (Test-Json -Json ($Document | ConvertTo-Json -Depth 100 -Compress) -SchemaFile $schemaPath -ErrorAction Stop -WarningAction SilentlyContinue)) { throw 'release isolation report schema validation failed' }
+    if ([string]$Document.schema_version -cne 'harness-release-isolation-report/v1' -or [string]$Document.report_run_id -cnotmatch '^[0-9a-f]{32}$' -or
+        [string]$Document.producer_identity -cne 'release-isolation-qualification/v1' -or [string]$Document.producer_mode -cnotin @('formal','test-only','diagnostic-smoke') -or
+        [string]$Document.status -cnotin @('pass','fail','unavailable')) { throw 'release isolation report identity is invalid' }
+    Assert-ReleaseDate -Value $Document.generated_at_utc -Label 'release isolation report'
+    Assert-ReleaseIsolationContentDigest -Document $Document -Property report_digest
+    Assert-ReleaseIsolationSanitizedContent -Value $Document
+    $stable = Assert-ReleaseIsolationSourceBinding -RepoRoot $RepoRoot -Document $Document -InputPaths (Get-ReleaseIsolationInputPaths) -ExpectedSource $ExpectedSource -RequirePortableSource:$RequirePortableSource
+    Assert-ReleaseKeys -Value $Document.workflow -Expected @('run_id','run_attempt') -Label 'release isolation workflow'
+    if ([string]$Document.workflow.run_id -cnotmatch '^[1-9][0-9]*$' -or ($Document.workflow.run_attempt -isnot [long] -and $Document.workflow.run_attempt -isnot [int]) -or [long]$Document.workflow.run_attempt -lt 1) { throw 'release isolation workflow identity is invalid' }
+    Assert-ReleaseKeys -Value $Document.observations -Expected @('model_producer','host_producer','aggregator') -Label 'release isolation observations'
+    $model = $Document.observations.model_producer; $host = $Document.observations.host_producer; $aggregator = $Document.observations.aggregator
+    Assert-ReleaseIsolationObservationSummary -Summary $model -ExpectedRole 'model-producer' -Label 'release isolation model observation'
+    Assert-ReleaseIsolationObservationSummary -Summary $host -ExpectedRole 'host-producer' -Label 'release isolation host observation'
+    Assert-ReleaseIsolationObservationSummary -Summary $aggregator -ExpectedRole 'aggregator' -Label 'release isolation aggregator observation'
+    $resultNames = @('observations_distinct','workflow_identity_consistent','source_identity_consistent','producer_labels_consistent','producer_aggregator_labels_distinct','aggregator_account_distinct_from_model','aggregator_account_distinct_from_host','producer_codex_home_same','producer_codex_home_dedicated','producer_auth_present','aggregator_credential_blind','no_private_identity_persisted')
+    Assert-ReleaseKeys -Value $Document.results -Expected $resultNames -Label 'release isolation results'
+    foreach ($name in $resultNames) { Assert-ReleaseBoolean -Value $Document.results[$name] -Label "release isolation result $name" }
+    $summaries = @($model,$host,$aggregator)
+    $derived = [ordered]@{
+        observations_distinct=(@($summaries.observation_run_id | Select-Object -Unique).Count -eq 3 -and @($summaries.observation_digest | Select-Object -Unique).Count -eq 3)
+        workflow_identity_consistent=$true
+        source_identity_consistent=$true
+        producer_labels_consistent=([string]$model.runner_label_digest -ceq [string]$host.runner_label_digest)
+        producer_aggregator_labels_distinct=([string]$model.runner_label_digest -cne [string]$aggregator.runner_label_digest -and [string]$host.runner_label_digest -cne [string]$aggregator.runner_label_digest)
+        aggregator_account_distinct_from_model=([string]$aggregator.account_digest -cne [string]$model.account_digest)
+        aggregator_account_distinct_from_host=([string]$aggregator.account_digest -cne [string]$host.account_digest)
+        producer_codex_home_same=([string]$model.codex_home_identity_digest -ceq [string]$host.codex_home_identity_digest)
+        producer_codex_home_dedicated=($null -ne $model.codex_home_identity_digest -and $null -ne $host.codex_home_identity_digest)
+        no_private_identity_persisted=$true
+    }
+    foreach ($name in $derived.Keys) { if ([bool]$Document.results[$name] -ne [bool]$derived[$name]) { throw "release isolation result $name is inconsistent" } }
+    $hasFailure = @($summaries | Where-Object { [string]$_.status -ceq 'fail' }).Count -gt 0 -or @($resultNames | Where-Object { -not [bool]$Document.results[$_] }).Count -gt 0
+    $hasUnavailable = @($summaries | Where-Object { [string]$_.status -ceq 'unavailable' }).Count -gt 0
+    $derivedStatus = if ($hasFailure) { 'fail' } elseif ([string]$Document.producer_mode -cne 'formal') { 'unavailable' } elseif ($hasUnavailable) { 'unavailable' } elseif ([bool]$Document.source_dirty -or -not $stable) { 'fail' } else { 'pass' }
+    $derivedReason = if ($derivedStatus -ceq 'pass') { 'all-isolation-checks-passed' } elseif ($derivedStatus -ceq 'fail') { 'isolation-check-failed' } elseif ([string]$Document.producer_mode -cne 'formal') { 'non-formal-producer-mode' } else { 'isolation-unavailable' }
+    if ([string]$Document.status -cne $derivedStatus -or [string]$Document.reason -cne $derivedReason) { throw 'release isolation aggregate status is inconsistent' }
+    return [ordered]@{status=$derivedStatus;reason=$derivedReason;producer_identity='release-isolation-qualification/v1';producer_mode=[string]$Document.producer_mode;source_revision=[string]$Document.source_revision;report_run_id=[string]$Document.report_run_id}
+}
+
+function New-ReleaseIsolationReportArtifact {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$ModelProducerObservationPath,
+        [Parameter(Mandatory)][string]$HostProducerObservationPath,
+        [Parameter(Mandatory)][string]$AggregatorObservationPath,
+        [Parameter(Mandatory)][string]$OutputPath,
+        [Parameter(Mandatory)][ValidateSet('formal','test-only','diagnostic-smoke')][string]$ProducerMode
+    )
+    $repo = (Resolve-Path -LiteralPath $RepoRoot).Path
+    $inputPaths = @($ModelProducerObservationPath,$HostProducerObservationPath,$AggregatorObservationPath)
+    $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $repo
+    $target = Resolve-HarnessReleaseArtifactPath -RepoRoot $repo -OutputPath $OutputPath -EvidencePaths $inputPaths -ProtectedRoots $protected
+    $sourceStart = Get-HarnessReleaseSourceState -RepoRoot $repo
+    $definitions = @(
+        [ordered]@{name='model_producer';role='model-producer';path=$ModelProducerObservationPath},
+        [ordered]@{name='host_producer';role='host-producer';path=$HostProducerObservationPath},
+        [ordered]@{name='aggregator';role='aggregator';path=$AggregatorObservationPath}
+    )
+    $records = [ordered]@{}
+    foreach ($definition in $definitions) {
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$definition.path) -ProtectedRoots $protected -MaximumBytes 512KB
+        $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        $validated = Assert-ReleaseRunnerObservation -RepoRoot $repo -Document $document -ExpectedSource $sourceStart
+        if ([string]$validated.role -cne [string]$definition.role -or [string]$validated.producer_mode -cne $ProducerMode) { throw 'release isolation observation role or producer mode is invalid' }
+        $records[$definition.name] = [ordered]@{artifact=$artifact;document=$document;validated=$validated}
+    }
+    $values = @($records.Values)
+    if (@($values.artifact.path | Sort-Object -Unique).Count -ne 3 -or @($values.artifact.digest | Sort-Object -Unique).Count -ne 3 -or
+        @($values | ForEach-Object { "{0}|{1}" -f [string]$_.artifact.physical.volume,[string]$_.artifact.physical.file_id } | Sort-Object -Unique).Count -ne 3 -or
+        @($values.validated.observation_run_id | Sort-Object -Unique).Count -ne 3) { throw 'release isolation observations are not independent' }
+    $workflowKeys = @($values | ForEach-Object { "{0}|{1}" -f [string]$_.document.workflow.run_id,[long]$_.document.workflow.run_attempt } | Sort-Object -Unique)
+    $sourceKeys = @($values | ForEach-Object { "{0}|{1}|{2}|{3}" -f [string]$_.document.source_revision,[string]$_.document.source.commit_tree_oid,[string]$_.document.source.object_format,[string]$_.document.source.start.state_digest } | Sort-Object -Unique)
+    if ($workflowKeys.Count -ne 1) { throw 'release isolation observation workflow identities differ' }
+    if ($sourceKeys.Count -ne 1) { throw 'release isolation observation source identities differ' }
+    $model = $records.model_producer.validated; $host = $records.host_producer.validated; $aggregator = $records.aggregator.validated
+    $results = [ordered]@{
+        observations_distinct=$true;workflow_identity_consistent=$true;source_identity_consistent=$true
+        producer_labels_consistent=([string]$model.runner_label_digest -ceq [string]$host.runner_label_digest)
+        producer_aggregator_labels_distinct=([string]$model.runner_label_digest -cne [string]$aggregator.runner_label_digest -and [string]$host.runner_label_digest -cne [string]$aggregator.runner_label_digest)
+        aggregator_account_distinct_from_model=([string]$aggregator.account_digest -cne [string]$model.account_digest)
+        aggregator_account_distinct_from_host=([string]$aggregator.account_digest -cne [string]$host.account_digest)
+        producer_codex_home_same=([string]$model.codex_home_identity_digest -ceq [string]$host.codex_home_identity_digest)
+        producer_codex_home_dedicated=([string]$model.codex_home_mode -ceq 'dedicated-auth-home' -and [string]$host.codex_home_mode -ceq 'dedicated-auth-home' -and [bool]$model.codex_home_layout_stable -and [bool]$host.codex_home_layout_stable)
+        producer_auth_present=([string]$model.codex_home_auth_status -ceq 'present' -and [string]$host.codex_home_auth_status -ceq 'present')
+        aggregator_credential_blind=[bool]$aggregator.aggregator_credential_blind
+        no_private_identity_persisted=$true
+    }
+    $inputDigests = [ordered]@{}
+    foreach ($entry in (Get-ReleaseIsolationInputPaths).GetEnumerator()) { $inputDigests[$entry.Key] = Get-ReleaseFileDigest -Path (Join-Path $repo ([string]$entry.Value)) }
+    $sourceEnd = Get-HarnessReleaseSourceState -RepoRoot $repo
+    if (-not (Test-ReleaseIsolationSourceStateEqual -Left $sourceStart -Right $sourceEnd)) { throw 'release isolation source changed during aggregation' }
+    $summaries = [ordered]@{}
+    foreach ($definition in $definitions) {
+        $item = $records[$definition.name].validated
+        $summaries[$definition.name] = [ordered]@{observation_run_id=$item.observation_run_id;observation_digest=$item.observation_digest;role=$item.role;runner_label_digest=$item.runner_label_digest;account_digest=$item.account_digest;codex_home_identity_digest=$item.codex_home_identity_digest;status=$item.status}
+    }
+    $hasFailure = @($summaries.Values | Where-Object { [string]$_.status -ceq 'fail' }).Count -gt 0 -or @($results.Keys | Where-Object { -not [bool]$results[$_] }).Count -gt 0
+    $hasUnavailable = @($summaries.Values | Where-Object { [string]$_.status -ceq 'unavailable' }).Count -gt 0
+    $stable = Test-HarnessReleaseSourceStable -Start $sourceStart -End $sourceEnd
+    $status = if ($hasFailure) { 'fail' } elseif ($ProducerMode -cne 'formal') { 'unavailable' } elseif ($hasUnavailable) { 'unavailable' } elseif ([bool]$sourceStart.dirty -or -not $stable) { 'fail' } else { 'pass' }
+    $reason = if ($status -ceq 'pass') { 'all-isolation-checks-passed' } elseif ($status -ceq 'fail') { 'isolation-check-failed' } elseif ($ProducerMode -cne 'formal') { 'non-formal-producer-mode' } else { 'isolation-unavailable' }
+    $document = [ordered]@{
+        schema_version='harness-release-isolation-report/v1';generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o');source_revision=[string]$sourceStart.revision
+        source_dirty=([bool]$sourceStart.dirty -or [bool]$sourceEnd.dirty);source_state_stable=$stable
+        source=[ordered]@{commit_tree_oid=[string]$sourceStart.commit_tree_oid;object_format=[string]$sourceStart.object_format;start=$sourceStart;end=$sourceEnd;input_digests=$inputDigests}
+        report_run_id=[guid]::NewGuid().ToString('N');producer_identity='release-isolation-qualification/v1';producer_mode=$ProducerMode
+        workflow=[ordered]@{run_id=[string]$records.model_producer.document.workflow.run_id;run_attempt=[long]$records.model_producer.document.workflow.run_attempt}
+        observations=$summaries;results=$results;status=$status;reason=$reason;report_digest=$null
+    }
+    $document.report_digest = Get-ReleaseSha256Text -Text ($document | ConvertTo-Json -Depth 100 -Compress)
+    $json = $document | ConvertTo-Json -Depth 100 -Compress
+    $validatedDocument = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($json))
+    [void](Assert-ReleaseIsolationReport -RepoRoot $repo -Document $validatedDocument -ExpectedSource $sourceStart)
+    $rawDigest = Write-ReleaseIsolationArtifact -Target $target -Content $json
+    $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath $target -ExpectedDigest $rawDigest -ProtectedRoots $protected -MaximumBytes 1MB
+    $reopened = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+    [void](Assert-ReleaseIsolationReport -RepoRoot $repo -Document $reopened -ExpectedSource $sourceStart)
+    return $reopened
+}
+
+function Read-ReleaseIsolationRolloutEvidence {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Gate,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource,
+        [string[]]$ProtectedRoots = @()
+    )
+    try {
+        Assert-ReleaseKeys -Value $Gate -Expected @('status','evidence_contract','artifact_path','evidence_digest','source_revision','producer_identity') -Label 'release isolation gate'
+        if ([string]$Gate.evidence_contract -cne 'harness-release-isolation-report/v1' -or [string]$Gate.source_revision -cne [string]$ExpectedSource.revision -or [string]::IsNullOrWhiteSpace([string]$Gate.producer_identity)) { throw 'release isolation gate binding is invalid' }
+        $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $RepoRoot -ProtectedRoots $ProtectedRoots
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$Gate.artifact_path) -ExpectedDigest ([string]$Gate.evidence_digest) -ProtectedRoots $protected -MaximumBytes 1MB
+        $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        $result = Assert-ReleaseIsolationReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource -RequirePortableSource
+        $result['path'] = [string]$artifact.path
+        $result['raw_digest'] = [string]$artifact.digest
+        $result['report_digest'] = [string]$document.report_digest
+        $result['workflow'] = $document.workflow
+        $result['observations'] = $document.observations
+        return $result
+    } catch { throw [IO.InvalidDataException]::new('rollout-evidence-release-isolation-report-invalid',$_.Exception) }
+}
+
+function Get-ReleaseProducerReceiptDefinition {
+    param([Parameter(Mandatory)][ValidateSet('model','host')][string]$Kind)
+    if ($Kind -ceq 'model') {
+        return [ordered]@{
+            schema_version='harness-release-model-receipt/v1';schema_path='schemas/release-model-receipt.schema.json'
+            producer_identity='release-model-receipt/v1';job_name='release-model';observation_role='model-producer'
+            artifacts=@([ordered]@{role='model40';evidence_contract='harness-model-eval-report/v2'})
+        }
+    }
+    return [ordered]@{
+        schema_version='harness-release-host-receipt/v1';schema_path='schemas/release-host-receipt.schema.json'
+        producer_identity='release-host-receipt/v1';job_name='release-host';observation_role='host-producer'
+        artifacts=@(
+            [ordered]@{role='cognitive-host';evidence_contract='harness-host-benchmark-report/v2'},
+            [ordered]@{role='installed-desktop-primary';evidence_contract='harness-installed-desktop-benchmark-report/v1'},
+            [ordered]@{role='installed-desktop-distinct';evidence_contract='harness-installed-desktop-benchmark-report/v1'}
+        )
+    }
+}
+
+function Get-ReleaseProducerReceiptInputPaths {
+    param([Parameter(Mandatory)][ValidateSet('model','host')][string]$Kind)
+    $definition = Get-ReleaseProducerReceiptDefinition -Kind $Kind
+    return [ordered]@{
+        producer_digest='scripts/write-release-producer-receipt.ps1'
+        receipt_schema_digest=[string]$definition.schema_path
+        observation_schema_digest='schemas/release-runner-observation.schema.json'
+        rollout_evidence_digest='scripts/lib/Harness.RolloutEvidence.psm1'
+    }
+}
+
+function Get-ReleaseProducerReceiptStatus {
+    param(
+        [Parameter(Mandatory)][ValidateSet('formal','test-only')][string]$ProducerMode,
+        [Parameter(Mandatory)][string]$Conclusion,
+        [Parameter(Mandatory)][string]$ObservationStatus,
+        [Parameter(Mandatory)][string[]]$ArtifactStatuses,
+        [Parameter(Mandatory)][bool]$SourceDirty,
+        [Parameter(Mandatory)][bool]$SourceStable
+    )
+    if ($ProducerMode -ceq 'test-only') { return 'unavailable' }
+    $statuses = @($ObservationStatus) + @($ArtifactStatuses)
+    if ($Conclusion -cne 'success' -or $SourceDirty -or -not $SourceStable -or @($statuses | Where-Object { $_ -ceq 'fail' }).Count -gt 0) { return 'fail' }
+    if (@($statuses | Where-Object { $_ -ceq 'unavailable' }).Count -gt 0) { return 'unavailable' }
+    return 'pass'
+}
+
+function Get-ReleaseProducerReceiptReason {
+    param([Parameter(Mandatory)][string]$ProducerMode,[Parameter(Mandatory)][string]$Status)
+    if ($ProducerMode -ceq 'test-only') { return 'non-formal-producer-mode' }
+    if ($Status -ceq 'pass') { return 'all-producer-checks-passed' }
+    if ($Status -ceq 'fail') { return 'producer-check-failed' }
+    return 'producer-check-unavailable'
+}
+
+function Assert-ReleaseProducerReceipt {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Parameter(Mandatory)][ValidateSet('model','host')][string]$Kind,
+        [Collections.IDictionary]$ExpectedSource = $null,
+        [switch]$RequirePortableSource
+    )
+    $definition = Get-ReleaseProducerReceiptDefinition -Kind $Kind
+    $topKeys = @('schema_version','generated_at_utc','source_revision','source_dirty','source_state_stable','source','receipt_run_id','producer_identity','producer_mode','workflow','runner_observation','artifacts','status','reason','receipt_digest')
+    Assert-ReleaseKeys -Value $Document -Expected $topKeys -Label "release $Kind receipt"
+    $schemaPath = Join-Path $RepoRoot ([string]$definition.schema_path)
+    if (-not (Test-Json -Json ($Document | ConvertTo-Json -Depth 100 -Compress) -SchemaFile $schemaPath -ErrorAction Stop -WarningAction SilentlyContinue)) { throw "release $Kind receipt schema validation failed" }
+    if ([string]$Document.schema_version -cne [string]$definition.schema_version -or [string]$Document.receipt_run_id -cnotmatch '^[0-9a-f]{32}$' -or
+        [string]$Document.producer_identity -cne [string]$definition.producer_identity -or [string]$Document.producer_mode -cnotin @('formal','test-only') -or
+        [string]$Document.status -cnotin @('pass','fail','unavailable')) { throw "release $Kind receipt identity is invalid" }
+    Assert-ReleaseDate -Value $Document.generated_at_utc -Label "release $Kind receipt"
+    Assert-ReleaseIsolationContentDigest -Document $Document -Property receipt_digest
+    Assert-ReleaseIsolationSanitizedContent -Value $Document
+    $stable = Assert-ReleaseIsolationSourceBinding -RepoRoot $RepoRoot -Document $Document -InputPaths (Get-ReleaseProducerReceiptInputPaths -Kind $Kind) -ExpectedSource $ExpectedSource -RequirePortableSource:$RequirePortableSource
+
+    Assert-ReleaseKeys -Value $Document.workflow -Expected @('run_id','run_attempt','job_name','checkout_sha','conclusion') -Label "release $Kind receipt workflow"
+    if ([string]$Document.workflow.run_id -cnotmatch '^[1-9][0-9]*$' -or ($Document.workflow.run_attempt -isnot [long] -and $Document.workflow.run_attempt -isnot [int]) -or [long]$Document.workflow.run_attempt -lt 1 -or
+        [string]$Document.workflow.job_name -cne [string]$definition.job_name -or [string]$Document.workflow.checkout_sha -cne [string]$Document.source_revision -or
+        [string]$Document.workflow.conclusion -cnotin @('success','failure','neutral','cancelled','skipped','timed_out','action_required','stale','startup_failure')) {
+        throw "release $Kind receipt workflow binding is invalid"
+    }
+    Assert-ReleaseKeys -Value $Document.runner_observation -Expected @('role','observation_digest','account_digest','runner_label_digest') -Label "release $Kind receipt runner observation"
+    if ([string]$Document.runner_observation.role -cne [string]$definition.observation_role) { throw "release $Kind receipt runner role is invalid" }
+    foreach ($name in @('observation_digest','account_digest','runner_label_digest')) { Assert-ReleaseDigestValue -Value $Document.runner_observation[$name] -Label "release $Kind receipt runner $name" }
+
+    $artifacts = @($Document.artifacts)
+    if ($artifacts.Count -ne @($definition.artifacts).Count) { throw "release $Kind receipt Artifact set is incomplete" }
+    for ($index=0; $index -lt $artifacts.Count; $index++) {
+        $artifact = $artifacts[$index]
+        $expected = $definition.artifacts[$index]
+        Assert-ReleaseKeys -Value $artifact -Expected @('role','evidence_contract','raw_digest','report_digest','source_revision','status') -Label "release $Kind receipt Artifact"
+        if ([string]$artifact.role -cne [string]$expected.role -or [string]$artifact.evidence_contract -cne [string]$expected.evidence_contract -or
+            [string]$artifact.source_revision -cne [string]$Document.source_revision -or [string]$artifact.status -cnotin @('pass','fail','unavailable')) {
+            throw "release $Kind receipt Artifact binding is invalid"
+        }
+        foreach ($name in @('raw_digest','report_digest')) { Assert-ReleaseDigestValue -Value $artifact[$name] -Label "release $Kind receipt Artifact $name" }
+    }
+    if ($Kind -ceq 'host' -and ([string]$artifacts[1].raw_digest -ceq [string]$artifacts[2].raw_digest -or [string]$artifacts[1].report_digest -ceq [string]$artifacts[2].report_digest)) {
+        throw 'release host receipt installed Desktop Artifacts are not distinct'
+    }
+
+    $expectedReason = Get-ReleaseProducerReceiptReason -ProducerMode ([string]$Document.producer_mode) -Status ([string]$Document.status)
+    if ([string]$Document.reason -cne $expectedReason) { throw "release $Kind receipt status reason is invalid" }
+    if ([string]$Document.producer_mode -ceq 'formal') {
+        $knownFailure = [string]$Document.workflow.conclusion -cne 'success' -or [bool]$Document.source_dirty -or -not $stable -or @($artifacts | Where-Object { [string]$_.status -ceq 'fail' }).Count -gt 0
+        $knownUnavailable = @($artifacts | Where-Object { [string]$_.status -ceq 'unavailable' }).Count -gt 0
+        if (($knownFailure -and [string]$Document.status -cne 'fail') -or (-not $knownFailure -and $knownUnavailable -and [string]$Document.status -ceq 'pass')) {
+            throw "release $Kind receipt status is inconsistent"
+        }
+    }
+    return [ordered]@{
+        status=[string]$Document.status;reason=[string]$Document.reason;producer_identity=[string]$definition.producer_identity;producer_mode=[string]$Document.producer_mode
+        source_revision=[string]$Document.source_revision;source_dirty=[bool]$Document.source_dirty;source_state_stable=$stable
+        receipt_run_id=[string]$Document.receipt_run_id;receipt_digest=[string]$Document.receipt_digest;workflow=$Document.workflow;runner_observation=$Document.runner_observation;artifacts=$artifacts
+    }
+}
+
+function New-ReleaseProducerReceiptArtifact {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][ValidateSet('model','host')][string]$Kind,
+        [Parameter(Mandatory)][string]$RunnerObservationPath,
+        [Parameter(Mandatory)][string]$OutputPath,
+        [Parameter(Mandatory)][string]$RunId,
+        [Parameter(Mandatory)][int]$RunAttempt,
+        [Parameter(Mandatory)][string]$CheckoutSha,
+        [Parameter(Mandatory)][ValidateSet('success','failure','neutral','cancelled','skipped','timed_out','action_required','stale','startup_failure')][string]$Conclusion,
+        [Parameter(Mandatory)][ValidateSet('formal','test-only')][string]$ProducerMode,
+        [string]$ModelReportPath = '',
+        [string]$CognitiveHostReportPath = '',
+        [string]$InstalledDesktopPrimaryReportPath = '',
+        [string]$InstalledDesktopDistinctReportPath = ''
+    )
+    $repo = (Resolve-Path -LiteralPath $RepoRoot).Path
+    $definition = Get-ReleaseProducerReceiptDefinition -Kind $Kind
+    if ($RunId -cnotmatch '^[1-9][0-9]*$' -or $RunAttempt -lt 1 -or $CheckoutSha -cnotmatch '^[0-9a-f]{40,64}$') { throw "release $Kind receipt workflow identity is invalid" }
+    if ($Kind -ceq 'model') {
+        if ([string]::IsNullOrWhiteSpace($ModelReportPath) -or -not [string]::IsNullOrWhiteSpace($CognitiveHostReportPath) -or -not [string]::IsNullOrWhiteSpace($InstalledDesktopPrimaryReportPath) -or -not [string]::IsNullOrWhiteSpace($InstalledDesktopDistinctReportPath)) { throw 'release model receipt input set is invalid' }
+        $reportPaths = @($ModelReportPath)
+    } else {
+        if (-not [string]::IsNullOrWhiteSpace($ModelReportPath) -or @(@($CognitiveHostReportPath,$InstalledDesktopPrimaryReportPath,$InstalledDesktopDistinctReportPath) | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) { throw 'release host receipt input set is invalid' }
+        $reportPaths = @($CognitiveHostReportPath,$InstalledDesktopPrimaryReportPath,$InstalledDesktopDistinctReportPath)
+    }
+    $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $repo
+    $target = Resolve-HarnessReleaseArtifactPath -RepoRoot $repo -OutputPath $OutputPath -EvidencePaths (@($RunnerObservationPath) + $reportPaths) -ProtectedRoots $protected
+    $sourceStart = Get-HarnessReleaseSourceState -RepoRoot $repo
+    if ($CheckoutSha -cne [string]$sourceStart.revision) { throw "release $Kind receipt checkout is stale" }
+
+    $observationArtifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath $RunnerObservationPath -ProtectedRoots $protected -MaximumBytes 512KB
+    $observationDocument = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$observationArtifact.bytes)
+    $observation = Assert-ReleaseRunnerObservation -RepoRoot $repo -Document $observationDocument -ExpectedSource $sourceStart
+    if ([string]$observation.role -cne [string]$definition.observation_role -or [string]$observation.producer_mode -cne $ProducerMode -or
+        [string]$observation.workflow.run_id -cne $RunId -or [long]$observation.workflow.run_attempt -ne $RunAttempt) {
+        throw "release $Kind receipt runner observation binding is invalid"
+    }
+
+    $artifactSummaries = [Collections.Generic.List[object]]::new()
+    if ($Kind -ceq 'model') {
+        $rawDigest = Get-ReleaseFileDigest -Path $ModelReportPath
+        $gate = [ordered]@{status='unavailable';evidence_contract='harness-model-eval-report/v2';artifact_path=$ModelReportPath;evidence_digest=$rawDigest;source_revision=[string]$sourceStart.revision;producer_identity='release-model-receipt-writer/v1'}
+        $model = Read-ModelRolloutEvidence -RepoRoot $repo -Gate $gate -ExpectedSource $sourceStart -ProtectedRoots $protected
+        $artifactSummaries.Add([ordered]@{role='model40';evidence_contract='harness-model-eval-report/v2';raw_digest=[string]$model.raw_digest;report_digest=[string]$model.report_digest;source_revision=[string]$model.source_revision;status=[string]$model.status})
+    } else {
+        $cognitiveDigest = Get-ReleaseFileDigest -Path $CognitiveHostReportPath
+        $cognitiveNames = @('DP-G02-COGNITIVE-HOST-3X3','DP-G05-V2-BARE-1.25','DP-G06-REQUEST-SEND-REDUCTION')
+        $cognitiveGates = [ordered]@{}
+        foreach ($name in $cognitiveNames) { $cognitiveGates[$name] = [ordered]@{status='unavailable';evidence_contract='harness-host-benchmark-report/v2';artifact_path=$CognitiveHostReportPath;evidence_digest=$cognitiveDigest;source_revision=[string]$sourceStart.revision;producer_identity='release-host-receipt-writer/v1'} }
+        $cognitive = Read-CognitiveHostRolloutEvidence -RepoRoot $repo -Gates $cognitiveGates -Names $cognitiveNames -ExpectedSource $sourceStart -ProtectedRoots $protected
+        $cognitiveStatus = Get-ReleaseProducerCombinedStatus -Statuses @([string]$cognitive.g02_status,[string]$cognitive.g05_status,[string]$cognitive.g06_status)
+        $installed = @()
+        foreach ($path in @($InstalledDesktopPrimaryReportPath,$InstalledDesktopDistinctReportPath)) {
+            $digest = Get-ReleaseFileDigest -Path $path
+            $gate = [ordered]@{status='unavailable';evidence_contract='harness-installed-desktop-benchmark-report/v1';artifact_path=$path;evidence_digest=$digest;source_revision=[string]$sourceStart.revision;producer_identity='release-host-receipt-writer/v1'}
+            $installed += ,(Read-InstalledDesktopRolloutEvidence -RepoRoot $repo -Gate $gate -ExpectedSource $sourceStart -ProtectedRoots $protected)
+        }
+        Assert-InstalledDesktopEvidencePairDistinct -Installed $installed
+        $artifactSummaries.Add([ordered]@{role='cognitive-host';evidence_contract='harness-host-benchmark-report/v2';raw_digest=[string]$cognitive.raw_digest;report_digest=[string]$cognitive.report_digest;source_revision=[string]$cognitive.source_revision;status=$cognitiveStatus})
+        for ($index=0; $index -lt 2; $index++) {
+            $artifactSummaries.Add([ordered]@{role=@('installed-desktop-primary','installed-desktop-distinct')[$index];evidence_contract='harness-installed-desktop-benchmark-report/v1';raw_digest=[string]$installed[$index].raw_digest;report_digest=[string]$installed[$index].report_digest;source_revision=[string]$installed[$index].source_revision;status=[string]$installed[$index].status})
+        }
+    }
+
+    $inputDigests = [ordered]@{}
+    foreach ($entry in (Get-ReleaseProducerReceiptInputPaths -Kind $Kind).GetEnumerator()) { $inputDigests[$entry.Key] = Get-ReleaseFileDigest -Path (Join-Path $repo ([string]$entry.Value)) }
+    $sourceEnd = Get-HarnessReleaseSourceState -RepoRoot $repo
+    if (-not (Test-ReleaseIsolationSourceStateEqual -Left $sourceStart -Right $sourceEnd)) { throw "release $Kind receipt source changed during aggregation" }
+    $stable = Test-HarnessReleaseSourceStable -Start $sourceStart -End $sourceEnd
+    $status = Get-ReleaseProducerReceiptStatus -ProducerMode $ProducerMode -Conclusion $Conclusion -ObservationStatus ([string]$observation.status) -ArtifactStatuses @($artifactSummaries.status) -SourceDirty ([bool]$sourceStart.dirty -or [bool]$sourceEnd.dirty) -SourceStable $stable
+    $reason = Get-ReleaseProducerReceiptReason -ProducerMode $ProducerMode -Status $status
+    $document = [ordered]@{
+        schema_version=[string]$definition.schema_version;generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o');source_revision=[string]$sourceStart.revision
+        source_dirty=([bool]$sourceStart.dirty -or [bool]$sourceEnd.dirty);source_state_stable=$stable
+        source=[ordered]@{commit_tree_oid=[string]$sourceStart.commit_tree_oid;object_format=[string]$sourceStart.object_format;start=$sourceStart;end=$sourceEnd;input_digests=$inputDigests}
+        receipt_run_id=[guid]::NewGuid().ToString('N');producer_identity=[string]$definition.producer_identity;producer_mode=$ProducerMode
+        workflow=[ordered]@{run_id=$RunId;run_attempt=[long]$RunAttempt;job_name=[string]$definition.job_name;checkout_sha=$CheckoutSha;conclusion=$Conclusion}
+        runner_observation=[ordered]@{role=[string]$observation.role;observation_digest=[string]$observation.observation_digest;account_digest=[string]$observation.account_digest;runner_label_digest=[string]$observation.runner_label_digest}
+        artifacts=@($artifactSummaries);status=$status;reason=$reason;receipt_digest=$null
+    }
+    $document.receipt_digest = Get-ReleaseSha256Text -Text ($document | ConvertTo-Json -Depth 100 -Compress)
+    $json = $document | ConvertTo-Json -Depth 100 -Compress
+    $validatedDocument = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($json))
+    [void](Assert-ReleaseProducerReceipt -RepoRoot $repo -Document $validatedDocument -Kind $Kind -ExpectedSource $sourceStart)
+    $rawDigest = Write-ReleaseIsolationArtifact -Target $target -Content $json
+    $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath $target -ExpectedDigest $rawDigest -ProtectedRoots $protected -MaximumBytes 1MB
+    $reopened = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+    [void](Assert-ReleaseProducerReceipt -RepoRoot $repo -Document $reopened -Kind $Kind -ExpectedSource $sourceStart)
+    return $reopened
+}
+
+function Read-ReleaseProducerReceiptRolloutEvidence {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Gate,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource,
+        [Parameter(Mandatory)][ValidateSet('model','host')][string]$Kind,
+        [string[]]$ProtectedRoots = @()
+    )
+    try {
+        $definition = Get-ReleaseProducerReceiptDefinition -Kind $Kind
+        Assert-ReleaseKeys -Value $Gate -Expected @('status','evidence_contract','artifact_path','evidence_digest','source_revision','producer_identity') -Label "release $Kind receipt gate"
+        if ([string]$Gate.evidence_contract -cne [string]$definition.schema_version -or [string]$Gate.source_revision -cne [string]$ExpectedSource.revision -or [string]::IsNullOrWhiteSpace([string]$Gate.producer_identity)) { throw "release $Kind receipt gate binding is invalid" }
+        $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $RepoRoot -ProtectedRoots $ProtectedRoots
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$Gate.artifact_path) -ExpectedDigest ([string]$Gate.evidence_digest) -ProtectedRoots $protected -MaximumBytes 1MB
+        $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        $result = Assert-ReleaseProducerReceipt -RepoRoot $RepoRoot -Document $document -Kind $Kind -ExpectedSource $ExpectedSource -RequirePortableSource
+        $result['path'] = [string]$artifact.path
+        $result['raw_digest'] = [string]$artifact.digest
+        return $result
+    } catch { throw [IO.InvalidDataException]::new("rollout-evidence-release-$Kind-receipt-invalid",$_.Exception) }
+}
+
+function Assert-ReleaseProducerReceiptObservationBinding {
+    param(
+        [Parameter(Mandatory)][Collections.IDictionary]$Receipt,
+        [Parameter(Mandatory)][Collections.IDictionary]$Observation,
+        [Parameter(Mandatory)][Collections.IDictionary]$IsolationWorkflow
+    )
+    if ([string]$Receipt.workflow.run_id -cne [string]$IsolationWorkflow.run_id -or [long]$Receipt.workflow.run_attempt -ne [long]$IsolationWorkflow.run_attempt -or
+        [string]$Receipt.runner_observation.role -cne [string]$Observation.role -or [string]$Receipt.runner_observation.observation_digest -cne [string]$Observation.observation_digest -or
+        [string]$Receipt.runner_observation.account_digest -cne [string]$Observation.account_digest -or [string]$Receipt.runner_observation.runner_label_digest -cne [string]$Observation.runner_label_digest) {
+        throw 'release producer receipt runner observation does not match G04'
+    }
+    $derived = Get-ReleaseProducerReceiptStatus -ProducerMode ([string]$Receipt.producer_mode) -Conclusion ([string]$Receipt.workflow.conclusion) -ObservationStatus ([string]$Observation.status) -ArtifactStatuses @($Receipt.artifacts.status) -SourceDirty ([bool]$Receipt.source_dirty) -SourceStable ([bool]$Receipt.source_state_stable)
+    if ([string]$Receipt.status -cne $derived -or [string]$Receipt.reason -cne (Get-ReleaseProducerReceiptReason -ProducerMode ([string]$Receipt.producer_mode) -Status $derived)) { throw 'release producer receipt status does not match G04' }
+    return $derived
+}
+
+function Assert-ReleaseProducerArtifactBinding {
+    param([Parameter(Mandatory)][Collections.IDictionary]$ReceiptArtifact,[Parameter(Mandatory)][Collections.IDictionary]$Evidence)
+    if ([string]$ReceiptArtifact.raw_digest -cne [string]$Evidence.raw_digest -or [string]$ReceiptArtifact.report_digest -cne [string]$Evidence.report_digest -or
+        [string]$ReceiptArtifact.source_revision -cne [string]$Evidence.source_revision -or [string]$ReceiptArtifact.status -cne [string]$Evidence.status) {
+        throw 'release producer receipt Artifact binding is invalid'
+    }
+}
+
+function Get-ReleaseProducerCombinedStatus {
+    param([Parameter(Mandatory)][string[]]$Statuses)
+    if (@($Statuses | Where-Object { $_ -ceq 'fail' }).Count -gt 0) { return 'fail' }
+    if (@($Statuses | Where-Object { $_ -ceq 'unavailable' }).Count -gt 0) { return 'unavailable' }
+    return 'pass'
+}
+
+function Get-ExactHeadEngineeringInputPaths {
+    return [ordered]@{
+        producer_digest = 'scripts/generate-exact-head-engineering-evidence.ps1'
+        report_schema_digest = 'schemas/exact-head-engineering-evidence.schema.json'
+        ordinary_receipt_schema_digest = 'schemas/ordinary-ci-receipt.schema.json'
+        rollout_evidence_digest = 'scripts/lib/Harness.RolloutEvidence.psm1'
+        atomic_write_digest = 'scripts/lib/Harness.AtomicWrite.psm1'
+        path_digest = 'scripts/lib/Harness.Path.psm1'
+    }
+}
+
+function Assert-ExactHeadUtcDate {
+    param([object]$Value,[string]$Label)
+    try { $parsed = [DateTimeOffset]::Parse([string]$Value,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None) }
+    catch { throw "$Label timestamp is invalid" }
+    if ($parsed.Offset -ne [TimeSpan]::Zero) { throw "$Label timestamp is not UTC" }
+}
+
+function ConvertTo-ExactHeadInt64 {
+    param([object]$Value,[string]$Label)
+    if ($Value -is [long] -or $Value -is [int]) {
+        $number = [long]$Value
+    } elseif ($Value -is [string]) {
+        $number = 0L
+        if (-not [long]::TryParse([string]$Value,[Globalization.NumberStyles]::None,[Globalization.CultureInfo]::InvariantCulture,[ref]$number)) { throw "$Label is not an integer" }
+    } else { throw "$Label is not an integer" }
+    if ($number -lt 1) { throw "$Label is not positive" }
+    return $number
+}
+
+function Invoke-ExactHeadNativeBytes {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [Parameter(Mandatory)][string]$Label
+    )
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $FilePath
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    foreach ($argument in $Arguments) { $start.ArgumentList.Add([string]$argument) }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    $buffer = [IO.MemoryStream]::new()
+    try {
+        if (-not $process.Start()) { throw "$Label unavailable" }
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.StandardOutput.BaseStream.CopyTo($buffer)
+        $process.WaitForExit()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0) { throw "$Label unavailable (exit $($process.ExitCode))" }
+        return $buffer.ToArray()
+    } finally {
+        $buffer.Dispose()
+        $process.Dispose()
+    }
+}
+
+function Get-ExactHeadGitDiff {
+    param([string]$RepoRoot,[string]$BaseSha,[string]$HeadSha)
+    $git = [string]@(Get-Command git -CommandType Application -ErrorAction Stop)[0].Source
+    $bytes = Invoke-ExactHeadNativeBytes -FilePath $git -Arguments @(
+        '-C',$RepoRoot,'diff','--binary','--full-index','--no-ext-diff','--no-color',$BaseSha,$HeadSha,'--'
+    ) -Label 'exact-head Git diff'
+    return [ordered]@{digest=(Get-ReleaseSha256Bytes -Bytes $bytes);bytes=[long]$bytes.Length}
+}
+
+function Read-ExactHeadJsonFile {
+    param([string]$Path,[long]$MaximumBytes,[string]$Label)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "$Label missing" }
+    Assert-ReleasePathHasNoReparseAncestor -Path $Path
+    Assert-ReleaseSingleLinkFile -Path $Path -Label $Label
+    Assert-ReleaseSingleDataStreamFile -Path $Path -Label $Label
+    $info = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if ($info.Length -gt $MaximumBytes) { throw "$Label too large" }
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -gt $MaximumBytes) { throw "$Label too large" }
+    return [ordered]@{bytes=$bytes;document=(ConvertFrom-InstalledDesktopEvidenceBytes -Bytes $bytes)}
+}
+
+function Invoke-ExactHeadGitHubJson {
+    param([string[]]$Arguments,[string]$Label)
+    $gh = [string]@(Get-Command gh -CommandType Application -ErrorAction Stop)[0].Source
+    $bytes = Invoke-ExactHeadNativeBytes -FilePath $gh -Arguments $Arguments -Label $Label
+    return ConvertFrom-InstalledDesktopEvidenceBytes -Bytes $bytes
+}
+
+function Resolve-ExactHeadFixtureFile {
+    param([string]$FixtureRoot,[string]$RelativePath,[string]$Label)
+    $root = (Resolve-Path -LiteralPath $FixtureRoot -ErrorAction Stop).Path
+    Assert-ReleasePathHasNoReparseAncestor -Path $root
+    $target = [IO.Path]::GetFullPath((Join-Path $root $RelativePath))
+    if (-not (Test-ReleasePathAtOrBelow -Path $target -Root $root)) { throw "$Label escaped fixture root" }
+    return $target
+}
+
+function Read-ExactHeadGitHubState {
+    param(
+        [string]$RepositoryFullName,
+        [long]$PullRequestNumber,
+        [long]$RunId,
+        [long]$ReviewCommentId,
+        [ValidateSet('formal','test-only')][string]$ProducerMode,
+        [AllowEmptyString()][string]$GitHubFixtureRoot
+    )
+    if ($ProducerMode -ceq 'formal') {
+        if (-not [string]::IsNullOrWhiteSpace($GitHubFixtureRoot)) { throw 'formal exact-head producer rejects GitHub fixtures' }
+        return [ordered]@{
+            pull_request = Invoke-ExactHeadGitHubJson -Arguments @('api',"repos/$RepositoryFullName/pulls/$PullRequestNumber") -Label 'GitHub pull request metadata'
+            workflow_run = Invoke-ExactHeadGitHubJson -Arguments @('api',"repos/$RepositoryFullName/actions/runs/$RunId") -Label 'GitHub workflow run'
+            workflow_jobs = Invoke-ExactHeadGitHubJson -Arguments @('api',"repos/$RepositoryFullName/actions/runs/$RunId/jobs?per_page=100") -Label 'GitHub workflow jobs'
+            workflow_artifacts = Invoke-ExactHeadGitHubJson -Arguments @('api',"repos/$RepositoryFullName/actions/runs/$RunId/artifacts?per_page=100") -Label 'GitHub workflow artifacts'
+            review_comment = Invoke-ExactHeadGitHubJson -Arguments @('api',"repos/$RepositoryFullName/issues/comments/$ReviewCommentId") -Label 'GitHub independent review comment'
+            fixture_root = ''
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($GitHubFixtureRoot)) { throw 'test-only exact-head producer requires GitHubFixtureRoot' }
+    $root = (Resolve-Path -LiteralPath $GitHubFixtureRoot -ErrorAction Stop).Path
+    return [ordered]@{
+        pull_request = (Read-ExactHeadJsonFile -Path (Resolve-ExactHeadFixtureFile -FixtureRoot $root -RelativePath 'pull-request.json' -Label 'pull request fixture') -MaximumBytes 128KB -Label 'pull request fixture').document
+        workflow_run = (Read-ExactHeadJsonFile -Path (Resolve-ExactHeadFixtureFile -FixtureRoot $root -RelativePath 'workflow-run.json' -Label 'workflow run fixture') -MaximumBytes 128KB -Label 'workflow run fixture').document
+        workflow_jobs = (Read-ExactHeadJsonFile -Path (Resolve-ExactHeadFixtureFile -FixtureRoot $root -RelativePath 'workflow-jobs.json' -Label 'workflow jobs fixture') -MaximumBytes 512KB -Label 'workflow jobs fixture').document
+        workflow_artifacts = (Read-ExactHeadJsonFile -Path (Resolve-ExactHeadFixtureFile -FixtureRoot $root -RelativePath 'workflow-artifacts.json' -Label 'workflow artifacts fixture') -MaximumBytes 512KB -Label 'workflow artifacts fixture').document
+        review_comment = (Read-ExactHeadJsonFile -Path (Resolve-ExactHeadFixtureFile -FixtureRoot $root -RelativePath 'review-comment.json' -Label 'review comment fixture') -MaximumBytes 512KB -Label 'review comment fixture').document
+        fixture_root = $root
+    }
+}
+
+function Get-ExactHeadArtifactDefinitions {
+    param([string]$HeadSha,[long]$RunAttempt)
+    return @(
+        [ordered]@{check_name='changed-optional';job_id='changed-optional';artifact_name="thin-v2-pr-changed-optional-$HeadSha-$RunAttempt"},
+        [ordered]@{check_name='core-rollback';job_id='pr-core';artifact_name="thin-v2-pr-core-aggregate-$HeadSha-$RunAttempt"},
+        [ordered]@{check_name='entry-lifecycle';job_id='pr-core-checks';artifact_name="thin-v2-pr-core-entry-lifecycle-$HeadSha-$RunAttempt"},
+        [ordered]@{check_name='evaluation-release';job_id='pr-core-checks';artifact_name="thin-v2-pr-core-evaluation-release-$HeadSha-$RunAttempt"},
+        [ordered]@{check_name='governance-approval';job_id='pr-core-checks';artifact_name="thin-v2-pr-core-governance-approval-$HeadSha-$RunAttempt"},
+        [ordered]@{check_name='harness-contracts';job_id='pr-core-checks';artifact_name="thin-v2-pr-core-harness-contracts-$HeadSha-$RunAttempt"},
+        [ordered]@{check_name='install-evidence';job_id='pr-core-checks';artifact_name="thin-v2-pr-core-install-evidence-$HeadSha-$RunAttempt"}
+    )
+}
+
+function New-ExactHeadTemporaryRoot {
+    $path = Join-Path ([IO.Path]::GetTempPath()) ('thin-v2-exact-head-' + [guid]::NewGuid().ToString('N'))
+    [void][IO.Directory]::CreateDirectory($path)
+    return $path
+}
+
+function Remove-ExactHeadTemporaryRoot {
+    param([AllowEmptyString()][string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return }
+    $full = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    $temp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+    if (-not $full.StartsWith($temp + '\thin-v2-exact-head-',[StringComparison]::OrdinalIgnoreCase) -or
+        [IO.Path]::GetFileName($full) -cnotmatch '^thin-v2-exact-head-[0-9a-f]{32}$') {
+        throw 'exact-head temporary cleanup target rejected'
+    }
+    [IO.Directory]::Delete($full,$true)
+}
+
+function Get-ExactHeadReceiptPath {
+    param(
+        [string]$RepositoryFullName,
+        [long]$RunId,
+        [Collections.IDictionary]$Artifact,
+        [string]$ProducerMode,
+        [string]$FixtureRoot,
+        [string]$DownloadRoot
+    )
+    if ($ProducerMode -ceq 'test-only') {
+        return Resolve-ExactHeadFixtureFile -FixtureRoot $FixtureRoot -RelativePath ("artifacts/{0}/ordinary-ci-receipt.json" -f [long]$Artifact.id) -Label 'ordinary receipt fixture'
+    }
+    $destination = Join-Path $DownloadRoot ([string]$Artifact.id)
+    [void][IO.Directory]::CreateDirectory($destination)
+    $gh = [string]@(Get-Command gh -CommandType Application -ErrorAction Stop)[0].Source
+    [void](Invoke-ExactHeadNativeBytes -FilePath $gh -Arguments @(
+        'run','download',[string]$RunId,'--repo',$RepositoryFullName,'--name',[string]$Artifact.name,'--dir',$destination
+    ) -Label 'GitHub ordinary receipt artifact')
+    $files = @(Get-ChildItem -LiteralPath $destination -File -Recurse -Force -ErrorAction Stop)
+    if ($files.Count -ne 1 -or $files[0].Name -cne 'ordinary-ci-receipt.json') { throw 'ordinary receipt artifact must contain exactly one receipt' }
+    return $files[0].FullName
+}
+
+function Assert-ExactHeadReceipt {
+    param(
+        [string]$RepoRoot,
+        [Collections.IDictionary]$Receipt,
+        [Collections.IDictionary]$Definition,
+        [Collections.IDictionary]$Artifact,
+        [long]$PullRequestNumber,
+        [long]$RunId,
+        [long]$RunAttempt,
+        [string]$BaseSha,
+        [string]$HeadSha
+    )
+    $schema = Join-Path $RepoRoot 'schemas\ordinary-ci-receipt.schema.json'
+    if (-not (Test-Json -Json ($Receipt | ConvertTo-Json -Depth 20 -Compress) -SchemaFile $schema -ErrorAction Stop -WarningAction SilentlyContinue)) { throw 'ordinary receipt schema validation failed' }
+    Assert-ReleaseKeys -Value $Receipt -Expected @('schema_version','pull_request_number','run_id','run_attempt','head_sha','base_sha','checkout_sha','job_id','check_name','outcome','created_at_utc') -Label 'ordinary receipt'
+    if ([string]$Receipt.schema_version -cne 'thin-harness-ordinary-ci-receipt/v1' -or
+        [long]$Receipt.pull_request_number -ne $PullRequestNumber -or
+        (ConvertTo-ExactHeadInt64 -Value $Receipt.run_id -Label 'ordinary receipt run_id') -ne $RunId -or
+        [long]$Receipt.run_attempt -ne $RunAttempt -or
+        [string]$Receipt.base_sha -cne $BaseSha -or
+        [string]$Receipt.head_sha -cne $HeadSha -or
+        [string]$Receipt.checkout_sha -cne $HeadSha -or
+        [string]$Receipt.job_id -cne [string]$Definition.job_id -or
+        [string]$Receipt.check_name -cne [string]$Definition.check_name -or
+        [string]$Receipt.outcome -cne 'success') {
+        throw 'ordinary receipt identity or outcome mismatch'
+    }
+    Assert-ExactHeadUtcDate -Value $Receipt.created_at_utc -Label 'ordinary receipt'
+    if ([long]$Artifact.id -lt 1 -or [string]$Artifact.name -cne [string]$Definition.artifact_name -or [bool]$Artifact.expired) { throw 'ordinary receipt Artifact identity is invalid' }
+}
+
+function Get-ExactHeadOrdinaryReceipts {
+    param(
+        [string]$RepoRoot,
+        [string]$RepositoryFullName,
+        [long]$PullRequestNumber,
+        [long]$RunId,
+        [long]$RunAttempt,
+        [string]$BaseSha,
+        [string]$HeadSha,
+        [Collections.IDictionary]$ArtifactsDocument,
+        [string]$ProducerMode,
+        [string]$FixtureRoot,
+        [string]$DownloadRoot
+    )
+    Assert-ReleaseKeys -Value $ArtifactsDocument -Expected @('total_count','artifacts') -Label 'workflow artifacts response'
+    $artifacts = @($ArtifactsDocument.artifacts)
+    if ([long]$ArtifactsDocument.total_count -ne $artifacts.Count -or $artifacts.Count -gt 100) { throw 'workflow artifacts response is incomplete' }
+    $definitions = @(Get-ExactHeadArtifactDefinitions -HeadSha $HeadSha -RunAttempt $RunAttempt)
+    $checks = [Collections.Generic.List[object]]::new()
+    $paths = [Collections.Generic.List[string]]::new()
+    foreach ($definition in $definitions) {
+        $matches = @($artifacts | Where-Object { [string]$_.name -ceq [string]$definition.artifact_name })
+        if ($matches.Count -ne 1) { throw "ordinary receipt Artifact is missing or ambiguous: $($definition.check_name)" }
+        $artifact = $matches[0]
+        $path = Get-ExactHeadReceiptPath -RepositoryFullName $RepositoryFullName -RunId $RunId -Artifact $artifact -ProducerMode $ProducerMode -FixtureRoot $FixtureRoot -DownloadRoot $DownloadRoot
+        $record = Read-ExactHeadJsonFile -Path $path -MaximumBytes 64KB -Label 'ordinary receipt'
+        Assert-ExactHeadReceipt -RepoRoot $RepoRoot -Receipt $record.document -Definition $definition -Artifact $artifact -PullRequestNumber $PullRequestNumber -RunId $RunId -RunAttempt $RunAttempt -BaseSha $BaseSha -HeadSha $HeadSha
+        $digest = Get-ReleaseSha256Bytes -Bytes ([byte[]]$record.bytes)
+        $checks.Add([ordered]@{
+            check_name=[string]$definition.check_name
+            job_id=[string]$definition.job_id
+            artifact_id=[long]$artifact.id
+            artifact_name=[string]$artifact.name
+            raw_receipt_digest=$digest
+            outcome='success'
+        })
+        $paths.Add($path)
+    }
+    $lines = @($checks | ForEach-Object { "{0}={1}" -f [string]$_.check_name,[string]$_.raw_receipt_digest })
+    $setBytes = [Text.UTF8Encoding]::new($false).GetBytes(($lines -join [char]10))
+    return [ordered]@{
+        receipt_set_digest=Get-ReleaseSha256Bytes -Bytes $setBytes
+        receipt_set_bytes=[long]$setBytes.Length
+        checks=@($checks)
+        paths=@($paths)
+    }
+}
+
+function Get-ExactHeadJobOutcome {
+    param([object[]]$Jobs,[string]$Name)
+    $matches = @($Jobs | Where-Object { [string]$_.name -ceq $Name })
+    if ($matches.Count -ne 1) { throw "workflow job is missing or ambiguous: $Name" }
+    if ([string]$matches[0].status -cne 'completed') { return [string]$matches[0].status }
+    return [string]$matches[0].conclusion
+}
+
+function Get-ExactHeadWorkflowSummary {
+    param([Collections.IDictionary]$Run,[Collections.IDictionary]$JobsDocument,[long]$ExpectedRunId)
+    Assert-ReleaseKeys -Value $JobsDocument -Expected @('total_count','jobs') -Label 'workflow jobs response'
+    $jobs = @($JobsDocument.jobs)
+    if ([long]$JobsDocument.total_count -ne $jobs.Count -or $jobs.Count -gt 100) { throw 'workflow jobs response is incomplete' }
+    $runId = ConvertTo-ExactHeadInt64 -Value $Run.id -Label 'workflow run id'
+    if ($runId -ne $ExpectedRunId) { throw 'workflow run id mismatch' }
+    $ordinary = [ordered]@{
+        'changed-optional'=Get-ExactHeadJobOutcome -Jobs $jobs -Name 'changed-optional'
+        'entry-lifecycle'=Get-ExactHeadJobOutcome -Jobs $jobs -Name 'pr-core-checks (entry-lifecycle)'
+        'evaluation-release'=Get-ExactHeadJobOutcome -Jobs $jobs -Name 'pr-core-checks (evaluation-release)'
+        'install-evidence'=Get-ExactHeadJobOutcome -Jobs $jobs -Name 'pr-core-checks (install-evidence)'
+        'governance-approval'=Get-ExactHeadJobOutcome -Jobs $jobs -Name 'pr-core-checks (governance-approval)'
+        'harness-contracts'=Get-ExactHeadJobOutcome -Jobs $jobs -Name 'pr-core-checks (harness-contracts)'
+        'core-rollback'=Get-ExactHeadJobOutcome -Jobs $jobs -Name 'pr-core'
+    }
+    $release = [ordered]@{
+        'release-model'=Get-ExactHeadJobOutcome -Jobs $jobs -Name 'release-model'
+        'release-host'=Get-ExactHeadJobOutcome -Jobs $jobs -Name 'release-host'
+        'release-full'=Get-ExactHeadJobOutcome -Jobs $jobs -Name 'release-full'
+    }
+    return [ordered]@{
+        workflow_name=[string]$Run.name
+        run_id=$runId
+        run_attempt=[long]$Run.run_attempt
+        status=[string]$Run.status
+        conclusion=[string]$Run.conclusion
+        head_sha=[string]$Run.head_sha
+        ordinary_jobs=$ordinary
+        release_jobs=$release
+    }
+}
+
+function Assert-ExactHeadReviewReceiptShape {
+    param([Collections.IDictionary]$Receipt)
+    Assert-ReleaseKeys -Value $Receipt -Expected @(
+        'schema_version','pull_request_number','base_sha','head_sha','reviewed_diff_digest','reviewed_diff_bytes',
+        'task_starting_sha','task_diff_digest','task_diff_bytes','reviewed_commits','ci_run_id','ci_run_attempt',
+        'ci_conclusion','receipt_set_digest','receipt_set_bytes','artifact_ids','runtime_hotfix_identity',
+        'reviewer_actor_id','reviewer_context_id','reviewer_model','reviewer_participated','read_only','zero_write',
+        'verdict','findings','skipped_jobs','created_at_utc'
+    ) -Label 'independent review receipt'
+    Assert-ReleaseKeys -Value $Receipt.findings -Expected @('p0','p1','p2','p3') -Label 'independent review findings'
+    foreach ($name in @('reviewed_diff_digest','task_diff_digest','receipt_set_digest','runtime_hotfix_identity')) { Assert-ReleaseDigestValue -Value $Receipt[$name] -Label "independent review $name" }
+    foreach ($name in @('reviewed_diff_bytes','task_diff_bytes','receipt_set_bytes')) {
+        if ($Receipt[$name] -isnot [long] -and $Receipt[$name] -isnot [int]) { throw "independent review $name is not an integer" }
+        if ([long]$Receipt[$name] -lt 0) { throw "independent review $name is negative" }
+    }
+    foreach ($name in @('p0','p1','p2','p3')) {
+        if ($Receipt.findings[$name] -isnot [long] -and $Receipt.findings[$name] -isnot [int]) { throw "independent review finding $name is not an integer" }
+        if ([long]$Receipt.findings[$name] -lt 0) { throw "independent review finding $name is negative" }
+    }
+    if ([string]$Receipt.schema_version -cne 'thin-harness-independent-review-receipt/v1' -or
+        [string]$Receipt.base_sha -cnotmatch '^[0-9a-f]{40}$' -or [string]$Receipt.head_sha -cnotmatch '^[0-9a-f]{40}$' -or
+        [string]$Receipt.task_starting_sha -cnotmatch '^[0-9a-f]{40}$' -or
+        [string]::IsNullOrWhiteSpace([string]$Receipt.reviewer_actor_id) -or [string]::IsNullOrWhiteSpace([string]$Receipt.reviewer_context_id) -or
+        [string]$Receipt.reviewer_model -cnotmatch '^[A-Za-z0-9._/-]{1,128}$' -or
+        $Receipt.reviewer_participated -isnot [bool] -or $Receipt.read_only -isnot [bool] -or $Receipt.zero_write -isnot [bool] -or
+        [string]$Receipt.verdict -cnotin @('pass','fail','unavailable')) {
+        throw 'independent review receipt shape is invalid'
+    }
+    Assert-ExactHeadUtcDate -Value $Receipt.created_at_utc -Label 'independent review receipt'
+}
+
+function Get-ExactHeadIndependentReview {
+    param(
+        [Collections.IDictionary]$Comment,
+        [long]$ReviewCommentId,
+        [long]$PullRequestNumber,
+        [string]$BaseSha,
+        [string]$HeadSha,
+        [long]$RunId,
+        [long]$RunAttempt,
+        [Collections.IDictionary]$OrdinaryReceipts,
+        [Collections.IDictionary]$ReviewedDiff,
+        [string]$RepoRoot
+    )
+    if ((ConvertTo-ExactHeadInt64 -Value $Comment.id -Label 'review comment id') -ne $ReviewCommentId) { throw 'independent review comment id mismatch' }
+    $fence = ([string]([char]96)) * 3
+    $pattern = '(?ms)^[ \t]*' + [regex]::Escape($fence) + '(?:json)?[ \t]*\r?\n(?<json>.*?)\r?\n[ \t]*' + [regex]::Escape($fence) + '[ \t]*$'
+    $matching = [Collections.Generic.List[object]]::new()
+    foreach ($match in [regex]::Matches([string]$Comment.body,$pattern)) {
+        $json = [string]$match.Groups['json'].Value
+        try {
+            $bytes = [Text.UTF8Encoding]::new($false).GetBytes($json)
+            $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes $bytes
+            if ([string]$document.schema_version -ceq 'thin-harness-independent-review-receipt/v1' -and [string]$document.head_sha -ceq $HeadSha) {
+                $matching.Add([ordered]@{bytes=$bytes;document=$document})
+            }
+        } catch {}
+    }
+    if ($matching.Count -ne 1) { throw 'independent review receipt is missing or ambiguous for exact Head' }
+    $raw = $matching[0]
+    $receipt = $raw.document
+    Assert-ExactHeadReviewReceiptShape -Receipt $receipt
+    $reviewRunId = ConvertTo-ExactHeadInt64 -Value $receipt.ci_run_id -Label 'independent review run id'
+    if ([long]$receipt.pull_request_number -ne $PullRequestNumber -or
+        [string]$receipt.base_sha -cne $BaseSha -or [string]$receipt.head_sha -cne $HeadSha -or
+        $reviewRunId -ne $RunId -or [long]$receipt.ci_run_attempt -ne $RunAttempt -or
+        [string]$receipt.ci_conclusion -cne 'success' -or
+        [string]$receipt.receipt_set_digest -cne [string]$OrdinaryReceipts.receipt_set_digest -or
+        [long]$receipt.receipt_set_bytes -ne [long]$OrdinaryReceipts.receipt_set_bytes -or
+        [string]$receipt.reviewed_diff_digest -cne [string]$ReviewedDiff.digest -or
+        [long]$receipt.reviewed_diff_bytes -ne [long]$ReviewedDiff.bytes) {
+        throw 'independent review receipt binding mismatch'
+    }
+    $expectedArtifactIds = @($OrdinaryReceipts.checks | ForEach-Object { [long]$_.artifact_id } | Sort-Object)
+    $actualArtifactIds = @($receipt.artifact_ids | ForEach-Object { [long]$_ } | Sort-Object)
+    if (@(Compare-Object $expectedArtifactIds $actualArtifactIds).Count -ne 0 -or $actualArtifactIds.Count -ne 7) { throw 'independent review Artifact set mismatch' }
+    $skipped = @($receipt.skipped_jobs | ForEach-Object { [string]$_ } | Sort-Object -CaseSensitive)
+    if (($skipped -join '|') -cne 'release-full|release-host|release-model') { throw 'independent review skipped Job set mismatch' }
+    $reviewedCommits = @($receipt.reviewed_commits | ForEach-Object { [string]$_ })
+    if ($reviewedCommits.Count -lt 1 -or $reviewedCommits -cnotcontains $HeadSha -or @($reviewedCommits | Where-Object { $_ -cnotmatch '^[0-9a-f]{40}$' }).Count -ne 0) { throw 'independent review commit set is invalid' }
+    $taskDiff = Get-ExactHeadGitDiff -RepoRoot $RepoRoot -BaseSha ([string]$receipt.task_starting_sha) -HeadSha $HeadSha
+    if ([string]$receipt.task_diff_digest -cne [string]$taskDiff.digest -or [long]$receipt.task_diff_bytes -ne [long]$taskDiff.bytes) { throw 'independent review task diff mismatch' }
+    return [ordered]@{
+        comment_id=$ReviewCommentId
+        schema_version=[string]$receipt.schema_version
+        base_sha=[string]$receipt.base_sha
+        head_sha=[string]$receipt.head_sha
+        reviewed_diff_digest=[string]$receipt.reviewed_diff_digest
+        reviewed_diff_bytes=[long]$receipt.reviewed_diff_bytes
+        task_starting_sha=[string]$receipt.task_starting_sha
+        task_diff_digest=[string]$receipt.task_diff_digest
+        task_diff_bytes=[long]$receipt.task_diff_bytes
+        ci_run_id=$reviewRunId
+        ci_run_attempt=[long]$receipt.ci_run_attempt
+        receipt_set_digest=[string]$receipt.receipt_set_digest
+        reviewer_model=[string]$receipt.reviewer_model
+        reviewer_participated=[bool]$receipt.reviewer_participated
+        read_only=([bool]$receipt.read_only -and [bool]$receipt.zero_write)
+        verdict=[string]$receipt.verdict
+        findings=[ordered]@{p0=[long]$receipt.findings.p0;p1=[long]$receipt.findings.p1;p2=[long]$receipt.findings.p2;p3=[long]$receipt.findings.p3}
+        created_at_utc=([DateTimeOffset]::Parse([string]$receipt.created_at_utc)).ToUniversalTime().ToString('o')
+        receipt_digest=Get-ReleaseSha256Bytes -Bytes ([byte[]]$raw.bytes)
+    }
+}
+
+function Get-ExactHeadMetadataDigest {
+    param([Collections.IDictionary]$PullRequest)
+    $basis = [ordered]@{
+        number=[long]$PullRequest.number
+        state=[string]$PullRequest.state
+        draft=[bool]$PullRequest.draft
+        merged=[bool]$PullRequest.merged
+        base_ref=[string]$PullRequest.base_ref
+        base_sha=[string]$PullRequest.base_sha
+        head_ref=[string]$PullRequest.head_ref
+        head_sha=[string]$PullRequest.head_sha
+    }
+    return Get-ReleaseSha256Text -Text ($basis | ConvertTo-Json -Depth 10 -Compress)
+}
+
+function Get-ExactHeadReceiptSet {
+    param([object[]]$Checks)
+    $lines = @($Checks | ForEach-Object { "{0}={1}" -f [string]$_.check_name,[string]$_.raw_receipt_digest })
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($lines -join [char]10))
+    return [ordered]@{digest=(Get-ReleaseSha256Bytes -Bytes $bytes);bytes=[long]$bytes.Length}
+}
+
+function Assert-ExactHeadEngineeringReport {
+    param(
+        [string]$RepoRoot,
+        [Collections.IDictionary]$Document,
+        [Collections.IDictionary]$ExpectedSource = $null
+    )
+    $topKeys = @('schema_version','generated_at_utc','source_revision','source_dirty','source_state_stable','source','report_run_id','producer_identity','producer_mode','repository','pull_request','workflow','ordinary_receipts','independent_review','results','status','reason','report_digest')
+    Assert-ReleaseKeys -Value $Document -Expected $topKeys -Label 'exact-head engineering report'
+    $schemaPath = Join-Path $RepoRoot 'schemas\exact-head-engineering-evidence.schema.json'
+    if (-not (Test-Json -Json ($Document | ConvertTo-Json -Depth 100 -Compress) -SchemaFile $schemaPath -ErrorAction Stop -WarningAction SilentlyContinue)) { throw 'exact-head engineering report schema validation failed' }
+    if ([string]$Document.schema_version -cne 'thin-harness-exact-head-engineering-evidence/v1' -or
+        [string]$Document.report_run_id -cnotmatch '^[0-9a-f]{32}$' -or
+        [string]$Document.producer_identity -cne 'exact-head-engineering-evidence/v1' -or
+        [string]$Document.producer_mode -cnotin @('formal','test-only')) { throw 'exact-head engineering report identity is invalid' }
+    Assert-ExactHeadUtcDate -Value $Document.generated_at_utc -Label 'exact-head engineering report'
+    Assert-ReleaseReportDigest -Document $Document
+    Assert-InstalledDesktopSanitizedContent -Value $Document
+    Assert-HarnessPortableAdditionalSanitizedContent -Value $Document
+
+    Assert-ReleaseKeys -Value $Document.source -Expected @('commit_tree_oid','object_format','start','end','input_digests') -Label 'exact-head source'
+    Assert-ReleaseSourceStateShape -Value $Document.source.start -Label 'exact-head source start'
+    Assert-ReleaseSourceStateShape -Value $Document.source.end -Label 'exact-head source end'
+    $stable = Test-HarnessReleaseSourceStable -Start $Document.source.start -End $Document.source.end
+    if ([string]$Document.source_revision -cne [string]$Document.source.start.revision -or
+        [string]$Document.source_revision -cne [string]$Document.source.end.revision -or
+        [string]$Document.source.commit_tree_oid -cne [string]$Document.source.start.commit_tree_oid -or
+        [string]$Document.source.commit_tree_oid -cne [string]$Document.source.end.commit_tree_oid -or
+        [string]$Document.source.object_format -cne [string]$Document.source.start.object_format -or
+        [string]$Document.source.object_format -cne [string]$Document.source.end.object_format -or
+        [bool]$Document.source_dirty -ne ([bool]$Document.source.start.dirty -or [bool]$Document.source.end.dirty) -or
+        [bool]$Document.source_state_stable -ne $stable) { throw 'exact-head source summary is inconsistent' }
+    if ($null -ne $ExpectedSource) {
+        Assert-HarnessPortableEvidenceSource -RepoRoot $RepoRoot -ExpectedSource $ExpectedSource
+        Assert-ReleaseSourceStateMatchesExpected -Value $Document.source.start -Expected $ExpectedSource -Label 'exact-head source start'
+        Assert-ReleaseSourceStateMatchesExpected -Value $Document.source.end -Expected $ExpectedSource -Label 'exact-head source end'
+    }
+    $inputPaths = Get-ExactHeadEngineeringInputPaths
+    Assert-ReleaseKeys -Value $Document.source.input_digests -Expected @($inputPaths.Keys) -Label 'exact-head input digests'
+    foreach ($entry in $inputPaths.GetEnumerator()) {
+        Assert-ReleaseCurrentFileDigest -RepoRoot $RepoRoot -Value $Document.source.input_digests[$entry.Key] -RelativePath ([string]$entry.Value) -Label "exact-head $($entry.Key)"
+    }
+
+    Assert-ReleaseKeys -Value $Document.repository -Expected @('full_name') -Label 'exact-head repository'
+    Assert-ReleaseKeys -Value $Document.pull_request -Expected @('number','state','draft','merged','base_ref','base_sha','head_ref','head_sha','metadata_observed_at_utc','metadata_digest') -Label 'exact-head pull request'
+    Assert-ExactHeadUtcDate -Value $Document.pull_request.metadata_observed_at_utc -Label 'exact-head pull request metadata'
+    if ([string]$Document.pull_request.metadata_digest -cne (Get-ExactHeadMetadataDigest -PullRequest $Document.pull_request)) { throw 'exact-head pull request metadata digest mismatch' }
+
+    Assert-ReleaseKeys -Value $Document.workflow -Expected @('workflow_name','run_id','run_attempt','status','conclusion','head_sha','ordinary_jobs','release_jobs') -Label 'exact-head workflow'
+    $ordinaryNames = @('changed-optional','entry-lifecycle','evaluation-release','install-evidence','governance-approval','harness-contracts','core-rollback')
+    $releaseNames = @('release-model','release-host','release-full')
+    Assert-ReleaseKeys -Value $Document.workflow.ordinary_jobs -Expected $ordinaryNames -Label 'exact-head ordinary jobs'
+    Assert-ReleaseKeys -Value $Document.workflow.release_jobs -Expected $releaseNames -Label 'exact-head release jobs'
+
+    Assert-ReleaseKeys -Value $Document.ordinary_receipts -Expected @('receipt_set_digest','receipt_set_bytes','checks') -Label 'exact-head ordinary receipts'
+    $checkOrder = @('changed-optional','core-rollback','entry-lifecycle','evaluation-release','governance-approval','harness-contracts','install-evidence')
+    $checks = @($Document.ordinary_receipts.checks)
+    if ($checks.Count -ne 7 -or (@($checks | ForEach-Object { [string]$_.check_name }) -join '|') -cne ($checkOrder -join '|')) { throw 'exact-head ordinary receipt order is invalid' }
+    $expectedDefinitions = @(Get-ExactHeadArtifactDefinitions -HeadSha ([string]$Document.pull_request.head_sha) -RunAttempt ([long]$Document.workflow.run_attempt))
+    $receiptSummariesValid = $true
+    for ($checkIndex=0; $checkIndex -lt $checks.Count; $checkIndex++) {
+        $check = $checks[$checkIndex]
+        $definition = $expectedDefinitions[$checkIndex]
+        Assert-ReleaseKeys -Value $check -Expected @('check_name','job_id','artifact_id','artifact_name','raw_receipt_digest','outcome') -Label 'exact-head ordinary receipt summary'
+        Assert-ReleaseDigestValue -Value $check.raw_receipt_digest -Label 'exact-head raw receipt'
+        if ([string]$check.check_name -cne [string]$definition.check_name -or [string]$check.job_id -cne [string]$definition.job_id -or
+            [string]$check.artifact_name -cne [string]$definition.artifact_name -or [string]$check.outcome -cne 'success') { $receiptSummariesValid = $false }
+    }
+    if (@($checks.artifact_id | Sort-Object -Unique).Count -ne 7 -or @($checks.raw_receipt_digest | Sort-Object -Unique).Count -ne 7) { throw 'exact-head ordinary receipts are not distinct' }
+    $receiptSet = Get-ExactHeadReceiptSet -Checks $checks
+    if ([string]$Document.ordinary_receipts.receipt_set_digest -cne [string]$receiptSet.digest -or [long]$Document.ordinary_receipts.receipt_set_bytes -ne [long]$receiptSet.bytes) { throw 'exact-head receipt set mismatch' }
+
+    $reviewKeys = @('comment_id','schema_version','base_sha','head_sha','reviewed_diff_digest','reviewed_diff_bytes','task_starting_sha','task_diff_digest','task_diff_bytes','ci_run_id','ci_run_attempt','receipt_set_digest','reviewer_model','reviewer_participated','read_only','verdict','findings','created_at_utc','receipt_digest')
+    Assert-ReleaseKeys -Value $Document.independent_review -Expected $reviewKeys -Label 'exact-head independent review'
+    Assert-ReleaseKeys -Value $Document.independent_review.findings -Expected @('p0','p1','p2','p3') -Label 'exact-head independent review findings'
+    foreach ($name in @('reviewed_diff_digest','task_diff_digest','receipt_set_digest','receipt_digest')) { Assert-ReleaseDigestValue -Value $Document.independent_review[$name] -Label "exact-head review $name" }
+    Assert-ExactHeadUtcDate -Value $Document.independent_review.created_at_utc -Label 'exact-head independent review'
+    $reviewedDiff = Get-ExactHeadGitDiff -RepoRoot $RepoRoot -BaseSha ([string]$Document.pull_request.base_sha) -HeadSha ([string]$Document.pull_request.head_sha)
+    $taskDiff = Get-ExactHeadGitDiff -RepoRoot $RepoRoot -BaseSha ([string]$Document.independent_review.task_starting_sha) -HeadSha ([string]$Document.pull_request.head_sha)
+
+    $resultNames = @('pr_open','pr_draft','pr_unmerged','exact_base','exact_head','exact_checkout','ordinary_jobs_passed','release_jobs_not_counted_as_pass','seven_receipts_valid','receipt_set_valid','review_exact_head','review_read_only','review_independent','review_verdict_pass','review_findings_clear','reviewed_diff_valid','source_clean','source_stable')
+    Assert-ReleaseKeys -Value $Document.results -Expected $resultNames -Label 'exact-head results'
+    foreach ($name in $resultNames) { Assert-ReleaseBoolean -Value $Document.results[$name] -Label "exact-head result $name" }
+    $derived = [ordered]@{
+        pr_open=([string]$Document.pull_request.state -ceq 'open')
+        pr_draft=[bool]$Document.pull_request.draft
+        pr_unmerged=(-not [bool]$Document.pull_request.merged)
+        exact_base=([long]$Document.pull_request.number -eq 2 -and [string]$Document.repository.full_name -ceq 'Li-WithIce/claude-dev-harness' -and [string]$Document.pull_request.base_ref -ceq 'codex/harness-v2-public-optin-beta' -and [string]$Document.pull_request.base_sha -ceq [string]$Document.independent_review.base_sha)
+        exact_head=([string]$Document.pull_request.head_ref -ceq 'codex/harness-v2-default-promotion' -and [string]$Document.pull_request.head_sha -ceq [string]$Document.source_revision -and [string]$Document.workflow.head_sha -ceq [string]$Document.pull_request.head_sha)
+        exact_checkout=($receiptSummariesValid -and [bool]$Document.results.exact_checkout)
+        ordinary_jobs_passed=([string]$Document.workflow.workflow_name -ceq 'Validation' -and [string]$Document.workflow.status -ceq 'completed' -and [string]$Document.workflow.conclusion -ceq 'success' -and @($ordinaryNames | Where-Object { [string]$Document.workflow.ordinary_jobs[$_] -cne 'success' }).Count -eq 0)
+        release_jobs_not_counted_as_pass=(@($releaseNames | Where-Object { [string]$Document.workflow.release_jobs[$_] -cne 'skipped' }).Count -eq 0)
+        seven_receipts_valid=($checks.Count -eq 7 -and $receiptSummariesValid)
+        receipt_set_valid=([string]$Document.independent_review.receipt_set_digest -ceq [string]$receiptSet.digest)
+        review_exact_head=([string]$Document.independent_review.base_sha -ceq [string]$Document.pull_request.base_sha -and [string]$Document.independent_review.head_sha -ceq [string]$Document.pull_request.head_sha -and [long]$Document.independent_review.ci_run_id -eq [long]$Document.workflow.run_id -and [long]$Document.independent_review.ci_run_attempt -eq [long]$Document.workflow.run_attempt)
+        review_read_only=[bool]$Document.independent_review.read_only
+        review_independent=(-not [bool]$Document.independent_review.reviewer_participated)
+        review_verdict_pass=([string]$Document.independent_review.verdict -ceq 'pass')
+        review_findings_clear=([long]$Document.independent_review.findings.p0 -eq 0 -and [long]$Document.independent_review.findings.p1 -eq 0 -and [long]$Document.independent_review.findings.p2 -eq 0)
+        reviewed_diff_valid=([string]$Document.independent_review.reviewed_diff_digest -ceq [string]$reviewedDiff.digest -and [long]$Document.independent_review.reviewed_diff_bytes -eq [long]$reviewedDiff.bytes -and [string]$Document.independent_review.task_diff_digest -ceq [string]$taskDiff.digest -and [long]$Document.independent_review.task_diff_bytes -eq [long]$taskDiff.bytes)
+        source_clean=(-not [bool]$Document.source_dirty)
+        source_stable=[bool]$Document.source_state_stable
+    }
+    foreach ($name in $derived.Keys) { if ([bool]$Document.results[$name] -ne [bool]$derived[$name]) { throw "exact-head result $name is inconsistent" } }
+    $allPassed = @($resultNames | Where-Object { -not [bool]$derived[$_] }).Count -eq 0
+    if ([string]$Document.producer_mode -ceq 'test-only') {
+        if ([string]$Document.status -cne 'unavailable' -or [string]$Document.reason -cne 'non-formal-producer-mode') { throw 'test-only exact-head report cannot pass' }
+    } elseif ($allPassed) {
+        if ([string]$Document.status -cne 'pass' -or [string]$Document.reason -cne 'all-exact-head-engineering-checks-passed') { throw 'formal exact-head passing status is inconsistent' }
+    } elseif (-not (([string]$Document.status -ceq 'fail' -and [string]$Document.reason -ceq 'exact-head-engineering-check-failed') -or
+        ([string]$Document.status -ceq 'unavailable' -and [string]$Document.reason -ceq 'github-evidence-unavailable'))) {
+        throw 'formal exact-head non-passing status is inconsistent'
+    }
+    return [ordered]@{status=[string]$Document.status;reason=[string]$Document.reason;producer_identity='exact-head-engineering-evidence/v1';source_revision=[string]$Document.source_revision;report_run_id=[string]$Document.report_run_id}
+}
+
+function New-ExactHeadEngineeringEvidenceArtifact {
+    param(
+        [string]$RepoRoot,
+        [string]$RepositoryFullName,
+        [long]$PullRequestNumber,
+        [long]$RunId,
+        [long]$ReviewCommentId,
+        [string]$OutputPath,
+        [ValidateSet('formal','test-only')][string]$ProducerMode,
+        [AllowEmptyString()][string]$GitHubFixtureRoot = ''
+    )
+    $repo = (Resolve-Path -LiteralPath $RepoRoot -ErrorAction Stop).Path
+    if ($RepositoryFullName -cne 'Li-WithIce/claude-dev-harness') { throw 'exact-head repository is not authorized' }
+    $sourceStart = Get-HarnessReleaseSourceState -RepoRoot $repo
+    $downloadRoot = if ($ProducerMode -ceq 'formal') { New-ExactHeadTemporaryRoot } else { '' }
+    try {
+        $github = Read-ExactHeadGitHubState -RepositoryFullName $RepositoryFullName -PullRequestNumber $PullRequestNumber -RunId $RunId -ReviewCommentId $ReviewCommentId -ProducerMode $ProducerMode -GitHubFixtureRoot $GitHubFixtureRoot
+        $pullApi = $github.pull_request
+        $pull = [ordered]@{
+            number=[long]$pullApi.number
+            state=[string]$pullApi.state
+            draft=[bool]$pullApi.draft
+            merged=[bool]$pullApi.merged
+            base_ref=[string]$pullApi.base.ref
+            base_sha=[string]$pullApi.base.sha
+            head_ref=[string]$pullApi.head.ref
+            head_sha=[string]$pullApi.head.sha
+            metadata_observed_at_utc=[DateTimeOffset]::UtcNow.ToString('o')
+            metadata_digest=$null
+        }
+        $pull.metadata_digest = Get-ExactHeadMetadataDigest -PullRequest $pull
+        $workflow = Get-ExactHeadWorkflowSummary -Run $github.workflow_run -JobsDocument $github.workflow_jobs -ExpectedRunId $RunId
+        $receipts = Get-ExactHeadOrdinaryReceipts -RepoRoot $repo -RepositoryFullName $RepositoryFullName -PullRequestNumber $PullRequestNumber -RunId $RunId -RunAttempt ([long]$workflow.run_attempt) -BaseSha ([string]$pull.base_sha) -HeadSha ([string]$pull.head_sha) -ArtifactsDocument $github.workflow_artifacts -ProducerMode $ProducerMode -FixtureRoot ([string]$github.fixture_root) -DownloadRoot $downloadRoot
+        $reviewedDiff = Get-ExactHeadGitDiff -RepoRoot $repo -BaseSha ([string]$pull.base_sha) -HeadSha ([string]$pull.head_sha)
+        $review = Get-ExactHeadIndependentReview -Comment $github.review_comment -ReviewCommentId $ReviewCommentId -PullRequestNumber $PullRequestNumber -BaseSha ([string]$pull.base_sha) -HeadSha ([string]$pull.head_sha) -RunId $RunId -RunAttempt ([long]$workflow.run_attempt) -OrdinaryReceipts $receipts -ReviewedDiff $reviewedDiff -RepoRoot $repo
+        $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $repo
+        $target = Resolve-HarnessReleaseArtifactPath -RepoRoot $repo -OutputPath $OutputPath -EvidencePaths @($receipts.paths) -ProtectedRoots $protected
+        $inputDigests = [ordered]@{}
+        foreach ($entry in (Get-ExactHeadEngineeringInputPaths).GetEnumerator()) { $inputDigests[$entry.Key] = Get-ReleaseFileDigest -Path (Join-Path $repo ([string]$entry.Value)) }
+        $sourceEnd = Get-HarnessReleaseSourceState -RepoRoot $repo
+        $stable = Test-HarnessReleaseSourceStable -Start $sourceStart -End $sourceEnd
+        $ordinaryNames = @('changed-optional','entry-lifecycle','evaluation-release','install-evidence','governance-approval','harness-contracts','core-rollback')
+        $releaseNames = @('release-model','release-host','release-full')
+        $results = [ordered]@{
+            pr_open=([string]$pull.state -ceq 'open')
+            pr_draft=[bool]$pull.draft
+            pr_unmerged=(-not [bool]$pull.merged)
+            exact_base=([long]$pull.number -eq 2 -and $RepositoryFullName -ceq 'Li-WithIce/claude-dev-harness' -and [string]$pull.base_ref -ceq 'codex/harness-v2-public-optin-beta' -and [string]$review.base_sha -ceq [string]$pull.base_sha)
+            exact_head=([string]$pull.head_ref -ceq 'codex/harness-v2-default-promotion' -and [string]$pull.head_sha -ceq [string]$sourceStart.revision -and [string]$workflow.head_sha -ceq [string]$pull.head_sha)
+            exact_checkout=$true
+            ordinary_jobs_passed=([string]$workflow.workflow_name -ceq 'Validation' -and [string]$workflow.status -ceq 'completed' -and [string]$workflow.conclusion -ceq 'success' -and @($ordinaryNames | Where-Object { [string]$workflow.ordinary_jobs[$_] -cne 'success' }).Count -eq 0)
+            release_jobs_not_counted_as_pass=(@($releaseNames | Where-Object { [string]$workflow.release_jobs[$_] -cne 'skipped' }).Count -eq 0)
+            seven_receipts_valid=(@($receipts.checks).Count -eq 7)
+            receipt_set_valid=([string]$review.receipt_set_digest -ceq [string]$receipts.receipt_set_digest)
+            review_exact_head=([string]$review.base_sha -ceq [string]$pull.base_sha -and [string]$review.head_sha -ceq [string]$pull.head_sha -and [long]$review.ci_run_id -eq $RunId -and [long]$review.ci_run_attempt -eq [long]$workflow.run_attempt)
+            review_read_only=[bool]$review.read_only
+            review_independent=(-not [bool]$review.reviewer_participated)
+            review_verdict_pass=([string]$review.verdict -ceq 'pass')
+            review_findings_clear=([long]$review.findings.p0 -eq 0 -and [long]$review.findings.p1 -eq 0 -and [long]$review.findings.p2 -eq 0)
+            reviewed_diff_valid=([string]$review.reviewed_diff_digest -ceq [string]$reviewedDiff.digest -and [long]$review.reviewed_diff_bytes -eq [long]$reviewedDiff.bytes)
+            source_clean=(-not [bool]$sourceStart.dirty -and -not [bool]$sourceEnd.dirty)
+            source_stable=$stable
+        }
+        $allPassed = @($results.Keys | Where-Object { -not [bool]$results[$_] }).Count -eq 0
+        $status = if ($ProducerMode -cne 'formal') { 'unavailable' } elseif ($allPassed) { 'pass' } else { 'fail' }
+        $reason = if ($ProducerMode -cne 'formal') { 'non-formal-producer-mode' } elseif ($allPassed) { 'all-exact-head-engineering-checks-passed' } else { 'exact-head-engineering-check-failed' }
+        $document = [ordered]@{
+            schema_version='thin-harness-exact-head-engineering-evidence/v1'
+            generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o')
+            source_revision=[string]$sourceStart.revision
+            source_dirty=([bool]$sourceStart.dirty -or [bool]$sourceEnd.dirty)
+            source_state_stable=$stable
+            source=[ordered]@{commit_tree_oid=[string]$sourceStart.commit_tree_oid;object_format=[string]$sourceStart.object_format;start=$sourceStart;end=$sourceEnd;input_digests=$inputDigests}
+            report_run_id=[guid]::NewGuid().ToString('N')
+            producer_identity='exact-head-engineering-evidence/v1'
+            producer_mode=$ProducerMode
+            repository=[ordered]@{full_name=$RepositoryFullName}
+            pull_request=$pull
+            workflow=$workflow
+            ordinary_receipts=[ordered]@{receipt_set_digest=[string]$receipts.receipt_set_digest;receipt_set_bytes=[long]$receipts.receipt_set_bytes;checks=@($receipts.checks)}
+            independent_review=$review
+            results=$results
+            status=$status
+            reason=$reason
+            report_digest=$null
+        }
+        $document.report_digest = Get-ReleaseSha256Text -Text ($document | ConvertTo-Json -Depth 100 -Compress)
+        $json = $document | ConvertTo-Json -Depth 100 -Compress
+        $validated = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($json))
+        [void](Assert-ExactHeadEngineeringReport -RepoRoot $repo -Document $validated -ExpectedSource $sourceStart)
+        $rawDigest = Write-ReleaseIsolationArtifact -Target $target -Content $json
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath $target -ExpectedDigest $rawDigest -ProtectedRoots $protected -MaximumBytes 2MB
+        $reopened = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        [void](Assert-ExactHeadEngineeringReport -RepoRoot $repo -Document $reopened -ExpectedSource $sourceStart)
+        return $reopened
+    } finally {
+        if (-not [string]::IsNullOrWhiteSpace($downloadRoot)) { Remove-ExactHeadTemporaryRoot -Path $downloadRoot }
+    }
+}
+
+function Read-ExactHeadRolloutEvidence {
+    param(
+        [string]$RepoRoot,
+        [Collections.IDictionary]$Gate,
+        [Collections.IDictionary]$ExpectedSource,
+        [string[]]$ProtectedRoots = @()
+    )
+    try {
+        Assert-ReleaseKeys -Value $Gate -Expected @('status','evidence_contract','artifact_path','evidence_digest','source_revision','producer_identity') -Label 'exact-head engineering gate'
+        if ([string]$Gate.evidence_contract -cne 'thin-harness-exact-head-engineering-evidence/v1' -or
+            [string]$Gate.source_revision -cne [string]$ExpectedSource.revision -or
+            [string]::IsNullOrWhiteSpace([string]$Gate.producer_identity)) { throw 'exact-head engineering gate binding is invalid' }
+        $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $RepoRoot -ProtectedRoots $ProtectedRoots
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$Gate.artifact_path) -ExpectedDigest ([string]$Gate.evidence_digest) -ProtectedRoots $protected -MaximumBytes 2MB
+        $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        $result = Assert-ExactHeadEngineeringReport -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource
+        $result['path'] = [string]$artifact.path
+        $result['raw_digest'] = [string]$artifact.digest
+        $result['report_digest'] = [string]$document.report_digest
+        return $result
+    } catch { throw [IO.InvalidDataException]::new('rollout-evidence-exact-head-engineering-report-invalid',$_.Exception) }
+}
+
+function Get-ReleaseFullReceiptDefinition {
+    return [ordered]@{
+        schema_version='harness-release-full-receipt/v1'
+        schema_path='schemas/release-full-receipt.schema.json'
+        producer_identity='release-full-receipt/v1'
+        input_contracts=[ordered]@{
+            exact_head='thin-harness-exact-head-engineering-evidence/v1'
+            release_isolation='harness-release-isolation-report/v1'
+            release_model='harness-release-model-receipt/v1'
+            release_host='harness-release-host-receipt/v1'
+            v1_stop_loss='harness-v1-stop-loss-report/v1'
+            lifecycle_core='harness-preset-lifecycle-report/v1'
+            lifecycle_governed='harness-preset-lifecycle-report/v1'
+            lifecycle_full='harness-preset-lifecycle-report/v1'
+        }
+    }
+}
+
+function Get-ReleaseFullReceiptInputPaths {
+    return [ordered]@{
+        producer_digest='scripts/write-release-full-receipt.ps1'
+        receipt_schema_digest='schemas/release-full-receipt.schema.json'
+        observation_schema_digest='schemas/release-runner-observation.schema.json'
+        rollout_evidence_digest='scripts/lib/Harness.RolloutEvidence.psm1'
+    }
+}
+
+function Get-ReleaseFullReceiptStatus {
+    param(
+        [Parameter(Mandatory)][ValidateSet('formal','test-only')][string]$ProducerMode,
+        [Parameter(Mandatory)][string]$Conclusion,
+        [Parameter(Mandatory)][string[]]$InputStatuses,
+        [Parameter(Mandatory)][bool]$SourceDirty,
+        [Parameter(Mandatory)][bool]$SourceStable
+    )
+    if ($ProducerMode -ceq 'test-only') { return 'unavailable' }
+    if ($Conclusion -cne 'success' -or $SourceDirty -or -not $SourceStable -or @($InputStatuses | Where-Object { $_ -ceq 'fail' }).Count -gt 0) { return 'fail' }
+    if (@($InputStatuses | Where-Object { $_ -ceq 'unavailable' }).Count -gt 0) { return 'unavailable' }
+    return 'pass'
+}
+
+function Get-ReleaseFullReceiptReason {
+    param([Parameter(Mandatory)][string]$ProducerMode,[Parameter(Mandatory)][string]$Status)
+    if ($ProducerMode -ceq 'test-only') { return 'non-formal-producer-mode' }
+    if ($Status -ceq 'pass') { return 'all-release-full-checks-passed' }
+    if ($Status -ceq 'fail') { return 'release-full-check-failed' }
+    return 'release-full-check-unavailable'
+}
+
+function Assert-ReleaseFullReceipt {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Document,
+        [Collections.IDictionary]$ExpectedSource = $null,
+        [switch]$RequirePortableSource
+    )
+    $definition = Get-ReleaseFullReceiptDefinition
+    $topKeys = @('schema_version','generated_at_utc','source_revision','source_dirty','source_state_stable','source','receipt_run_id','producer_identity','producer_mode','workflow','aggregator_observation','inputs','status','reason','receipt_digest')
+    Assert-ReleaseKeys -Value $Document -Expected $topKeys -Label 'release full receipt'
+    $schemaPath = Join-Path $RepoRoot ([string]$definition.schema_path)
+    if (-not (Test-Json -Json ($Document | ConvertTo-Json -Depth 100 -Compress) -SchemaFile $schemaPath -ErrorAction Stop -WarningAction SilentlyContinue)) { throw 'release full receipt schema validation failed' }
+    if ([string]$Document.schema_version -cne [string]$definition.schema_version -or [string]$Document.receipt_run_id -cnotmatch '^[0-9a-f]{32}$' -or
+        [string]$Document.producer_identity -cne [string]$definition.producer_identity -or [string]$Document.producer_mode -cnotin @('formal','test-only') -or
+        [string]$Document.status -cnotin @('pass','fail','unavailable')) { throw 'release full receipt identity is invalid' }
+    Assert-ReleaseDate -Value $Document.generated_at_utc -Label 'release full receipt'
+    Assert-ReleaseIsolationContentDigest -Document $Document -Property receipt_digest
+    Assert-ReleaseIsolationSanitizedContent -Value $Document
+    $stable = Assert-ReleaseIsolationSourceBinding -RepoRoot $RepoRoot -Document $Document -InputPaths (Get-ReleaseFullReceiptInputPaths) -ExpectedSource $ExpectedSource -RequirePortableSource:$RequirePortableSource
+
+    Assert-ReleaseKeys -Value $Document.workflow -Expected @('run_id','run_attempt','job_name','checkout_sha','conclusion') -Label 'release full receipt workflow'
+    if ([string]$Document.workflow.run_id -cnotmatch '^[1-9][0-9]*$' -or ($Document.workflow.run_attempt -isnot [long] -and $Document.workflow.run_attempt -isnot [int]) -or [long]$Document.workflow.run_attempt -lt 1 -or
+        [string]$Document.workflow.job_name -cne 'release-full' -or [string]$Document.workflow.checkout_sha -cne [string]$Document.source_revision -or
+        [string]$Document.workflow.conclusion -cnotin @('success','failure','neutral','cancelled','skipped','timed_out','action_required','stale','startup_failure')) {
+        throw 'release full receipt workflow binding is invalid'
+    }
+    Assert-ReleaseKeys -Value $Document.aggregator_observation -Expected @('role','observation_digest','account_digest','runner_label_digest') -Label 'release full receipt aggregator observation'
+    if ([string]$Document.aggregator_observation.role -cne 'aggregator') { throw 'release full receipt aggregator role is invalid' }
+    foreach ($name in @('observation_digest','account_digest','runner_label_digest')) { Assert-ReleaseDigestValue -Value $Document.aggregator_observation[$name] -Label "release full receipt aggregator $name" }
+
+    Assert-ReleaseKeys -Value $Document.inputs -Expected @($definition.input_contracts.Keys) -Label 'release full receipt inputs'
+    foreach ($name in @($definition.input_contracts.Keys)) {
+        $input = $Document.inputs[$name]
+        Assert-ReleaseKeys -Value $input -Expected @('evidence_contract','raw_digest','document_digest','source_revision','status') -Label "release full receipt input $name"
+        if ([string]$input.evidence_contract -cne [string]$definition.input_contracts[$name] -or [string]$input.source_revision -cne [string]$Document.source_revision -or
+            [string]$input.status -cnotin @('pass','fail','unavailable')) { throw "release full receipt input $name binding is invalid" }
+        foreach ($digestName in @('raw_digest','document_digest')) { Assert-ReleaseDigestValue -Value $input[$digestName] -Label "release full receipt input $name $digestName" }
+    }
+
+    $derivedStatus = Get-ReleaseFullReceiptStatus -ProducerMode ([string]$Document.producer_mode) -Conclusion ([string]$Document.workflow.conclusion) `
+        -InputStatuses @($Document.inputs.Values | ForEach-Object { [string]$_.status }) -SourceDirty ([bool]$Document.source_dirty) -SourceStable $stable
+    $derivedReason = Get-ReleaseFullReceiptReason -ProducerMode ([string]$Document.producer_mode) -Status $derivedStatus
+    if ([string]$Document.status -cne $derivedStatus -or [string]$Document.reason -cne $derivedReason) { throw 'release full receipt status is inconsistent' }
+    return [ordered]@{
+        status=$derivedStatus;reason=$derivedReason;producer_identity=[string]$definition.producer_identity;producer_mode=[string]$Document.producer_mode
+        source_revision=[string]$Document.source_revision;source_dirty=[bool]$Document.source_dirty;source_state_stable=$stable;receipt_run_id=[string]$Document.receipt_run_id
+        receipt_digest=[string]$Document.receipt_digest;workflow=$Document.workflow;aggregator_observation=$Document.aggregator_observation;inputs=$Document.inputs
+    }
+}
+
+function Assert-ReleaseFullReceiptBindings {
+    param(
+        [Parameter(Mandatory)][Collections.IDictionary]$Receipt,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExactHead,
+        [Parameter(Mandatory)][Collections.IDictionary]$ReleaseIsolation,
+        [Parameter(Mandatory)][Collections.IDictionary]$ReleaseModel,
+        [Parameter(Mandatory)][Collections.IDictionary]$ReleaseHost,
+        [Parameter(Mandatory)][Collections.IDictionary]$V1StopLoss,
+        [Parameter(Mandatory)][Collections.IDictionary]$LifecycleCore,
+        [Parameter(Mandatory)][Collections.IDictionary]$LifecycleGoverned,
+        [Parameter(Mandatory)][Collections.IDictionary]$LifecycleFull
+    )
+    if ([string]$Receipt.workflow.run_id -cne [string]$ReleaseIsolation.workflow.run_id -or [long]$Receipt.workflow.run_attempt -ne [long]$ReleaseIsolation.workflow.run_attempt -or
+        [string]$Receipt.workflow.run_id -cne [string]$ReleaseModel.workflow.run_id -or [long]$Receipt.workflow.run_attempt -ne [long]$ReleaseModel.workflow.run_attempt -or
+        [string]$Receipt.workflow.run_id -cne [string]$ReleaseHost.workflow.run_id -or [long]$Receipt.workflow.run_attempt -ne [long]$ReleaseHost.workflow.run_attempt) {
+        throw 'release full receipt workflow does not match G04/G09/G10'
+    }
+    [void](Assert-ReleaseProducerReceiptObservationBinding -Receipt $ReleaseModel -Observation $ReleaseIsolation.observations.model_producer -IsolationWorkflow $ReleaseIsolation.workflow)
+    [void](Assert-ReleaseProducerReceiptObservationBinding -Receipt $ReleaseHost -Observation $ReleaseIsolation.observations.host_producer -IsolationWorkflow $ReleaseIsolation.workflow)
+    $aggregator = $ReleaseIsolation.observations.aggregator
+    foreach ($name in @('role','observation_digest','account_digest','runner_label_digest')) {
+        if ([string]$Receipt.aggregator_observation[$name] -cne [string]$aggregator[$name]) { throw 'release full receipt aggregator observation does not match G04' }
+    }
+    if ([string]$LifecycleCore.preset -cne 'core' -or [string]$LifecycleGoverned.preset -cne 'governed' -or [string]$LifecycleFull.preset -cne 'full') {
+        throw 'release full receipt lifecycle preset binding is invalid'
+    }
+    $bindings = [ordered]@{
+        exact_head=[ordered]@{evidence_contract='thin-harness-exact-head-engineering-evidence/v1';raw_digest=[string]$ExactHead.raw_digest;document_digest=[string]$ExactHead.report_digest;source_revision=[string]$ExactHead.source_revision;status=[string]$ExactHead.status}
+        release_isolation=[ordered]@{evidence_contract='harness-release-isolation-report/v1';raw_digest=[string]$ReleaseIsolation.raw_digest;document_digest=[string]$ReleaseIsolation.report_digest;source_revision=[string]$ReleaseIsolation.source_revision;status=[string]$ReleaseIsolation.status}
+        release_model=[ordered]@{evidence_contract='harness-release-model-receipt/v1';raw_digest=[string]$ReleaseModel.raw_digest;document_digest=[string]$ReleaseModel.receipt_digest;source_revision=[string]$ReleaseModel.source_revision;status=[string]$ReleaseModel.status}
+        release_host=[ordered]@{evidence_contract='harness-release-host-receipt/v1';raw_digest=[string]$ReleaseHost.raw_digest;document_digest=[string]$ReleaseHost.receipt_digest;source_revision=[string]$ReleaseHost.source_revision;status=[string]$ReleaseHost.status}
+        v1_stop_loss=[ordered]@{evidence_contract='harness-v1-stop-loss-report/v1';raw_digest=[string]$V1StopLoss.raw_digest;document_digest=[string]$V1StopLoss.report_digest;source_revision=[string]$V1StopLoss.source_revision;status=[string]$V1StopLoss.status}
+        lifecycle_core=[ordered]@{evidence_contract='harness-preset-lifecycle-report/v1';raw_digest=[string]$LifecycleCore.raw_digest;document_digest=[string]$LifecycleCore.report_digest;source_revision=[string]$LifecycleCore.source_revision;status=[string]$LifecycleCore.status}
+        lifecycle_governed=[ordered]@{evidence_contract='harness-preset-lifecycle-report/v1';raw_digest=[string]$LifecycleGoverned.raw_digest;document_digest=[string]$LifecycleGoverned.report_digest;source_revision=[string]$LifecycleGoverned.source_revision;status=[string]$LifecycleGoverned.status}
+        lifecycle_full=[ordered]@{evidence_contract='harness-preset-lifecycle-report/v1';raw_digest=[string]$LifecycleFull.raw_digest;document_digest=[string]$LifecycleFull.report_digest;source_revision=[string]$LifecycleFull.source_revision;status=[string]$LifecycleFull.status}
+    }
+    foreach ($name in @($bindings.Keys)) {
+        foreach ($property in @('evidence_contract','raw_digest','document_digest','source_revision','status')) {
+            if ([string]$Receipt.inputs[$name][$property] -cne [string]$bindings[$name][$property]) { throw "release full receipt input $name does not match its Gate Artifact" }
+        }
+    }
+    return [string]$Receipt.status
+}
+
+function New-ReleaseFullReceiptGate {
+    param([string]$Contract,[string]$Path,[Collections.IDictionary]$Source)
+    return [ordered]@{status='unavailable';evidence_contract=$Contract;artifact_path=$Path;evidence_digest=(Get-ReleaseFileDigest -Path $Path);source_revision=[string]$Source.revision;producer_identity='release-full-receipt-writer/v1'}
+}
+
+function New-ReleaseFullReceiptArtifact {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$ExactHeadReportPath,
+        [Parameter(Mandatory)][string]$ReleaseIsolationReportPath,
+        [Parameter(Mandatory)][string]$ReleaseModelReceiptPath,
+        [Parameter(Mandatory)][string]$ReleaseHostReceiptPath,
+        [Parameter(Mandatory)][string]$V1StopLossReportPath,
+        [Parameter(Mandatory)][string]$LifecycleCoreReportPath,
+        [Parameter(Mandatory)][string]$LifecycleGovernedReportPath,
+        [Parameter(Mandatory)][string]$LifecycleFullReportPath,
+        [Parameter(Mandatory)][string]$AggregatorObservationPath,
+        [Parameter(Mandatory)][string]$OutputPath,
+        [Parameter(Mandatory)][string]$RunId,
+        [Parameter(Mandatory)][int]$RunAttempt,
+        [Parameter(Mandatory)][string]$CheckoutSha,
+        [Parameter(Mandatory)][ValidateSet('success','failure','neutral','cancelled','skipped','timed_out','action_required','stale','startup_failure')][string]$Conclusion,
+        [Parameter(Mandatory)][ValidateSet('formal','test-only')][string]$ProducerMode
+    )
+    $repo = (Resolve-Path -LiteralPath $RepoRoot).Path
+    if ($RunId -cnotmatch '^[1-9][0-9]*$' -or $RunAttempt -lt 1 -or $CheckoutSha -cnotmatch '^[0-9a-f]{40,64}$') { throw 'release full receipt workflow identity is invalid' }
+    $inputPaths = @($ExactHeadReportPath,$ReleaseIsolationReportPath,$ReleaseModelReceiptPath,$ReleaseHostReceiptPath,$V1StopLossReportPath,$LifecycleCoreReportPath,$LifecycleGovernedReportPath,$LifecycleFullReportPath,$AggregatorObservationPath)
+    $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $repo
+    $target = Resolve-HarnessReleaseArtifactPath -RepoRoot $repo -OutputPath $OutputPath -EvidencePaths $inputPaths -ProtectedRoots $protected
+    $sourceStart = Get-HarnessReleaseSourceState -RepoRoot $repo
+    if ($CheckoutSha -cne [string]$sourceStart.revision) { throw 'release full receipt checkout is stale' }
+
+    $exactHead = Read-ExactHeadRolloutEvidence -RepoRoot $repo -Gate (New-ReleaseFullReceiptGate -Contract 'thin-harness-exact-head-engineering-evidence/v1' -Path $ExactHeadReportPath -Source $sourceStart) -ExpectedSource $sourceStart -ProtectedRoots $protected
+    $releaseIsolation = Read-ReleaseIsolationRolloutEvidence -RepoRoot $repo -Gate (New-ReleaseFullReceiptGate -Contract 'harness-release-isolation-report/v1' -Path $ReleaseIsolationReportPath -Source $sourceStart) -ExpectedSource $sourceStart -ProtectedRoots $protected
+    $releaseModel = Read-ReleaseProducerReceiptRolloutEvidence -RepoRoot $repo -Gate (New-ReleaseFullReceiptGate -Contract 'harness-release-model-receipt/v1' -Path $ReleaseModelReceiptPath -Source $sourceStart) -ExpectedSource $sourceStart -Kind model -ProtectedRoots $protected
+    $releaseHost = Read-ReleaseProducerReceiptRolloutEvidence -RepoRoot $repo -Gate (New-ReleaseFullReceiptGate -Contract 'harness-release-host-receipt/v1' -Path $ReleaseHostReceiptPath -Source $sourceStart) -ExpectedSource $sourceStart -Kind host -ProtectedRoots $protected
+    $v1StopLoss = Read-V1StopLossRolloutEvidence -RepoRoot $repo -Gate (New-ReleaseFullReceiptGate -Contract 'harness-v1-stop-loss-report/v1' -Path $V1StopLossReportPath -Source $sourceStart) -ExpectedSource $sourceStart -ProtectedRoots $protected
+    $lifecycle = @(
+        Read-PresetLifecycleRolloutEvidence -RepoRoot $repo -Gate (New-ReleaseFullReceiptGate -Contract 'harness-preset-lifecycle-report/v1' -Path $LifecycleCoreReportPath -Source $sourceStart) -ExpectedSource $sourceStart -ExpectedPreset core -ProtectedRoots $protected
+        Read-PresetLifecycleRolloutEvidence -RepoRoot $repo -Gate (New-ReleaseFullReceiptGate -Contract 'harness-preset-lifecycle-report/v1' -Path $LifecycleGovernedReportPath -Source $sourceStart) -ExpectedSource $sourceStart -ExpectedPreset governed -ProtectedRoots $protected
+        Read-PresetLifecycleRolloutEvidence -RepoRoot $repo -Gate (New-ReleaseFullReceiptGate -Contract 'harness-preset-lifecycle-report/v1' -Path $LifecycleFullReportPath -Source $sourceStart) -ExpectedSource $sourceStart -ExpectedPreset full -ProtectedRoots $protected
+    )
+    $observationArtifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath $AggregatorObservationPath -ProtectedRoots $protected -MaximumBytes 512KB
+    $observationDocument = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$observationArtifact.bytes)
+    $aggregator = Assert-ReleaseRunnerObservation -RepoRoot $repo -Document $observationDocument -ExpectedSource $sourceStart -RequirePortableSource
+    if ([string]$aggregator.role -cne 'aggregator' -or [string]$aggregator.producer_mode -cne $ProducerMode -or
+        [string]$aggregator.workflow.run_id -cne $RunId -or [long]$aggregator.workflow.run_attempt -ne $RunAttempt) { throw 'release full receipt aggregator observation binding is invalid' }
+    if ([string]$releaseIsolation.producer_mode -cne $ProducerMode) { throw 'release full receipt isolation producer mode is invalid' }
+    foreach ($name in @('observation_run_id','observation_digest','role','runner_label_digest','account_digest','codex_home_identity_digest','status')) {
+        if ([string]$aggregator[$name] -cne [string]$releaseIsolation.observations.aggregator[$name]) {
+            throw 'release full receipt aggregator observation does not match G04'
+        }
+    }
+
+    $inputs = [ordered]@{
+        exact_head=[ordered]@{evidence_contract='thin-harness-exact-head-engineering-evidence/v1';raw_digest=[string]$exactHead.raw_digest;document_digest=[string]$exactHead.report_digest;source_revision=[string]$exactHead.source_revision;status=[string]$exactHead.status}
+        release_isolation=[ordered]@{evidence_contract='harness-release-isolation-report/v1';raw_digest=[string]$releaseIsolation.raw_digest;document_digest=[string]$releaseIsolation.report_digest;source_revision=[string]$releaseIsolation.source_revision;status=[string]$releaseIsolation.status}
+        release_model=[ordered]@{evidence_contract='harness-release-model-receipt/v1';raw_digest=[string]$releaseModel.raw_digest;document_digest=[string]$releaseModel.receipt_digest;source_revision=[string]$releaseModel.source_revision;status=[string]$releaseModel.status}
+        release_host=[ordered]@{evidence_contract='harness-release-host-receipt/v1';raw_digest=[string]$releaseHost.raw_digest;document_digest=[string]$releaseHost.receipt_digest;source_revision=[string]$releaseHost.source_revision;status=[string]$releaseHost.status}
+        v1_stop_loss=[ordered]@{evidence_contract='harness-v1-stop-loss-report/v1';raw_digest=[string]$v1StopLoss.raw_digest;document_digest=[string]$v1StopLoss.report_digest;source_revision=[string]$v1StopLoss.source_revision;status=[string]$v1StopLoss.status}
+        lifecycle_core=[ordered]@{evidence_contract='harness-preset-lifecycle-report/v1';raw_digest=[string]$lifecycle[0].raw_digest;document_digest=[string]$lifecycle[0].report_digest;source_revision=[string]$lifecycle[0].source_revision;status=[string]$lifecycle[0].status}
+        lifecycle_governed=[ordered]@{evidence_contract='harness-preset-lifecycle-report/v1';raw_digest=[string]$lifecycle[1].raw_digest;document_digest=[string]$lifecycle[1].report_digest;source_revision=[string]$lifecycle[1].source_revision;status=[string]$lifecycle[1].status}
+        lifecycle_full=[ordered]@{evidence_contract='harness-preset-lifecycle-report/v1';raw_digest=[string]$lifecycle[2].raw_digest;document_digest=[string]$lifecycle[2].report_digest;source_revision=[string]$lifecycle[2].source_revision;status=[string]$lifecycle[2].status}
+    }
+    $sourceEnd = Get-HarnessReleaseSourceState -RepoRoot $repo
+    if (-not (Test-ReleaseIsolationSourceStateEqual -Left $sourceStart -Right $sourceEnd)) { throw 'release full receipt source changed during aggregation' }
+    $stable = Test-HarnessReleaseSourceStable -Start $sourceStart -End $sourceEnd
+    $status = Get-ReleaseFullReceiptStatus -ProducerMode $ProducerMode -Conclusion $Conclusion -InputStatuses @($inputs.Values | ForEach-Object { [string]$_.status }) -SourceDirty ([bool]$sourceStart.dirty -or [bool]$sourceEnd.dirty) -SourceStable $stable
+    $reason = Get-ReleaseFullReceiptReason -ProducerMode $ProducerMode -Status $status
+    $inputDigests = [ordered]@{}
+    foreach ($entry in (Get-ReleaseFullReceiptInputPaths).GetEnumerator()) { $inputDigests[$entry.Key] = Get-ReleaseFileDigest -Path (Join-Path $repo ([string]$entry.Value)) }
+    $document = [ordered]@{
+        schema_version='harness-release-full-receipt/v1';generated_at_utc=[DateTimeOffset]::UtcNow.ToString('o');source_revision=[string]$sourceStart.revision
+        source_dirty=([bool]$sourceStart.dirty -or [bool]$sourceEnd.dirty);source_state_stable=$stable
+        source=[ordered]@{commit_tree_oid=[string]$sourceStart.commit_tree_oid;object_format=[string]$sourceStart.object_format;start=$sourceStart;end=$sourceEnd;input_digests=$inputDigests}
+        receipt_run_id=[guid]::NewGuid().ToString('N');producer_identity='release-full-receipt/v1';producer_mode=$ProducerMode
+        workflow=[ordered]@{run_id=$RunId;run_attempt=[long]$RunAttempt;job_name='release-full';checkout_sha=$CheckoutSha;conclusion=$Conclusion}
+        aggregator_observation=[ordered]@{role='aggregator';observation_digest=[string]$aggregator.observation_digest;account_digest=[string]$aggregator.account_digest;runner_label_digest=[string]$aggregator.runner_label_digest}
+        inputs=$inputs;status=$status;reason=$reason;receipt_digest=$null
+    }
+    $document.receipt_digest = Get-ReleaseSha256Text -Text ($document | ConvertTo-Json -Depth 100 -Compress)
+    $json = $document | ConvertTo-Json -Depth 100 -Compress
+    $validated = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($json))
+    $receipt = Assert-ReleaseFullReceipt -RepoRoot $repo -Document $validated -ExpectedSource $sourceStart
+    [void](Assert-ReleaseFullReceiptBindings -Receipt $receipt -ExactHead $exactHead -ReleaseIsolation $releaseIsolation -ReleaseModel $releaseModel -ReleaseHost $releaseHost -V1StopLoss $v1StopLoss -LifecycleCore $lifecycle[0] -LifecycleGoverned $lifecycle[1] -LifecycleFull $lifecycle[2])
+    $rawDigest = Write-ReleaseIsolationArtifact -Target $target -Content $json
+    $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath $target -ExpectedDigest $rawDigest -ProtectedRoots $protected -MaximumBytes 1MB
+    $reopenedDocument = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+    $reopened = Assert-ReleaseFullReceipt -RepoRoot $repo -Document $reopenedDocument -ExpectedSource $sourceStart
+    [void](Assert-ReleaseFullReceiptBindings -Receipt $reopened -ExactHead $exactHead -ReleaseIsolation $releaseIsolation -ReleaseModel $releaseModel -ReleaseHost $releaseHost -V1StopLoss $v1StopLoss -LifecycleCore $lifecycle[0] -LifecycleGoverned $lifecycle[1] -LifecycleFull $lifecycle[2])
+    return $reopenedDocument
+}
+
+function Read-ReleaseFullReceiptRolloutEvidence {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][Collections.IDictionary]$Gate,
+        [Parameter(Mandatory)][Collections.IDictionary]$ExpectedSource,
+        [string[]]$ProtectedRoots = @()
+    )
+    try {
+        Assert-ReleaseKeys -Value $Gate -Expected @('status','evidence_contract','artifact_path','evidence_digest','source_revision','producer_identity') -Label 'release full receipt gate'
+        if ([string]$Gate.evidence_contract -cne 'harness-release-full-receipt/v1' -or [string]$Gate.source_revision -cne [string]$ExpectedSource.revision -or
+            [string]::IsNullOrWhiteSpace([string]$Gate.producer_identity)) { throw 'release full receipt gate binding is invalid' }
+        $protected = Get-HarnessPortableEvidenceProtectedRoots -RepoRoot $RepoRoot -ProtectedRoots $ProtectedRoots
+        $artifact = Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$Gate.artifact_path) -ExpectedDigest ([string]$Gate.evidence_digest) -ProtectedRoots $protected -MaximumBytes 1MB
+        $document = ConvertFrom-InstalledDesktopEvidenceBytes -Bytes ([byte[]]$artifact.bytes)
+        $result = Assert-ReleaseFullReceipt -RepoRoot $RepoRoot -Document $document -ExpectedSource $ExpectedSource -RequirePortableSource
+        $result['path'] = [string]$artifact.path
+        $result['raw_digest'] = [string]$artifact.digest
+        return $result
+    } catch { throw [IO.InvalidDataException]::new('rollout-evidence-release-full-receipt-invalid',$_.Exception) }
+}
+
+function Assert-HarnessRolloutEvidenceSetProvenance {
+    param(
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Gates,
+        [AllowEmptyString()][string]$RepoRoot = '',
+        [System.Collections.IDictionary]$ExpectedSource = $null,
+        [string[]]$ProtectedRoots = @()
+    )
+    $exactHeadName = 'DP-G00-EXACT-HEAD-ENGINEERING-CI'
+    $modelName = 'DP-G01-MODEL40'
+    $cognitiveNames = @('DP-G02-COGNITIVE-HOST-3X3','DP-G05-V2-BARE-1.25','DP-G06-REQUEST-SEND-REDUCTION')
+    $installedNames = @('DP-G03-INSTALLED-DESKTOP-HOST-3X3','DP-G07-DISTINCT-INSTALLED-DESKTOP-GATE')
+    $isolationName = 'DP-G04-CODEX-HOME-RUNNER-ISOLATION'
+    $releaseModelName = 'DP-G09-RELEASE-MODEL'
+    $releaseHostName = 'DP-G10-RELEASE-HOST'
+    $releaseFullName = 'DP-G11-RELEASE-FULL'
+    $v1StopLossName = 'DP-G14-V1-STOP-LOSS'
+    $lifecyclePresets = [ordered]@{
+        'DP-G18-CORE-LIFECYCLE'='core'
+        'DP-G19-GOVERNED-LIFECYCLE'='governed'
+        'DP-G20-FULL-LIFECYCLE'='full'
+    }
+    $lifecycleNames = @($lifecyclePresets.Keys)
+    $releaseFullDependencies = @($exactHeadName,$modelName) + $cognitiveNames + $installedNames + @($isolationName,$releaseModelName,$releaseHostName,$v1StopLossName) + $lifecycleNames
+    if ($Gates.Contains($releaseFullName) -and [string]$Gates[$releaseFullName].evidence_contract -cne 'harness-release-full-receipt/v1') {
+        throw "rollout-evidence-provenance-unwired-$releaseFullName"
+    }
+    if ($Gates.Contains($releaseFullName) -and @($releaseFullDependencies | Where-Object { -not $Gates.Contains($_) }).Count -gt 0) {
+        throw 'rollout-evidence-release-full-gate-set-incomplete'
+    }
+    $adapted = $false
+    if ($Gates.Contains($exactHeadName)) {
+        if ([string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-exact-head-engineering-report-invalid' }
+        $exactHead = Read-ExactHeadRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$exactHeadName] -ExpectedSource $ExpectedSource -ProtectedRoots $ProtectedRoots
+        $Gates[$exactHeadName].status = [string]$exactHead.status
+        $Gates[$exactHeadName].producer_identity = [string]$exactHead.producer_identity
+        $adapted = $true
+    }
+    if ($Gates.Contains($modelName)) {
+        if ([string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-model-report-invalid' }
+        $model = Read-ModelRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$modelName] -ExpectedSource $ExpectedSource -ProtectedRoots $ProtectedRoots
+        $Gates[$modelName].status = [string]$model.status
+        $Gates[$modelName].producer_identity = [string]$model.producer_identity
+        $adapted = $true
+    }
+    $cognitivePresent = @($cognitiveNames | Where-Object { $Gates.Contains($_) })
+    if ($cognitivePresent.Count -gt 0) {
+        if ($cognitivePresent.Count -ne 3 -or [string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-cognitive-gate-set-incomplete' }
+        $cognitive = Read-CognitiveHostRolloutEvidence -RepoRoot $RepoRoot -Gates $Gates -Names $cognitiveNames -ExpectedSource $ExpectedSource -ProtectedRoots $ProtectedRoots
+        $Gates[$cognitiveNames[0]].status = [string]$cognitive.g02_status
+        $Gates[$cognitiveNames[1]].status = [string]$cognitive.g05_status
+        $Gates[$cognitiveNames[2]].status = [string]$cognitive.g06_status
+        foreach ($name in $cognitiveNames) { $Gates[$name].producer_identity = [string]$cognitive.producer_identity }
+        $adapted = $true
+    }
+    $installedPresent = @($installedNames | Where-Object { $Gates.Contains($_) })
+    if ($installedPresent.Count -gt 0) {
+        if ($installedPresent.Count -ne 2 -or [string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-installed-report-invalid' }
+        $installed = @(
+            Read-InstalledDesktopRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$installedNames[0]] -ExpectedSource $ExpectedSource -ProtectedRoots $ProtectedRoots
+            Read-InstalledDesktopRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$installedNames[1]] -ExpectedSource $ExpectedSource -ProtectedRoots $ProtectedRoots
+        )
+        Assert-InstalledDesktopEvidencePairDistinct -Installed $installed
+        for ($index=0; $index -lt 2; $index++) {
+            $gate = $Gates[$installedNames[$index]]
+            $gate.status = [string]$installed[$index].status
+            $gate.producer_identity = [string]$installed[$index].producer_identity
+        }
+        $adapted = $true
+    }
+    if ($Gates.Contains($v1StopLossName)) {
+        if ([string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-v1-stop-loss-report-invalid' }
+        $v1StopLoss = Read-V1StopLossRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$v1StopLossName] -ExpectedSource $ExpectedSource -ProtectedRoots $ProtectedRoots
+        $Gates[$v1StopLossName].status = [string]$v1StopLoss.status
+        $Gates[$v1StopLossName].producer_identity = [string]$v1StopLoss.producer_identity
+        $adapted = $true
+    }
+    if ($Gates.Contains($isolationName)) {
+        if ([string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-release-isolation-report-invalid' }
+        $isolation = Read-ReleaseIsolationRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$isolationName] -ExpectedSource $ExpectedSource -ProtectedRoots $ProtectedRoots
+        $Gates[$isolationName].status = [string]$isolation.status
+        $Gates[$isolationName].producer_identity = [string]$isolation.producer_identity
+        $adapted = $true
+    }
+    if ($Gates.Contains($releaseModelName)) {
+        if (-not $Gates.Contains($modelName) -or -not $Gates.Contains($isolationName) -or [string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-release-model-gate-set-incomplete' }
+        $releaseModel = Read-ReleaseProducerReceiptRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$releaseModelName] -ExpectedSource $ExpectedSource -Kind model -ProtectedRoots $ProtectedRoots
+        Assert-ReleaseProducerArtifactBinding -ReceiptArtifact $releaseModel.artifacts[0] -Evidence $model
+        $releaseModelObservationStatus = Assert-ReleaseProducerReceiptObservationBinding -Receipt $releaseModel -Observation $isolation.observations.model_producer -IsolationWorkflow $isolation.workflow
+        $Gates[$releaseModelName].status = Get-ReleaseProducerCombinedStatus -Statuses @([string]$releaseModel.status,[string]$model.status,[string]$releaseModelObservationStatus)
+        $Gates[$releaseModelName].producer_identity = [string]$releaseModel.producer_identity
+        $adapted = $true
+    }
+    if ($Gates.Contains($releaseHostName)) {
+        $hostDependencies = @($cognitiveNames + $installedNames + @($isolationName))
+        if (@($hostDependencies | Where-Object { -not $Gates.Contains($_) }).Count -gt 0 -or [string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-release-host-gate-set-incomplete' }
+        $releaseHost = Read-ReleaseProducerReceiptRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$releaseHostName] -ExpectedSource $ExpectedSource -Kind host -ProtectedRoots $ProtectedRoots
+        $cognitiveStatus = Get-ReleaseProducerCombinedStatus -Statuses @([string]$cognitive.g02_status,[string]$cognitive.g05_status,[string]$cognitive.g06_status)
+        $cognitiveArtifact = [ordered]@{raw_digest=[string]$cognitive.raw_digest;report_digest=[string]$cognitive.report_digest;source_revision=[string]$cognitive.source_revision;status=$cognitiveStatus}
+        Assert-ReleaseProducerArtifactBinding -ReceiptArtifact $releaseHost.artifacts[0] -Evidence $cognitiveArtifact
+        Assert-ReleaseProducerArtifactBinding -ReceiptArtifact $releaseHost.artifacts[1] -Evidence $installed[0]
+        Assert-ReleaseProducerArtifactBinding -ReceiptArtifact $releaseHost.artifacts[2] -Evidence $installed[1]
+        $releaseHostObservationStatus = Assert-ReleaseProducerReceiptObservationBinding -Receipt $releaseHost -Observation $isolation.observations.host_producer -IsolationWorkflow $isolation.workflow
+        $Gates[$releaseHostName].status = Get-ReleaseProducerCombinedStatus -Statuses @(
+            [string]$releaseHost.status,[string]$releaseHostObservationStatus,[string]$cognitiveStatus,
+            [string]$installed[0].status,[string]$installed[1].status
+        )
+        $Gates[$releaseHostName].producer_identity = [string]$releaseHost.producer_identity
+        $adapted = $true
+    }
+    $lifecyclePresent = @($lifecycleNames | Where-Object { $Gates.Contains($_) })
+    if ($lifecyclePresent.Count -gt 0) {
+        if ($lifecyclePresent.Count -ne 3 -or [string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) { throw 'rollout-evidence-lifecycle-gate-set-incomplete' }
+        $lifecycle = [Collections.Generic.List[object]]::new()
+        foreach ($name in $lifecycleNames) {
+            $lifecycle.Add((Read-PresetLifecycleRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$name] -ExpectedSource $ExpectedSource -ExpectedPreset ([string]$lifecyclePresets[$name]) -ProtectedRoots $ProtectedRoots))
+        }
+        for ($left=0; $left -lt $lifecycle.Count; $left++) {
+            for ($right=$left+1; $right -lt $lifecycle.Count; $right++) {
+                if ([string]$lifecycle[$left].path -ieq [string]$lifecycle[$right].path -or
+                    [string]$lifecycle[$left].raw_digest -ceq [string]$lifecycle[$right].raw_digest -or
+                    ([string]$lifecycle[$left].volume -ceq [string]$lifecycle[$right].volume -and [string]$lifecycle[$left].file_id -ceq [string]$lifecycle[$right].file_id) -or
+                    [string]$lifecycle[$left].report_run_id -ceq [string]$lifecycle[$right].report_run_id -or
+                    [string]$lifecycle[$left].workspace_identity_digest -ceq [string]$lifecycle[$right].workspace_identity_digest -or
+                    [string]$lifecycle[$left].profile_identity_digest -ceq [string]$lifecycle[$right].profile_identity_digest -or
+                    [string]$lifecycle[$left].source_revision -cne [string]$lifecycle[$right].source_revision -or
+                    [string]$lifecycle[$left].commit_tree_oid -cne [string]$lifecycle[$right].commit_tree_oid -or
+                    [string]$lifecycle[$left].object_format -cne [string]$lifecycle[$right].object_format) {
+                    throw 'rollout-evidence-lifecycle-reports-not-distinct'
+                }
+            }
+        }
+        for ($index=0; $index -lt $lifecycleNames.Count; $index++) {
+            $gate = $Gates[$lifecycleNames[$index]]
+            $gate.status = [string]$lifecycle[$index].status
+            $gate.producer_identity = [string]$lifecycle[$index].producer_identity
+        }
+        $adapted = $true
+    }
+    if ($Gates.Contains($releaseFullName)) {
+        if ([string]::IsNullOrWhiteSpace($RepoRoot) -or $null -eq $ExpectedSource) {
+            throw 'rollout-evidence-release-full-gate-set-incomplete'
+        }
+        $releaseFull = Read-ReleaseFullReceiptRolloutEvidence -RepoRoot $RepoRoot -Gate $Gates[$releaseFullName] -ExpectedSource $ExpectedSource -ProtectedRoots $ProtectedRoots
+        $releaseFullStatus = Assert-ReleaseFullReceiptBindings -Receipt $releaseFull -ExactHead $exactHead -ReleaseIsolation $isolation -ReleaseModel $releaseModel -ReleaseHost $releaseHost `
+            -V1StopLoss $v1StopLoss -LifecycleCore $lifecycle[0] -LifecycleGoverned $lifecycle[1] -LifecycleFull $lifecycle[2]
+        $Gates[$releaseFullName].status = [string]$releaseFullStatus
+        $Gates[$releaseFullName].producer_identity = [string]$releaseFull.producer_identity
+        $adapted = $true
+    }
+    $adaptedNames = @($exactHeadName,$modelName,$isolationName,$releaseModelName,$releaseHostName,$releaseFullName,$v1StopLossName) + $cognitiveNames + $installedNames + $lifecycleNames
+    foreach ($name in @($Gates.Keys | Where-Object { $_ -cnotin $adaptedNames } | Sort-Object)) {
+        $gate = $Gates[$name]
+        if ($gate -isnot [System.Collections.IDictionary] -or
+            [string]::IsNullOrWhiteSpace([string]$gate.artifact_path) -or
+            [string]::IsNullOrWhiteSpace([string]$gate.producer_identity) -or
+            [string]$gate.evidence_digest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'rollout-evidence-provenance-unverified' }
+        [void](Read-HarnessRolloutEvidenceArtifact -ArtifactPath ([string]$gate.artifact_path) -ExpectedDigest ([string]$gate.evidence_digest) -ProtectedRoots $ProtectedRoots)
+        throw "rollout-evidence-provenance-unwired-$name"
+    }
+    if ($adapted) { return $true }
+    throw 'rollout-evidence-provenance-unverified'
+}
+
+function Test-HarnessRolloutPromotionPathSnapshot {
+    param([System.Collections.IDictionary]$Left,[System.Collections.IDictionary]$Right)
+    foreach ($name in @('source','final_target','candidate_target','authorization_target','runtime_default_target','workspace','workspace_identity')) {
+        if (-not ([string]$Left[$name]).Equals([string]$Right[$name],[StringComparison]::OrdinalIgnoreCase)) { return $false }
+    }
+    return $true
+}
+
+function Test-HarnessRolloutBytesEqual {
+    param([byte[]]$Left,[byte[]]$Right)
+    if ($Left.Length -ne $Right.Length) { return $false }
+    for ($index = 0; $index -lt $Left.Length; $index++) { if ($Left[$index] -ne $Right[$index]) { return $false } }
+    return $true
+}
+
+function Get-HarnessRolloutPublicationPreimage {
+    param([string]$Path,[long]$Limit,[string]$Name)
+    $exists = Test-Path -LiteralPath $Path -PathType Leaf
+    $bytes = if ($exists) {
+        $info = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        if ($info.Length -gt $Limit) { throw "rollout-promotion-$Name-target-too-large" }
+        $value = [IO.File]::ReadAllBytes($Path)
+        if ($value.Length -gt $Limit) { throw "rollout-promotion-$Name-target-too-large" }
+        $value
+    } else { [byte[]]::new(0) }
+    return [ordered]@{exists=$exists;bytes=$bytes;digest=$(if($exists){Get-ReleaseSha256Bytes -Bytes $bytes}else{'missing'})}
+}
+
+function Write-HarnessRolloutPublicationBytes {
+    param([string]$WorkspaceRoot,[string]$Path,[byte[]]$Bytes,[string]$SourceDigest,[string]$CurrentDigest)
+    return & $script:RolloutAtomicModule {
+        param($Root,$Target,$Value,$ExpectedSource,$ExpectedCurrent)
+        Write-HarnessAtomicBytes -WorkspaceRoot $Root -Path $Target -SourceBytes $Value -ExpectedSourceDigest $ExpectedSource -ExpectedCurrentDigest $ExpectedCurrent
+    } $WorkspaceRoot $Path $Bytes $SourceDigest $CurrentDigest
+}
+
+function Remove-HarnessRolloutPublicationFile {
+    param([string]$WorkspaceRoot,[string]$Path,[string]$ExpectedDigest)
+    return & $script:RolloutAtomicModule {
+        param($Root,$Target,$Digest)
+        Remove-HarnessFileIfDigestAtomic -WorkspaceRoot $Root -Path $Target -ExpectedDigest $Digest
+    } $WorkspaceRoot $Path $ExpectedDigest
+}
+
+function Restore-HarnessRolloutPublicationRecord {
+    param([string]$WorkspaceRoot,[System.Collections.IDictionary]$Record)
+    if (-not $Record.Contains('published_digest')) { throw 'rollout-promotion-rollback-published-digest-missing' }
+    $exists = Test-Path -LiteralPath ([string]$Record.path) -PathType Leaf
+    $publishedDigest = [string]$Record.published_digest
+    $currentDigest = if ($exists) { Get-ReleaseFileDigest -Path ([string]$Record.path) } else { 'missing' }
+    if ($currentDigest -cne $publishedDigest) { throw "rollout-promotion-rollback-cas-mismatch-$($Record.name)" }
+    if ([bool]$Record.preimage.exists) {
+        [void](Write-HarnessRolloutPublicationBytes -WorkspaceRoot $WorkspaceRoot -Path ([string]$Record.relative) -Bytes ([byte[]]$Record.preimage.bytes) -SourceDigest ([string]$Record.preimage.digest) -CurrentDigest $publishedDigest)
+    } elseif ($exists) {
+        [void](Remove-HarnessRolloutPublicationFile -WorkspaceRoot $WorkspaceRoot -Path ([string]$Record.relative) -ExpectedDigest $publishedDigest)
+    }
+}
+
+function Remove-HarnessRolloutCreatedParents {
+    param([string]$WorkspaceRoot,[string[]]$Directories)
+    $workspace = [IO.Path]::GetFullPath($WorkspaceRoot).TrimEnd('\')
+    foreach ($directory in @($Directories | Sort-Object Length -Descending -Unique)) {
+        try {
+            $full = [IO.Path]::GetFullPath($directory).TrimEnd('\')
+            if ($full.StartsWith($workspace + '\',[StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $full -PathType Container) -and @(Get-ChildItem -LiteralPath $full -Force).Count -eq 0) { [IO.Directory]::Delete($full,$false) }
+        } catch { }
+    }
+}
+
+function Invoke-HarnessRolloutPublicationTransaction {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$WorkspaceRoot,
+        [Parameter(Mandatory)][string]$ReportPath,
+        [Parameter(Mandatory)][ValidateSet('canary-candidate','final-default')][string]$Phase,
+        [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$ReportBytes,
+        [Parameter(Mandatory)][string]$ExpectedReportDigest,
+        [AllowEmptyCollection()][byte[]]$AuthorizationBytes = [byte[]]::new(0),
+        [AllowEmptyString()][string]$ExpectedAuthorizationDigest = '',
+        [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$DecisionBytes,
+        [Parameter(Mandatory)][string]$ExpectedDecisionDigest,
+        [string[]]$ProtectedRoots = @(),
+        [System.Collections.IDictionary]$SourceStateStart = $null,
+        $ProtocolModule = $null,
+        [int]$FaultAfterMutation = 0,
+        [switch]$SkipCanonicalResolutionForStructuralTest
+    )
+    if ($ExpectedReportDigest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'rollout-promotion-expected-report-digest-invalid' }
+    if ($Phase -ceq 'canary-candidate' -and $AuthorizationBytes.Length -eq 0) { throw 'rollout-promotion-canary-authorization-required' }
+    if ($Phase -ceq 'canary-candidate' -and $ExpectedAuthorizationDigest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'rollout-promotion-expected-authorization-digest-invalid' }
+    if ($Phase -ceq 'final-default' -and -not [string]::IsNullOrWhiteSpace($ExpectedAuthorizationDigest)) { throw 'rollout-promotion-unexpected-authorization-digest' }
+    if ($DecisionBytes.Length -eq 0 -or $ExpectedDecisionDigest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'rollout-promotion-runtime-decision-invalid' }
+    try { $decisionDocument = [Text.UTF8Encoding]::new($false,$true).GetString($DecisionBytes) | ConvertFrom-HarnessJson -Depth 20 }
+    catch { throw 'rollout-promotion-runtime-decision-invalid' }
+    if ($decisionDocument -isnot [Collections.IDictionary] -or [string]$decisionDocument.decision_digest -cne $ExpectedDecisionDigest) {
+        throw 'rollout-promotion-runtime-decision-invalid'
+    }
+    $expectedDecisionBytesDigest = Get-ReleaseSha256Bytes -Bytes $DecisionBytes
+    $paths = Resolve-HarnessRolloutPromotionPaths -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -ReportPath $ReportPath -ProtectedRoots $ProtectedRoots
+    $sourceBytes = [IO.File]::ReadAllBytes([string]$paths.source)
+    if (-not (Test-HarnessRolloutBytesEqual -Left $sourceBytes -Right $ReportBytes)) { throw 'rollout-promotion-input-bytes-changed' }
+    $workspace = [string]$paths.workspace
+    $mutexHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.UTF8Encoding]::new($false).GetBytes([string]$paths.workspace_identity))).ToLowerInvariant()
+    $mutex = [Threading.Mutex]::new($false,"Global\dev-harness.rollout-promotion.$mutexHash")
+    $acquired = $false
+    $createdParents = [Collections.Generic.List[string]]::new()
+    $mutated = [Collections.Generic.List[object]]::new()
+    try {
+        try { $acquired = $mutex.WaitOne(10000) } catch [Threading.AbandonedMutexException] { $acquired = $true }
+        if (-not $acquired) { throw 'rollout-promotion-lock-timeout' }
+        $locked = Resolve-HarnessRolloutPromotionPaths -RepoRoot $RepoRoot -WorkspaceRoot $workspace -ReportPath $ReportPath -ProtectedRoots $ProtectedRoots
+        if (-not (Test-HarnessRolloutPromotionPathSnapshot -Left $paths -Right $locked)) { throw 'rollout-promotion-path-changed' }
+        if (-not (Test-HarnessRolloutBytesEqual -Left ([IO.File]::ReadAllBytes([string]$locked.source)) -Right $ReportBytes)) { throw 'rollout-promotion-input-bytes-changed' }
+        $records = [ordered]@{
+            final = [ordered]@{name='final';path=[string]$paths.final_target;relative=[string]$paths.final_target_relative;limit=4MB;preimage=$null}
+            candidate = [ordered]@{name='candidate';path=[string]$paths.candidate_target;relative=[string]$paths.candidate_target_relative;limit=4MB;preimage=$null}
+            authorization = [ordered]@{name='authorization';path=[string]$paths.authorization_target;relative=[string]$paths.authorization_target_relative;limit=64KB;preimage=$null}
+            runtime_default = [ordered]@{name='runtime-default';path=[string]$paths.runtime_default_target;relative=[string]$paths.runtime_default_target_relative;limit=64KB;preimage=$null}
+        }
+        foreach ($record in $records.Values) {
+            $record.preimage = Get-HarnessRolloutPublicationPreimage -Path ([string]$record.path) -Limit ([long]$record.limit) -Name ([string]$record.name)
+        }
+        if ($Phase -ceq 'canary-candidate' -and [bool]$records.final.preimage.exists) { throw 'rollout-promotion-final-already-canonical' }
+        foreach ($record in $records.Values) {
+            $cursor = [IO.Path]::GetDirectoryName([string]$record.path)
+            while (-not (Test-Path -LiteralPath $cursor)) {
+                $createdParents.Add($cursor)
+                $parent = [IO.Path]::GetDirectoryName($cursor)
+                if ([string]::IsNullOrWhiteSpace($parent) -or $parent -ceq $cursor) { throw 'rollout-promotion-parent-unavailable' }
+                $cursor = $parent
+            }
+        }
+        $operations = if ($Phase -ceq 'canary-candidate') {
+            @(
+                [ordered]@{record=$records.candidate;action='write';bytes=$ReportBytes},
+                [ordered]@{record=$records.authorization;action='write';bytes=$AuthorizationBytes},
+                [ordered]@{record=$records.runtime_default;action='write';bytes=$DecisionBytes}
+            )
+        } else {
+            @(
+                [ordered]@{record=$records.final;action='write';bytes=$ReportBytes},
+                [ordered]@{record=$records.runtime_default;action='write';bytes=$DecisionBytes},
+                [ordered]@{record=$records.candidate;action='delete';bytes=[byte[]]::new(0)},
+                [ordered]@{record=$records.authorization;action='delete';bytes=[byte[]]::new(0)}
+            )
+        }
+        $mutationCount = 0
+        try {
+            foreach ($operation in $operations) {
+                $record = $operation.record
+                if ([string]$operation.action -ceq 'write') {
+                    $digest = Get-ReleaseSha256Bytes -Bytes ([byte[]]$operation.bytes)
+                    [void](Write-HarnessRolloutPublicationBytes -WorkspaceRoot $workspace -Path ([string]$record.relative) -Bytes ([byte[]]$operation.bytes) -SourceDigest $digest -CurrentDigest ([string]$record.preimage.digest))
+                    $record['published_digest'] = $digest
+                    $mutated.Add($record)
+                    $mutationCount++
+                } elseif ([bool]$record.preimage.exists) {
+                    [void](Remove-HarnessRolloutPublicationFile -WorkspaceRoot $workspace -Path ([string]$record.relative) -ExpectedDigest ([string]$record.preimage.digest))
+                    $record['published_digest'] = 'missing'
+                    $mutated.Add($record)
+                    $mutationCount++
+                }
+                if ($FaultAfterMutation -gt 0 -and $mutationCount -eq $FaultAfterMutation) { throw 'rollout-promotion-structural-test-fault' }
+            }
+            $published = Resolve-HarnessRolloutPromotionPaths -RepoRoot $RepoRoot -WorkspaceRoot $workspace -ReportPath $ReportPath -ProtectedRoots $ProtectedRoots
+            if (-not (Test-HarnessRolloutPromotionPathSnapshot -Left $paths -Right $published)) { throw 'rollout-promotion-published-path-changed' }
+            if ($Phase -ceq 'canary-candidate') {
+                if ((Get-ReleaseFileDigest -Path ([string]$paths.candidate_target)) -cne (Get-ReleaseSha256Bytes -Bytes $ReportBytes) -or
+                    (Get-ReleaseFileDigest -Path ([string]$paths.authorization_target)) -cne (Get-ReleaseSha256Bytes -Bytes $AuthorizationBytes) -or
+                    (Get-ReleaseFileDigest -Path ([string]$paths.runtime_default_target)) -cne $expectedDecisionBytesDigest -or
+                    (Test-Path -LiteralPath ([string]$paths.final_target))) { throw 'rollout-promotion-candidate-byte-verification-failed' }
+            } elseif ((Get-ReleaseFileDigest -Path ([string]$paths.final_target)) -cne (Get-ReleaseSha256Bytes -Bytes $ReportBytes) -or
+                (Get-ReleaseFileDigest -Path ([string]$paths.runtime_default_target)) -cne $expectedDecisionBytesDigest -or
+                (Test-Path -LiteralPath ([string]$paths.candidate_target)) -or (Test-Path -LiteralPath ([string]$paths.authorization_target))) { throw 'rollout-promotion-final-state-verification-failed' }
+            if ($null -ne $SourceStateStart) {
+                $sourceStateEnd = Get-HarnessReleaseSourceState -RepoRoot $RepoRoot
+                if (-not (Test-HarnessReleaseSourceStable -Start $SourceStateStart -End $sourceStateEnd)) { throw 'rollout-promotion-source-changed' }
+            }
+            if (-not $SkipCanonicalResolutionForStructuralTest) {
+                if ($null -eq $ProtocolModule) { throw 'rollout-promotion-canonical-verification-context-missing' }
+                $resolution = & $ProtocolModule {
+                    param($Root,$Workspace)
+                    Get-HarnessProtocolResolution -RepoRoot $Root -WorkspaceRoot $Workspace -RequestedProtocol auto
+                } $RepoRoot $workspace
+                $runtimeDefault = $resolution.runtime_default_decision
+                $expectedScope = if ($Phase -ceq 'canary-candidate') { 'workspace-canary' } else { 'release-default' }
+                if ([string]$resolution.selected_protocol -cne 'v2' -or [string]$runtimeDefault.status -cne 'valid' -or
+                    [string]$runtimeDefault.scope -cne $expectedScope -or [string]$runtimeDefault.decision_digest -cne $ExpectedDecisionDigest) {
+                    throw 'rollout-promotion-canonical-verification-failed'
+                }
+            }
+        } catch {
+            $publishError = $_
+            $rollbackFailures = [Collections.Generic.List[string]]::new()
+            for ($index = $mutated.Count - 1; $index -ge 0; $index--) {
+                try { Restore-HarnessRolloutPublicationRecord -WorkspaceRoot $workspace -Record $mutated[$index] }
+                catch { $rollbackFailures.Add([string]$_.Exception.Message) }
+            }
+            Remove-HarnessRolloutCreatedParents -WorkspaceRoot $workspace -Directories @($createdParents)
+            if ($rollbackFailures.Count -gt 0) { throw ('rollout-promotion-rollback-failed: ' + (@($rollbackFailures) -join '; ')) }
+            throw $publishError
+        }
+        return [ordered]@{
+            workspace=$workspace;phase=$Phase
+            final_target=[string]$paths.final_target_relative
+            candidate_target=[string]$paths.candidate_target_relative
+            authorization_target=[string]$paths.authorization_target_relative
+            runtime_default_target=[string]$paths.runtime_default_target_relative
+        }
+    } finally {
+        if ($null -ne $mutex) {
+            try { if ($acquired) { [void]$mutex.ReleaseMutex() } } finally { $mutex.Dispose() }
+        }
+    }
 }
 
 function Write-HarnessReleaseArtifact {

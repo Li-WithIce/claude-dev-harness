@@ -291,7 +291,7 @@ try {
     if (-not (Test-Path -LiteralPath $candidatePath -PathType Leaf)) {
         Write-CanonicalRuntimeUtf8BomAtomic `
             -Path $candidatePath `
-            -Content @"
+            -Content ((@"
 ---
 tags: [运行时, 记忆, 候选]
 created: $today
@@ -303,7 +303,7 @@ updated: $today
 | ID | 日期 | 类型 | 内容摘要 | 建议写入 | 来源 | 状态 | 用户确认 |
 |----|------|------|----------|----------|------|------|----------|
 | 无 | - | - | 当前暂无候选项 | - | - | - | - |
-"@
+"@) -replace "`r`n", "`n")
         $repairs += ('created {0}' -f $candidatePath)
     }
 
@@ -311,7 +311,7 @@ updated: $today
     if (-not (Test-Path -LiteralPath $archivePath -PathType Leaf)) {
         Write-CanonicalRuntimeUtf8BomAtomic `
             -Path $archivePath `
-            -Content @"
+            -Content ((@"
 ---
 tags: [运行时, 记忆候选归档]
 created: $today
@@ -323,7 +323,7 @@ updated: $today
 | ID | 归档日期 | 类型 | 内容摘要 | 结果 | 目标位置 / 原因 | 备注 |
 |----|----------|------|----------|------|-----------------|------|
 | 无 | - | - | 当前暂无归档项 | - | - | - |
-"@
+"@) -replace "`r`n", "`n")
         $repairs += ('created {0}' -f $archivePath)
     }
 

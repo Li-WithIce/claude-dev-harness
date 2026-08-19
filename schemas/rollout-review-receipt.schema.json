@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/rollout-review-receipt.schema.json",
+  "title": "Thin Harness rollout report review receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "reviewed_payload_digest",
+    "source_revision",
+    "phase",
+    "reviewer_actor_id",
+    "reviewer_context_id",
+    "reviewer_model",
+    "read_only",
+    "verdict",
+    "findings",
+    "created_at_utc",
+    "receipt_digest"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["rollout-report-review-receipt/v1"] },
+    "reviewed_payload_digest": { "$ref": "#/definitions/digest" },
+    "source_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "phase": { "type": "string", "enum": ["canary-candidate", "final-default"] },
+    "reviewer_actor_id": { "$ref": "#/definitions/identity" },
+    "reviewer_context_id": { "$ref": "#/definitions/identity" },
+    "reviewer_model": { "$ref": "#/definitions/identity" },
+    "read_only": { "type": "boolean", "const": true },
+    "verdict": { "type": "string", "enum": ["pass", "revise"] },
+    "findings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["p0", "p1", "p2"],
+      "properties": {
+        "p0": { "type": "integer", "minimum": 0 },
+        "p1": { "type": "integer", "minimum": 0 },
+        "p2": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "created_at_utc": { "type": "string", "format": "date-time" },
+    "receipt_digest": { "$ref": "#/definitions/digest" }
+  },
+  "definitions": {
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "identity": { "type": "string", "minLength": 1, "pattern": "\\S" }
+  }
+}

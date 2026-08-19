@@ -1,6 +1,11 @@
 ﻿[CmdletBinding()]
 param(
     [string]$RepoRoot = '',
+    [string]$GateEvidencePath = '',
+    [switch]$CreateReviewPayload,
+    [string]$ReviewPayloadPath = '',
+    [string]$ReviewReceiptPath = '',
+    # Retained only so the pre-DP-02B release job fails with an explicit diagnostic.
     [string]$ModelEvalReportPath = '',
     [string]$HostBenchmarkReportPath = '',
     [string]$OutputPath = '',
@@ -12,14 +17,8 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Split-Path -Parent $PSScriptRoot }
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
-$powerShell = (Get-Process -Id $PID).Path
 $evidenceModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.RolloutEvidence.psm1') -Force -PassThru -ErrorAction Stop
-
-function Get-TextDigest {
-    param([string]$Text)
-    $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($Text)
-    return 'sha256:' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
-}
+$qualificationModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Qualification.psm1') -Force -PassThru -ErrorAction Stop
 
 function Resolve-ReportInputPath {
     param([AllowEmptyString()][string]$Path)
@@ -28,40 +27,30 @@ function Resolve-ReportInputPath {
     return [IO.Path]::GetFullPath((Join-Path $RepoRoot $Path))
 }
 
-function Invoke-RolloutGate {
-    param([string]$Name,[string]$Command,[string]$ScriptPath,[string[]]$Arguments)
-    $output = @(& $powerShell -NoLogo -NoProfile -NonInteractive -File $ScriptPath @Arguments 2>&1 | ForEach-Object { [string]$_ })
-    $exitCode = $LASTEXITCODE
-    $text = $output -join "`n"
-    if ($exitCode -ne 0 -or $text -cmatch '(?m)^\[UNAVAILABLE\]\s+') {
-        Write-Host ("[ROLLOUT:{0}] exit={1}" -f $Name,$exitCode)
-        foreach ($line in @($output | Select-Object -Last 200)) { Write-Host ("[ROLLOUT:{0}] {1}" -f $Name,$line) }
-    }
-    return [pscustomobject]@{
-        Command = $Command
-        ExitCode = $exitCode
-        Output = $text
-        EvidenceDigest = Get-TextDigest -Text ("command=$Command`nexit_code=$exitCode`n$text")
-    }
+function Read-RolloutInputDocument {
+    param([string]$Path,[string]$Kind,[long]$MaximumBytes,[string]$MissingReason,[string]$TooLargeReason)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw $MissingReason }
+    $info = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if ($info.Length -gt $MaximumBytes) { throw $TooLargeReason }
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -gt $MaximumBytes) { throw $TooLargeReason }
+    return & $qualificationModule { param($Value,$DocumentKind) ConvertFrom-HarnessRolloutJsonBytes -Bytes $Value -Kind $DocumentKind } $bytes $Kind
 }
 
-function New-GateRecord {
-    param([string]$Status,[string]$EvidenceDigest,[string]$Command)
-    return [ordered]@{status=$Status;evidence_digest=$EvidenceDigest;command=$Command}
+if (-not [string]::IsNullOrWhiteSpace($ModelEvalReportPath) -or -not [string]::IsNullOrWhiteSpace($HostBenchmarkReportPath)) {
+    throw 'rollout-v1-evidence-inputs-are-historical-only'
 }
+$evidenceMode = -not [string]::IsNullOrWhiteSpace($GateEvidencePath)
+$finalizeMode = -not [string]::IsNullOrWhiteSpace($ReviewPayloadPath) -or -not [string]::IsNullOrWhiteSpace($ReviewReceiptPath)
+if ($evidenceMode -eq $finalizeMode) { throw 'rollout-generator-input-mode-invalid' }
+if ($finalizeMode -and ([string]::IsNullOrWhiteSpace($ReviewPayloadPath) -or [string]::IsNullOrWhiteSpace($ReviewReceiptPath))) { throw 'rollout-review-payload-and-receipt-required' }
+if ($evidenceMode -and -not $CreateReviewPayload) { throw 'rollout-evidence-provenance-unverified' }
+if ($finalizeMode -and $CreateReviewPayload) { throw 'rollout-generator-input-mode-invalid' }
 
-function New-ExecutedGateRecord {
-    param([string]$Status,[pscustomobject]$Run)
-    return New-GateRecord -Status $Status -EvidenceDigest $Run.EvidenceDigest -Command $Run.Command
-}
-
-function New-EvidenceGateRecord {
-    param([System.Collections.IDictionary]$Gate)
-    return New-GateRecord -Status ([string]$Gate.status) -EvidenceDigest ([string]$Gate.evidence_digest) -Command ([string]$Gate.command)
-}
-
-$ModelEvalReportPath = Resolve-ReportInputPath -Path $ModelEvalReportPath
-$HostBenchmarkReportPath = Resolve-ReportInputPath -Path $HostBenchmarkReportPath
+$GateEvidencePath = Resolve-ReportInputPath -Path $GateEvidencePath
+$ReviewPayloadPath = Resolve-ReportInputPath -Path $ReviewPayloadPath
+$ReviewReceiptPath = Resolve-ReportInputPath -Path $ReviewReceiptPath
+$inputPaths = @($GateEvidencePath,$ReviewPayloadPath,$ReviewReceiptPath) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
 $protectedRoots = [Collections.Generic.List[string]]::new()
 if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) { $protectedRoots.Add((Join-Path $env:USERPROFILE '.codex')) }
 foreach ($name in @('CODEX_HOME','HOST_BENCHMARK_CODEX_HOME')) {
@@ -71,63 +60,47 @@ foreach ($name in @('CODEX_HOME','HOST_BENCHMARK_CODEX_HOME')) {
 $outputTarget = if ([string]::IsNullOrWhiteSpace($OutputPath)) { '' } else {
     & $evidenceModule {
         param($Root,$Path,$Inputs,$Protected) Resolve-HarnessReleaseArtifactPath -RepoRoot $Root -OutputPath $Path -EvidencePaths $Inputs -ProtectedRoots $Protected
-    } $RepoRoot $OutputPath @($ModelEvalReportPath,$HostBenchmarkReportPath) @($protectedRoots)
+    } $RepoRoot $OutputPath @($inputPaths) @($protectedRoots)
 }
 $sourceStart = & $evidenceModule { param($Root) Get-HarnessReleaseSourceState -RepoRoot $Root } $RepoRoot
 
-$behaviorEvidence = & $evidenceModule {
-    param($Root,$Path,$Source) Get-HarnessReleaseEvidenceGate -Kind model -RepoRoot $Root -ReportPath $Path -ExpectedSource $Source
-} $RepoRoot $ModelEvalReportPath $sourceStart
-Write-Host ("[ROLLOUT:behavior] status={0} reason={1}" -f $behaviorEvidence.status,$behaviorEvidence.reason)
-
-$compatRun = Invoke-RolloutGate -Name 'v1_compatibility' -Command 'scripts/run-validation.ps1 -Suite all -CheckTimeoutSeconds 360 -VerboseOutput' -ScriptPath (Join-Path $RepoRoot 'scripts\run-validation.ps1') -Arguments @('-RepoRoot',$RepoRoot,'-Suite','all','-CheckTimeoutSeconds','360','-VerboseOutput')
-$compatStatus = if ($compatRun.ExitCode -ne 0) { 'fail' } elseif ($compatRun.Output -cmatch '(?m)^\[UNAVAILABLE\]\s+') { 'unavailable' } else { 'pass' }
-
-$performanceEvidence = & $evidenceModule {
-    param($Root,$Path,$Source) Get-HarnessReleaseEvidenceGate -Kind host -RepoRoot $Root -ReportPath $Path -ExpectedSource $Source
-} $RepoRoot $HostBenchmarkReportPath $sourceStart
-Write-Host ("[ROLLOUT:direct_performance] status={0} reason={1}" -f $performanceEvidence.status,$performanceEvidence.reason)
-
-$coreRun = Invoke-RolloutGate -Name 'core_install_rollback' -Command 'scripts/run-isolated-install-smoke.ps1 -Preset core' -ScriptPath (Join-Path $RepoRoot 'scripts\run-isolated-install-smoke.ps1') -Arguments @('-RepoRoot',$RepoRoot,'-Preset','core')
-$coreStatus = if ($coreRun.ExitCode -eq 0) { 'pass' } else { 'fail' }
-$fullRun = Invoke-RolloutGate -Name 'full_install_rollback' -Command 'scripts/run-isolated-install-smoke.ps1 -Preset full' -ScriptPath (Join-Path $RepoRoot 'scripts\run-isolated-install-smoke.ps1') -Arguments @('-RepoRoot',$RepoRoot,'-Preset','full')
-$fullStatus = if ($fullRun.ExitCode -eq 0) { 'pass' } else { 'fail' }
-
-$sourceEnd = & $evidenceModule { param($Root) Get-HarnessReleaseSourceState -RepoRoot $Root } $RepoRoot
-$sourceStable = & $evidenceModule { param($Start,$End) Test-HarnessReleaseSourceStable -Start $Start -End $End } $sourceStart $sourceEnd
-if (-not $sourceStable) {
-    $compatStatus = 'fail'
-    $compatRun.EvidenceDigest = Get-TextDigest -Text ("source_start={0}`nsource_end={1}`nprior_evidence={2}" -f $sourceStart.state_digest,$sourceEnd.state_digest,$compatRun.EvidenceDigest)
-    Write-Host '[ROLLOUT:source] qualification source was dirty or changed while gates ran; report will be ineligible.'
+$document = $null
+$exitCode = 0
+if ($evidenceMode) {
+    $evidenceSet = Read-RolloutInputDocument -Path $GateEvidencePath -Kind evidence-set -MaximumBytes 4MB -MissingReason 'rollout-evidence-set-missing' -TooLargeReason 'rollout-evidence-set-too-large'
+    & $qualificationModule { param($Root,$Set) Assert-HarnessRolloutV2EvidenceSet -RepoRoot $Root -Document $Set } $RepoRoot $evidenceSet
+    $provenanceStatus = 'verified'
+    try {
+        & $evidenceModule { param($Root,$Source,$Gates,$Protected) Assert-HarnessRolloutEvidenceSetProvenance -RepoRoot $Root -ExpectedSource $Source -Gates $Gates -ProtectedRoots $Protected } $RepoRoot $sourceStart $evidenceSet.gates @($protectedRoots)
+    } catch {
+        $reason = [string]$_.Exception.Message
+        if (-not $reason.StartsWith('rollout-evidence-',[StringComparison]::Ordinal)) { throw }
+        $provenanceStatus = 'unverified'
+    }
+    $document = & $qualificationModule { param($Root,$Set,$Status) New-HarnessRolloutReviewPayloadDocument -RepoRoot $Root -EvidenceSet $Set -ProvenanceStatus $Status } $RepoRoot $evidenceSet $provenanceStatus
+    $exitCode = if ($provenanceStatus -ceq 'verified') { 0 } else { 3 }
+} else {
+    $payload = Read-RolloutInputDocument -Path $ReviewPayloadPath -Kind review-payload -MaximumBytes 4MB -MissingReason 'rollout-review-payload-missing' -TooLargeReason 'rollout-review-payload-too-large'
+    $receipt = Read-RolloutInputDocument -Path $ReviewReceiptPath -Kind review-receipt -MaximumBytes 64KB -MissingReason 'rollout-review-receipt-missing' -TooLargeReason 'rollout-review-receipt-too-large'
+    & $qualificationModule {
+        param($Root,$Payload,$Receipt)
+        Assert-HarnessRolloutReviewPayload -RepoRoot $Root -Document $Payload
+        Assert-HarnessRolloutReviewReceipt -RepoRoot $Root -Document $Receipt -ExpectedPayloadDigest ([string]$Payload.reviewed_payload_digest) -ExpectedSourceRevision ([string]$Payload.source_revision) -ExpectedPhase ([string]$Payload.phase)
+    } $RepoRoot $payload $receipt
+    if ([string]$payload.provenance_status -cne 'verified') { throw 'rollout-evidence-provenance-unverified' }
+    & $evidenceModule { param($Root,$Source,$Gates,$Protected) Assert-HarnessRolloutEvidenceSetProvenance -RepoRoot $Root -ExpectedSource $Source -Gates $Gates -ProtectedRoots $Protected } $RepoRoot $sourceStart $payload.gates @($protectedRoots)
+    $document = & $qualificationModule {
+        param($Root,$Payload,$Receipt,$ReceiptPath)
+        New-HarnessRolloutV2ReportDocument -RepoRoot $Root -ReviewPayload $Payload -ReviewReceipt $Receipt -ReviewReceiptArtifactPath $ReceiptPath
+    } $RepoRoot $payload $receipt $ReviewReceiptPath
 }
 
-$gates = [ordered]@{
-    behavior = New-EvidenceGateRecord -Gate $behaviorEvidence
-    v1_compatibility = New-ExecutedGateRecord -Status $compatStatus -Run $compatRun
-    direct_performance = New-EvidenceGateRecord -Gate $performanceEvidence
-    core_install_rollback = New-ExecutedGateRecord -Status $coreStatus -Run $coreRun
-    full_install_rollback = New-ExecutedGateRecord -Status $fullStatus -Run $fullRun
-}
-if (-not $sourceStable) {
-    if ([string]$gates.behavior.status -ceq 'pass') { $gates.behavior.status = 'fail' }
-    if ([string]$gates.direct_performance.status -ceq 'pass') { $gates.direct_performance.status = 'fail' }
-}
-
-$protocolModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1') -Force -PassThru -ErrorAction Stop
-$report = & $protocolModule { param($Root,$GateValues) New-HarnessRolloutReportDocument -RepoRoot $Root -Gates $GateValues } $RepoRoot $gates
 $sourceFinal = & $evidenceModule { param($Root) Get-HarnessReleaseSourceState -RepoRoot $Root } $RepoRoot
-$sourceStayedStableThroughReport = & $evidenceModule { param($Start,$End) Test-HarnessReleaseSourceStable -Start $Start -End $End } $sourceStart $sourceFinal
-if (-not $sourceStayedStableThroughReport) {
-    $gates.v1_compatibility.status = 'fail'
-    $gates.v1_compatibility.evidence_digest = Get-TextDigest -Text ("source_start={0}`nsource_final={1}`nprior_evidence={2}" -f $sourceStart.state_digest,$sourceFinal.state_digest,$gates.v1_compatibility.evidence_digest)
-    $report = & $protocolModule { param($Root,$GateValues) New-HarnessRolloutReportDocument -RepoRoot $Root -Gates $GateValues } $RepoRoot $gates
-}
-
-$json = $report | ConvertTo-Json -Depth 30 -Compress
+if (-not (& $evidenceModule { param($Start,$End) Test-HarnessReleaseSourceStable -Start $Start -End $End } $sourceStart $sourceFinal)) { throw 'rollout-source-changed' }
+$json = $document | ConvertTo-Json -Depth 100 -Compress
 if (-not [string]::IsNullOrWhiteSpace($outputTarget)) {
     & $evidenceModule { param($Target,$Content) Write-HarnessReleaseArtifact -Target $Target -Content $Content } $outputTarget $json
 }
 Write-Output $json
-
-$exitCode = & $evidenceModule { param($GateValues,$Eligible,$Required) Get-HarnessReleaseExitCode -Gates $GateValues -Eligible $Eligible -RequireEligible $Required } $gates ([bool]$report.eligible) ([bool]$RequireEligible)
+if ($RequireEligible -and ($document -isnot [System.Collections.IDictionary] -or -not $document.Contains('eligible') -or -not [bool]$document.eligible)) { exit 3 }
 exit $exitCode

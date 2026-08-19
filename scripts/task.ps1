@@ -23,6 +23,39 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:AutoExpectedVersionUsed = $false
+
+function Resolve-HarnessEntryExpectedVersion {
+    param(
+        [Parameter(Mandatory)][string]$ResolvedRepoRoot,
+        [Parameter(Mandatory)][string]$ResolvedWorkspaceRoot,
+        [Parameter(Mandatory)][string]$ResolvedTaskId,
+        [AllowNull()][Nullable[int]]$ProvidedVersion
+    )
+
+    if ($null -ne $ProvidedVersion) { return [int]$ProvidedVersion }
+    $status = Get-HarnessTaskStatus -RepoRoot $ResolvedRepoRoot -WorkspaceRoot $ResolvedWorkspaceRoot -TaskId $ResolvedTaskId
+    $version = [int]$status.task.version
+    $script:AutoExpectedVersionUsed = $true
+
+    $readyName = [Environment]::GetEnvironmentVariable('DEV_HARNESS_TEST_TASK_CLI_VERSION_READY_EVENT',[EnvironmentVariableTarget]::Process)
+    $releaseName = [Environment]::GetEnvironmentVariable('DEV_HARNESS_TEST_TASK_CLI_VERSION_RELEASE_EVENT',[EnvironmentVariableTarget]::Process)
+    if ([string]::IsNullOrWhiteSpace($readyName) -xor [string]::IsNullOrWhiteSpace($releaseName)) {
+        throw 'task CLI version test barrier requires both event names'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($readyName)) {
+        $ready = [Threading.EventWaitHandle]::OpenExisting($readyName)
+        $release = [Threading.EventWaitHandle]::OpenExisting($releaseName)
+        try {
+            [void]$ready.Set()
+            if (-not $release.WaitOne(10000)) { throw 'task CLI version test barrier timed out' }
+        } finally {
+            $release.Dispose()
+            $ready.Dispose()
+        }
+    }
+    return $version
+}
 
 try {
     if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
@@ -76,25 +109,21 @@ try {
         } elseif ($Command -ceq 'status') {
             $result = Get-HarnessTaskStatus -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId
         } elseif ($Command -ceq 'transition') {
-            if ([string]::IsNullOrWhiteSpace($TaskId) -or $null -eq $ExpectedVersion) {
-                throw 'transition requires -TaskId and -ExpectedVersion'
-            }
-            $result = Set-HarnessTaskTransition -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -ExpectedVersion ([int]$ExpectedVersion) -To $To -Reason $Reason -ContractPath $Contract -EvidenceSatisfied:$EvidenceSatisfied -ActorHost $ActorHost -ActorModel $ActorModel
+            if ([string]::IsNullOrWhiteSpace($TaskId)) { throw 'transition requires -TaskId' }
+            $resolvedVersion = Resolve-HarnessEntryExpectedVersion -ResolvedRepoRoot $RepoRoot -ResolvedWorkspaceRoot $WorkspaceRoot -ResolvedTaskId $TaskId -ProvidedVersion $ExpectedVersion
+            $result = Set-HarnessTaskTransition -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -ExpectedVersion $resolvedVersion -To $To -Reason $Reason -ContractPath $Contract -EvidenceSatisfied:$EvidenceSatisfied -ActorHost $ActorHost -ActorModel $ActorModel
         } elseif ($Command -ceq 'verify') {
-            if ([string]::IsNullOrWhiteSpace($TaskId) -or $null -eq $ExpectedVersion -or [string]::IsNullOrWhiteSpace($Evidence)) {
-                throw 'verify requires -TaskId, -ExpectedVersion, and -Evidence'
-            }
-            $result = Set-HarnessTaskEvidence -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -ExpectedVersion ([int]$ExpectedVersion) -EvidencePath $Evidence -ActorHost $ActorHost -ActorModel $ActorModel
+            if ([string]::IsNullOrWhiteSpace($TaskId) -or [string]::IsNullOrWhiteSpace($Evidence)) { throw 'verify requires -TaskId and -Evidence' }
+            $resolvedVersion = Resolve-HarnessEntryExpectedVersion -ResolvedRepoRoot $RepoRoot -ResolvedWorkspaceRoot $WorkspaceRoot -ResolvedTaskId $TaskId -ProvidedVersion $ExpectedVersion
+            $result = Set-HarnessTaskEvidence -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -ExpectedVersion $resolvedVersion -EvidencePath $Evidence -ActorHost $ActorHost -ActorModel $ActorModel
         } elseif ($Command -ceq 'approve') {
-            if ([string]::IsNullOrWhiteSpace($TaskId) -or $null -eq $ExpectedVersion -or [string]::IsNullOrWhiteSpace($Approval)) {
-                throw 'approve requires -TaskId, -ExpectedVersion, and -Approval'
-            }
-            $result = Set-HarnessTaskApproval -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -ExpectedVersion ([int]$ExpectedVersion) -ApprovalPath $Approval -ActorHost $ActorHost -ActorModel $ActorModel
+            if ([string]::IsNullOrWhiteSpace($TaskId) -or [string]::IsNullOrWhiteSpace($Approval)) { throw 'approve requires -TaskId and -Approval' }
+            $resolvedVersion = Resolve-HarnessEntryExpectedVersion -ResolvedRepoRoot $RepoRoot -ResolvedWorkspaceRoot $WorkspaceRoot -ResolvedTaskId $TaskId -ProvidedVersion $ExpectedVersion
+            $result = Set-HarnessTaskApproval -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -ExpectedVersion $resolvedVersion -ApprovalPath $Approval -ActorHost $ActorHost -ActorModel $ActorModel
         } elseif ($Command -ceq 'resume-and-execute') {
-            if ([string]::IsNullOrWhiteSpace($TaskId) -or $null -eq $ExpectedVersion) {
-                throw 'resume-and-execute requires -TaskId and -ExpectedVersion'
-            }
-            $result = Resume-HarnessTaskExecution -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -ExpectedVersion ([int]$ExpectedVersion) -ActorHost $ActorHost -ActorModel $ActorModel
+            if ([string]::IsNullOrWhiteSpace($TaskId)) { throw 'resume-and-execute requires -TaskId' }
+            $resolvedVersion = Resolve-HarnessEntryExpectedVersion -ResolvedRepoRoot $RepoRoot -ResolvedWorkspaceRoot $WorkspaceRoot -ResolvedTaskId $TaskId -ProvidedVersion $ExpectedVersion
+            $result = Resume-HarnessTaskExecution -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -ExpectedVersion $resolvedVersion -ActorHost $ActorHost -ActorModel $ActorModel
         } elseif ($Command -ceq 'replay') {
             if ([string]::IsNullOrWhiteSpace($TransactionId)) {
                 throw 'replay requires -TransactionId'
@@ -122,9 +151,10 @@ try {
         Write-Output ("detected_protocol: {0}" -f $result.detected_protocol)
         Write-Output ("selected_protocol: {0}" -f $result.selected_protocol)
         Write-Output ("preference_source: {0}" -f $result.preference_source)
+        Write-Output ("default_source: {0}" -f $result.default_source)
         Write-Output ("reason: {0}" -f $result.reason)
         Write-Output ("workspace_config: {0}" -f $result.workspace_config.new_task_protocol)
-        Write-Output ("rollout_status: {0}" -f $result.rollout_eligibility.status)
+        Write-Output ("runtime_default: {0}" -f $result.runtime_default_decision.status)
         if (-not [string]::IsNullOrWhiteSpace([string]$result.warning)) { Write-Output ("warning: {0}" -f $result.warning) }
         Write-Output 'runtime_writes: 0'
     } elseif ($Command -ceq 'status') {
@@ -135,7 +165,6 @@ try {
             Write-Output 'runtime_writes: 0'
         } else {
             Write-Output ("task_id: {0}" -f $result.task.task_id)
-            Write-Output ("version: {0}" -f $result.task.version)
             Write-Output ("status: {0}" -f $result.task.status)
             Write-Output ("is_current: {0}" -f ([string]$result.is_current).ToLowerInvariant())
             Write-Output ("pending_transactions: {0}" -f @($result.pending_transactions).Count)
@@ -179,6 +208,17 @@ try {
     }
     exit 0
 } catch {
-    [Console]::Error.WriteLine($_.Exception.Message)
+    $message = [string]$_.Exception.Message
+    $conflict = [regex]::Match($message,'^ExpectedVersion mismatch: expected=\d+ actual=(?<actual>\d+)$')
+    if ($script:AutoExpectedVersionUsed -and $conflict.Success) {
+        $currentVersion = [int]$conflict.Groups['actual'].Value
+        if ($AsJson) {
+            [Console]::Error.WriteLine(([ordered]@{error='task-version-conflict';current_version=$currentVersion;writes=0} | ConvertTo-Json -Compress))
+        } else {
+            [Console]::Error.WriteLine("task-version-conflict; current_version=$currentVersion; task changed concurrently, reread and retry")
+        }
+    } else {
+        [Console]::Error.WriteLine($message)
+    }
     exit 2
 }

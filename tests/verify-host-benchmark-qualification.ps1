@@ -56,8 +56,7 @@ function Invoke-FixtureRunner {
         [int]$Trials,
         [int]$Groups = 1,
         [string]$BenchmarkPath = 'cognitive-fast-path',
-        [string]$CodexHome = '',
-        [string]$EligibilityReportPath = ''
+        [string]$CodexHome = ''
     )
     $outputPath = Join-Path $OutputRoot ("report-$Mode-$Groups-$Trials.json")
     $logPath = Join-Path $OutputRoot ("order-$Mode-$Groups-$Trials.txt")
@@ -74,7 +73,6 @@ function Invoke-FixtureRunner {
         if ($BenchmarkPath -ceq 'cognitive-fast-path') { $env:HOST_BENCHMARK_TEST_EXPECTED_CODEX_HOME = [IO.Path]::GetFullPath($CodexHome).TrimEnd('\') } else { Remove-Item Env:HOST_BENCHMARK_TEST_EXPECTED_CODEX_HOME -ErrorAction Ignore }
         $runnerArguments = @('-NoLogo','-NoProfile','-NonInteractive','-File',(Join-Path $Fixture 'scripts\run-host-benchmark.ps1'),'-RepoRoot',$Fixture,'-OutputPath',$outputPath,'-Groups',$Groups,'-Trials',$Trials,'-MaxRoundTrips',1,'-TimeoutSeconds',30,'-BenchmarkPath',$BenchmarkPath)
         if (-not [string]::IsNullOrWhiteSpace($CodexHome)) { $runnerArguments += @('-CodexHome',$CodexHome) }
-        if ($BenchmarkPath -ceq 'installed-desktop-path') { $runnerArguments += @('-EligibilityReportPath',$EligibilityReportPath) }
         $lines = @(& pwsh @runnerArguments 2>&1 | ForEach-Object { [string]$_ })
         $exitCode = $LASTEXITCODE
     } finally {
@@ -792,7 +790,6 @@ exit 0
     Write-Utf8 (Join-Path $fixture 'install.ps1') "throw 'fixture install must not execute'`n"
     Write-Utf8 (Join-Path $fixture 'uninstall.ps1') "throw 'fixture uninstall must not execute'`n"
     Write-Utf8 (Join-Path $fixture 'tests\verify-installation.ps1') "throw 'fixture verification must not execute'`n"
-    Write-Utf8 (Join-Path $fixture 'scripts\promote-v2-rollout-report.ps1') "throw 'fixture promotion must not execute'`n"
     Write-Utf8 (Join-Path $fixture 'scripts\lib\Harness.Protocol.psm1') "throw 'fixture protocol module must not execute'`n"
     Write-Utf8 (Join-Path $fixture 'scripts\receive-otlp-http.ps1') "throw 'fixture collector must not execute'`n"
     Write-Utf8 (Join-Path $fixture 'skills\codex\scripts\invoke_codex.ps1') "throw 'fixture wrapper must not execute'`n"
@@ -817,14 +814,10 @@ $script:InstalledFixtureDriftInjected = $false
 function Write-InstalledFixtureEvent([string]$Event) {
     [IO.File]::AppendAllText($env:HOST_BENCHMARK_TEST_LOG,("installed:$Event`n"),[Text.UTF8Encoding]::new($false))
 }
-function Invoke-InstalledDesktopRolloutPromotion {
-    param([string]$RepoRoot,[string]$Workspace,[string]$EligibilityReportPath,[string]$SourceRevision)
-    Write-InstalledFixtureEvent ("promote:" + (Split-Path -Leaf (Split-Path -Parent $Workspace)))
-    $report = [IO.File]::ReadAllText($EligibilityReportPath,[Text.UTF8Encoding]::new($false,$true)) | ConvertFrom-Json -AsHashtable -Depth 20
-    if ([string]$report.status -cne 'pass' -or [string]$report.source_revision -cne $SourceRevision -or [string]$report.report_digest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'fixture rollout report was not eligible or source-bound' }
-    $script:InstalledFixtureReportDigest = [string]$report.report_digest
-    $fileDigest = 'sha256:' + (Get-FileHash -LiteralPath $EligibilityReportPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    return [ordered]@{status='pass';source_revision=$SourceRevision;report_digest=$script:InstalledFixtureReportDigest;file_digest=$fileDigest}
+function Enable-InstalledDesktopWorkspaceV2 {
+    param([string]$Workspace)
+    Write-InstalledFixtureEvent ("enable-v2:" + (Split-Path -Leaf (Split-Path -Parent $Workspace)))
+    return [ordered]@{status='pass';new_task_protocol='v2';preference_source='workspace-config';config_digest=('sha256:' + ('2' * 64))}
 }
 function Invoke-InstalledDesktopInstall {
     param([string]$CodexHome,[string]$Workspace,[string]$RepoRoot)
@@ -838,8 +831,8 @@ function Invoke-InstalledDesktopRouteProbe {
     param([string]$Protocol,[string]$Workspace)
     $label = Split-Path -Leaf (Split-Path -Parent $Workspace)
     Write-InstalledFixtureEvent "route:$label"
-    if ($Protocol -ceq 'v2') { return [ordered]@{requested_protocol='auto';selected_protocol='v2';detected_protocol='new';reason='eligible-rollout-report';rollout_status='pass';report_digest=$script:InstalledFixtureReportDigest} }
-    return [ordered]@{requested_protocol='auto';selected_protocol='v1';detected_protocol='v1';reason='existing-v1-plan';rollout_status='not-required';report_digest=$null}
+    if ($Protocol -ceq 'v2') { return [ordered]@{requested_protocol='v2';detected_protocol='new';selected_protocol='v2';preference_source='workspace-config';default_source='workspace-config';reason='workspace-v2-new-task';workspace_config_status='present';workspace_config_protocol='v2';runtime_default_status='not-read';artifact_kind='new-task'} }
+    return [ordered]@{requested_protocol='auto';detected_protocol='v1';selected_protocol='v1';preference_source='workspace-config';default_source='existing-artifact';reason='existing-v1-plan';workspace_config_status='present';workspace_config_protocol='auto';runtime_default_status='not-read';artifact_kind='v1-plan'}
 }
 function Test-InstalledDesktopWorkspaceRegistered {
     param([string]$CodexHome,[string]$Workspace)
@@ -986,13 +979,13 @@ function Invoke-HostTrial {
     if ([string]$named.BenchmarkPath -ceq 'installed-desktop-path') {
         $profileConfig = Get-InstalledDesktopUserConfigBinding -CodexHome ([string]$named.CodexHome)
         if ($Protocol -ceq 'bare') {
-            $installedDesktop = [ordered]@{benchmark_path='installed-desktop-path';host_surface='codex-cli-host-equivalent';user_config_mode='loaded';protocol_environment='cleared';profile_config=$profileConfig;install_status='not-applicable';verification_status='not-applicable';auth_unchanged=$true;cleanup_status='not-required';hook_installed='not-applicable';hook_trust='unknown';hook_callability='unknown';route_probe=$null;rollout_promotion=$null}
+            $installedDesktop = [ordered]@{benchmark_path='installed-desktop-path';host_surface='installed-desktop-path';user_config_mode='loaded';workspace_config_loaded=$false;protocol_environment='cleared';profile_config=$profileConfig;install_status='not-applicable';verification_status='not-applicable';auth_unchanged=$null;workspace_protocol_config=$null;route_probe=$null;cleanup_status='not-required';hook_installed='not-applicable';hook_trust='manual';hook_callability='manual'}
         } else {
             $workspace = Join-Path (Join-Path ([string]$named.ScratchRoot) ("$Protocol-$Trial")) 'workspace'
-            $promotion = Invoke-InstalledDesktopRolloutPromotion -RepoRoot ([string]$named.RepoRoot) -Workspace $workspace -EligibilityReportPath ([string]$named.EligibilityReportPath) -SourceRevision $revision
             $installation = Invoke-InstalledDesktopInstall -CodexHome ([string]$named.CodexHome) -Workspace $workspace -RepoRoot ([string]$named.RepoRoot)
+            $workspaceProtocol = if ($Protocol -ceq 'v2') { Enable-InstalledDesktopWorkspaceV2 -Workspace $workspace } else { $null }
             $route = Invoke-InstalledDesktopRouteProbe -Protocol $Protocol -Workspace $workspace
-            $installedDesktop = [ordered]@{benchmark_path='installed-desktop-path';host_surface='codex-cli-host-equivalent';user_config_mode='loaded';protocol_environment='cleared';profile_config=$profileConfig;install_status=$installation.install_status;verification_status=$installation.verification_status;auth_unchanged=$installation.auth_unchanged;cleanup_status='passed';hook_installed=$installation.hook_installed;hook_trust='unknown';hook_callability='unknown';route_probe=$route;rollout_promotion=$promotion}
+            $installedDesktop = [ordered]@{benchmark_path='installed-desktop-path';host_surface='installed-desktop-path';user_config_mode='loaded';workspace_config_loaded=$true;protocol_environment='cleared';profile_config=$profileConfig;install_status=$installation.install_status;verification_status=$installation.verification_status;auth_unchanged=$installation.auth_unchanged;workspace_protocol_config=$workspaceProtocol;route_probe=$route;cleanup_status='passed';hook_installed=$installation.hook_installed;hook_trust='manual';hook_callability='manual'}
         }
     }
     $record = [ordered]@{
@@ -1113,24 +1106,24 @@ function Invoke-HostTrial {
     Check ([string]$pass.Report.source.execution_mode -ceq 'clean-commit-clone' -and [string]$pass.Report.source.commit_tree_oid -match '^[0-9a-f]{40,64}$') 'clean report omitted native commit source identity'
     Check ([bool]$pass.Report.source.input_head_binding.start -and [bool]$pass.Report.source.input_head_binding.end) 'clean report did not bind live execution inputs to HEAD blobs'
 
-    $installedEligibilityReport = Join-Path $scratch 'installed-eligible-report.json'
-    Write-Utf8 $installedEligibilityReport (([ordered]@{schema_version='fixture-rollout-report/v1';status='pass';source_revision=$fixtureRevision;report_digest=('sha256:' + ('b' * 64))}) | ConvertTo-Json -Compress)
-    $installedEligibilityFileDigest = 'sha256:' + (Get-FileHash -LiteralPath $installedEligibilityReport -Algorithm SHA256).Hash.ToLowerInvariant()
     $installedPassProfile = Join-Path $scratch 'installed-runner-pass-profile'
     $installedPassHome = Join-Path $installedPassProfile '.codex'
     Write-Utf8 (Join-Path $installedPassHome 'auth.json') '{"fixture":"installed-runner-pass"}'
     Write-Utf8 (Join-Path $installedPassHome 'config.toml') 'model = "fixture"'
-    $installedPass = Invoke-FixtureRunner -Fixture $fixture -OutputRoot $scratch -Mode 'installed-pass' -Trials 3 -Groups 3 -BenchmarkPath 'installed-desktop-path' -CodexHome $installedPassHome -EligibilityReportPath $installedEligibilityReport
-    Check ($installedPass.ExitCode -eq 2 -and $null -ne $installedPass.Report -and [string]$installedPass.Report.schema_version -ceq 'harness-installed-desktop-benchmark-report/v1' -and [string]$installedPass.Report.qualification.status -ceq 'unavailable' -and [string]$installedPass.Report.status -ceq 'unavailable' -and -not [bool]$installedPass.Report.performance.eligible -and [bool]$installedPass.Report.performance.measurement_passed -and [int]$installedPass.Report.performance.measurement_passed_groups -eq 3 -and [string]$installedPass.Report.execution.host_surface -ceq 'codex-cli-host-equivalent' -and [string]$installedPass.Report.execution.rollout_report_digest -ceq ('sha256:' + ('b' * 64)) -and [string]$installedPass.Report.execution.rollout_report_file_digest -ceq $installedEligibilityFileDigest) 'installed Desktop 3x3 measurement did not remain qualification-unavailable with exact rollout bindings and exit 2'
+    $installedPass = Invoke-FixtureRunner -Fixture $fixture -OutputRoot $scratch -Mode 'installed-pass' -Trials 3 -Groups 3 -BenchmarkPath 'installed-desktop-path' -CodexHome $installedPassHome
+    Check ($installedPass.ExitCode -eq 2 -and $null -ne $installedPass.Report -and [string]$installedPass.Report.schema_version -ceq 'harness-installed-desktop-benchmark-report/v1' -and [string]$installedPass.Report.producer_identity -ceq 'host-benchmark-installed-desktop/v1' -and [string]$installedPass.Report.producer_mode -ceq 'test-only' -and [string]$installedPass.Report.qualification.status -ceq 'unavailable' -and [string]$installedPass.Report.status -ceq 'unavailable' -and -not [bool]$installedPass.Report.performance.eligible -and [bool]$installedPass.Report.performance.measurement_passed -and [int]$installedPass.Report.performance.measurement_passed_groups -eq 3 -and [string]$installedPass.Report.execution.host_surface -ceq 'installed-desktop-path' -and [string]$installedPass.Report.qualification.hook_trust -ceq 'manual' -and -not [bool]$installedPass.Report.qualification.hook_observations_blocking) 'installed Desktop fixture did not remain explicitly test-only while proving the corrected hard-result path'
     $installedEvents = @($installedPass.Order | Where-Object { $_ -like 'installed:*' })
-    Check (@($installedEvents | Where-Object { $_ -like 'installed:promote:*' }).Count -eq 18 -and @($installedEvents | Where-Object { $_ -like 'installed:install:*' }).Count -eq 18 -and @($installedEvents | Where-Object { $_ -like 'installed:verify:*' }).Count -eq 18 -and @($installedEvents | Where-Object { $_ -like 'installed:route:*' }).Count -eq 18 -and @($installedEvents | Where-Object { $_ -like 'installed:cleanup:*' }).Count -eq 18) 'installed Desktop fixture did not execute the full promotion/install/verify/route/cleanup chain'
+    Check (@($installedEvents | Where-Object { $_ -like 'installed:promote:*' }).Count -eq 0 -and @($installedEvents | Where-Object { $_ -like 'installed:enable-v2:*' }).Count -eq 9 -and @($installedEvents | Where-Object { $_ -like 'installed:install:*' }).Count -eq 18 -and @($installedEvents | Where-Object { $_ -like 'installed:verify:*' }).Count -eq 18 -and @($installedEvents | Where-Object { $_ -like 'installed:route:*' }).Count -eq 18 -and @($installedEvents | Where-Object { $_ -like 'installed:cleanup:*' }).Count -eq 18) 'installed Desktop fixture did not execute install/workspace-enable/route/cleanup without Promotion'
+    $installedV2Trials = @($installedPass.Report.groups | ForEach-Object { @($_.protocols.v2.trials) })
+    $installedV1Trials = @($installedPass.Report.groups | ForEach-Object { @($_.protocols.v1.trials) })
+    Check (@($installedV2Trials | Where-Object { [string]$_.installed_desktop.route_probe.requested_protocol -ceq 'v2' -and [string]$_.installed_desktop.route_probe.preference_source -ceq 'workspace-config' -and [string]$_.installed_desktop.route_probe.reason -ceq 'workspace-v2-new-task' -and [int]$_.artifact_writes -eq 0 -and [int]$_.runtime_writes -eq 0 }).Count -eq 9 -and @($installedV1Trials | Where-Object { [string]$_.installed_desktop.route_probe.reason -ceq 'existing-v1-plan' -and [string]$_.installed_desktop.route_probe.artifact_kind -ceq 'v1-plan' -and $null -eq $_.installed_desktop.workspace_protocol_config }).Count -eq 9) 'installed v2 was not workspace-selected or existing v1 Artifact behavior changed'
 
     foreach ($driftMode in @('installed-cleanup-auth-drift','installed-cleanup-config-drift')) {
         $driftProfile = Join-Path $scratch ("$driftMode-profile")
         $driftHome = Join-Path $driftProfile '.codex'
         Write-Utf8 (Join-Path $driftHome 'auth.json') ("{`"fixture`":`"$driftMode`"}")
         Write-Utf8 (Join-Path $driftHome 'config.toml') 'model = "fixture"'
-        $drift = Invoke-FixtureRunner -Fixture $fixture -OutputRoot $scratch -Mode $driftMode -Trials 3 -Groups 3 -BenchmarkPath 'installed-desktop-path' -CodexHome $driftHome -EligibilityReportPath $installedEligibilityReport
+        $drift = Invoke-FixtureRunner -Fixture $fixture -OutputRoot $scratch -Mode $driftMode -Trials 3 -Groups 3 -BenchmarkPath 'installed-desktop-path' -CodexHome $driftHome
         $driftTrials = @($drift.Order | Where-Object { $_ -match '^(?:bare|v1|v2)\d+$' })
         Check ($drift.ExitCode -eq 1 -and $null -eq $drift.Report -and ($driftTrials -join ',') -ceq 'bare1,v11' -and @($drift.Order | Where-Object { $_ -like 'installed:cleanup:*' }).Count -eq 1) "$driftMode did not fail and stop before the next installed Desktop trial"
     }

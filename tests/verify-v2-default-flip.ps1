@@ -7,197 +7,321 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Split-Path -Parent $P
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 . (Join-Path $PSScriptRoot 'fixture-test-common.ps1')
 
-$script:checks=[System.Collections.Generic.List[string]]::new();$script:failures=[System.Collections.Generic.List[string]]::new()
-function Check($Condition,$Pass,$Fail){if($Condition){$script:checks.Add($Pass)}else{$script:failures.Add($Fail)}}
-function New-Gates([string]$Performance='pass'){
+$script:checks = [Collections.Generic.List[string]]::new()
+$script:failures = [Collections.Generic.List[string]]::new()
+function Check($Condition,[string]$Pass,[string]$Fail) { if ($Condition) { $script:checks.Add($Pass) } else { $script:failures.Add($Fail) } }
+function Copy-Document([Collections.IDictionary]$Document) { return ($Document | ConvertTo-Json -Depth 100 -Compress) | ConvertFrom-Json -AsHashtable -Depth 100 -DateKind String }
+function Write-Json([string]$Path,[object]$Document) { [void][IO.Directory]::CreateDirectory((Split-Path -Parent $Path));[IO.File]::WriteAllText($Path,($Document|ConvertTo-Json -Depth 100 -Compress),[Text.UTF8Encoding]::new($false)) }
+function Test-ExactBytes([byte[]]$Left,[byte[]]$Right) { if($Left.Length-ne$Right.Length){return $false};for($i=0;$i-lt$Left.Length;$i++){if($Left[$i]-ne$Right[$i]){return $false}};return $true }
+function Get-Rejection([scriptblock]$Action) { try { $null=& $Action; return '' } catch { return [string]$_.Exception.Message } }
+function Set-ContextDigest([Collections.IDictionary]$Document) { $Document.context_digest=& $script:qualificationModule {param($Value)Get-HarnessObservedHostContextDigest -Document $Value} $Document }
+function Set-ReceiptDigest([Collections.IDictionary]$Document) { $Document.receipt_digest=& $script:qualificationModule {param($Value)Get-HarnessRolloutReviewReceiptDigest -Document $Value} $Document }
+function Set-ReportDigest([Collections.IDictionary]$Document) { $Document.report_digest=& $script:qualificationModule {param($Value)Get-HarnessRolloutReportDigest -Document $Value} $Document }
+function Set-AuthorizationDigest([Collections.IDictionary]$Document) { $Document.authorization_digest=& $script:qualificationModule {param($Value)Get-HarnessCanaryAuthorizationDigest -Document $Value} $Document }
+
+function Invoke-Generator([string[]]$Arguments) {
+    $output=@(& $script:powerShell -NoLogo -NoProfile -NonInteractive -File $script:generatorPath -RepoRoot $RepoRoot @Arguments 2>&1|ForEach-Object{[string]$_})
+    return [pscustomobject]@{ExitCode=$LASTEXITCODE;Output=$output-join"`n"}
+}
+function Invoke-Promotion([string[]]$Arguments) {
+    $output=@(& $script:powerShell -NoLogo -NoProfile -NonInteractive -File $script:promotionPath -RepoRoot $RepoRoot @Arguments 2>&1|ForEach-Object{[string]$_})
+    return [pscustomobject]@{ExitCode=$LASTEXITCODE;Output=$output-join"`n"}
+}
+function Resolve-Protocol([string]$Workspace,[string]$TaskId='',[ValidateSet('auto','v1','v2')][string]$Requested='auto') {
+    return & $script:protocolModule {param($Root,$Work,$Task,$Mode)Get-HarnessProtocolResolution -RepoRoot $Root -WorkspaceRoot $Work -TaskId $Task -RequestedProtocol $Mode} $RepoRoot $Workspace $TaskId $Requested
+}
+function Resolve-Qualification([string]$Workspace,[AllowNull()][Collections.IDictionary]$Context=$null,[AllowEmptyString()][string]$ReportPath='') {
+    if([string]::IsNullOrWhiteSpace($ReportPath)){
+        $final='.assistant/runtime/rollout/v2-eligibility.json';$candidate='.assistant/runtime/rollout/v2-canary-candidate.json'
+        $ReportPath=if(Test-Path -LiteralPath (Join-Path $Workspace $final)){$final}else{$candidate}
+    }
+    return & $script:qualificationModule {param($Root,$Work,$Path,$Observed)Get-HarnessRolloutEligibility -RepoRoot $Root -WorkspaceRoot $Work -ReportPath $Path -ObservedHostContext $Observed} $RepoRoot $Workspace $ReportPath $Context
+}
+function Resolve-Requested([string]$Workspace,[ValidateSet('v1','v2')][string]$Requested) {
+    return Resolve-Protocol -Workspace $Workspace -Requested $Requested
+}
+
+function New-EvidenceSet([ValidateSet('canary-candidate','final-default')][string]$Phase) {
+    $contracts=& $script:qualificationModule {Get-HarnessRolloutV2GateContracts -InputOnly}
+    $hostBinding=& $script:qualificationModule {Get-HarnessRolloutV2ExpectedHost}
+    $revision=& $script:qualificationModule {param($Root)Get-HarnessRolloutRevision -RepoRoot $Root} $RepoRoot
+    $gates=[ordered]@{}
+    foreach($name in $contracts.Keys){
+        $gates[$name]=[ordered]@{
+            status=$(if($Phase-ceq'canary-candidate'-and[string]$name-cin@('DP-G13-PROMOTION-AUTO-PROBE','DP-G15-CANARY','DP-G16-STABLE-DECISION')){'not_run'}else{'pass'})
+            evidence_contract=[string]$contracts[$name]
+            artifact_path=$script:placeholderArtifactPath
+            evidence_digest=$script:placeholderArtifactDigest
+            source_revision=$revision
+            producer_identity='structural-test-producer'
+        }
+    }
+    return [ordered]@{schema_version='rollout-evidence-set/v1';phase=$Phase;source_revision=$revision;host=$hostBinding;gates=$gates}
+}
+function New-LegacyEvidenceSet([ValidateSet('canary-candidate','final-default')][string]$Phase) {
+    $set=New-EvidenceSet $Phase
+    foreach($gate in $set.gates.Values){$gate.Remove('artifact_path');$gate.Remove('producer_identity')}
+    return $set
+}
+function New-ReportBundle([ValidateSet('canary-candidate','final-default')][string]$Phase,[ValidateSet('verified','test-only')][string]$ProvenanceStatus,[string]$Name) {
+    $set=New-EvidenceSet $Phase
+    $payload=& $script:qualificationModule {param($Root,$Value,$Status)New-HarnessRolloutReviewPayloadDocument -RepoRoot $Root -EvidenceSet $Value -ProvenanceStatus $Status} $RepoRoot $set $ProvenanceStatus
+    $receipt=& $script:qualificationModule {param($Root,$Value)New-HarnessRolloutReviewReceiptDocument -RepoRoot $Root -Payload $Value -ReviewerActorId 'structural-reviewer' -ReviewerContextId 'isolated-structural-review' -ReviewerModel 'gpt-5.6-sol'} $RepoRoot $payload
+    $receiptPath=Join-Path $script:deliveryRoot "$Name-review-receipt.json";Write-Json $receiptPath $receipt
+    $report=if($ProvenanceStatus-ceq'test-only'){
+        & $script:qualificationModule {param($Root,$Payload,$Receipt,$Path)New-HarnessRolloutV2ReportDocument -RepoRoot $Root -ReviewPayload $Payload -ReviewReceipt $Receipt -ReviewReceiptArtifactPath $Path -TestOnly} $RepoRoot $payload $receipt $receiptPath
+    }else{
+        & $script:qualificationModule {param($Root,$Payload,$Receipt,$Path)New-HarnessRolloutV2ReportDocument -RepoRoot $Root -ReviewPayload $Payload -ReviewReceipt $Receipt -ReviewReceiptArtifactPath $Path} $RepoRoot $payload $receipt $receiptPath
+    }
+    $reportPath=Join-Path $script:deliveryRoot "$Name-report.json";Write-Json $reportPath $report
+    return [pscustomobject]@{Set=$set;Payload=$payload;Receipt=$receipt;ReceiptPath=$receiptPath;Report=$report;ReportPath=$reportPath}
+}
+function Assert-AuthorizationReason([Collections.IDictionary]$Report,[Collections.IDictionary]$Context,[Collections.IDictionary]$Authorization,[string]$Workspace,[datetimeoffset]$AsOf) {
+    return Get-Rejection {& $script:qualificationModule {param($Root,$Work,$Rep,$Ctx,$Auth,$Now)Assert-HarnessCanaryAuthorization -RepoRoot $Root -WorkspaceRoot $Work -Report $Rep -ObservedHostContext $Ctx -Document $Auth -AsOfUtc $Now} $RepoRoot $Workspace $Report $Context $Authorization $AsOf}
+}
+function New-StructuralDecision([string]$Workspace,[string]$Phase) {
+    $scope=if($Phase-ceq'canary-candidate'){'workspace-canary'}else{'release-default'}
+    $expires=if($Phase-ceq'canary-candidate'){[Nullable[datetimeoffset]]([datetimeoffset]::UtcNow.AddHours(1))}else{[Nullable[datetimeoffset]]$null}
+    return & $script:runtimeDefaultModule {param($Root,$Work,$Mode,$Revision,$Expiry)New-HarnessRuntimeDefaultDecisionDocument -RepoRoot $Root -WorkspaceRoot $Work -Scope $Mode -SourceRevision $Revision -ExpiresAtUtc $Expiry} $RepoRoot $Workspace $scope ([string]$script:sourceState.revision) $expires
+}
+function Invoke-StructuralTransaction([string]$Workspace,[string]$InputPath,[string]$Phase,[byte[]]$ReportBytes,[byte[]]$AuthorizationBytes,[int]$FaultAfter=0) {
+    $reportDocument=[Text.UTF8Encoding]::new($false,$true).GetString($ReportBytes)|ConvertFrom-Json -AsHashtable -Depth 100
+    $authorizationDigest=if($AuthorizationBytes.Length-eq0){''}else{[string]([Text.UTF8Encoding]::new($false,$true).GetString($AuthorizationBytes)|ConvertFrom-Json -AsHashtable -Depth 100).authorization_digest}
+    $decision=New-StructuralDecision $Workspace $Phase
+    $decisionBytes=[Text.UTF8Encoding]::new($false).GetBytes(($decision|ConvertTo-Json -Depth 20 -Compress))
+    return & $script:evidenceModule {
+        param($Root,$Work,$ArtifactPath,$Mode,$Report,$ReportDigest,$Authorization,$AuthorizationDigest,$Decision,$DecisionDigest,$SourceState,$Fault)
+        Invoke-HarnessRolloutPublicationTransaction -RepoRoot $Root -WorkspaceRoot $Work -ReportPath $ArtifactPath -Phase $Mode -ReportBytes $Report -ExpectedReportDigest $ReportDigest -AuthorizationBytes $Authorization -ExpectedAuthorizationDigest $AuthorizationDigest -DecisionBytes $Decision -ExpectedDecisionDigest $DecisionDigest -SourceStateStart $SourceState -FaultAfterMutation $Fault -SkipCanonicalResolutionForStructuralTest
+    } $RepoRoot $Workspace $InputPath $Phase $ReportBytes ([string]$reportDocument.report_digest) $AuthorizationBytes $authorizationDigest $decisionBytes ([string]$decision.decision_digest) $script:sourceState $FaultAfter
+}
+function New-CanonicalProtocolModule([string]$Scope,[string]$DecisionDigest) {
+    return New-Module -ArgumentList @($Scope,$DecisionDigest) -ScriptBlock {
+        param($ExpectedScope,$ExpectedDecisionDigest)
+        function Get-HarnessProtocolResolution {
+            [CmdletBinding()]param([string]$RepoRoot,[string]$WorkspaceRoot,[string]$RequestedProtocol)
+            return [ordered]@{selected_protocol='v2';runtime_default_decision=[ordered]@{status='valid';usable=$true;scope=$ExpectedScope;decision_digest=$ExpectedDecisionDigest}}
+        }
+    }
+}
+function New-V1Gates {
     $digest='sha256:'+('2'*64)
     return [ordered]@{
         behavior=[ordered]@{status='pass';evidence_digest=$digest;command='scripts/run-model-evals.ps1 -Model gpt-5.6-sol -Reasoning max'}
         v1_compatibility=[ordered]@{status='pass';evidence_digest=$digest;command='scripts/run-validation.ps1 -Suite all -CheckTimeoutSeconds 360 -VerboseOutput'}
-        direct_performance=[ordered]@{status=$Performance;evidence_digest=$digest;command='scripts/run-host-benchmark.ps1 -Groups 3 -Trials 3 -Model gpt-5.6-sol -Reasoning max'}
+        direct_performance=[ordered]@{status='pass';evidence_digest=$digest;command='scripts/run-host-benchmark.ps1 -Groups 3 -Trials 3 -Model gpt-5.6-sol -Reasoning max'}
         core_install_rollback=[ordered]@{status='pass';evidence_digest=$digest;command='scripts/run-isolated-install-smoke.ps1 -Preset core'}
         full_install_rollback=[ordered]@{status='pass';evidence_digest=$digest;command='scripts/run-isolated-install-smoke.ps1 -Preset full'}
     }
 }
-function New-Report([System.Collections.IDictionary]$Gates,$Distribution=$RepoRoot){return & $script:protocolModule {param($Root,$Values) New-HarnessRolloutReportDocument -RepoRoot $Root -Gates $Values} $Distribution $Gates}
-function Set-ReportDigest([System.Collections.IDictionary]$Document){$Document.report_digest=& $script:protocolModule {param($Value) Get-HarnessRolloutReportDigest -Document $Value} $Document}
-function Write-Report($Workspace,$Name,[System.Collections.IDictionary]$Document){$relative="rollout/$Name.json";$target=Join-Path $Workspace $relative;[void][IO.Directory]::CreateDirectory((Split-Path -Parent $target));[IO.File]::WriteAllText($target,($Document|ConvertTo-Json -Depth 30),[Text.UTF8Encoding]::new($false));return $relative}
-function Resolve-Protocol($Workspace,$ReportPath,$TaskId='new-task',$Requested='auto'){return Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $Workspace -TaskId $TaskId -RequestedProtocol $Requested -EligibilityReportPath $ReportPath}
-function Resolve-ProtocolDefault($Workspace,$TaskId='new-task',$Requested='auto'){return Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $Workspace -TaskId $TaskId -RequestedProtocol $Requested}
-function Test-ExactBytes([byte[]]$Left,[byte[]]$Right){if($Left.Length-ne$Right.Length){return $false};for($i=0;$i-lt$Left.Length;$i++){if($Left[$i]-ne$Right[$i]){return $false}};return $true}
-function Invoke-Promotion($Workspace,$ReportPath,$Distribution=$RepoRoot){$output=@(& $script:powerShell -NoLogo -NoProfile -NonInteractive -File $script:promotionPath -RepoRoot $Distribution -WorkspaceRoot $Workspace -ReportPath $ReportPath 2>&1|ForEach-Object{[string]$_});return [pscustomobject]@{ExitCode=$LASTEXITCODE;Output=($output-join"`n")}}
-function Set-ReportEnvironment($Value){if($null-eq$Value){Remove-Item Env:HARNESS_V2_ELIGIBILITY_REPORT -ErrorAction SilentlyContinue}else{[Environment]::SetEnvironmentVariable('HARNESS_V2_ELIGIBILITY_REPORT',[string]$Value,[EnvironmentVariableTarget]::Process)}}
-function Test-PromotionPathRejected($Module,$Root,$Workspace,$Report,[string[]]$ProtectedRoots=@()){try{$null=& $Module {param($Repo,$Work,$InputReport,$Protected) Resolve-HarnessRolloutPromotionPaths -RepoRoot $Repo -WorkspaceRoot $Work -ReportPath $InputReport -ProtectedRoots $Protected} $Root $Workspace $Report $ProtectedRoots;return $false}catch{return $true}}
-function Resolve-ProtocolCanonical($Workspace,$TaskId='new-task',$Requested='auto'){
-    $prior=[Environment]::GetEnvironmentVariable('HARNESS_V2_ELIGIBILITY_REPORT',[EnvironmentVariableTarget]::Process)
-    try{Set-ReportEnvironment $null;return Resolve-ProtocolDefault $Workspace $TaskId $Requested}
-    finally{Set-ReportEnvironment $prior}
+function New-V2TaskDocument([string]$TaskId){$now=[datetimeoffset]::UtcNow.ToString('o');return [ordered]@{schema_version='task-state/v2';task_id=$TaskId;version=1;status='ready';identity='existing';intent='write';requirement_state='clear';execution_profile='direct';persistence='ephemeral';policies=[ordered]@{plan_required=$false;approval_required=$false;rollback_required=$false;independent_review_required=$false;verification_required=$true};created_at=$now;updated_at=$now}}
+
+$script:generatorPath=Join-Path $RepoRoot 'scripts\generate-v2-rollout-report.ps1'
+$script:promotionPath=Join-Path $RepoRoot 'scripts\promote-v2-rollout-report.ps1'
+$script:powerShell=(Get-Process -Id $PID).Path
+$repoBefore=@(& git -C $RepoRoot status --porcelain --untracked-files=all)
+$trustedTempRoot=[Environment]::GetEnvironmentVariable('DEV_HARNESS_VALIDATION_TEMP_ROOT',[EnvironmentVariableTarget]::Process)
+if([string]::IsNullOrWhiteSpace($trustedTempRoot)){
+    if($RepoRoot.Equals('D:\data\dev-harness-next',[StringComparison]::OrdinalIgnoreCase)){$trustedTempRoot='D:\data\dev-harness-validation-temp'}
+    elseif(-not[string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)){$trustedTempRoot=$env:RUNNER_TEMP}
+    else{throw 'DEV_HARNESS_VALIDATION_TEMP_ROOT is required outside the trusted development workspace'}
 }
-function New-V2TaskDocument($TaskId){$now=[DateTimeOffset]::UtcNow.ToString('o');return [ordered]@{schema_version='task-state/v2';task_id=$TaskId;version=1;status='ready';identity='existing';intent='write';requirement_state='clear';execution_profile='direct';persistence='ephemeral';policies=[ordered]@{plan_required=$false;approval_required=$false;rollback_required=$false;independent_review_required=$false;verification_required=$true};created_at=$now;updated_at=$now}}
-
-$protocolPath=Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1';$generatorPath=Join-Path $RepoRoot 'scripts\generate-v2-rollout-report.ps1';$script:promotionPath=Join-Path $RepoRoot 'scripts\promote-v2-rollout-report.ps1';$docPath=Join-Path $RepoRoot 'docs\release\compatibility-policy.md';$script:powerShell=(Get-Process -Id $PID).Path
-$repoBefore=@(&git -C $RepoRoot status --porcelain --untracked-files=all)
-$temp=Join-Path ([IO.Path]::GetTempPath()) ('thin-v2-pr14-'+[guid]::NewGuid().ToString('N'));$workspace=Join-Path $temp 'workspace'
-$oldGitDir=[Environment]::GetEnvironmentVariable('GIT_DIR',[EnvironmentVariableTarget]::Process);$oldGitWorkTree=[Environment]::GetEnvironmentVariable('GIT_WORK_TREE',[EnvironmentVariableTarget]::Process)
-try{
-    [void][IO.Directory]::CreateDirectory($workspace)
-    $shadowRepo=Join-Path $temp 'qualification-git';$null=@(&git init --quiet -- $shadowRepo 2>&1);if($LASTEXITCODE-ne0){throw 'shadow qualification Git init failed'}
+$trustedTempRoot=(Resolve-Path -LiteralPath $trustedTempRoot -ErrorAction Stop).Path
+$temp=Join-Path $trustedTempRoot ('thin-v2-dp02a-correction-'+[guid]::NewGuid().ToString('N'))
+$script:deliveryRoot=Join-Path $temp 'delivery';[void][IO.Directory]::CreateDirectory($script:deliveryRoot)
+$oldGitDir=[Environment]::GetEnvironmentVariable('GIT_DIR',[EnvironmentVariableTarget]::Process)
+$oldGitWorkTree=[Environment]::GetEnvironmentVariable('GIT_WORK_TREE',[EnvironmentVariableTarget]::Process)
+try {
+    $shadowRepo=Join-Path $temp 'qualification-git';$null=@(& git init --quiet -- $shadowRepo 2>&1);if($LASTEXITCODE-ne0){throw 'shadow Git init failed'}
     $env:GIT_DIR=Join-Path $shadowRepo '.git';$env:GIT_WORK_TREE=$RepoRoot
-    $null=@(&git -C $RepoRoot add -A -- 2>&1);if($LASTEXITCODE-ne0){throw 'shadow qualification Git add failed'}
-    $null=@(&git -C $RepoRoot -c user.name='Rollout Test' -c user.email='rollout@test.invalid' commit --quiet -m qualification-snapshot 2>&1);if($LASTEXITCODE-ne0){throw 'shadow qualification Git commit failed'}
-    foreach($file in @($protocolPath,$generatorPath,$script:promotionPath,$PSCommandPath)){$tokens=$null;$errors=$null;[Management.Automation.Language.Parser]::ParseFile($file,[ref]$tokens,[ref]$errors)|Out-Null;Check (@($errors).Count-eq0) "$(Split-Path -Leaf $file) parses" "$(Split-Path -Leaf $file) parse failed";Check (Test-FileHasUtf8Bom $file) "$(Split-Path -Leaf $file) has UTF-8 BOM" "$(Split-Path -Leaf $file) lacks UTF-8 BOM"}
-    $script:protocolModule=Import-Module $protocolPath -Force -PassThru;$script:atomicModule=Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.AtomicWrite.psm1') -Force -PassThru
+    $null=@(& git -C $RepoRoot add -A -- 2>&1);if($LASTEXITCODE-ne0){throw 'shadow Git add failed'}
+    $null=@(& git -C $RepoRoot -c user.name='Rollout Test' -c user.email='rollout@test.invalid' commit --quiet -m qualification-snapshot 2>&1);if($LASTEXITCODE-ne0){throw 'shadow Git commit failed'}
+
+    $protocolPath=Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1'
+    $qualificationPath=Join-Path $RepoRoot 'scripts\lib\Harness.Qualification.psm1'
+    $runtimeDefaultPath=Join-Path $RepoRoot 'scripts\lib\Harness.RuntimeDefault.psm1'
+    $rolloutEvidencePath=Join-Path $RepoRoot 'scripts\lib\Harness.RolloutEvidence.psm1'
+    foreach($file in @($protocolPath,$qualificationPath,$runtimeDefaultPath,$rolloutEvidencePath,$script:generatorPath,$script:promotionPath,$PSCommandPath)){$tokens=$null;$errors=$null;[Management.Automation.Language.Parser]::ParseFile($file,[ref]$tokens,[ref]$errors)|Out-Null;Check (@($errors).Count-eq0) "$(Split-Path -Leaf $file) parses" "$(Split-Path -Leaf $file) parse failed"}
+    foreach($schema in @('runtime-default-decision.schema.json','rollout-eligibility-v2.schema.json','rollout-evidence-set.schema.json','rollout-canary-authorization.schema.json','rollout-observed-host-context.schema.json','rollout-review-payload.schema.json','rollout-review-receipt.schema.json')){try{$null=Get-Content -Raw -LiteralPath (Join-Path $RepoRoot "schemas/$schema")|ConvertFrom-Json -Depth 100;Check $true "$schema parses" ''}catch{Check $false '' "$schema parse failed"}}
+    $script:protocolModule=Import-Module $protocolPath -Force -PassThru
+    $script:qualificationModule=Import-Module $qualificationPath -Force -PassThru
+    $script:runtimeDefaultModule=Import-Module $runtimeDefaultPath -Force -PassThru
+    $script:evidenceModule=Import-Module $rolloutEvidencePath -Force -PassThru
     $exports=@($script:protocolModule.ExportedFunctions.Keys)
-    Check (@(Compare-Object @($exports|Sort-Object) @('Get-HarnessProtocolResolution','Get-HarnessWorkspaceProtocolConfig','Set-HarnessWorkspaceProtocolConfig')).Count-eq0) 'Protocol exports only resolution and workspace config operations' 'Protocol exposed rollout internals or omitted config operations'
-    $sourcePaths=@(& $script:protocolModule {param($Root) Get-HarnessRolloutSourcePaths -RepoRoot $Root} $RepoRoot)
-    Check ($sourcePaths-ccontains'runtime-hooks/core/pretooluse.ps1'-and$sourcePaths-ccontains'scripts/migrate-task-v1-to-v2.ps1'-and$sourcePaths-ccontains'scripts/run-validation.ps1'-and$sourcePaths-ccontains'tests/verify-v2-approval.ps1') 'rollout source digest covers runtime, migration, validation, and hard-safety tests' 'rollout source digest omits a safety execution surface'
-    $generator=Get-Content -LiteralPath $generatorPath -Raw -Encoding utf8
-    Check ($generator-match'run-validation\.ps1 -Suite all -CheckTimeoutSeconds 360 -VerboseOutput'-and$generator-match"\[UNAVAILABLE\\\]\\s\+") 'rollout generator exposes and classifies full-suite unavailable evidence' 'rollout generator can collapse unavailable full-suite evidence into pass'
+    Check (@(Compare-Object @($exports|Sort-Object) @('Get-HarnessProtocolResolution','Get-HarnessWorkspaceProtocolConfig','Set-HarnessWorkspaceProtocolConfig')).Count-eq0) 'Protocol public export surface remains bounded' 'Protocol public export surface changed'
+    $resolverParameters=(Get-Command Get-HarnessProtocolResolution -Module $script:protocolModule.Name).Parameters
+    Check (-not$resolverParameters.ContainsKey('ObservedHostContext')-and-not$resolverParameters.ContainsKey('EligibilityReportPath')) 'Runtime resolver excludes Qualification inputs' 'Runtime resolver still accepts Qualification inputs'
 
-    $promotionSource=Get-Content -LiteralPath $script:promotionPath -Raw -Encoding utf8;$rolloutEvidenceSource=Get-Content -LiteralPath (Join-Path $RepoRoot 'scripts\lib\Harness.RolloutEvidence.psm1') -Raw -Encoding utf8;$atomicSource=Get-Content -LiteralPath (Join-Path $RepoRoot 'scripts\lib\Harness.AtomicWrite.psm1') -Raw -Encoding utf8
-    $plainWorkspace=& $script:protocolModule {param($Path) Resolve-HarnessWorkspaceRoot -WorkspaceRoot $Path} $workspace;$slashWorkspace=& $script:protocolModule {param($Path) Resolve-HarnessWorkspaceRoot -WorkspaceRoot $Path} ($workspace+[IO.Path]::DirectorySeparatorChar);$normalizeIndex=$promotionSource.IndexOf('$WorkspaceRoot = [string]$paths.workspace',[StringComparison]::Ordinal);$mutexIndex=$promotionSource.IndexOf('$mutexIdentity = [string]$paths.workspace_identity',[StringComparison]::Ordinal);$sourceSizeIndex=$promotionSource.IndexOf('$sourceInfo.Length -gt 4MB',[StringComparison]::Ordinal);$sourceReadIndex=$promotionSource.IndexOf('$bytes = [IO.File]::ReadAllBytes',[StringComparison]::Ordinal);$readSizeIndex=$promotionSource.IndexOf('$bytes.Length -gt 4MB',[StringComparison]::Ordinal)
-    $publishedIndex=$promotionSource.IndexOf('$published = $true',[StringComparison]::Ordinal);$postResolveIndex=$promotionSource.IndexOf('$publishedPaths = & $evidenceModule',[StringComparison]::Ordinal);$targetReadIndex=$promotionSource.IndexOf('$targetBytes = [IO.File]::ReadAllBytes',[StringComparison]::Ordinal)
-    Check ($plainWorkspace-ceq$slashWorkspace-and$rolloutEvidenceSource-match'workspace_identity\s*=\s*\$workspaceIdentity'-and$normalizeIndex-ge0-and$mutexIndex-gt$normalizeIndex-and$promotionSource-notmatch'\$WorkspaceRoot\.ToUpperInvariant\(\)') 'promotion mutex uses the physical workspace identity after lexical normalization' 'promotion mutex is not bound to the physical workspace identity'
-    Check ($publishedIndex-ge0-and$postResolveIndex-gt$publishedIndex-and$targetReadIndex-gt$postResolveIndex) 'promotion revalidates physical paths after publish before consuming target bytes' 'promotion consumes a published target before post-publish path revalidation'
-    Check ($rolloutEvidenceSource-match'Assert-ReleaseSingleLinkFile -Path \$source'-and$rolloutEvidenceSource-match'Assert-ReleaseSingleLinkFile -Path \$target') 'promotion path resolution retains source and target hardlink guards' 'promotion path resolution lost a hardlink guard'
-    Check ($rolloutEvidenceSource-match'Assert-ReleaseSingleDataStreamFile -Path \$source'-and$rolloutEvidenceSource-match'Assert-ReleaseSingleDataStreamFile -Path \$target'-and$atomicSource-match'function Write-HarnessAtomicBytes'-and$atomicSource-notmatch'\[System\.IO\.File\]::Copy') 'promotion rejects alternate streams and publishes only validated bytes' 'promotion can copy unvalidated alternate streams'
-    Check ($sourceSizeIndex-ge0-and$sourceReadIndex-gt$sourceSizeIndex-and$readSizeIndex-gt$sourceReadIndex) 'promotion rechecks the input size after reading exact bytes' 'promotion can consume bytes that grew beyond the input size limit'
+    $script:placeholderArtifactPath=Join-Path $script:deliveryRoot 'unwired-artifact.json';[IO.File]::WriteAllText($script:placeholderArtifactPath,'{"not":"release-evidence"}',[Text.UTF8Encoding]::new($false))
+    $script:placeholderArtifactDigest='sha256:'+((Get-FileHash -LiteralPath $script:placeholderArtifactPath -Algorithm SHA256).Hash.ToLowerInvariant())
+    $script:sourceState=& $script:evidenceModule {param($Root)Get-HarnessReleaseSourceState -RepoRoot $Root} $RepoRoot
+    $validContext=& $script:qualificationModule {param($Root)New-HarnessObservedHostContextDocument -RepoRoot $Root} $RepoRoot
+    $contextPath=Join-Path $script:deliveryRoot 'observed-host.json';Write-Json $contextPath $validContext
 
-    $missing=Resolve-ProtocolCanonical $workspace
-    Check ($missing.selected_protocol-ceq'v1'-and$missing.reason-ceq'rollout-report-missing'-and$missing.rollout_eligibility.status-ceq'missing'-and$missing.warning-match'deprecated') 'missing report keeps new auto task on v1 with a diagnostic warning' 'missing report did not fail safe to v1'
+    $legacySetPath=Join-Path $script:deliveryRoot 'legacy-self-attested.json';Write-Json $legacySetPath (New-LegacyEvidenceSet final-default)
+    $legacyOutput=Join-Path $script:deliveryRoot 'legacy-output.json';$legacyGeneration=Invoke-Generator @('-GateEvidencePath',$legacySetPath,'-OutputPath',$legacyOutput,'-RequireEligible')
+    Check ($legacyGeneration.ExitCode-ne0-and$legacyGeneration.Output-match'rollout-evidence-provenance-unverified'-and-not(Test-Path $legacyOutput)) 'bare all-pass Evidence Set cannot create a report' 'bare all-pass Evidence Set still created output'
 
-    $pass=New-Report (New-Gates);$passPath=Write-Report $workspace 'pass' $pass;$eligible=Resolve-Protocol $workspace $passPath
-    Check ($eligible.selected_protocol-ceq'v2'-and$eligible.reason-ceq'eligible-rollout-report'-and$eligible.rollout_eligibility.status-ceq'pass'-and$null-eq$eligible.warning) 'current all-pass report flips only a new auto task to v2' 'all-pass current report did not select v2'
-    $configV1=& $script:protocolModule {param($Root,$Work) Set-HarnessWorkspaceProtocolConfig -RepoRoot $Root -WorkspaceRoot $Work -NewTaskProtocol v1} $RepoRoot $workspace;$workspaceV1=Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $workspace -TaskId 'workspace-v1' -EligibilityReportPath $passPath
-    $configV2=& $script:protocolModule {param($Root,$Work) Set-HarnessWorkspaceProtocolConfig -RepoRoot $Root -WorkspaceRoot $Work -NewTaskProtocol v2} $RepoRoot $workspace;$workspaceV2=Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $workspace -TaskId 'workspace-v2' -EligibilityReportPath $passPath
-    $configAuto=& $script:protocolModule {param($Root,$Work) Set-HarnessWorkspaceProtocolConfig -RepoRoot $Root -WorkspaceRoot $Work -NewTaskProtocol auto} $RepoRoot $workspace;$workspaceAuto=Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $workspace -TaskId 'workspace-auto' -EligibilityReportPath $passPath
-    Check ($configV1.new_task_protocol-ceq'v1'-and$workspaceV1.selected_protocol-ceq'v1'-and$workspaceV1.preference_source-ceq'workspace-config'-and$workspaceV1.rollout_eligibility.status-ceq'not-required') 'workspace v1 stop-loss outranks an eligible rollout report' 'eligible rollout overrode workspace v1'
-    Check ($configV2.new_task_protocol-ceq'v2'-and$workspaceV2.selected_protocol-ceq'v2'-and$workspaceV2.preference_source-ceq'workspace-config'-and$workspaceV2.rollout_eligibility.status-ceq'not-required') 'workspace v2 opt-in outranks rollout and fallback for a new task' 'workspace v2 did not outrank rollout resolution'
-    Check ($configAuto.new_task_protocol-ceq'auto'-and$workspaceAuto.selected_protocol-ceq'v2'-and$workspaceAuto.rollout_eligibility.status-ceq'pass') 'workspace auto delegates to the eligible rollout report' 'workspace auto bypassed rollout qualification'
-    Remove-Item -LiteralPath (Join-Path $workspace '.assistant\config\protocol.json') -Force
-    $canonicalPath=Join-Path $workspace '.assistant\runtime\rollout\v2-eligibility.json';[void][IO.Directory]::CreateDirectory((Split-Path -Parent $canonicalPath));[IO.File]::WriteAllText($canonicalPath,($pass|ConvertTo-Json -Depth 30),[Text.UTF8Encoding]::new($false))
-    Check (Test-Path -LiteralPath $canonicalPath -PathType Leaf) 'canonical report fixture exists at the fixed workspace path' 'canonical report fixture was not created'
-    $deliveryRoot=Join-Path $temp 'release-input';[void][IO.Directory]::CreateDirectory($deliveryRoot);$deliveryPath=Join-Path $deliveryRoot 'eligible.json';[IO.File]::WriteAllText($deliveryPath,(($pass|ConvertTo-Json -Depth 30)+"`n`n"),[Text.UTF8Encoding]::new($false));$deliveryBytes=[IO.File]::ReadAllBytes($deliveryPath);Remove-Item -LiteralPath $canonicalPath -Force
-    $evidenceModule=Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.RolloutEvidence.psm1') -Force -PassThru;$normalPaths=& $evidenceModule {param($Root,$Workspace,$Report) Resolve-HarnessRolloutPromotionPaths -RepoRoot $Root -WorkspaceRoot $Workspace -ReportPath $Report} $RepoRoot $workspace $deliveryPath;$slashPaths=& $evidenceModule {param($Root,$Workspace,$Report) Resolve-HarnessRolloutPromotionPaths -RepoRoot $Root -WorkspaceRoot $Workspace -ReportPath $Report} $RepoRoot ($workspace+[IO.Path]::DirectorySeparatorChar) $deliveryPath
-    Check (-not[string]::IsNullOrWhiteSpace([string]$normalPaths.workspace_identity)-and[string]$normalPaths.workspace_identity-ceq[string]$slashPaths.workspace_identity) 'equivalent workspace spellings resolve to one physical promotion identity' 'equivalent workspace spellings split the physical promotion identity'
-    $workspaceBoundaryInput=Join-Path $workspace 'boundary-input.json';[IO.File]::WriteAllText($workspaceBoundaryInput,'{}',[Text.UTF8Encoding]::new($false));Check (Test-PromotionPathRejected $evidenceModule $RepoRoot $workspace $workspaceBoundaryInput) 'promotion rejects a report inside the target workspace' 'promotion accepted a report inside the target workspace'
-    Check (Test-PromotionPathRejected $evidenceModule $RepoRoot $workspace $protocolPath) 'promotion rejects a report inside the distribution repository' 'promotion accepted a report inside the distribution repository'
-    $credentialRoot=Join-Path $temp 'credential-home';[void][IO.Directory]::CreateDirectory($credentialRoot);$credentialInput=Join-Path $credentialRoot 'report.json';[IO.File]::WriteAllText($credentialInput,'{}',[Text.UTF8Encoding]::new($false));Check (Test-PromotionPathRejected $evidenceModule $RepoRoot $workspace $credentialInput @($credentialRoot)) 'promotion rejects a report inside a credential root' 'promotion accepted a report inside a credential root'
-    $aliasTarget=Join-Path $temp 'alias-target';[void][IO.Directory]::CreateDirectory($aliasTarget);$aliasInput=Join-Path $aliasTarget 'report.json';[IO.File]::WriteAllText($aliasInput,'{}',[Text.UTF8Encoding]::new($false));$inputAlias=Join-Path $temp 'input-alias';New-Item -ItemType Junction -Path $inputAlias -Target $aliasTarget|Out-Null;Check (Test-PromotionPathRejected $evidenceModule $RepoRoot $workspace (Join-Path $inputAlias 'report.json')) 'promotion rejects a reparse alias in the report path' 'promotion accepted a reparse alias in the report path'
-    $workspaceAlias=Join-Path $temp 'workspace-alias';New-Item -ItemType Junction -Path $workspaceAlias -Target $workspace|Out-Null;Check (Test-PromotionPathRejected $evidenceModule $RepoRoot $workspaceAlias $deliveryPath) 'promotion rejects a reparse alias for the workspace root' 'promotion accepted a reparse alias for the workspace root'
-    $promotion=Invoke-Promotion $workspace $deliveryPath
-    $promotionPreservedBytes=$promotion.ExitCode-eq0-and(Test-Path -LiteralPath $canonicalPath -PathType Leaf)
-    if($promotionPreservedBytes){$promotionPreservedBytes=Test-ExactBytes $deliveryBytes ([IO.File]::ReadAllBytes($canonicalPath))}
-    Check $promotionPreservedBytes 'the offline promotion entry publishes exact report bytes to the fixed canonical path' ("promotion failed or re-encoded bytes: "+$promotion.Output)
-    $canonicalEligible=Resolve-ProtocolCanonical $workspace
-    Check ($canonicalEligible.selected_protocol-ceq'v2'-and$canonicalEligible.rollout_eligibility.status-ceq'pass') 'auto discovers the current canonical workspace report without an environment variable' ("auto did not discover the canonical rollout report: " + ($canonicalEligible|ConvertTo-Json -Depth 10 -Compress))
-    $replacementPath=Join-Path $deliveryRoot 'eligible-reformatted.json';[IO.File]::WriteAllText($replacementPath,(($pass|ConvertTo-Json -Depth 30)+"`n `n"),[Text.UTF8Encoding]::new($false));$replacementBytes=[IO.File]::ReadAllBytes($replacementPath);$replacement=Invoke-Promotion $workspace $replacementPath
-    $replacementPreserved=$replacement.ExitCode-eq0;if($replacementPreserved){$replacementPreserved=Test-ExactBytes $replacementBytes ([IO.File]::ReadAllBytes($canonicalPath))};Check $replacementPreserved 'promotion atomically replaces an existing canonical report without re-encoding' ("promotion replacement failed: "+$replacement.Output)
-    $atomicWorkspace=Join-Path $temp 'atomic-workspace';[void][IO.Directory]::CreateDirectory($atomicWorkspace);$atomicTarget=Join-Path $atomicWorkspace 'state\target.json';[void][IO.Directory]::CreateDirectory((Split-Path -Parent $atomicTarget));[IO.File]::WriteAllText($atomicTarget,'A',[Text.UTF8Encoding]::new($false));$digestA='sha256:'+(Get-FileHash -LiteralPath $atomicTarget -Algorithm SHA256).Hash.ToLowerInvariant();[IO.File]::WriteAllText($atomicTarget,'B',[Text.UTF8Encoding]::new($false));$digestB='sha256:'+(Get-FileHash -LiteralPath $atomicTarget -Algorithm SHA256).Hash.ToLowerInvariant();$sourceDigest='sha256:'+(Get-FileHash -LiteralPath $replacementPath -Algorithm SHA256).Hash.ToLowerInvariant();$casRejected=$false
-    try{& $script:atomicModule {param($Root,$SourceBytes,$SourceDigest,$TargetDigest) Write-HarnessAtomicBytes -WorkspaceRoot $Root -SourceBytes $SourceBytes -Path 'state/target.json' -ExpectedSourceDigest $SourceDigest -ExpectedCurrentDigest $TargetDigest} $atomicWorkspace $replacementBytes $sourceDigest $digestA|Out-Null}catch{$casRejected=$true};Check ($casRejected-and([IO.File]::ReadAllText($atomicTarget)-ceq'B')) 'atomic publish rejects stale target CAS and restores exact competing bytes' 'stale target CAS overwrote or lost competing bytes'
-    $sourceRejected=$false;try{& $script:atomicModule {param($Root,$SourceBytes,$WrongDigest) Write-HarnessAtomicBytes -WorkspaceRoot $Root -SourceBytes $SourceBytes -Path 'new/deep/target.json' -ExpectedSourceDigest $WrongDigest -ExpectedCurrentDigest missing} $atomicWorkspace $replacementBytes $digestB|Out-Null}catch{$sourceRejected=$true};Check ($sourceRejected-and-not(Test-Path -LiteralPath (Join-Path $atomicWorkspace 'new'))) 'failed source CAS leaves no target parents or publication debris' 'failed source CAS changed workspace structure'
-    $deleteRejected=$false;try{& $script:atomicModule {param($Root,$WrongDigest) Remove-HarnessFileIfDigestAtomic -WorkspaceRoot $Root -Path 'state/target.json' -ExpectedDigest $WrongDigest} $atomicWorkspace $digestA|Out-Null}catch{$deleteRejected=$true};Check ($deleteRejected-and([IO.File]::ReadAllText($atomicTarget)-ceq'B')) 'atomic rollback delete restores a target whose digest changed' 'stale rollback delete removed or changed the competing target'
-    $deleteSucceeded=& $script:atomicModule {param($Root,$Digest) Remove-HarnessFileIfDigestAtomic -WorkspaceRoot $Root -Path 'state/target.json' -ExpectedDigest $Digest} $atomicWorkspace $digestB;$debris=@(Get-ChildItem -LiteralPath $atomicWorkspace -Force -Recurse|Where-Object{$_.Name-like'.harness-*'});Check ($deleteSucceeded-and-not(Test-Path -LiteralPath $atomicTarget)-and$debris.Count-eq0) 'atomic rollback delete removes only exact published bytes without debris' 'exact rollback delete failed or left publication debris'
-    $oversizedTarget=[byte[]]::new(4MB+1);[IO.File]::WriteAllBytes($canonicalPath,$oversizedTarget);$oversizedTargetResult=Invoke-Promotion $workspace $replacementPath
-    Check ($oversizedTargetResult.ExitCode-eq2-and$oversizedTargetResult.Output-match'rollout-promotion-target-too-large'-and(Get-Item -LiteralPath $canonicalPath).Length-eq$oversizedTarget.Length) 'promotion rejects an oversized canonical preimage without reading or changing it' 'oversized canonical preimage was consumed or changed'
-    [IO.File]::WriteAllBytes($canonicalPath,$replacementBytes)
-    $canonicalBeforeRejection=[IO.File]::ReadAllBytes($canonicalPath);$ineligiblePromotion=New-Report (New-Gates 'fail');$ineligiblePromotionPath=Join-Path $deliveryRoot 'ineligible.json';[IO.File]::WriteAllText($ineligiblePromotionPath,($ineligiblePromotion|ConvertTo-Json -Depth 30),[Text.UTF8Encoding]::new($false));$ineligibleResult=Invoke-Promotion $workspace $ineligiblePromotionPath
-    $ineligiblePreserved=$ineligibleResult.ExitCode-eq2;if($ineligiblePreserved){$ineligiblePreserved=Test-ExactBytes $canonicalBeforeRejection ([IO.File]::ReadAllBytes($canonicalPath))};Check $ineligiblePreserved 'promotion rejects an ineligible report without changing canonical bytes' 'ineligible promotion changed canonical bytes or returned the wrong exit code'
-    $tamperedPromotion=New-Report (New-Gates);$tamperedPromotion.report_digest='sha256:'+('f'*64);$tamperedPromotionPath=Join-Path $deliveryRoot 'tampered.json';[IO.File]::WriteAllText($tamperedPromotionPath,($tamperedPromotion|ConvertTo-Json -Depth 30),[Text.UTF8Encoding]::new($false));$tamperedPromotionResult=Invoke-Promotion $workspace $tamperedPromotionPath
-    $tamperedPreserved=$tamperedPromotionResult.ExitCode-eq2;if($tamperedPreserved){$tamperedPreserved=Test-ExactBytes $canonicalBeforeRejection ([IO.File]::ReadAllBytes($canonicalPath))};Check $tamperedPreserved 'promotion rejects a tampered report without changing canonical bytes' 'tampered promotion changed canonical bytes or returned the wrong exit code'
-    $rollbackFixtureRoot=Join-Path $RepoRoot '.assistant\runtime\test-fixtures';$rollbackRepo=Join-Path $rollbackFixtureRoot ('post-publish-rollback-repo-'+[guid]::NewGuid().ToString('N'));$activeGitDir=$env:GIT_DIR;$activeGitWorkTree=$env:GIT_WORK_TREE
-    try{
-        Remove-Item Env:GIT_DIR,Env:GIT_WORK_TREE -ErrorAction SilentlyContinue;$null=@(&git clone --quiet --no-hardlinks -- $shadowRepo $rollbackRepo 2>&1);if($LASTEXITCODE-ne0){throw 'post-publish rollback clone failed'}
-        $rollbackCanonical=Join-Path $rollbackRepo '.assistant\runtime\rollout\v2-eligibility.json';[void][IO.Directory]::CreateDirectory((Split-Path -Parent $rollbackCanonical));$rollbackPreimage=[Text.UTF8Encoding]::new($false).GetBytes('{"sentinel":"preserve"}');[IO.File]::WriteAllBytes($rollbackCanonical,$rollbackPreimage)
-        $null=@(&git -C $rollbackRepo add -f -- '.assistant/runtime/rollout/v2-eligibility.json' 2>&1);$null=@(&git -C $rollbackRepo -c user.name='Rollout Test' -c user.email='rollout@test.invalid' commit --quiet -m canonical-preimage 2>&1);if($LASTEXITCODE-ne0){throw 'post-publish rollback fixture commit failed'}
-        $rollbackDocument=New-Report (New-Gates) $rollbackRepo;$rollbackInput=Join-Path $deliveryRoot 'post-publish-rollback.json';[IO.File]::WriteAllText($rollbackInput,($rollbackDocument|ConvertTo-Json -Depth 30),[Text.UTF8Encoding]::new($false));$rollbackResult=Invoke-Promotion $rollbackRepo $rollbackInput $rollbackRepo
-        $rollbackStatus=@(&git -C $rollbackRepo status --porcelain --untracked-files=all);$rollbackDebris=@(Get-ChildItem -LiteralPath $rollbackRepo -Force -Recurse|Where-Object{$_.Name-like'.harness-*'});$rollbackRestored=$rollbackResult.ExitCode-eq2-and$rollbackResult.Output-match'rollout-promotion-source-changed'-and(Test-ExactBytes $rollbackPreimage ([IO.File]::ReadAllBytes($rollbackCanonical)))-and$rollbackStatus.Count-eq0-and$rollbackDebris.Count-eq0
-        Check $rollbackRestored 'post-publish source-state failure restores exact canonical bytes and clean repository state' ("post-publish rollback failed: "+$rollbackResult.Output)
-        $null=@(&git -C $rollbackRepo rm --quiet -- '.assistant/runtime/rollout/v2-eligibility.json' 2>&1);$ignorePath=Join-Path $rollbackRepo '.gitignore';[IO.File]::AppendAllText($ignorePath,"`n!.assistant/`n!.assistant/runtime/`n!.assistant/runtime/rollout/`n!.assistant/runtime/rollout/v2-eligibility.json`n",[Text.UTF8Encoding]::new($false));$null=@(&git -C $rollbackRepo add -- '.gitignore' 2>&1);$null=@(&git -C $rollbackRepo -c user.name='Rollout Test' -c user.email='rollout@test.invalid' commit --quiet -m canonical-absent 2>&1);if($LASTEXITCODE-ne0){throw 'missing-preimage rollback fixture commit failed'};$rollbackAssistant=Join-Path $rollbackRepo '.assistant';if(Test-Path -LiteralPath $rollbackAssistant){Remove-Item -LiteralPath $rollbackAssistant -Recurse -Force}
-        $missingRollbackDocument=New-Report (New-Gates) $rollbackRepo;$missingRollbackInput=Join-Path $deliveryRoot 'post-publish-missing-rollback.json';[IO.File]::WriteAllText($missingRollbackInput,($missingRollbackDocument|ConvertTo-Json -Depth 30),[Text.UTF8Encoding]::new($false));$missingRollbackResult=Invoke-Promotion $rollbackRepo $missingRollbackInput $rollbackRepo
-        $missingRollbackStatus=@(&git -C $rollbackRepo status --porcelain --untracked-files=all);$missingRollbackDebris=@(Get-ChildItem -LiteralPath $rollbackRepo -Force -Recurse|Where-Object{$_.Name-like'.harness-*'});$missingRollbackClean=$missingRollbackResult.ExitCode-eq2-and$missingRollbackResult.Output-match'rollout-promotion-source-changed'-and-not(Test-Path -LiteralPath $rollbackCanonical)-and-not(Test-Path -LiteralPath $rollbackAssistant)-and$missingRollbackStatus.Count-eq0-and$missingRollbackDebris.Count-eq0
-        Check $missingRollbackClean 'post-publish failure removes a newly created canonical report and its empty parents' ("missing-preimage rollback failed: "+$missingRollbackResult.Output)
-    }finally{
-        if($null-eq$activeGitDir){Remove-Item Env:GIT_DIR -ErrorAction SilentlyContinue}else{$env:GIT_DIR=$activeGitDir};if($null-eq$activeGitWorkTree){Remove-Item Env:GIT_WORK_TREE -ErrorAction SilentlyContinue}else{$env:GIT_WORK_TREE=$activeGitWorkTree}
-        Remove-DirectoryWithRetry -Path $rollbackRepo
-        if((Test-Path -LiteralPath $rollbackFixtureRoot -PathType Container)-and@(Get-ChildItem -LiteralPath $rollbackFixtureRoot -Force).Count-eq0){[IO.Directory]::Delete($rollbackFixtureRoot,$false)}
-    }
-    $oversizedReportPath='rollout/oversized.json';[IO.File]::WriteAllBytes((Join-Path $workspace $oversizedReportPath),$oversizedTarget)
-    $missingExplicit=Resolve-Protocol $workspace 'rollout/missing-explicit.json'
-    Check ($missingExplicit.selected_protocol-ceq'v1'-and$missingExplicit.reason-ceq'rollout-report-missing') 'an explicitly selected missing report fails closed instead of falling through to canonical' 'missing explicit report fell through to canonical'
-    $failedCanonical=New-Report (New-Gates 'fail');[IO.File]::WriteAllText($canonicalPath,($failedCanonical|ConvertTo-Json -Depth 30),[Text.UTF8Encoding]::new($false));$explicitPreferred=Resolve-Protocol $workspace $passPath
-    Check ($explicitPreferred.selected_protocol-ceq'v2') 'an explicit valid report has priority over canonical' 'canonical report overrode an explicit report'
-    [IO.File]::WriteAllBytes($canonicalPath,$replacementBytes);$invalidEnvironmentPath='rollout/invalid-environment.json';[IO.File]::WriteAllText((Join-Path $workspace $invalidEnvironmentPath),'{',[Text.UTF8Encoding]::new($false))
-    $priorReport=[Environment]::GetEnvironmentVariable('HARNESS_V2_ELIGIBILITY_REPORT',[EnvironmentVariableTarget]::Process)
-    try{
-        $env:HARNESS_V2_ELIGIBILITY_REPORT=$passPath;$environmentPreferred=Resolve-ProtocolDefault $workspace;Check ($environmentPreferred.selected_protocol-ceq'v2') 'the report environment variable has priority over canonical' 'canonical report overrode the environment report'
-        $explicitOversizedWithEnvironment=Resolve-Protocol $workspace $oversizedReportPath;Check ($explicitOversizedWithEnvironment.selected_protocol-ceq'v1'-and$explicitOversizedWithEnvironment.reason-ceq'rollout-report-too-large'-and$explicitOversizedWithEnvironment.rollout_eligibility.status-ceq'invalid') 'an oversized explicit report blocks valid environment and canonical fallback' 'oversized explicit report fell through to environment or canonical'
-        $explicitEmptyWithEnvironment=Resolve-Protocol $workspace '';Check ($explicitEmptyWithEnvironment.selected_protocol-ceq'v1'-and$explicitEmptyWithEnvironment.reason-ceq'rollout-report-missing'-and$explicitEmptyWithEnvironment.rollout_eligibility.status-ceq'missing') 'an explicitly selected empty report blocks valid environment and canonical fallback' 'empty explicit report fell through to environment or canonical'
-        $explicitMissingWithEnvironment=Resolve-Protocol $workspace 'rollout/missing-explicit.json';Check ($explicitMissingWithEnvironment.selected_protocol-ceq'v1') 'a missing explicit report outranks a valid environment report and fails closed' 'a valid environment report masked a missing explicit selection'
-        $explicitInvalidWithEnvironment=Resolve-Protocol $workspace $invalidEnvironmentPath;Check ($explicitInvalidWithEnvironment.selected_protocol-ceq'v1'-and$explicitInvalidWithEnvironment.reason-ceq'rollout-report-invalid-json') 'an invalid explicit report blocks valid environment and canonical fallback' 'invalid explicit report fell through to environment or canonical'
-        New-Item -Path Env:HARNESS_V2_ELIGIBILITY_REPORT -Value '' -Force|Out-Null;$environmentEmpty=Resolve-ProtocolDefault $workspace;Check ($environmentEmpty.selected_protocol-ceq'v1'-and$environmentEmpty.reason-ceq'rollout-report-missing') 'a defined empty report environment variable blocks canonical fallback' 'empty report environment variable fell through to canonical'
-        $env:HARNESS_V2_ELIGIBILITY_REPORT=$invalidEnvironmentPath;$environmentInvalid=Resolve-ProtocolDefault $workspace;Check ($environmentInvalid.selected_protocol-ceq'v1'-and$environmentInvalid.reason-ceq'rollout-report-invalid-json'-and$environmentInvalid.rollout_eligibility.status-ceq'invalid') 'an invalid environment report fails closed instead of using canonical' 'invalid environment report fell through to canonical'
-        $env:HARNESS_V2_ELIGIBILITY_REPORT=$oversizedReportPath;$environmentOversized=Resolve-ProtocolDefault $workspace;Check ($environmentOversized.selected_protocol-ceq'v1'-and$environmentOversized.reason-ceq'rollout-report-too-large'-and$environmentOversized.rollout_eligibility.status-ceq'invalid') 'an oversized environment report fails closed instead of using canonical' 'oversized environment report fell through to canonical'
-        $env:HARNESS_V2_ELIGIBILITY_REPORT='rollout/missing-environment.json';$environmentMissing=Resolve-ProtocolDefault $workspace;Check ($environmentMissing.selected_protocol-ceq'v1'-and$environmentMissing.reason-ceq'rollout-report-missing') 'a missing environment report fails closed instead of falling through to canonical' 'missing environment report fell through to canonical'
-    }finally{Set-ReportEnvironment $priorReport}
-    [IO.File]::WriteAllBytes($canonicalPath,$oversizedTarget);$canonicalOversized=Resolve-ProtocolCanonical $workspace;Check ($canonicalOversized.selected_protocol-ceq'v1'-and$canonicalOversized.reason-ceq'rollout-report-too-large'-and$canonicalOversized.rollout_eligibility.status-ceq'invalid') 'an oversized canonical report fails closed when no higher-priority source is selected' 'oversized canonical report did not fail closed'
-    [IO.File]::WriteAllText($canonicalPath,($pass|ConvertTo-Json -Depth 30),[Text.UTF8Encoding]::new($false))
-    $null=@(&git -C $RepoRoot rm --cached --quiet -- scripts/lib/Harness.RolloutEvidence.psm1 2>&1);if($LASTEXITCODE-ne0){throw 'shadow untracked-source setup failed'}
-    $dirtyDistribution=Resolve-Protocol $workspace $passPath
-    Check ($dirtyDistribution.selected_protocol-ceq'v1'-and$dirtyDistribution.reason-ceq'rollout-source-dirty') 'untracked distribution source invalidates an otherwise current report' 'untracked distribution source kept auto on v2'
-    $dirtyCanonicalBytes=[IO.File]::ReadAllBytes($canonicalPath);$dirtyPromotion=Invoke-Promotion $workspace $deliveryPath
-    $dirtyPreserved=$dirtyPromotion.ExitCode-eq2;if($dirtyPreserved){$dirtyPreserved=Test-ExactBytes $dirtyCanonicalBytes ([IO.File]::ReadAllBytes($canonicalPath))};Check $dirtyPreserved 'promotion rejects a dirty distribution without changing canonical bytes' 'dirty distribution promotion changed canonical bytes or returned the wrong exit code'
-    $null=@(&git -C $RepoRoot add -- scripts/lib/Harness.RolloutEvidence.psm1 2>&1);if($LASTEXITCODE-ne0){throw 'shadow untracked-source restore failed'}
+    $describedSet=New-EvidenceSet final-default;$describedSetPath=Join-Path $script:deliveryRoot 'described-set.json';Write-Json $describedSetPath $describedSet
+    $diagnosticPayloadPath=Join-Path $script:deliveryRoot 'diagnostic-review-payload.json';$diagnosticGeneration=Invoke-Generator @('-GateEvidencePath',$describedSetPath,'-CreateReviewPayload','-OutputPath',$diagnosticPayloadPath)
+    $diagnosticPayload=Get-Content -LiteralPath $diagnosticPayloadPath -Raw|ConvertFrom-Json -AsHashtable -Depth 100 -DateKind String
+    Check ($diagnosticGeneration.ExitCode-eq3-and$diagnosticPayload.schema_version-ceq'rollout-review-payload/v1'-and$diagnosticPayload.provenance_status-ceq'unverified'-and@($diagnosticPayload.gates.Values|Where-Object{$_.status-cne'unavailable'}).Count-eq0) 'unwired Artifacts produce only a non-authorizing Review Payload' ("diagnostic payload boundary failed: "+$diagnosticGeneration.Output)
+    $diagnosticReceipt=& $script:qualificationModule {param($Root,$Payload)New-HarnessRolloutReviewReceiptDocument -RepoRoot $Root -Payload $Payload -ReviewerActorId 'reviewer' -ReviewerContextId 'context' -ReviewerModel 'gpt-5.6-sol'} $RepoRoot $diagnosticPayload
+    $diagnosticReceiptPath=Join-Path $script:deliveryRoot 'diagnostic-review-receipt.json';Write-Json $diagnosticReceiptPath $diagnosticReceipt
+    $diagnosticFinalPath=Join-Path $script:deliveryRoot 'diagnostic-final.json';$diagnosticFinalize=Invoke-Generator @('-ReviewPayloadPath',$diagnosticPayloadPath,'-ReviewReceiptPath',$diagnosticReceiptPath,'-OutputPath',$diagnosticFinalPath,'-RequireEligible')
+    Check ($diagnosticFinalize.ExitCode-ne0-and$diagnosticFinalize.Output-match'rollout-evidence-provenance-unverified'-and-not(Test-Path $diagnosticFinalPath)) 'Review cannot upgrade unverified provenance into an authorizing report' 'unverified Review Payload became authorizing'
+    $missingReceipt=Invoke-Generator @('-ReviewPayloadPath',$diagnosticPayloadPath,'-OutputPath',(Join-Path $script:deliveryRoot 'missing-receipt.json'))
+    Check ($missingReceipt.ExitCode-ne0-and$missingReceipt.Output-match'rollout-review-payload-and-receipt-required') 'Finalize requires a real Review Receipt file' 'Finalize accepted missing Review Receipt'
 
-    foreach($status in @('fail','blocked','unavailable','simulated')){
-        $document=New-Report (New-Gates $status);$path=Write-Report $workspace "performance-$status" $document;$result=Resolve-Protocol $workspace $path
-        Check ($result.selected_protocol-ceq'v1'-and$result.reason-ceq"rollout-gate-direct_performance-$status") "$status performance gate keeps auto on v1" "$status performance gate selected v2"
-    }
-    foreach($case in @(
-        [pscustomobject]@{name='behavior';status='unavailable'},
-        [pscustomobject]@{name='v1_compatibility';status='blocked'},
-        [pscustomobject]@{name='core_install_rollback';status='fail'},
-        [pscustomobject]@{name='full_install_rollback';status='simulated'}
-    )){
-        $gates=New-Gates;$gates[$case.name].status=$case.status;$document=New-Report $gates;$path=Write-Report $workspace ("gate-{0}-{1}" -f $case.name,$case.status) $document;$result=Resolve-Protocol $workspace $path
-        Check ($result.selected_protocol-ceq'v1'-and$result.reason-ceq("rollout-gate-{0}-{1}" -f $case.name,$case.status)) "$($case.name) $($case.status) keeps auto on v1" "$($case.name) $($case.status) selected v2"
-    }
+    $testFinal=New-ReportBundle final-default test-only 'test-final'
+    $verifiedFinal=New-ReportBundle final-default verified 'verified-final'
+    $testCandidate=New-ReportBundle canary-candidate test-only 'test-candidate'
+    $verifiedCandidate=New-ReportBundle canary-candidate verified 'verified-candidate'
+    $schemaDigest='sha256:'+((Get-FileHash -LiteralPath (Join-Path $RepoRoot 'schemas\rollout-eligibility-v2.schema.json') -Algorithm SHA256).Hash.ToLowerInvariant())
+    $g12=$verifiedFinal.Report.gates['DP-G12-ROLLOUT-ELIGIBILITY-REPORT']
+    Check ($g12.status-ceq'pass'-and$g12.evidence_contract-ceq'rollout-report-review-receipt/v1'-and$g12.evidence_digest-ceq$verifiedFinal.Receipt.receipt_digest-and$g12.evidence_digest-cne$schemaDigest) 'G12 binds the actual phase-specific Review Receipt digest' 'G12 still binds the schema or wrong receipt'
 
-    $staleRevision=($pass|ConvertTo-Json -Depth 30)|ConvertFrom-Json -AsHashtable -Depth 30;$staleRevision.source_revision='0'*40;Set-ReportDigest $staleRevision;$path=Write-Report $workspace 'stale-revision' $staleRevision;$result=Resolve-Protocol $workspace $path
-    Check ($result.selected_protocol-ceq'v1'-and$result.reason-ceq'rollout-report-stale-revision') 'stale revision fails closed' 'stale revision selected v2'
-    $staleSource=($pass|ConvertTo-Json -Depth 30)|ConvertFrom-Json -AsHashtable -Depth 30;$staleSource.source_digest='sha256:'+('3'*64);Set-ReportDigest $staleSource;$path=Write-Report $workspace 'stale-source' $staleSource;$result=Resolve-Protocol $workspace $path
-    Check ($result.selected_protocol-ceq'v1'-and$result.reason-ceq'rollout-report-stale-source') 'stale source digest fails closed' 'stale source digest selected v2'
-    $staleGenerator=($pass|ConvertTo-Json -Depth 30)|ConvertFrom-Json -AsHashtable -Depth 30;$staleGenerator.generator_digest='sha256:'+('4'*64);Set-ReportDigest $staleGenerator;$path=Write-Report $workspace 'stale-generator' $staleGenerator;$result=Resolve-Protocol $workspace $path
-    Check ($result.selected_protocol-ceq'v1'-and$result.reason-ceq'rollout-report-stale-generator') 'stale generator digest fails closed' 'stale generator selected v2'
-    $tampered=($pass|ConvertTo-Json -Depth 30)|ConvertFrom-Json -AsHashtable -Depth 30;$tampered.gates.behavior.evidence_digest='sha256:'+('5'*64);$path=Write-Report $workspace 'tampered' $tampered;$result=Resolve-Protocol $workspace $path
-    Check ($result.selected_protocol-ceq'v1'-and$result.reason-ceq'rollout-report-digest-mismatch') 'tampered report digest fails closed' 'tampered report selected v2'
-    $proxy=($pass|ConvertTo-Json -Depth 30)|ConvertFrom-Json -AsHashtable -Depth 30;$proxy.gates.behavior.command='tests/run-scenario-evals.ps1 -Suite core';Set-ReportDigest $proxy;$path=Write-Report $workspace 'proxy-command' $proxy;$result=Resolve-Protocol $workspace $path
-    Check ($result.selected_protocol-ceq'v1'-and$result.reason-ceq'rollout-report-invalid-gate') 'deterministic proxy command fails closed' 'deterministic proxy command selected v2'
-    $extra=($pass|ConvertTo-Json -Depth 30)|ConvertFrom-Json -AsHashtable -Depth 30;$extra['authorization_bypass']=$true;$path=Write-Report $workspace 'extra-key' $extra;$result=Resolve-Protocol $workspace $path
-    Check ($result.selected_protocol-ceq'v1'-and$result.reason-ceq'rollout-report-invalid-document') 'unknown report fields fail closed' 'unknown report field selected v2'
-    $outside=Resolve-Protocol $workspace '..\outside-report.json'
-    Check ($outside.selected_protocol-ceq'v1'-and$outside.rollout_eligibility.status-ceq'invalid') 'report path escape fails closed' 'outside report path was accepted'
+    $reviewReasonMissing=Get-Rejection {& $script:qualificationModule {param($Root,$Payload,$Path)New-HarnessRolloutV2ReportDocument -RepoRoot $Root -ReviewPayload $Payload -ReviewReceipt $null -ReviewReceiptArtifactPath $Path} $RepoRoot $verifiedFinal.Payload $verifiedFinal.ReceiptPath}
+    Check (-not[string]::IsNullOrWhiteSpace($reviewReasonMissing)) 'report builder rejects a missing Review Receipt' 'report builder accepted a missing Review Receipt'
+    $tamperedReceipt=Copy-Document $verifiedFinal.Receipt;$tamperedReceipt.reviewed_payload_digest='sha256:'+('9'*64);Set-ReceiptDigest $tamperedReceipt
+    $payloadMismatch=Get-Rejection {& $script:qualificationModule {param($Root,$Receipt,$Payload)Assert-HarnessRolloutReviewReceipt -RepoRoot $Root -Document $Receipt -ExpectedPayloadDigest $Payload.reviewed_payload_digest -ExpectedSourceRevision $Payload.source_revision -ExpectedPhase $Payload.phase} $RepoRoot $tamperedReceipt $verifiedFinal.Payload}
+    $phaseReceipt=Copy-Document $verifiedFinal.Receipt;$phaseReceipt.phase='canary-candidate';Set-ReceiptDigest $phaseReceipt
+    $phaseMismatch=Get-Rejection {& $script:qualificationModule {param($Root,$Receipt,$Payload)Assert-HarnessRolloutReviewReceipt -RepoRoot $Root -Document $Receipt -ExpectedPayloadDigest $Payload.reviewed_payload_digest -ExpectedSourceRevision $Payload.source_revision -ExpectedPhase $Payload.phase} $RepoRoot $phaseReceipt $verifiedFinal.Payload}
+    $sourceReceipt=Copy-Document $verifiedFinal.Receipt;$sourceReceipt.source_revision='1'*40;Set-ReceiptDigest $sourceReceipt
+    $sourceMismatch=Get-Rejection {& $script:qualificationModule {param($Root,$Receipt,$Payload)Assert-HarnessRolloutReviewReceipt -RepoRoot $Root -Document $Receipt -ExpectedPayloadDigest $Payload.reviewed_payload_digest -ExpectedSourceRevision $Payload.source_revision -ExpectedPhase $Payload.phase} $RepoRoot $sourceReceipt $verifiedFinal.Payload}
+    $blankReviewer=Copy-Document $verifiedFinal.Receipt;$blankReviewer.reviewer_actor_id=' ';Set-ReceiptDigest $blankReviewer
+    $blankReviewerReason=Get-Rejection {& $script:qualificationModule {param($Root,$Receipt,$Payload)Assert-HarnessRolloutReviewReceipt -RepoRoot $Root -Document $Receipt -ExpectedPayloadDigest $Payload.reviewed_payload_digest -ExpectedSourceRevision $Payload.source_revision -ExpectedPhase $Payload.phase} $RepoRoot $blankReviewer $verifiedFinal.Payload}
+    $findingReceipt=Copy-Document $verifiedFinal.Receipt;$findingReceipt.findings.p2=1;Set-ReceiptDigest $findingReceipt
+    $findingReason=Get-Rejection {& $script:qualificationModule {param($Root,$Receipt,$Payload)Assert-HarnessRolloutReviewReceipt -RepoRoot $Root -Document $Receipt -ExpectedPayloadDigest $Payload.reviewed_payload_digest -ExpectedSourceRevision $Payload.source_revision -ExpectedPhase $Payload.phase} $RepoRoot $findingReceipt $verifiedFinal.Payload}
+    $reusedCandidateReason=Get-Rejection {& $script:qualificationModule {param($Root,$Payload,$Receipt,$Path)New-HarnessRolloutV2ReportDocument -RepoRoot $Root -ReviewPayload $Payload -ReviewReceipt $Receipt -ReviewReceiptArtifactPath $Path} $RepoRoot $verifiedFinal.Payload $verifiedCandidate.Receipt $verifiedCandidate.ReceiptPath}
+    Check ($payloadMismatch-match'payload-mismatch'-and$phaseMismatch-match'phase-mismatch'-and$sourceMismatch-match'source-mismatch'-and$blankReviewerReason-match'invalid-document'-and$findingReason-match'findings'-and-not[string]::IsNullOrWhiteSpace($reusedCandidateReason)) 'Review Receipt payload, phase, source, reviewer, findings, and cross-phase reuse all fail closed' 'a Review Receipt drift case was accepted'
 
-    $v1Id='existing-v1';$v1Path=Join-Path $workspace "docs\tasks\$v1Id\plan.md";[void][IO.Directory]::CreateDirectory((Split-Path -Parent $v1Path));[IO.File]::WriteAllText($v1Path,"---`ntask_id: existing-v1`nstage: TEST`ntool: codex`nupdated: 2026-07-14`n---`n",[Text.UTF8Encoding]::new($false))
-    $existingV1=Resolve-Protocol $workspace $passPath $v1Id
-    Check ($existingV1.selected_protocol-ceq'v1'-and$existingV1.detected_protocol-ceq'v1'-and$existingV1.rollout_eligibility.status-ceq'not-required') 'existing v1 artifact overrides an eligible rollout report' 'eligible report converted existing v1 task'
-    $v2Id='existing-v2';$v2Path=Join-Path $workspace ".assistant\runtime\tasks\$v2Id\task.json";[void][IO.Directory]::CreateDirectory((Split-Path -Parent $v2Path));[IO.File]::WriteAllText($v2Path,((New-V2TaskDocument $v2Id)|ConvertTo-Json -Depth 20 -Compress),[Text.UTF8Encoding]::new($false));$failedPath=Write-Report $workspace 'failed' (New-Report (New-Gates 'fail'))
-    $existingV2=Resolve-Protocol $workspace $failedPath $v2Id
-    Check ($existingV2.selected_protocol-ceq'v2'-and$existingV2.detected_protocol-ceq'v2'-and$existingV2.rollout_eligibility.status-ceq'not-required') 'existing v2 artifact overrides an ineligible report' 'ineligible report downgraded existing v2 task'
-    $explicitV1=Resolve-Protocol $workspace $passPath 'explicit-new' 'v1';$explicitV2=Resolve-Protocol $workspace '' 'explicit-new' 'v2'
-    Check ($explicitV1.selected_protocol-ceq'v1'-and$explicitV1.reason-ceq'explicit-v1-new-task'-and$explicitV2.selected_protocol-ceq'v2'-and$explicitV2.reason-ceq'explicit-v2-new-task') 'explicit v1 rollback and v2 opt-in remain deterministic' 'explicit protocol behavior drifted'
+    $resolverWorkspace=Join-Path $temp 'resolver-workspace';$finalCanonical=Join-Path $resolverWorkspace '.assistant\runtime\rollout\v2-eligibility.json';Write-Json $finalCanonical $testFinal.Report
+    $missingContext=Resolve-Qualification $resolverWorkspace
+    $driftContext=& $script:qualificationModule {param($Root)New-HarnessObservedHostContextDocument -RepoRoot $Root -CliVersion '0.144.5' -ServiceVersion '0.144.5' -SkipSemanticValidation} $RepoRoot
+    $wrongContractContext=& $script:qualificationModule {param($Root)New-HarnessObservedHostContextDocument -RepoRoot $Root -HookContract 'wrong-hook/v1' -SkipSemanticValidation} $RepoRoot
+    $futureContext=& $script:qualificationModule {param($Root,$Observed)New-HarnessObservedHostContextDocument -RepoRoot $Root -ObservedAtUtc $Observed -SkipSemanticValidation} $RepoRoot ([datetimeoffset]::UtcNow.AddMinutes(1))
+    $badDigestContext=Copy-Document $validContext;$badDigestContext.context_digest='sha256:'+('f'*64)
+    $driftResolution=Resolve-Qualification $resolverWorkspace $driftContext
+    $wrongContractResolution=Resolve-Qualification $resolverWorkspace $wrongContractContext
+    $futureContextResolution=Resolve-Qualification $resolverWorkspace $futureContext
+    $badDigestResolution=Resolve-Qualification $resolverWorkspace $badDigestContext
+    $validContextResolution=Resolve-Qualification $resolverWorkspace $validContext
+    Check ($missingContext.status-ceq'unauthorized'-and$missingContext.reason-ceq'rollout-observed-host-context-missing') 'Qualification rejects missing actual Host Context' 'Report self-attested Host without actual Context'
+    Check ($driftResolution.status-ceq'unauthorized'-and$driftResolution.reason-ceq'rollout-observed-host-context-cli-version-mismatch') 'Qualification rejects actual Host 0.144.5' 'Host version drift passed Qualification'
+    Check ($wrongContractResolution.status-ceq'unauthorized'-and$wrongContractResolution.reason-ceq'rollout-observed-host-context-hook-contract-mismatch') 'Qualification rejects actual Hook contract drift' 'Hook contract drift passed Qualification'
+    Check ($futureContextResolution.status-ceq'unauthorized'-and$futureContextResolution.reason-ceq'rollout-observed-host-context-future') 'Qualification rejects one-minute future Host Context' 'near-future Host Context passed Qualification'
+    Check ($badDigestResolution.status-ceq'unauthorized'-and$badDigestResolution.reason-ceq'rollout-observed-host-context-digest-mismatch') 'Qualification rejects tampered Host Context' 'tampered Host Context passed Qualification'
+    Check ($validContextResolution.status-ceq'unavailable'-and$validContextResolution.reason-ceq'rollout-evidence-provenance-unverified') 'valid Host cannot upgrade test-only Evidence' 'test-only report passed Qualification'
 
-    $oldProtocol=$env:HARNESS_PROTOCOL;$oldReport=[Environment]::GetEnvironmentVariable('HARNESS_V2_ELIGIBILITY_REPORT',[EnvironmentVariableTarget]::Process)
-    $workspaceBefore=@(Get-ChildItem -LiteralPath $workspace -Force -Recurse|ForEach-Object{$relative=$_.FullName.Substring($workspace.Length).TrimStart('\','/');if($_.PSIsContainer){"D|$relative"}else{"F|$relative|$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)"}}|Sort-Object)
-    try{$env:HARNESS_PROTOCOL='auto';Set-ReportEnvironment $null;Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Policy.psm1') -Force;$zero=[ordered]@{user_visible_behavior=0;data_integrity=0;authorization_and_security=0;external_side_effects=0;blast_radius=0;rollback=0;verification_coverage=0};$route=Resolve-HarnessExecutionProfile -RepoRoot $RepoRoot -WorkspaceRoot $workspace -RiskScores $zero}finally{if($null-eq$oldProtocol){Remove-Item Env:HARNESS_PROTOCOL -ErrorAction Ignore}else{$env:HARNESS_PROTOCOL=$oldProtocol};Set-ReportEnvironment $oldReport;Remove-Module Harness.Policy -ErrorAction Ignore}
-    $workspaceAfter=@(Get-ChildItem -LiteralPath $workspace -Force -Recurse|ForEach-Object{$relative=$_.FullName.Substring($workspace.Length).TrimStart('\','/');if($_.PSIsContainer){"D|$relative"}else{"F|$relative|$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)"}}|Sort-Object);Check ($route.selected_protocol-ceq'v2'-and$route.profile-ceq'direct'-and@(Compare-Object $workspaceBefore $workspaceAfter).Count-eq0) 'canonical eligible auto reaches v2 Direct with zero workspace writes' ("Policy route or zero-write contract failed: " + ($route|ConvertTo-Json -Depth 10 -Compress))
+    $emptyPromotionWorkspace=Join-Path $temp 'public-promotion-workspace';[void][IO.Directory]::CreateDirectory($emptyPromotionWorkspace)
+    $testFinalPromotion=Invoke-Promotion @('-WorkspaceRoot',$emptyPromotionWorkspace,'-ReportPath',$testFinal.ReportPath,'-ObservedHostContextPath',$contextPath,'-ReviewReceiptPath',$testFinal.ReceiptPath)
+    Check ($testFinalPromotion.ExitCode-eq2-and$testFinalPromotion.Output-match'rollout-evidence-provenance-unverified'-and-not(Test-Path (Join-Path $emptyPromotionWorkspace '.assistant'))) 'test-only Final cannot be promoted and writes nothing' 'test-only Final was promoted or wrote state'
+    $candidateWithoutSwitch=Invoke-Promotion @('-WorkspaceRoot',$emptyPromotionWorkspace,'-ReportPath',$testCandidate.ReportPath)
+    $candidateWithoutOwner=Invoke-Promotion @('-WorkspaceRoot',$emptyPromotionWorkspace,'-ReportPath',$testCandidate.ReportPath,'-AuthorizeCanary')
+    $candidateWithoutExpiry=Invoke-Promotion @('-WorkspaceRoot',$emptyPromotionWorkspace,'-ReportPath',$testCandidate.ReportPath,'-AuthorizeCanary','-AuthorizedBy','operator')
+    $candidateTestOnly=Invoke-Promotion @('-WorkspaceRoot',$emptyPromotionWorkspace,'-ReportPath',$testCandidate.ReportPath,'-AuthorizeCanary','-AuthorizedBy','operator','-DurationHours','1','-ObservedHostContextPath',$contextPath,'-ReviewReceiptPath',$testCandidate.ReceiptPath)
+    Check ($candidateWithoutSwitch.ExitCode-eq2-and$candidateWithoutSwitch.Output-match'authorization-required'-and$candidateWithoutOwner.Output-match'authorized-by-required'-and$candidateWithoutExpiry.Output-match'expiry-required'-and$candidateTestOnly.Output-match'provenance-unverified'-and-not(Test-Path (Join-Path $emptyPromotionWorkspace '.assistant'))) 'Candidate requires explicit owner/expiry and test-only Candidate remains zero-write' ("Candidate parameter or test-only boundary failed: switch=[$($candidateWithoutSwitch.Output)] owner=[$($candidateWithoutOwner.Output)] expiry=[$($candidateWithoutExpiry.Output)] test=[$($candidateTestOnly.Output)]")
 
-    $doc=Get-Content -LiteralPath $docPath -Raw -Encoding utf8
-    Check ($doc-match'HARNESS_PROTOCOL=v1'-and$doc-match'does not delete v1'-and$doc-match'complete external release cycle') 'compatibility policy documents rollback, retention, and external release-cycle boundary' 'compatibility policy is incomplete'
-}finally{
+    $authorizationWorkspace=Join-Path $temp 'authorization-workspace';[void][IO.Directory]::CreateDirectory($authorizationWorkspace)
+    $now=[datetimeoffset]::UtcNow
+    $authorization=& $script:qualificationModule {param($Root,$Work,$Report,$Context,$Issued)New-HarnessCanaryAuthorizationDocument -RepoRoot $Root -WorkspaceRoot $Work -Report $Report -ObservedHostContext $Context -AuthorizedBy 'operator@example.invalid' -IssuedAtUtc $Issued -ExpiresAtUtc $Issued.AddHours(1)} $RepoRoot $authorizationWorkspace $verifiedCandidate.Report $validContext $now
+    $validAuthorizationReason=Assert-AuthorizationReason $verifiedCandidate.Report $validContext $authorization $authorizationWorkspace $now
+    Check ([string]::IsNullOrWhiteSpace($validAuthorizationReason)-and-not[string]::IsNullOrWhiteSpace([string]$authorization.authorization_id)-and$authorization.authorized_by-ceq'operator@example.invalid'-and$authorization.new_tasks_only-and$authorization.status-ceq'granted') 'Canary Authorization binds owner, identity, Host, granted status, and new-task scope' ("valid Authorization rejected: $validAuthorizationReason")
+    $missingOwner=Copy-Document $authorization;$missingOwner.Remove('authorized_by');$missingOwnerReason=Assert-AuthorizationReason $verifiedCandidate.Report $validContext $missingOwner $authorizationWorkspace $now
+    $missingExpiry=Copy-Document $authorization;$missingExpiry.Remove('expires_at_utc');$missingExpiryReason=Assert-AuthorizationReason $verifiedCandidate.Report $validContext $missingExpiry $authorizationWorkspace $now
+    $badStatus=Copy-Document $authorization;$badStatus.status='revoked';Set-AuthorizationDigest $badStatus;$badStatusReason=Assert-AuthorizationReason $verifiedCandidate.Report $validContext $badStatus $authorizationWorkspace $now
+    $notNew=Copy-Document $authorization;$notNew.new_tasks_only=$false;Set-AuthorizationDigest $notNew;$notNewReason=Assert-AuthorizationReason $verifiedCandidate.Report $validContext $notNew $authorizationWorkspace $now
+    Check ($missingOwnerReason-match'invalid-document'-and$missingExpiryReason-match'invalid-document'-and$badStatusReason-match'invalid-document'-and$notNewReason-match'invalid-document') 'missing owner/expiry, non-granted status, and non-new-task scope are rejected' 'a required Canary Authorization field was optional'
+    $expired=Copy-Document $authorization;$expired.issued_at_utc=$now.AddHours(-2).ToString('o');$expired.expires_at_utc=$now.AddHours(-1).ToString('o');Set-AuthorizationDigest $expired;$expiredReason=Assert-AuthorizationReason $verifiedCandidate.Report $validContext $expired $authorizationWorkspace $now
+    $future=Copy-Document $authorization;$future.issued_at_utc=$now.AddMinutes(1).ToString('o');$future.expires_at_utc=$now.AddHours(1).ToString('o');Set-AuthorizationDigest $future;$futureReason=Assert-AuthorizationReason $verifiedCandidate.Report $validContext $future $authorizationWorkspace $now
+    $tooLong=Copy-Document $authorization;$tooLong.issued_at_utc=$now.ToString('o');$tooLong.expires_at_utc=$now.AddDays(8).ToString('o');Set-AuthorizationDigest $tooLong;$tooLongReason=Assert-AuthorizationReason $verifiedCandidate.Report $validContext $tooLong $authorizationWorkspace $now
+    $secondContext=& $script:qualificationModule {param($Root,$Observed)New-HarnessObservedHostContextDocument -RepoRoot $Root -ObservedAtUtc $Observed} $RepoRoot $now.AddSeconds(-1)
+    $contextMismatchReason=Assert-AuthorizationReason $verifiedCandidate.Report $secondContext $authorization $authorizationWorkspace $now
+    $copiedWorkspace=Join-Path $temp 'copied-auth-workspace';[void][IO.Directory]::CreateDirectory($copiedWorkspace);$copiedReason=Assert-AuthorizationReason $verifiedCandidate.Report $validContext $authorization $copiedWorkspace $now
+    Check ($expiredReason-match'expired'-and$futureReason-match'future-issued'-and$tooLongReason-match'duration-exceeded'-and$contextMismatchReason-match'host-context-mismatch'-and$copiedReason-match'workspace-mismatch') 'expired, future, over-seven-day, Host-mismatched, and copied Authorizations fail closed' 'a temporal or binding Authorization case was accepted'
+
+    $candidateResolverWorkspace=Join-Path $temp 'candidate-resolver';$candidateCanonical=Join-Path $candidateResolverWorkspace '.assistant\runtime\rollout\v2-canary-candidate.json';$authCanonical=Join-Path $candidateResolverWorkspace '.assistant\runtime\rollout\v2-canary-authorization.json';Write-Json $candidateCanonical $verifiedCandidate.Report
+    $missingPair=Resolve-Qualification $candidateResolverWorkspace $validContext
+    $candidateAuth=& $script:qualificationModule {param($Root,$Work,$Report,$Context,$Issued)New-HarnessCanaryAuthorizationDocument -RepoRoot $Root -WorkspaceRoot $Work -Report $Report -ObservedHostContext $Context -AuthorizedBy 'operator' -IssuedAtUtc $Issued -ExpiresAtUtc $Issued.AddHours(1)} $RepoRoot $candidateResolverWorkspace $verifiedCandidate.Report $validContext $now
+    Write-Json $authCanonical $candidateAuth;$completePair=Resolve-Qualification $candidateResolverWorkspace $validContext
+    $pairCopyWorkspace=Join-Path $temp 'pair-copy';$pairCopyDir=Join-Path $pairCopyWorkspace '.assistant\runtime\rollout';[void][IO.Directory]::CreateDirectory($pairCopyDir);[IO.File]::Copy($candidateCanonical,(Join-Path $pairCopyDir 'v2-canary-candidate.json'));[IO.File]::Copy($authCanonical,(Join-Path $pairCopyDir 'v2-canary-authorization.json'));$copiedPair=Resolve-Qualification $pairCopyWorkspace $validContext
+    [IO.File]::Delete($candidateCanonical);$authOnly=Resolve-Qualification $candidateResolverWorkspace $validContext
+    Check ($missingPair.reason-ceq'rollout-canary-authorization-missing'-and$completePair.reason-match'rollout-evidence-provenance-unwired'-and$copiedPair.reason-ceq'rollout-canary-authorization-workspace-mismatch'-and$authOnly.reason-ceq'rollout-report-missing') 'missing, complete-unwired, copied, and torn Candidate/Auth pairs all fail closed' 'Candidate/Auth pair state selected v2'
+
+    $candidateBytes=[IO.File]::ReadAllBytes($verifiedCandidate.ReportPath);$finalBytes=[IO.File]::ReadAllBytes($verifiedFinal.ReportPath);$authorizationBytes=[Text.UTF8Encoding]::new($false).GetBytes(($authorization|ConvertTo-Json -Depth 100 -Compress))
+    $transactionWorkspace=Join-Path $temp 'transaction-workspace';[void][IO.Directory]::CreateDirectory($transactionWorkspace)
+    $candidateTransaction=Invoke-StructuralTransaction $transactionWorkspace $verifiedCandidate.ReportPath 'canary-candidate' $candidateBytes $authorizationBytes
+    $candidateTarget=Join-Path $transactionWorkspace $candidateTransaction.candidate_target;$authorizationTarget=Join-Path $transactionWorkspace $candidateTransaction.authorization_target;$finalTarget=Join-Path $transactionWorkspace $candidateTransaction.final_target;$runtimeDefaultTarget=Join-Path $transactionWorkspace $candidateTransaction.runtime_default_target
+    $candidateDecision=Get-Content -Raw -LiteralPath $runtimeDefaultTarget|ConvertFrom-Json -AsHashtable -Depth 20 -DateKind String
+    Check ((Test-Path $candidateTarget)-and(Test-Path $authorizationTarget)-and-not(Test-Path $finalTarget)-and$candidateDecision.scope-ceq'workspace-canary') 'Candidate transaction writes Candidate, Authorization, and workspace Runtime Default only' 'Candidate transaction produced a torn or wrongly scoped state'
+    $finalTransaction=Invoke-StructuralTransaction $transactionWorkspace $verifiedFinal.ReportPath 'final-default' $finalBytes ([byte[]]::new(0))
+    $finalDecision=Get-Content -Raw -LiteralPath $runtimeDefaultTarget|ConvertFrom-Json -AsHashtable -Depth 20 -DateKind String
+    $finalBytesExact=Test-ExactBytes $finalBytes ([IO.File]::ReadAllBytes($finalTarget))
+    Check ((Test-Path $finalTarget)-and-not(Test-Path $candidateTarget)-and-not(Test-Path $authorizationTarget)-and$finalBytesExact-and$finalDecision.scope-ceq'release-default') 'Final transaction writes Final plus release Runtime Default and removes stale Candidate/Auth' 'Final transaction left stale or wrongly scoped state'
+    $sharedSourceIdentity=& $script:runtimeDefaultModule {param($Root)Get-HarnessRuntimeSourceIdentity -RepoRoot $Root} $RepoRoot
+    Check (($candidateDecision.source_identity|ConvertTo-Json -Compress)-ceq($sharedSourceIdentity|ConvertTo-Json -Compress)-and($finalDecision.source_identity|ConvertTo-Json -Compress)-ceq($sharedSourceIdentity|ConvertTo-Json -Compress)) 'Candidate and Final Promotion decisions use the shared Runtime Source Identity' 'Promotion produced a separate or drifting Runtime Source Identity'
+    $finalBefore=[IO.File]::ReadAllBytes($finalTarget);$candidateAfterFinalReason=Get-Rejection {Invoke-StructuralTransaction $transactionWorkspace $verifiedCandidate.ReportPath 'canary-candidate' $candidateBytes $authorizationBytes}
+    Check ($candidateAfterFinalReason-match'final-already-canonical'-and(Test-ExactBytes $finalBefore ([IO.File]::ReadAllBytes($finalTarget)))-and-not(Test-Path $candidateTarget)-and-not(Test-Path $authorizationTarget)) 'Candidate cannot affect an existing Final' 'Candidate modified or shadowed an existing Final'
+
+    $roundTripWorkspace=Join-Path $temp 'round-trip-workspace';[void][IO.Directory]::CreateDirectory($roundTripWorkspace);$canonicalFinalPath='.assistant/runtime/rollout/v2-eligibility.json';$roundTripDecision=New-StructuralDecision $roundTripWorkspace 'final-default';$roundTripDecisionBytes=[Text.UTF8Encoding]::new($false).GetBytes(($roundTripDecision|ConvertTo-Json -Depth 20 -Compress))
+    $oldEligibilityPath=[Environment]::GetEnvironmentVariable('HARNESS_V2_ELIGIBILITY_REPORT',[EnvironmentVariableTarget]::Process)
+    try{[Environment]::SetEnvironmentVariable('HARNESS_V2_ELIGIBILITY_REPORT','.assistant/runtime/rollout/alternate.json',[EnvironmentVariableTarget]::Process);$roundTrip=& $script:evidenceModule {param($Root,$Work,$ArtifactPath,$Bytes,$Digest,$Decision,$DecisionDigest,$SourceState,$Protocol)Invoke-HarnessRolloutPublicationTransaction -RepoRoot $Root -WorkspaceRoot $Work -ReportPath $ArtifactPath -Phase final-default -ReportBytes $Bytes -ExpectedReportDigest $Digest -DecisionBytes $Decision -ExpectedDecisionDigest $DecisionDigest -SourceStateStart $SourceState -ProtocolModule $Protocol} $RepoRoot $roundTripWorkspace $verifiedFinal.ReportPath $finalBytes ([string]$verifiedFinal.Report.report_digest) $roundTripDecisionBytes ([string]$roundTripDecision.decision_digest) $script:sourceState $script:protocolModule}finally{[Environment]::SetEnvironmentVariable('HARNESS_V2_ELIGIBILITY_REPORT',$oldEligibilityPath,[EnvironmentVariableTarget]::Process)}
+    $roundTripBytesExact=Test-ExactBytes $finalBytes ([IO.File]::ReadAllBytes((Join-Path $roundTripWorkspace $canonicalFinalPath)))
+    Check ($roundTrip.final_target-ceq$canonicalFinalPath-and$roundTripBytesExact) 'canonical round-trip is driven by the Runtime Default while rollout path overrides are ignored' 'canonical round-trip followed Qualification report state'
+    $wrongDecisionWorkspace=Join-Path $temp 'wrong-decision-round-trip';[void][IO.Directory]::CreateDirectory($wrongDecisionWorkspace);$wrongDecision=New-StructuralDecision $wrongDecisionWorkspace 'final-default';$wrongDecisionBytes=[Text.UTF8Encoding]::new($false).GetBytes(($wrongDecision|ConvertTo-Json -Depth 20 -Compress));$wrongDecisionModule=New-CanonicalProtocolModule 'release-default' ('sha256:'+('e'*64));$wrongDecisionReason=Get-Rejection {& $script:evidenceModule {param($Root,$Work,$ArtifactPath,$Bytes,$Digest,$Decision,$DecisionDigest,$SourceState,$Protocol)Invoke-HarnessRolloutPublicationTransaction -RepoRoot $Root -WorkspaceRoot $Work -ReportPath $ArtifactPath -Phase final-default -ReportBytes $Bytes -ExpectedReportDigest $Digest -DecisionBytes $Decision -ExpectedDecisionDigest $DecisionDigest -SourceStateStart $SourceState -ProtocolModule $Protocol} $RepoRoot $wrongDecisionWorkspace $verifiedFinal.ReportPath $finalBytes ([string]$verifiedFinal.Report.report_digest) $wrongDecisionBytes ([string]$wrongDecision.decision_digest) $script:sourceState $wrongDecisionModule}
+    Check ($wrongDecisionReason-match'canonical-verification-failed'-and-not(Test-Path (Join-Path $wrongDecisionWorkspace $canonicalFinalPath))-and-not(Test-Path (Join-Path $wrongDecisionWorkspace '.assistant/runtime/protocol-default.json'))) 'canonical round-trip rejects Runtime Default digest drift and rolls back' 'canonical round-trip accepted a different Runtime Default digest'
+    Remove-Module -ModuleInfo $wrongDecisionModule -Force
+
+    $rollbackWorkspace=Join-Path $temp 'rollback-workspace';[void][IO.Directory]::CreateDirectory($rollbackWorkspace);$null=Invoke-StructuralTransaction $rollbackWorkspace $verifiedCandidate.ReportPath 'canary-candidate' $candidateBytes $authorizationBytes
+    $rollbackCandidate=Join-Path $rollbackWorkspace '.assistant\runtime\rollout\v2-canary-candidate.json';$rollbackAuth=Join-Path $rollbackWorkspace '.assistant\runtime\rollout\v2-canary-authorization.json';$rollbackFinal=Join-Path $rollbackWorkspace '.assistant\runtime\rollout\v2-eligibility.json';$rollbackDecision=Join-Path $rollbackWorkspace '.assistant\runtime\protocol-default.json';$candidatePre=[IO.File]::ReadAllBytes($rollbackCandidate);$authPre=[IO.File]::ReadAllBytes($rollbackAuth);$decisionPre=[IO.File]::ReadAllBytes($rollbackDecision)
+    $rollbackReason=Get-Rejection {Invoke-StructuralTransaction $rollbackWorkspace $verifiedFinal.ReportPath 'final-default' $finalBytes ([byte[]]::new(0)) 4}
+    $rollbackCandidateRestored=Test-ExactBytes $candidatePre ([IO.File]::ReadAllBytes($rollbackCandidate));$rollbackAuthRestored=Test-ExactBytes $authPre ([IO.File]::ReadAllBytes($rollbackAuth));$rollbackDecisionRestored=Test-ExactBytes $decisionPre ([IO.File]::ReadAllBytes($rollbackDecision))
+    Check ($rollbackReason-match'structural-test-fault'-and-not(Test-Path $rollbackFinal)-and$rollbackCandidateRestored-and$rollbackAuthRestored-and$rollbackDecisionRestored) 'Final cleanup fault restores exact Candidate/Auth/Runtime Default preimages' 'Final cleanup fault left torn state'
+    $fourPreimageWorkspace=Join-Path $temp 'four-preimage-workspace';$fourDir=Join-Path $fourPreimageWorkspace '.assistant\runtime\rollout';[void][IO.Directory]::CreateDirectory($fourDir);$oldFinal=[Text.UTF8Encoding]::new($false).GetBytes('{"old":"final"}');$oldCandidate=[Text.UTF8Encoding]::new($false).GetBytes('{"old":"candidate"}');$oldAuth=[Text.UTF8Encoding]::new($false).GetBytes('{"old":"authorization"}');$oldDecision=[Text.UTF8Encoding]::new($false).GetBytes('{"old":"runtime-default"}');[IO.File]::WriteAllBytes((Join-Path $fourDir 'v2-eligibility.json'),$oldFinal);[IO.File]::WriteAllBytes((Join-Path $fourDir 'v2-canary-candidate.json'),$oldCandidate);[IO.File]::WriteAllBytes((Join-Path $fourDir 'v2-canary-authorization.json'),$oldAuth);[IO.File]::WriteAllBytes((Join-Path $fourPreimageWorkspace '.assistant\runtime\protocol-default.json'),$oldDecision)
+    $fourReason=Get-Rejection {Invoke-StructuralTransaction $fourPreimageWorkspace $verifiedFinal.ReportPath 'final-default' $finalBytes ([byte[]]::new(0)) 4}
+    $oldFinalRestored=Test-ExactBytes -Left $oldFinal -Right ([IO.File]::ReadAllBytes((Join-Path $fourDir 'v2-eligibility.json')))
+    $oldCandidateRestored=Test-ExactBytes -Left $oldCandidate -Right ([IO.File]::ReadAllBytes((Join-Path $fourDir 'v2-canary-candidate.json')))
+    $oldAuthRestored=Test-ExactBytes -Left $oldAuth -Right ([IO.File]::ReadAllBytes((Join-Path $fourDir 'v2-canary-authorization.json')))
+    $oldDecisionRestored=Test-ExactBytes -Left $oldDecision -Right ([IO.File]::ReadAllBytes((Join-Path $fourPreimageWorkspace '.assistant\runtime\protocol-default.json')))
+    Check ($fourReason-match'structural-test-fault'-and$oldFinalRestored-and$oldCandidateRestored-and$oldAuthRestored-and$oldDecisionRestored) 'four-path failure restores exact Final/Candidate/Authorization/Runtime Default bytes' 'four-path rollback changed a preimage'
+
+    $casWorkspace=Join-Path $temp 'rollback-cas-workspace';$casDir=Join-Path $casWorkspace '.assistant\runtime\rollout';[void][IO.Directory]::CreateDirectory($casDir)
+    $casExternal=[Text.UTF8Encoding]::new($false).GetBytes('{"external":"new-value"}');$casPublished=[Text.UTF8Encoding]::new($false).GetBytes('{"transaction":"published"}')
+    $casPublishedDigest=& $script:evidenceModule {param($Bytes)Get-ReleaseSha256Bytes -Bytes $Bytes} $casPublished
+    $casRecords=@(
+        [ordered]@{name='final';path=(Join-Path $casDir 'v2-eligibility.json');relative='.assistant/runtime/rollout/v2-eligibility.json';preimage=[ordered]@{exists=$true;bytes=$oldFinal;digest=(& $script:evidenceModule {param($Bytes)Get-ReleaseSha256Bytes -Bytes $Bytes} $oldFinal)};published_digest=$casPublishedDigest},
+        [ordered]@{name='candidate';path=(Join-Path $casDir 'v2-canary-candidate.json');relative='.assistant/runtime/rollout/v2-canary-candidate.json';preimage=[ordered]@{exists=$false;bytes=[byte[]]::new(0);digest='missing'};published_digest=$casPublishedDigest},
+        [ordered]@{name='authorization';path=(Join-Path $casDir 'v2-canary-authorization.json');relative='.assistant/runtime/rollout/v2-canary-authorization.json';preimage=[ordered]@{exists=$true;bytes=$oldAuth;digest=(& $script:evidenceModule {param($Bytes)Get-ReleaseSha256Bytes -Bytes $Bytes} $oldAuth)};published_digest=$casPublishedDigest},
+        [ordered]@{name='runtime-default';path=(Join-Path $casWorkspace '.assistant\runtime\protocol-default.json');relative='.assistant/runtime/protocol-default.json';preimage=[ordered]@{exists=$true;bytes=$oldDecision;digest=(& $script:evidenceModule {param($Bytes)Get-ReleaseSha256Bytes -Bytes $Bytes} $oldDecision)};published_digest=$casPublishedDigest}
+    )
+    $casPreserved=$true
+    foreach($record in $casRecords){[IO.File]::WriteAllBytes([string]$record.path,$casExternal);$reason=Get-Rejection {& $script:evidenceModule {param($Work,$Value)Restore-HarnessRolloutPublicationRecord -WorkspaceRoot $Work -Record $Value} $casWorkspace $record};if($reason-cnotmatch"rollout-promotion-rollback-cas-mismatch-$($record.name)"-or-not(Test-ExactBytes $casExternal ([IO.File]::ReadAllBytes([string]$record.path)))){$casPreserved=$false}}
+    Check $casPreserved 'rollback CAS preserves lock-external Final/Candidate/Authorization/Runtime Default values' 'rollback overwrote or deleted a lock-external value'
+
+    $pathWorkspace=Join-Path $temp 'path-workspace';[void][IO.Directory]::CreateDirectory($pathWorkspace);$paths=& $script:evidenceModule {param($Root,$Work,$ArtifactPath)Resolve-HarnessRolloutPromotionPaths -RepoRoot $Root -WorkspaceRoot $Work -ReportPath $ArtifactPath} $RepoRoot $pathWorkspace $verifiedFinal.ReportPath
+    Check ($paths.final_target_relative-ceq'.assistant/runtime/rollout/v2-eligibility.json'-and$paths.candidate_target_relative-ceq'.assistant/runtime/rollout/v2-canary-candidate.json'-and$paths.authorization_target_relative-ceq'.assistant/runtime/rollout/v2-canary-authorization.json'-and$paths.runtime_default_target_relative-ceq'.assistant/runtime/protocol-default.json') 'Promotion paths include four distinct governed files' 'Canonical promotion paths are incomplete'
+    $hardlinkSource=Join-Path $script:deliveryRoot 'hardlink-source.json';[IO.File]::WriteAllText($hardlinkSource,'{}',[Text.UTF8Encoding]::new($false));$hardlinkAlias=Join-Path $script:deliveryRoot 'hardlink-alias.json';$null=@(& fsutil.exe hardlink create $hardlinkAlias $hardlinkSource 2>&1);$hardlinkRejected=$false;try{$null=& $script:evidenceModule {param($Root,$Work,$ArtifactPath)Resolve-HarnessRolloutPromotionPaths -RepoRoot $Root -WorkspaceRoot $Work -ReportPath $ArtifactPath} $RepoRoot $pathWorkspace $hardlinkAlias}catch{$hardlinkRejected=$true};Check ($LASTEXITCODE-eq0-and$hardlinkRejected) 'Promotion rejects hardlinked report input' 'Promotion accepted hardlinked report input'
+    $adsInput=Join-Path $script:deliveryRoot 'ads-input.json';[IO.File]::WriteAllText($adsInput,'{}',[Text.UTF8Encoding]::new($false));[IO.File]::WriteAllText(($adsInput+':extra'),'x',[Text.UTF8Encoding]::new($false));$adsRejected=$false;try{$null=& $script:evidenceModule {param($Root,$Work,$ArtifactPath)Resolve-HarnessRolloutPromotionPaths -RepoRoot $Root -WorkspaceRoot $Work -ReportPath $ArtifactPath} $RepoRoot $pathWorkspace $adsInput}catch{$adsRejected=$true};Check $adsRejected 'Promotion rejects alternate streams on report input' 'Promotion accepted alternate-stream input'
+
+    $v1Report=& $script:qualificationModule {param($Root,$Gates)New-HarnessRolloutReportDocument -RepoRoot $Root -Gates $Gates} $RepoRoot (New-V1Gates);$v1Path=Join-Path $resolverWorkspace 'rollout\v1.json';Write-Json $v1Path $v1Report;$v1Resolution=Resolve-Qualification $resolverWorkspace $validContext 'rollout/v1.json'
+    Check ($v1Resolution.status-ceq'historical'-and$v1Resolution.reason-ceq'rollout-v1-historical-diagnostic-only') 'v1 report remains Qualification diagnostic-only' 'v1 report gained authorization authority'
+    $explicitV1=Resolve-Requested $resolverWorkspace 'v1';$explicitV2=Resolve-Requested $resolverWorkspace 'v2'
+    $existingV1Id='existing-v1';$v1Plan=Join-Path $resolverWorkspace "docs\tasks\$existingV1Id\plan.md";[void][IO.Directory]::CreateDirectory((Split-Path -Parent $v1Plan));[IO.File]::WriteAllText($v1Plan,"---`ntask_id: existing-v1`nstage: TEST`ntool: codex`nupdated: 2026-07-25`n---`n",[Text.UTF8Encoding]::new($false));$existingV1=Resolve-Protocol $resolverWorkspace $existingV1Id
+    $existingV2Id='existing-v2';$v2Path=Join-Path $resolverWorkspace ".assistant\runtime\tasks\$existingV2Id\task.json";Write-Json $v2Path (New-V2TaskDocument $existingV2Id);$existingV2=Resolve-Protocol $resolverWorkspace $existingV2Id
+    $configWorkspace=Join-Path $temp 'config-workspace';[void][IO.Directory]::CreateDirectory($configWorkspace);$enabled=& $script:protocolModule {param($Root,$Work)$null=Set-HarnessWorkspaceProtocolConfig -RepoRoot $Root -WorkspaceRoot $Work -NewTaskProtocol v2;Get-HarnessProtocolResolution -RepoRoot $Root -WorkspaceRoot $Work} $RepoRoot $configWorkspace;$disabled=& $script:protocolModule {param($Root,$Work)$null=Set-HarnessWorkspaceProtocolConfig -RepoRoot $Root -WorkspaceRoot $Work -NewTaskProtocol v1;Get-HarnessProtocolResolution -RepoRoot $Root -WorkspaceRoot $Work} $RepoRoot $configWorkspace
+    Check ($explicitV1.selected_protocol-ceq'v1'-and$explicitV2.selected_protocol-ceq'v2'-and$existingV1.selected_protocol-ceq'v1'-and$existingV2.selected_protocol-ceq'v2'-and$enabled.selected_protocol-ceq'v2'-and$disabled.selected_protocol-ceq'v1') 'v1 stop-loss, explicit/workspace enable-v2, and existing Artifact priority remain unchanged' ("protocol priority regressed: explicit=$($explicitV1.selected_protocol)/$($explicitV2.selected_protocol), existing=$($existingV1.selected_protocol)/$($existingV2.selected_protocol), workspace=$($enabled.selected_protocol)/$($disabled.selected_protocol)")
+
+    $doc=Get-Content -LiteralPath (Join-Path $RepoRoot 'docs\release\default-promotion-gates.md') -Raw -Encoding utf8
+    Check ($doc-match'provenance'-and$doc-match'Observed Host Context'-and$doc-match'expires_at_utc'-and$doc-match'v2-canary-candidate\.json'-and$doc-match'Review Payload'-and$doc-match'artifact_path'-and$doc-match'producer_identity'-and$doc-notmatch'rollout-eligibility-v2-envelope/v1') 'Canonical documentation names every correction boundary without the obsolete G12 envelope' 'Canonical documentation lacks or contradicts correction semantics'
+} catch {
+    [Console]::Error.WriteLine("TEST_EXCEPTION: $($_.Exception.Message)`n$($_.ScriptStackTrace)")
+    throw
+} finally {
     if($null-eq$oldGitDir){Remove-Item Env:GIT_DIR -ErrorAction Ignore}else{$env:GIT_DIR=$oldGitDir}
     if($null-eq$oldGitWorkTree){Remove-Item Env:GIT_WORK_TREE -ErrorAction Ignore}else{$env:GIT_WORK_TREE=$oldGitWorkTree}
-    Remove-Module Harness.Protocol -ErrorAction Ignore;if(Test-Path $temp){Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue}
+    Remove-Module Harness.Protocol,Harness.Qualification,Harness.RuntimeDefault,Harness.HostCapabilities,Harness.RolloutEvidence -ErrorAction Ignore
+    if(Test-Path -LiteralPath $temp){Remove-DirectoryWithRetry -Path $temp}
 }
-$repoAfter=@(&git -C $RepoRoot status --porcelain --untracked-files=all);Check (@(Compare-Object $repoBefore $repoAfter).Count-eq0) 'default-flip verifier leaves repository state unchanged' 'default-flip verifier changed repository state'
+$repoAfter=@(& git -C $RepoRoot status --porcelain --untracked-files=all)
+Check (@(Compare-Object $repoBefore $repoAfter).Count-eq0) 'default-flip verifier leaves repository state unchanged' 'default-flip verifier changed repository state'
 foreach($item in $script:checks){"[PASS] $item"};foreach($item in $script:failures){"[FAIL] $item"};if($script:failures.Count){"STATUS: FAIL ($($script:failures.Count) failed)";exit 1};"STATUS: PASS ($($script:checks.Count) checks)";exit 0

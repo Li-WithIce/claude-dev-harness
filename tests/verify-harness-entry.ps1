@@ -13,13 +13,28 @@ function Invoke-RepoScript {
         [string]$UserProfile,
         [string]$ScriptPath,
         [hashtable]$Arguments,
-        [string]$WorkingDirectory = ''
+        [string]$WorkingDirectory = '',
+        [switch]$ClearWorkspaceEnvironment
     )
 
     $originalUserProfile = $env:USERPROFILE
+    $originalHome = [Environment]::GetEnvironmentVariable('HOME', [EnvironmentVariableTarget]::Process)
+    $workspaceEnvironmentNames = @('DEV_HARNESS_WORKSPACE_ROOT','CLAUDE_DEV_HARNESS_WORKSPACE_ROOT','WORKSPACE_ROOT')
+    $savedWorkspaceEnvironment = [ordered]@{}
+    $presentWorkspaceEnvironment = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $originalLocation = $null
     try {
         $env:USERPROFILE = $UserProfile
+        $env:HOME = $UserProfile
+        if ($ClearWorkspaceEnvironment) {
+            foreach ($name in $workspaceEnvironmentNames) {
+                if (Test-Path -LiteralPath "Env:$name") {
+                    [void]$presentWorkspaceEnvironment.Add($name)
+                    $savedWorkspaceEnvironment[$name] = (Get-Item -LiteralPath "Env:$name").Value
+                }
+                Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+            }
+        }
         if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
             $originalLocation = (Get-Location).Path
             Set-Location -LiteralPath $WorkingDirectory
@@ -37,6 +52,20 @@ function Invoke-RepoScript {
         }
 
         $env:USERPROFILE = $originalUserProfile
+        if ($null -eq $originalHome) {
+            Remove-Item -LiteralPath 'Env:HOME' -ErrorAction SilentlyContinue
+        } else {
+            $env:HOME = $originalHome
+        }
+        if ($ClearWorkspaceEnvironment) {
+            foreach ($name in $workspaceEnvironmentNames) {
+                if ($presentWorkspaceEnvironment.Contains($name)) {
+                    Set-Item -LiteralPath "Env:$name" -Value ([string]$savedWorkspaceEnvironment[$name])
+                } else {
+                    Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+                }
+            }
+        }
     }
 }
 
@@ -91,17 +120,20 @@ function Invoke-FakeCodexStatus {
         [Parameter(Mandatory = $true)][string]$UserProfile,
         [Parameter(Mandatory = $true)][string]$StatusPath,
         [Parameter(Mandatory = $true)][string]$WorkspaceRoot,
-        [Parameter(Mandatory = $true)][string]$RepoRoot
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [switch]$ProbeHostDetails
     )
 
     $originalPath = $env:PATH
     try {
         $env:PATH = $BinPath + [System.IO.Path]::PathSeparator + $originalPath
         $timer = [System.Diagnostics.Stopwatch]::StartNew()
-        $result = Invoke-RepoScript -UserProfile $UserProfile -ScriptPath $StatusPath -Arguments @{
+        $arguments = @{
             WorkspaceRoot = $WorkspaceRoot
             RepoRoot      = $RepoRoot
         }
+        if ($ProbeHostDetails) { $arguments.ProbeHostDetails = $true }
+        $result = Invoke-RepoScript -UserProfile $UserProfile -ScriptPath $StatusPath -Arguments $arguments
         $timer.Stop()
         return [pscustomobject]@{ Result = $result; Elapsed = $timer.Elapsed }
     } finally {
@@ -229,7 +261,9 @@ if (Test-Path -LiteralPath (Join-Path $workspaceRoot '.assistant\工作流') -Pa
 }
 
 $statusWorkspaceBefore = @(Get-TestTreeState -Root $workspaceRoot)
-$statusUserBefore = @(Get-TestTreeState -Root $userProfile)
+# PowerShell updates this host-owned startup cache asynchronously; it is not Harness install state.
+$powerShellStartupProfilePrefix = 'F|AppData\Local\Microsoft\PowerShell\StartupProfileData-'
+$statusUserBefore = @(Get-TestTreeState -Root $userProfile | Where-Object { -not $_.StartsWith($powerShellStartupProfilePrefix, [StringComparison]::OrdinalIgnoreCase) })
 $statusRepoBefore = @(& git -C $RepoRoot status --porcelain --untracked-files=all)
 $statusGitOptionalLocksBefore = [Environment]::GetEnvironmentVariable('GIT_OPTIONAL_LOCKS', [EnvironmentVariableTarget]::Process)
 $statusResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath $statusPath -Arguments @{
@@ -237,24 +271,26 @@ $statusResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath $statusP
     RepoRoot      = $RepoRoot
 }
 $statusWorkspaceAfter = @(Get-TestTreeState -Root $workspaceRoot)
-$statusUserAfter = @(Get-TestTreeState -Root $userProfile)
+$statusUserAfter = @(Get-TestTreeState -Root $userProfile | Where-Object { -not $_.StartsWith($powerShellStartupProfilePrefix, [StringComparison]::OrdinalIgnoreCase) })
 $statusRepoAfter = @(& git -C $RepoRoot status --porcelain --untracked-files=all)
 $statusGitOptionalLocksAfter = [Environment]::GetEnvironmentVariable('GIT_OPTIONAL_LOCKS', [EnvironmentVariableTarget]::Process)
 $statusText = $statusResult.Output -join "`n"
-$hostVersionState = Get-StatusLineValue -Output $statusResult.Output -Prefix 'host_version'
 if ($statusResult.ExitCode -eq 1 -and
     (Get-StatusLineValue -Output $statusResult.Output -Prefix 'STATUS') -eq 'WARN' -and
-    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'hook_installed') -eq 'verified' -and
-    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'hook_trust') -eq 'unknown' -and
-    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'hook_callable') -eq 'unknown' -and
-    $hostVersionState -in @('verified','mismatch','unavailable') -and
+    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'host_product') -eq 'codex' -and
+    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'host_version_actual') -eq 'unknown' -and
+    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'host_details_probed') -eq 'false' -and
+    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'capability_observation') -eq 'observed' -and
+    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'capability_workspace_protocol_config') -eq 'true' -and
+    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'capability_hook_status_query') -eq 'unavailable' -and
     (Get-StatusLineValue -Output $statusResult.Output -Prefix 'protected_policy') -eq 'verified' -and
-    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'desktop_enforcement') -eq 'unavailable' -and
-    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'canonical_report') -eq 'missing' -and
-    $statusText -notmatch '(?m)^(desktop_enforcement|hook_trust|hook_callable): pass$') {
-    Add-Check 'harness-status reports installed, unknown, versioned, unavailable, and canonical states without false pass'
+    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'runtime_default') -eq 'missing' -and
+    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'workspace_config') -eq 'missing' -and
+    $statusText -notmatch '(?m)^(host_version_expected|qualification_profile|canonical_report|hook_installed|hook_trust|hook_callable):' -and
+    $statusText -notmatch 'Host capability observation|Host version observation') {
+    Add-Check 'default harness-status reports only required Runtime facts without probing Host details or warning on optional facts'
 } else {
-    Add-Failure 'harness-status should report each Desktop health dimension truthfully'
+    Add-Failure 'harness-status should report the ordinary runtime health surface truthfully'
 }
 if (@(Compare-Object $statusWorkspaceBefore $statusWorkspaceAfter -CaseSensitive).Count -eq 0 -and
     @(Compare-Object $statusUserBefore $statusUserAfter -CaseSensitive).Count -eq 0 -and
@@ -282,27 +318,38 @@ try {
 } finally {
     [System.IO.File]::WriteAllBytes($hookPath, $hookBytes)
 }
-if ($oversizedHookProbe.ExitCode -eq 2 -and
-    (Get-StatusLineValue -Output $oversizedHookProbe.Output -Prefix 'STATUS') -eq 'FAIL' -and
-    (Get-StatusLineValue -Output $oversizedHookProbe.Output -Prefix 'hook_installed') -eq 'invalid') {
-    Add-Check 'harness-status rejects an oversized Hook document through its bounded reader'
+if ($oversizedHookProbe.ExitCode -eq 1 -and
+    (Get-StatusLineValue -Output $oversizedHookProbe.Output -Prefix 'STATUS') -eq 'WARN' -and
+    (Get-StatusLineValue -Output $oversizedHookProbe.Output -Prefix 'capability_hook_status_query') -eq 'unavailable' -and
+    ($oversizedHookProbe.Output -join "`n") -notmatch '(?m)^hook_installed:') {
+    Add-Check 'ordinary harness-status does not read user Hook qualification state'
 } else {
-    Add-Failure 'harness-status should fail closed on an oversized Hook document'
+    Add-Failure 'ordinary harness-status should remain independent of user Hook qualification state'
 }
 
 $fakeCodexBin = Join-Path $caseRoot 'fake-codex-exact-version'
 [void][System.IO.Directory]::CreateDirectory($fakeCodexBin)
+$defaultProbeSentinel = Join-Path $fakeCodexBin 'default-probe-sentinel.txt'
 [System.IO.File]::WriteAllText(
     (Join-Path $fakeCodexBin 'codex.ps1'),
-    "[Console]::Out.WriteLine('codex-cli 0.144.4')`r`n",
+    "[IO.File]::WriteAllText('$($defaultProbeSentinel.Replace("'", "''"))','called')`r`n[Console]::Out.WriteLine('codex-cli 0.144.4')`r`n",
     [System.Text.UTF8Encoding]::new($false))
-$exactVersionProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot
-if ($exactVersionProbe.Result.ExitCode -eq 1 -and
-    (Get-StatusLineValue -Output $exactVersionProbe.Result.Output -Prefix 'host_version') -eq 'verified' -and
-    (Get-StatusLineValue -Output $exactVersionProbe.Result.Output -Prefix 'host_version_actual') -eq '0.144.4') {
-    Add-Check 'harness-status verifies the exact pinned Codex Host version when observable'
+$defaultVersionProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot
+if (-not (Test-Path -LiteralPath $defaultProbeSentinel) -and
+    (Get-StatusLineValue -Output $defaultVersionProbe.Result.Output -Prefix 'host_version_actual') -eq 'unknown' -and
+    (Get-StatusLineValue -Output $defaultVersionProbe.Result.Output -Prefix 'host_details_probed') -eq 'false') {
+    Add-Check 'default harness-status does not execute the Codex version probe'
 } else {
-    Add-Failure 'harness-status should verify the exact pinned Codex Host version'
+    Add-Failure 'default harness-status should not execute the Codex version probe'
+}
+$exactVersionProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -ProbeHostDetails
+if ($exactVersionProbe.Result.ExitCode -eq 1 -and
+    (Get-StatusLineValue -Output $exactVersionProbe.Result.Output -Prefix 'host_version_actual') -eq '0.144.4' -and
+    (Get-StatusLineValue -Output $exactVersionProbe.Result.Output -Prefix 'host_details_probed') -eq 'true' -and
+    ($exactVersionProbe.Result.Output -join "`n") -notmatch '(?m)^host_version_expected:') {
+    Add-Check 'harness-status reports an observed Host version as a fact without a qualification target'
+} else {
+    Add-Failure 'harness-status should report the observed Host version without a qualification target'
 }
 
 $fakeCodexBin = Join-Path $caseRoot 'fake-codex-mismatched-version'
@@ -311,13 +358,13 @@ $fakeCodexBin = Join-Path $caseRoot 'fake-codex-mismatched-version'
     (Join-Path $fakeCodexBin 'codex.ps1'),
     "[Console]::Out.WriteLine('codex-cli 9.9.9')`r`n",
     [System.Text.UTF8Encoding]::new($false))
-$mismatchedVersionProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot
+$mismatchedVersionProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -ProbeHostDetails
 if ($mismatchedVersionProbe.Result.ExitCode -eq 1 -and
-    (Get-StatusLineValue -Output $mismatchedVersionProbe.Result.Output -Prefix 'host_version') -eq 'mismatch' -and
-    (Get-StatusLineValue -Output $mismatchedVersionProbe.Result.Output -Prefix 'host_version_actual') -eq '9.9.9') {
-    Add-Check 'harness-status reports a well-formed non-pinned Codex Host version as mismatch'
+    (Get-StatusLineValue -Output $mismatchedVersionProbe.Result.Output -Prefix 'host_version_actual') -eq '9.9.9' -and
+    ($mismatchedVersionProbe.Result.Output -join "`n") -notmatch '(?i)version.mismatch|host_version_expected') {
+    Add-Check 'harness-status accepts a well-formed newer Host version without a mismatch conclusion'
 } else {
-    Add-Failure 'harness-status should preserve an observable non-pinned Codex Host version'
+    Add-Failure 'harness-status should preserve a newer Host version without qualification mismatch'
 }
 
 $fakeCodexBin = Join-Path $caseRoot 'fake-codex-malformed-version'
@@ -326,10 +373,10 @@ $fakeCodexBin = Join-Path $caseRoot 'fake-codex-malformed-version'
     (Join-Path $fakeCodexBin 'codex.ps1'),
     "[Console]::Out.WriteLine('not-a-codex-version')`r`n",
     [System.Text.UTF8Encoding]::new($false))
-$malformedVersionProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot
+$malformedVersionProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -ProbeHostDetails
 if ($malformedVersionProbe.Result.ExitCode -eq 1 -and
-    (Get-StatusLineValue -Output $malformedVersionProbe.Result.Output -Prefix 'host_version') -eq 'unavailable' -and
-    (Get-StatusLineValue -Output $malformedVersionProbe.Result.Output -Prefix 'host_version_actual') -eq 'unknown') {
+    (Get-StatusLineValue -Output $malformedVersionProbe.Result.Output -Prefix 'host_version_actual') -eq 'unknown' -and
+    ($malformedVersionProbe.Result.Output -join "`n") -notmatch '(?i)version.mismatch|host_version_expected') {
     Add-Check 'harness-status rejects malformed Codex Host version output as unavailable'
 } else {
     Add-Failure 'harness-status should not classify malformed Host output as a version mismatch'
@@ -341,11 +388,11 @@ $fakeCodexBin = Join-Path $caseRoot 'fake-codex-hang'
     (Join-Path $fakeCodexBin 'codex.ps1'),
     "Start-Sleep -Seconds 120`r`n",
     [System.Text.UTF8Encoding]::new($false))
-$hangProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot
+$hangProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -ProbeHostDetails
 if ($hangProbe.Result.ExitCode -eq 1 -and
     $hangProbe.Elapsed.TotalSeconds -lt 10 -and
     (Get-StatusLineValue -Output $hangProbe.Result.Output -Prefix 'STATUS') -eq 'WARN' -and
-    (Get-StatusLineValue -Output $hangProbe.Result.Output -Prefix 'host_version') -eq 'unavailable') {
+    (Get-StatusLineValue -Output $hangProbe.Result.Output -Prefix 'host_version_actual') -eq 'unknown') {
     Add-Check 'harness-status bounds a hanging Codex version probe and reports unavailable'
 } else {
     Add-Failure 'harness-status should terminate a hanging Codex version probe within its bounded timeout'
@@ -367,10 +414,10 @@ foreach ($argument in @('-NoLogo', '-NoProfile', '-NonInteractive', '-Command', 
     (Join-Path $fakeCodexBin 'codex.ps1'),
     $inheritedPipeScript,
     [System.Text.UTF8Encoding]::new($false))
-$inheritedPipeProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot
+$inheritedPipeProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -ProbeHostDetails
 if ($inheritedPipeProbe.Result.ExitCode -eq 1 -and
     $inheritedPipeProbe.Elapsed.TotalSeconds -lt 10 -and
-    (Get-StatusLineValue -Output $inheritedPipeProbe.Result.Output -Prefix 'host_version') -eq 'unavailable') {
+    (Get-StatusLineValue -Output $inheritedPipeProbe.Result.Output -Prefix 'host_version_actual') -eq 'unknown') {
     Add-Check 'harness-status bounds inherited output pipes after the Codex probe root exits'
 } else {
     Add-Failure 'harness-status should not wait indefinitely when a Codex probe child inherits output pipes'
@@ -382,10 +429,10 @@ $fakeCodexBin = Join-Path $caseRoot 'fake-codex-output-flood'
     (Join-Path $fakeCodexBin 'codex.ps1'),
     "[Console]::Out.Write(('x' * 131072))`r`n",
     [System.Text.UTF8Encoding]::new($false))
-$floodProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot
+$floodProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -ProbeHostDetails
 if ($floodProbe.Result.ExitCode -eq 1 -and
     $floodProbe.Elapsed.TotalSeconds -lt 10 -and
-    (Get-StatusLineValue -Output $floodProbe.Result.Output -Prefix 'host_version') -eq 'unavailable') {
+    (Get-StatusLineValue -Output $floodProbe.Result.Output -Prefix 'host_version_actual') -eq 'unknown') {
     Add-Check 'harness-status drains but rejects truncated Codex version output'
 } else {
     Add-Failure 'harness-status should fail closed when Codex version output exceeds the retention cap'
@@ -765,12 +812,57 @@ New-Item -ItemType Directory -Path $repoRootUserProfile -Force | Out-Null
 
 $guardResult = Invoke-RepoScript -UserProfile $repoRootUserProfile -ScriptPath $harnessPath -Arguments @{
     RepoRoot = $RepoRoot
-} -WorkingDirectory $RepoRoot
+} -WorkingDirectory $RepoRoot -ClearWorkspaceEnvironment
 
 if ((Get-StatusLineValue -Output $guardResult.Output -Prefix 'STATUS') -ne 'FAIL') {
     Add-Failure 'harness.ps1 should fail safely when run from the harness repo root without WorkspaceRoot'
 } else {
     Add-Check 'harness.ps1 fails safely when run from the harness repo root without WorkspaceRoot'
+}
+
+# Case 10: a Harness source RepoRoot nested inside an installed workspace cannot escape to that parent.
+$caseRoot = Join-Path $scratchRoot 'repo-boundary'
+$userProfile = Join-Path $caseRoot 'u'
+$workspaceRoot = Join-Path $caseRoot 'w'
+$nestedRepo = Join-Path $workspaceRoot 'r'
+New-Item -ItemType Directory -Path $userProfile,$workspaceRoot -Force | Out-Null
+
+$boundaryInstall = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @{
+    WorkspaceRoot = $workspaceRoot
+    RepoRoot      = $RepoRoot
+    Preset        = 'core'
+}
+if ($boundaryInstall.ExitCode -ne 0) {
+    Add-Failure 'install.ps1 should succeed before the nested Harness RepoRoot boundary regression runs'
+} else {
+    [void](Invoke-GitChecked -Arguments @('clone','--quiet','--no-hardlinks',$RepoRoot,$nestedRepo) -Label 'nested Harness RepoRoot clone')
+    Copy-Item -LiteralPath $harnessPath -Destination (Join-Path $nestedRepo 'harness.ps1') -Force
+
+    $parentAssistantBefore = Get-TestTreeState -Root (Join-Path $workspaceRoot '.assistant')
+    $parentAgentsBefore = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'AGENTS.md') -Algorithm SHA256).Hash
+    $nestedRepoBefore = @(& git -C $nestedRepo status --porcelain --untracked-files=all)
+    $boundaryResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $nestedRepo 'harness.ps1') -Arguments @{
+        RepoRoot = $nestedRepo
+    } -WorkingDirectory $nestedRepo -ClearWorkspaceEnvironment
+    $parentAssistantAfter = Get-TestTreeState -Root (Join-Path $workspaceRoot '.assistant')
+    $parentAgentsAfter = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'AGENTS.md') -Algorithm SHA256).Hash
+    $nestedRepoAfter = @(& git -C $nestedRepo status --porcelain --untracked-files=all)
+
+    if ($boundaryResult.ExitCode -eq 2 -and
+        (Get-StatusLineValue -Output $boundaryResult.Output -Prefix 'STATUS') -eq 'FAIL' -and
+        ($boundaryResult.Output -join "`n") -match 'Unable to infer WorkspaceRoot') {
+        Add-Check 'harness.ps1 does not cross its RepoRoot boundary to select an installed parent workspace'
+    } else {
+        Add-Failure 'harness.ps1 should fail closed instead of selecting an installed workspace above RepoRoot'
+    }
+
+    if (@(Compare-Object $parentAssistantBefore $parentAssistantAfter).Count -eq 0 -and
+        $parentAgentsBefore -eq $parentAgentsAfter -and
+        @(Compare-Object $nestedRepoBefore $nestedRepoAfter).Count -eq 0) {
+        Add-Check 'RepoRoot boundary failure changes neither the installed parent nor the Harness source repo'
+    } else {
+        Add-Failure 'RepoRoot boundary failure should leave the installed parent and Harness source repo unchanged'
+    }
 }
 } finally {
     Remove-DirectoryWithRetry -Path $scratchRoot

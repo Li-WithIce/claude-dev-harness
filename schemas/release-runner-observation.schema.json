@@ -1,0 +1,149 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.invalid/schemas/release-runner-observation.schema.json",
+  "title": "Thin Harness Release Runner Observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "generated_at_utc", "source_revision", "source_dirty", "source_state_stable", "source",
+    "observation_run_id", "producer_identity", "producer_mode", "role", "workflow", "runner", "codex_home",
+    "credential_boundary", "status", "reason", "observation_digest"
+  ],
+  "properties": {
+    "schema_version": { "const": "harness-release-runner-observation/v1" },
+    "generated_at_utc": { "$ref": "#/definitions/utcDateTime" },
+    "source_revision": { "$ref": "#/definitions/objectId" },
+    "source_dirty": { "type": "boolean" },
+    "source_state_stable": { "type": "boolean" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit_tree_oid", "object_format", "start", "end", "input_digests"],
+      "properties": {
+        "commit_tree_oid": { "$ref": "#/definitions/objectId" },
+        "object_format": { "$ref": "#/definitions/objectFormat" },
+        "start": { "$ref": "#/definitions/sourceState" },
+        "end": { "$ref": "#/definitions/sourceState" },
+        "input_digests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["boundary_script_digest", "observation_schema_digest", "rollout_evidence_digest", "host_benchmark_trial_digest", "atomic_write_digest", "path_digest"],
+          "properties": {
+            "boundary_script_digest": { "$ref": "#/definitions/digest" },
+            "observation_schema_digest": { "$ref": "#/definitions/digest" },
+            "rollout_evidence_digest": { "$ref": "#/definitions/digest" },
+            "host_benchmark_trial_digest": { "$ref": "#/definitions/digest" },
+            "atomic_write_digest": { "$ref": "#/definitions/digest" },
+            "path_digest": { "$ref": "#/definitions/digest" }
+          }
+        }
+      }
+    },
+    "observation_run_id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "producer_identity": { "const": "release-runner-observation/v1" },
+    "producer_mode": { "type": "string", "enum": ["formal", "test-only", "diagnostic-smoke"] },
+    "role": { "type": "string", "enum": ["model-producer", "host-producer", "aggregator"] },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "run_attempt"],
+      "properties": {
+        "run_id": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+        "run_attempt": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "runner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label_digest", "account_digest", "account_digest_basis", "platform"],
+      "properties": {
+        "label_digest": { "$ref": "#/definitions/digest" },
+        "account_digest": { "$ref": "#/definitions/digest" },
+        "account_digest_basis": { "const": "windows-sid-workflow-run/v1" },
+        "platform": { "const": "windows" }
+      }
+    },
+    "codex_home": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "identity_digest", "layout_stable", "auth_status", "path_persisted"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["dedicated-auth-home", "absent"] },
+        "identity_digest": { "oneOf": [{ "$ref": "#/definitions/digest" }, { "type": "null" }] },
+        "layout_stable": { "type": "boolean" },
+        "auth_status": { "type": "string", "enum": ["present", "absent"] },
+        "path_persisted": { "const": false }
+      }
+    },
+    "credential_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["forbidden_process_credentials_absent", "default_auth_absent", "credential_values_persisted"],
+      "properties": {
+        "forbidden_process_credentials_absent": { "type": "boolean" },
+        "default_auth_absent": { "type": "boolean" },
+        "credential_values_persisted": { "const": false }
+      }
+    },
+    "status": { "type": "string", "enum": ["pass", "fail", "unavailable"] },
+    "reason": { "type": "string", "enum": ["all-boundary-checks-passed", "non-formal-producer-mode", "boundary-check-failed", "boundary-unavailable"] },
+    "observation_digest": { "$ref": "#/definitions/digest" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "role": { "const": "aggregator" } } },
+      "then": {
+        "properties": {
+          "codex_home": { "properties": { "mode": { "const": "absent" }, "identity_digest": { "type": "null" }, "layout_stable": { "const": true }, "auth_status": { "const": "absent" } } },
+          "credential_boundary": { "properties": { "forbidden_process_credentials_absent": { "const": true }, "default_auth_absent": { "const": true } } }
+        }
+      },
+      "else": {
+        "properties": {
+          "codex_home": { "properties": { "mode": { "const": "dedicated-auth-home" }, "identity_digest": { "$ref": "#/definitions/digest" }, "layout_stable": { "const": true }, "auth_status": { "const": "present" } } }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "producer_mode": { "enum": ["test-only", "diagnostic-smoke"] } } },
+      "then": { "properties": { "status": { "not": { "const": "pass" } } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "pass" } } },
+      "then": { "properties": { "reason": { "const": "all-boundary-checks-passed" } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "fail" } } },
+      "then": { "properties": { "reason": { "const": "boundary-check-failed" } } }
+    },
+    {
+      "if": { "properties": { "producer_mode": { "enum": ["test-only", "diagnostic-smoke"] }, "status": { "const": "unavailable" } } },
+      "then": { "properties": { "reason": { "const": "non-formal-producer-mode" } } }
+    },
+    {
+      "if": { "properties": { "producer_mode": { "const": "formal" }, "status": { "const": "unavailable" } } },
+      "then": { "properties": { "reason": { "const": "boundary-unavailable" } } }
+    }
+  ],
+  "definitions": {
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "objectId": { "type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" },
+    "objectFormat": { "type": "string", "enum": ["sha1", "sha256"] },
+    "utcDateTime": { "type": "string", "format": "date-time", "pattern": "(?:Z|\\+00:00)$" },
+    "sourceState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision", "commit_tree_oid", "object_format", "dirty", "status_entry_count", "status_digest", "state_digest", "state_basis"],
+      "properties": {
+        "revision": { "$ref": "#/definitions/objectId" },
+        "commit_tree_oid": { "$ref": "#/definitions/objectId" },
+        "object_format": { "$ref": "#/definitions/objectFormat" },
+        "dirty": { "type": "boolean" },
+        "status_entry_count": { "type": "integer", "minimum": 0 },
+        "status_digest": { "$ref": "#/definitions/digest" },
+        "state_digest": { "$ref": "#/definitions/digest" },
+        "state_basis": { "const": "git-revision-tree-status/v1" }
+      }
+    }
+  }
+}

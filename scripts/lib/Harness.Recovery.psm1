@@ -147,7 +147,7 @@ function Get-HarnessResumeClarification {
         requirement_state = 'blocked'
         write_authorized = $false
         requested_task_id = $(if ([string]::IsNullOrWhiteSpace($TaskId)) { $null } else { $TaskId })
-        blocking_decision = 'Use resume-and-execute with an explicit TaskId and ExpectedVersion to authorize state mutation.'
+        blocking_decision = 'Use resume-and-execute with an explicit TaskId to authorize one CAS-protected state mutation.'
         recovery = $index
         side_effects = [ordered]@{
             task_state_writes = 0

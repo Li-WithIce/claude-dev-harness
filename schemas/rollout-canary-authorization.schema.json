@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/rollout-canary-authorization.schema.json",
+  "title": "Thin Harness workspace-bound Canary authorization v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "authorization_id",
+    "report_schema_version",
+    "report_phase",
+    "report_digest",
+    "source_revision",
+    "workspace_identity_digest",
+    "observed_host_context_digest",
+    "authorized_by",
+    "issued_at_utc",
+    "expires_at_utc",
+    "new_tasks_only",
+    "status",
+    "authorization_digest"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["rollout-canary-authorization/v1"] },
+    "authorization_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "report_schema_version": { "type": "string", "enum": ["rollout-eligibility/v2"] },
+    "report_phase": { "type": "string", "enum": ["canary-candidate"] },
+    "report_digest": { "$ref": "#/definitions/digest" },
+    "source_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "workspace_identity_digest": { "$ref": "#/definitions/digest" },
+    "observed_host_context_digest": { "$ref": "#/definitions/digest" },
+    "authorized_by": { "type": "string", "minLength": 1, "pattern": "\\S" },
+    "issued_at_utc": { "type": "string", "format": "date-time" },
+    "expires_at_utc": { "type": "string", "format": "date-time" },
+    "new_tasks_only": { "type": "boolean", "const": true },
+    "status": { "type": "string", "const": "granted" },
+    "authorization_digest": { "$ref": "#/definitions/digest" }
+  },
+  "definitions": {
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+  }
+}

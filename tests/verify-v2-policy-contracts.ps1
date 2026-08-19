@@ -107,15 +107,44 @@ $expectedSchemaFiles = @(
     'current-pointer.schema.json',
     'event.schema.json',
     'evidence.schema.json',
+    'exact-head-engineering-evidence.schema.json',
     'ordinary-ci-receipt.schema.json',
     'protected-actions-overlay.schema.json',
     'model-eval-observation.schema.json',
+    'preset-lifecycle-report.schema.json',
     'protocol-config.schema.json',
+    'release-full-receipt.schema.json',
+    'release-host-receipt.schema.json',
+    'release-isolation-report.schema.json',
+    'release-model-receipt.schema.json',
+    'release-runner-observation.schema.json',
     'requirement-contract.schema.json',
-    'task-state.schema.json'
+    'rollout-canary-authorization.schema.json',
+    'rollout-eligibility-v2.schema.json',
+    'rollout-evidence-set.schema.json',
+    'rollout-observed-host-context.schema.json',
+    'rollout-review-payload.schema.json',
+    'rollout-review-receipt.schema.json',
+    'runtime-default-decision.schema.json',
+    'task-state.schema.json',
+    'v1-stop-loss-report.schema.json'
 )
 $actualSchemaFiles = @(Get-ChildItem -LiteralPath $schemaRoot -Filter '*.json' -File | Select-Object -ExpandProperty Name | Sort-Object)
 Assert-True -Condition (@(Compare-Object $expectedSchemaFiles $actualSchemaFiles).Count -eq 0) -Success 'schema set contains the canonical and approved extension contracts' -Failure 'schema set drifted beyond the approved contracts'
+
+$receiptTopKeys = @('schema_version','generated_at_utc','source_revision','source_dirty','source_state_stable','source','receipt_run_id','producer_identity','producer_mode','workflow','runner_observation','artifacts','status','reason','receipt_digest')
+foreach ($kind in @('model','host')) {
+    $receiptSchema = Read-JsonHashtable -Path (Join-Path $schemaRoot "release-$kind-receipt.schema.json")
+    Assert-True -Condition ([string]$receiptSchema['$schema'] -ceq 'http://json-schema.org/draft-07/schema#' -and $receiptSchema.additionalProperties -eq $false -and ((@($receiptSchema.required) -join '|') -ceq ($receiptTopKeys -join '|'))) -Success "release $kind Receipt is a strict minimal Draft 7 contract" -Failure "release $kind Receipt contract is not strict or minimal"
+}
+$fullReceiptTopKeys = @('schema_version','generated_at_utc','source_revision','source_dirty','source_state_stable','source','receipt_run_id','producer_identity','producer_mode','workflow','aggregator_observation','inputs','status','reason','receipt_digest')
+$fullReceiptSchema = Read-JsonHashtable -Path (Join-Path $schemaRoot 'release-full-receipt.schema.json')
+Assert-True -Condition ([string]$fullReceiptSchema['$schema'] -ceq 'http://json-schema.org/draft-07/schema#' -and $fullReceiptSchema.additionalProperties -eq $false -and ((@($fullReceiptSchema.required) -join '|') -ceq ($fullReceiptTopKeys -join '|'))) -Success 'release full Receipt is a strict minimal Draft 7 contract' -Failure 'release full Receipt contract is not strict or minimal'
+$receiptWriter = Get-Content -LiteralPath (Join-Path $RepoRoot 'scripts\write-release-producer-receipt.ps1') -Raw -Encoding utf8
+$fullReceiptWriter = Get-Content -LiteralPath (Join-Path $RepoRoot 'scripts\write-release-full-receipt.ps1') -Raw -Encoding utf8
+$rolloutEvidence = Get-Content -LiteralPath (Join-Path $RepoRoot 'scripts\lib\Harness.RolloutEvidence.psm1') -Raw -Encoding utf8
+Assert-True -Condition ($receiptWriter -match 'New-ReleaseProducerReceiptArtifact' -and $receiptWriter -notmatch 'run-model-evals|run-host-benchmark' -and $rolloutEvidence -match 'DP-G09-RELEASE-MODEL' -and $rolloutEvidence -match 'DP-G10-RELEASE-HOST') -Success 'G09/G10 share one validating Receipt Writer and portable Adapter path' -Failure 'G09/G10 Receipt Writer or Adapter contract is incomplete'
+Assert-True -Condition ($fullReceiptWriter -match 'New-ReleaseFullReceiptArtifact' -and $fullReceiptWriter -notmatch 'run-model-evals|run-host-benchmark|run-preset-lifecycle|run-v1-stop-loss' -and $rolloutEvidence -match 'DP-G11-RELEASE-FULL' -and $rolloutEvidence -match 'harness-release-full-receipt/v1') -Success 'G11 has one aggregation-only Receipt Writer and portable Adapter path' -Failure 'G11 Receipt Writer or Adapter contract is incomplete'
 
 $catalog = Get-Content -LiteralPath $catalogPath -Raw -Encoding utf8 | ConvertFrom-Json -ErrorAction Stop
 $expectedCases = @('approval', 'audit-record', 'current-pointer', 'event', 'evidence', 'requirement-contract', 'task-state')

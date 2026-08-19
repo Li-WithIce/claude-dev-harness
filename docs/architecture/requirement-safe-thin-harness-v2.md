@@ -6,7 +6,7 @@ This document defines the machine-readable contracts introduced by PR-01 and imp
 
 - PR-00 through PR-03 keep v1 as the only default runtime.
 - PR-04 through PR-13 expose v2 only through explicit opt-in.
-- PR-14 lets `auto` select v2 only for a new task with a current all-pass rollout report; a missing, stale, failed, simulated, or unavailable gate selects v1 with a diagnostic reason.
+- PR-14 keeps `auto` artifact-first and consumes only a strict `harness-runtime-default/v1` decision after explicit/workspace preferences; missing, invalid, expired, source-drifted, workspace-mismatched, or capability-incompatible decisions select v1 with a runtime reason. Release Gate reports remain outside Runtime Core.
 - Existing v1 tasks continue to use the current five-stage files and scripts throughout this refactor.
 
 Schema or policy load failure never grants permission. Read-only inspection may continue when policy infrastructure is unavailable, but protected writes fail closed.
@@ -44,6 +44,8 @@ The Requirement Contract contains product truth only: goal, acceptance, scope, c
 Ask is not a fifth profile. It is `requirement_state=blocked`. Legacy `quick` and `workflow` names map to Direct and Governed only as compatibility aliases.
 
 `policies/protected-actions.json` contains hard escalation rules. A match raises requirements; it never declares a command or path safe. PR-01 records only the two plan-defined rules. Detection and approval enforcement arrive in later PRs.
+
+Ordinary configuration persistence is a general Runtime capability. Once the user explicitly authorizes and names a Workspace configuration file, database credentials and external-service keys may be written there, including production configuration, without depending on exact model/Host versions, Release Qualification, Vault, KMS, or a Secret Provider. File adapters send target paths to Core Policy and never classify file bodies as command text; Bash continues to send actual command text. Persistence does not authorize disclosure in replies, logs, task artifacts, Evidence, reviews, PRs, CI artifacts, snapshots, documentation, or unrelated files, and it does not bypass read-only sessions, Workspace containment, protected paths, OS permissions, enterprise endpoint policy, or real production-command governance.
 
 ## Canonical JSON contracts
 

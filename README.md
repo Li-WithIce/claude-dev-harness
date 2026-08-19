@@ -5,9 +5,8 @@ Windows 优先的轻量工程 harness。新任务先经过 Requirement Gate，�
 ## 当前交付状态
 
 - **v2 public opt-in implementation complete**：Requirement Gate、执行 profile、v2 Task State / Evidence / Approval / Audit、v1/v2 共存与迁移，以及工作区级 `enable-v2` 和 `core` / `governed` / `full` 生命周期已进入公共工程交付范围。
-- **v2 default promotion qualification pending**：当前 HEAD 的正式 Model40、真实 cognitive/installed Host 3×3、`v2/bare <= 1.25`、Installed Desktop Gate、eligible rollout promotion、Auto 默认翻转和 Canary / Stable 均未完成，也不计为通过；v1 物理删除是 Stable 之后还需另行授权的 retirement 里程碑。
 - 普通工作区的默认 `auto` 仍继续 fail-closed 到 v1；需要主动试用的新任务可执行一次工作区级 `enable-v2`，之后正常打开 Codex Desktop，不需要保留环境变量。Default Promotion、零配置 Auto 默认 v2 和 v1 retirement 均是后续里程碑。已有任务始终按现有 v2 `task.json` 或 v1 `plan.md` artifact 继续原协议，不会被偏好配置隐式迁移。
-- 入口和架构已经瘦身；当前 HEAD 尚未重新完成正式性能资格测量，因此不声明性能已接近 Bare。
+- 入口和架构已经瘦身；本页不声明性能已接近 Bare。
 
 ## 快速开始
 
@@ -24,7 +23,7 @@ pwsh -File .\install.ps1 `
 
 ### 2. 用 Codex 桌面打开项目
 
-默认兼容用法可直接用 Codex 桌面打开 `D:\my-project`，无需设置 `HARNESS_PROTOCOL`、指定 rollout report 或手工选择 execution profile；当前普通 `auto` 路径进入 v1。要让这个项目的新任务显式使用 v2，只需执行一次：
+默认兼容用法可直接用 Codex 桌面打开 `D:\my-project`，无需设置 `HARNESS_PROTOCOL` 或手工选择 execution profile；当前没有 Runtime Default Decision 时，普通 `auto` 路径进入 v1。要让这个项目的新任务显式使用 v2，只需执行一次：
 
 ```powershell
 # 只读查看当前新任务协议选择
@@ -33,12 +32,12 @@ pwsh -File .assistant\entry\task.ps1 protocol
 # 项目级公共 opt-in；随后可正常打开 Codex Desktop，无需环境变量
 pwsh -File .assistant\entry\task.ps1 enable-v2
 
-# 恢复证据门控的 auto，或立即让新任务止损到 v1
+# 恢复 Runtime Default 驱动的 auto，或立即让新任务止损到 v1
 pwsh -File .assistant\entry\task.ps1 reset-auto
 pwsh -File .assistant\entry\task.ps1 disable-v2
 ```
 
-选择保存在默认不入 Git 的 `.assistant/config/protocol.json`，install、update 和 uninstall 都保留它。优先级固定为：已有 v1/v2 artifact；显式维护覆盖或 `HARNESS_PROTOCOL`；工作区配置；合格 rollout report；v1 fallback。`enable-v2` 只是项目级 opt-in，不是 Default Promotion。
+选择保存在默认不入 Git 的 `.assistant/config/protocol.json`，install、update 和 uninstall 都保留它。优先级固定为：已有 v1/v2 artifact；显式维护覆盖或 `HARNESS_PROTOCOL`；工作区配置；有效的 `.assistant/runtime/protocol-default.json`；v1 fallback。`enable-v2` 是独立可用的项目级 opt-in。
 
 ### 3. 直接描述需求
 
@@ -61,11 +60,11 @@ pwsh -File .assistant\entry\task.ps1 disable-v2
 
 Evidence 记录真实执行过的验证、覆盖与缺口，并绑定任务版本和仓库修订；没有执行的检查不能写成通过。Critical 的 Approval、顶层结构化 `dry_run` 和至少一条成功执行 record 还必须绑定同一个运行时重算的 `protected-operation/v1` identity，且 `covers` 非空并包含它；无关成功 no-op、环境/目标/scope 漂移或旧 Critical 记录缺少绑定都会 fail closed。该 identity 只使用任务版本、Contract digest、规范化环境/目标、受保护动作类别、Approval 类型与 scope 等稳定非秘密输入。Approval 是对确定操作的合作式授权记录，不是密码学身份认证；参与独立性判断的 actor/context/base-model 字段拒绝空白字符串。
 
-Core 只内置有限的受保护动作规则：生产破坏性数据库命令，以及 `auth` / `permissions` / `rbac` 路径变更。项目特有风险必须通过严格的 `protected-actions-overlay/v1` 增加，不能靠提示词放宽 core。安装器把 Codex `PreToolUse` 合并到普通用户 `hooks.json`，不写信任记录，也不覆盖企业 `hooks=false` / managed-only 策略；经用户正常信任并启用后，`Bash` 只把 command text 送入 core policy。Codex 0.144.4 的 Hook payload 不绑定工具实际采用的 environment identity/cwd，remote primary 还可能把 Hook `cwd` 回退为本机旧 cwd；因此 Bash 中的 `apply_patch` / `applypatch` 和所有 direct `apply_patch` 都在 adapter 层 fail closed，不能用一个看似本地的 `cwd` 冒充执行环境。只有宿主以后提供可信的实际 environment identity/cwd 后，才能恢复按 patch 路径做细粒度放行。该版本真实 `permission_mode` 只有 `default` / `bypassPermissions`，不代表 Plan 协作模式；adapter 不从它臆造只读保证。
+Core 只内置有限的受保护动作规则：生产破坏性数据库命令，以及 `auth` / `permissions` / `rbac` 路径变更。项目特有风险必须通过严格的 `protected-actions-overlay/v1` 增加，不能靠提示词放宽 core。安装器把 Codex `PreToolUse` 合并到普通用户 `hooks.json`，不写信任记录，也不覆盖企业 `hooks=false` / managed-only 策略；经用户正常信任并启用后，普通文件工具只把目标路径送入 core policy，direct `apply_patch` 严格解析全部 Add/Update/Delete/Move 目标并按 Hook payload 的 `cwd` 做 Workspace containment，`Write`、`Edit`、`MultiEdit`、`NotebookEdit` 不把正文送入 `command_text`。因此用户明确授权的数据库凭证和外部服务 Key 可以持久化到指定 Workspace 配置文件，包括生产配置；该能力通用、版本中立，不依赖 Release Qualification、Vault、KMS 或 Secret Provider。持久化不等于披露：敏感值不得进入回复、日志、Task State、Plan、Evidence、Review、PR、CI artifact、测试 snapshot、文档或无关文件。`Bash` 仍把真实 command text 送入 core；缺少有效 tool workdir/environment 绑定的 shell-form `apply_patch` / `applypatch` 继续 fail closed。缺少 `cwd`、无法解析目标、read-only、Workspace 外路径、受保护路径、操作系统或企业端点拒绝也保持 fail closed；adapter 不从 approval/permission 标签臆造只读保证。
 
-Windows 启动链兼容 Codex 0.144.4 传入的本地环境 shell，并使用绝对 System32 Windows PowerShell 与安装时固化的绝对 PowerShell 7.3+ 路径；用户 JSON 用显式 writer 精确保留 `BigInteger` 与 decimal，不依赖 PowerShell 7.5 才具备的 `ConvertTo-Json` 行为。命令、参数和脚本文件均保持明文，不使用 `EncodedCommand`、隐藏窗口、动态求值、改写信任或安全产品绕过。用户目录若包含无法同时由 cmd 与 PowerShell 安全表示的 `` ` $ % ! ^ & | < > ( ) `` 字符，安装会在写入前拒绝。`tests/verify-v2-install-presets.ps1` 只证明安装后的原样命令可经 `cmd.exe /C`、PowerShell 7 和 Windows PowerShell 解析并产生预期 allow/deny JSON，不证明 Codex 已信任或启用 Hook，也不证明飞连/其他企业端点产品已放行。若企业策略、Hook trust 或端点隔离阻止脚本，Hook 状态就是 unavailable；不得改名、混淆或换载体绕过。宿主 Hook 只是已知工具面的 guardrail，不是完整执行边界。Codex 的“完全访问”不等于生产授权；桌面宿主无法提供不可绕过执行边界时，Critical 生产动作必须交给独立受控执行器，Codex 只生成 Plan、Dry Run、Approval Request 和 Evidence。Hook request 与 remote-primary 回退的固定版本实现见 [hook runtime](https://github.com/openai/codex/blob/rust-v0.144.4/codex-rs/core/src/hook_runtime.rs) 和 [turn context](https://github.com/openai/codex/blob/rust-v0.144.4/codex-rs/core/src/session/turn_context.rs)。
+Windows 启动链使用绝对 System32 Windows PowerShell 与安装时固化的 PowerShell 7.3+ 路径；用户 JSON 用显式 writer 精确保留 `BigInteger` 与 decimal。命令、参数和脚本文件均保持明文，不使用 `EncodedCommand`、隐藏窗口、动态求值、改写信任或安全产品绕过。用户目录若包含无法同时由 cmd 与 PowerShell 安全表示的 `` ` $ % ! ^ & | < > ( ) `` 字符，安装会在写入前拒绝。`tests/verify-v2-install-presets.ps1` 证明命令链可解析并产生预期 allow/deny JSON，但不证明 Host 已信任或启用 Hook，也不证明端点产品已放行。企业策略、Hook trust 或端点隔离无法观测时，Capability 保持 `unavailable`；普通 Direct 不把这种不可观测性误写成 Release 失败。宿主 Hook 是 guardrail，不是完整执行边界；Critical 生产动作仍必须交给独立受控执行器。
 
-仓库同时提供 qualification-only 的 `config.workspace.toml.template` 与 `harness-write-mcp.ps1`，用于验证“原生只读、唯一受控写工具”的确定性边界。受控 writer 固定 RepoRoot/WorkspaceRoot、规范化目标、执行目标 preimage CAS，并对受保护写重新绑定 v2 task/version/profile/Contract/Approval/dry-run；它拒绝 Harness 控制面、自身 RepoRoot 和 NTFS alternate data stream。Codex 0.144.4 的原生 app-server 已实际调用 `write_file`，且当前 MCP 接受宿主发送的对象型 `_meta`、拒绝非对象型 `_meta`；但 `install.ps1` 当前不会部署该模板：`:read-only` 也会阻断 v1 五阶段写回、构建/缓存产物、删除/重命名和 Git 提交，现有 writer 尚未提供这些等价能力。把静态配置加载冒充完整 Desktop 可用性会破坏 v1/v2 渐进兼容，因此默认状态仍是 unavailable，不能写成 active/pass。
+仓库同时提供 release-only 的 `config.workspace.toml.template` 与 `harness-write-mcp.ps1`，用于验证“原生只读、唯一受控写工具”的确定性边界。受控 writer 固定 RepoRoot/WorkspaceRoot、规范化目标、执行目标 preimage CAS，并对受保护写重新绑定 v2 task/version/profile/Contract/Approval/dry-run；它拒绝 Harness 控制面、自身 RepoRoot 和 NTFS alternate data stream。`install.ps1` 不部署该原型；无法观察时状态保持 `unavailable`，不能写成 active/pass。
 
 ## Worktree 与回滚最短路径
 
@@ -396,13 +395,11 @@ pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite core -
 - `core`：跑 `git diff --check`、v1/v2 核心协议、Requirement/route/TaskState/Evidence/Approval/兼容迁移、行为 eval、CI 路由、artifact/runtime/install 合同与基础 workflow/skill/tool checks；Memory、Team、md-html、Codex adapter 和 Provider 重型验证由 changed optional 或 `all` 执行。
 - `all`：跑 `git diff --check` 加除 `verify-installation.ps1` 外所有 `tests/verify-*.ps1`；需要安装验证时额外传 `-WorkspaceRoot`。
 
-`-CoreGroup` 只允许与 `-Suite core` 一起使用，默认值 `all` 保持原有 40 个 core 脚本及其顺序；五个可单独执行的分组依次为 `entry-lifecycle`（12）、`evaluation-release`（8）、`install-evidence`（2）、`governance-approval`（3）和 `harness-contracts`（15）。从 Windows PowerShell 5.1 进入时，该参数也会透明转交给 PowerShell 7 runner。
+`-CoreGroup` 只允许与 `-Suite core` 一起使用，默认值 `all` 保持 49 个 core 脚本及其顺序；五个可单独执行的分组依次为 `entry-lifecycle`（14）、`evaluation-release`（14）、`install-evidence`（3）、`governance-approval`（3）和 `harness-contracts`（15）。从 Windows PowerShell 5.1 进入时，该参数也会透明转交给 PowerShell 7 runner。
 
-GitHub Actions 使用三层 Windows 验证：pull request 的 **PR core** 先由 `pr-core-checks` 的五路 matrix 分别运行一个 `CoreGroup`，再由最终 `pr-core` 执行 core 安装回滚；**changed optional** 仅在 Memory、Team、md-html、Codex adapter 或 Provider 路径变化时运行对应重型验证，路由/安装面变化时 fail closed 全跑；可信 ref 上的 release qualification 依次运行 40-session real model Eval，以及三组相互独立的 clean bare/v1/v2 3×3 real host benchmark（共 27 个 observation，每组独立通过 latency/request-reduction 门槛），再由 **release full** 聚合 job 下载两个单文件 artifact，绑定单体 `Suite all` 与 core/full 安装回滚。所有普通 PR job 都显式 checkout 当前 pull request head SHA；每个 matrix leg、changed optional 和 aggregate rollback 都上传一个 `thin-harness-ordinary-ci-receipt/v1` 单文件 artifact，只含 PR/run、base/head/checkout SHA、固定 check identity、outcome 与 UTC 时间，不含 prompt、credential/auth、raw trace/log 或私人绝对路径。它是 external delivery receipt，不写回 tracked 文档。最终 `pr-core` 使用 `always()` 读取整个 matrix 的结果，并把 guard 作为第一步；只有结果精确为 `success` 才 checkout 并执行回滚，任一分组失败、取消或跳过都会让最终检查 fail closed，不能因依赖 job 被跳过而误绿。Model Eval 在每个 session 调用前使用同一可执行文件严格校验 `codex-cli 0.144.4`，每个 session 只接受携带该版本的 `codex-invocation-telemetry/v2`，聚合只接受 `harness-model-eval-report/v2`；任一版本、schema 或 session 证据缺失/不匹配均 fail closed，不能进入 eligible。`Trials=9` 或复制同一 3×3 组不能代替三组独立证据。生产者失败不会被吞掉，但未取消时仍上传已经生成的诊断报告；聚合 job 在前置失败但未取消时继续，缺报告记为 `unavailable`，generator 使用 `-RequireEligible`，最终 release 不会误绿。每个 job 使用由 run id、attempt 与 job 名绑定的新目录并拒绝预存目录；中间 artifact 必须恰有一个固定 JSON，最终 artifact 的上传范围只含三个固定 JSON。`pr-core-checks` 的每个 matrix leg 与最终 `pr-core` job 上限均为 45 分钟，`changed-optional` job 上限为 30 分钟，model/host/聚合 job 上限分别为 120/240/120 分钟；model/host 的单次 Codex 调用上限分别为 120/900 秒；常规 verify 脚本上限为 360 秒，磁盘密集的 host benchmark qualification 单项上限为 900 秒。CI 不安装、注册或连接外部 provider，也不要求 Node.js。
+GitHub Actions 的普通 PR 路径由五路 `pr-core-checks` matrix、`changed-optional` 和最终 core 安装回滚组成。所有普通 PR job 都 checkout 精确 PR HEAD，并分别上传一个 `thin-harness-ordinary-ci-receipt/v1` 单文件 artifact；receipt 只含 PR/run、base/head/checkout SHA、固定 check identity、outcome 与 UTC 时间，不含 prompt、credential、raw trace/log 或私人绝对路径。最终 `pr-core` 只有在五个分组精确为 `success` 时才继续；`pr-core-checks` 的每个 matrix leg 与最终 `pr-core` job 上限均为 45 分钟，`changed-optional` 上限为 30 分钟。其他 CI 维护合同见 [`docs/release/default-promotion-gates.md`](docs/release/default-promotion-gates.md)。
 
-三个 release job 都强制使用 `self-hosted`、`Windows`，不再回退 `windows-latest`，并绑定 `thin-v2-release` environment。`release-model`、`release-host` 使用 `THIN_V2_RELEASE_RUNNER` 指定的独占 producer label，并接收非敏感的 `HOST_BENCHMARK_CODEX_HOME` 路径；`release-full` 使用独立 `THIN_V2_RELEASE_AGGREGATOR_RUNNER` label 下的无登录 OS account，只读取脱敏 artifact，不接收 CodexHome 路径、不读取凭证 payload、也不重跑 producer。两个 producer 会各自将 Windows account SID 与 run id/attempt 一起做 SHA-256 摘要，只将本次 run 范围的摘要交给 aggregator；aggregator 使用同一算法计算自身摘要，与任一 producer 相同就 fail closed，且拒绝默认 `$HOME/.codex/auth.json` 以及 `HOST_BENCHMARK_CODEX_HOME`、`CODEX_HOME`、`CODEX_API_KEY`、`CODEX_ACCESS_TOKEN`、`OPENAI_API_KEY` 凭证环境变量。因此 label 只负责选路，运行时账户摘要和凭证面校验才是聚合边界。`runs-on` 早于 job environment 解析，因此两个 runner selector 都必须配置为 repository/org-level variable，不能使用 environment-level variable 选路；任一变量缺失都 fail closed。正式资格只能运行 `main`、`codex/harness-distribution` 或 `codex/thin-harness-v2-refactor`；environment 应启用分支限制和必要的审批。两个 runner account 都不承载其他 secrets 或工作负载，并预装 PowerShell 7.3+、Git、符合 OTel 合同的 Codex CLI/service `0.144.4`；release checkout 使用 `persist-credentials: false`。producer 目录内的 `auth.json`、OAuth/token 只留在其 runner 文件系统，不能复制到仓库、Actions variable/secret、workflow input、aggregator 或 artifact。缺少专用 label、合格登录或精确版本时，资格 fail closed 或真实报告保持 `unavailable`。`tests/run-scenario-evals.ps1` 的 deterministic policy/schema 结果和 `scripts/benchmark-harness.ps1` 的 fixture replay 仍用于 PR/本地诊断，均不能替代 release model/host evidence。
-
-协议解析先认已有 v2 `task.json` / 合法 v1 `plan.md` artifact，再看显式维护覆盖或 `HARNESS_PROTOCOL`，随后读取严格的工作区 `.assistant/config/protocol.json`。只有新任务最终仍为 `auto` 时，才按显式 `EligibilityReportPath`、`HARNESS_V2_ELIGIBILITY_REPORT`、workspace canonical `.assistant/runtime/rollout/v2-eligibility.json` 的固定优先级查找 revision-bound report；最后回退 v1。高优先级 report 来源一旦被选中但 missing/invalid 会直接回退 v1，不会用 canonical 掩盖错误。CI artifact 仍不自动下载；把 artifact 保存为 repo、workspace、Git metadata 和 credential home 之外的普通文件后，使用透明、无网络的 `scripts/promote-v2-rollout-report.ps1` 原子发布到固定 canonical 路径。installer/update/uninstall 不生成、接管或删除协议配置或 rollout 证据。缺失、dirty、stale、篡改、failed、blocked、simulated 或 unavailable report 均诊断后回退 v1；`disable-v2` / `HARNESS_PROTOCOL=v1` 永久保留为止损开关。生成、显式发布、Default Promotion、deprecation 与 v1 退役条件见 `docs/release/compatibility-policy.md`。
+协议解析先认已有 v2 `task.json` / 合法 v1 `plan.md` artifact，再看显式维护覆盖或 `HARNESS_PROTOCOL`，随后读取严格的工作区 `.assistant/config/protocol.json`。只有新任务最终仍为 `auto` 时才读取版本无关、Evidence 无关的 `.assistant/runtime/protocol-default.json`；它严格验证 schema、digest、绑定固定 Runtime 路径集的 Source Identity、可选 workspace/expiry 绑定和实际 required capabilities，并且只观察当前 Decision 要求的能力。Decision 缺失或无效时回退 v1；`disable-v2` / `HARNESS_PROTOCOL=v1` 永久保留为止损开关。
 
 ### 跑完整 verify 套件
 

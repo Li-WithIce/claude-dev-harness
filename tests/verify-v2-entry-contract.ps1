@@ -115,7 +115,7 @@ function Test-ExplicitNewV2FastPath {
         if (-not $fastBlock.Contains($fragment, [System.StringComparison]::Ordinal)) { return $false }
     }
     return $Text.Contains('Known: `.assistant\entry\task.ps1 protocol -TaskId {task_id}`; v2 state, else v1 plan, wins.', [System.StringComparison]::Ordinal) -and
-        $Text.Contains('New: `.assistant\entry\task.ps1 protocol`; config `v1|v2|auto`, then passing rollout or v1 fallback.', [System.StringComparison]::Ordinal) -and
+        $Text.Contains('New: `.assistant\entry\task.ps1 protocol`; config `v1|v2|auto`, then a valid Runtime Default Decision or v1 fallback.', [System.StringComparison]::Ordinal) -and
         $Text.Contains('No status/runtime/lifecycle fan-out.', [System.StringComparison]::Ordinal) -and
         $Text.Contains('Existing v2 may status/resume; v1 may load its shim.', [System.StringComparison]::Ordinal) -and
         $Text.Contains('minimum focused checks covering all confirmed acceptance criteria', [System.StringComparison]::Ordinal) -and
@@ -212,7 +212,7 @@ try {
     $canonicalDigest = Get-FileDigest -Path $canonicalPath
     $canonicalHasBom = $canonicalBytes.Length -ge 3 -and $canonicalBytes[0] -eq 0xEF -and $canonicalBytes[1] -eq 0xBB -and $canonicalBytes[2] -eq 0xBF
     Assert-True -Condition (-not $canonicalHasBom -and -not $canonicalText.Contains("`r")) -Success 'canonical entry contract is deterministic LF UTF-8 without BOM' -Failure 'canonical entry contract encoding is not deterministic'
-    Assert-True -Condition ($canonicalText -match '`protocol_default`:\s*`auto`' -and $canonicalText -match '`auto_resolves_to`:\s*`existing-artifact-or-gated-v2-new`' -and $canonicalText -match '`v2_entry_activation`:\s*`explicit-or-workspace-new-or-existing-v2-or-eligible-auto-new`') -Success 'auto is artifact-first and requires an eligible report for a new v2 task' -Failure 'entry contract protocol detector rollout is invalid'
+    Assert-True -Condition ($canonicalText -match '`protocol_default`:\s*`auto`' -and $canonicalText -match '`auto_resolves_to`:\s*`existing-artifact-or-runtime-default-or-v1-fallback`' -and $canonicalText -match '`v2_entry_activation`:\s*`explicit-or-workspace-new-or-existing-v2-or-runtime-default-new`') -Success 'auto is artifact-first and consumes only a Runtime Default Decision' -Failure 'entry contract protocol detector default is invalid'
     Assert-True -Condition (Test-ExplicitNewV2FastPath -Text $canonicalText) -Success 'explicit new v2 Direct is the first complete hop with one-shot fallback and a bounded stop condition' -Failure 'entry contract leaves explicit new v2 Direct vulnerable to discovery fan-out or unbounded post-action work'
     foreach ($fragment in @(
             'host/user-surfaced `HARNESS_PROTOCOL`',
@@ -238,7 +238,7 @@ try {
     Assert-True -Condition ($canonicalText -notmatch '\{(?:REPO_ROOT|VAULT_PATH|CODEX_HOME)\}' -and $canonicalText -notmatch '`auto_resolves_to`:\s*`v2`') -Success 'canonical body is host-neutral and never enables unconditional auto=v2' -Failure 'canonical body contains a host token or unconditional v2 default'
 
     $fixture = Get-Content -LiteralPath $fixturePath -Raw -Encoding utf8 | ConvertFrom-Json -ErrorAction Stop
-    Assert-True -Condition ([string]$fixture.schema_version -ceq 'thin-harness-entry-routing/v1' -and [string]$fixture.protocol.default -ceq 'auto' -and [string]$fixture.protocol.auto_resolves_to -ceq 'existing-artifact-or-gated-v2-new' -and [string]$fixture.protocol.v2_entry_activation -ceq 'explicit-or-workspace-new-or-existing-v2-or-eligible-auto-new') -Success 'route fixture preserves artifact-first gated auto' -Failure 'route fixture protocol metadata is invalid'
+    Assert-True -Condition ([string]$fixture.schema_version -ceq 'thin-harness-entry-routing/v1' -and [string]$fixture.protocol.default -ceq 'auto' -and [string]$fixture.protocol.auto_resolves_to -ceq 'existing-artifact-or-runtime-default-or-v1-fallback' -and [string]$fixture.protocol.v2_entry_activation -ceq 'explicit-or-workspace-new-or-existing-v2-or-runtime-default-new') -Success 'route fixture preserves artifact-first Runtime Default auto' -Failure 'route fixture protocol metadata is invalid'
     $invariants = @($fixture.baseline.invariants)
     $invariantIds = @($invariants | ForEach-Object { [string]$_.id })
     Assert-True -Condition ([string]$fixture.baseline.commit -ceq $baselineCommit -and $invariants.Count -eq 9 -and @($invariantIds | Select-Object -Unique).Count -eq 9) -Success 'v1 fixture pins nine unique behavior invariants to the immutable base commit' -Failure 'v1 baseline invariant catalog is incomplete or points at the wrong commit'
