@@ -593,7 +593,8 @@ $artifactByKey = [System.Collections.Generic.SortedDictionary[string,object]]::n
 foreach ($artifact in @($roots.trust_artifacts)) {
     $path = [string]$artifact.path
     if (-not $artifactPaths.Add($path)) { throw "duplicate trust artifact path: $path" }
-    $fullPath = Resolve-RepoFile -Path $path -Label 'trust artifact'
+    [void](Resolve-RepoFile -Path $path -Label 'trust artifact')
+    [byte[]]$normalizedArtifactBytes = Get-InventoryNormalizedTextBytes -Path $path -Label 'TCB artifact byte source'
     $artifactByKey.Add($path, [ordered]@{
         path = $path
         sha256 = Get-InventoryNormalizedTextDigest -Path $path -Label 'TCB artifact digest source'
@@ -602,7 +603,7 @@ foreach ($artifact in @($roots.trust_artifacts)) {
         trust_paths = @(Get-OrdinalStrings -Values @($artifact.trust_paths))
         reason = [string]$artifact.reason
         physical_loc = Get-TextPhysicalLoc -Path $path
-        bytes = [IO.File]::ReadAllBytes($fullPath).Length
+        bytes = $normalizedArtifactBytes.Length
     })
 }
 
