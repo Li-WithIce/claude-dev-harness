@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/kernel-component-classification.schema.json",
+  "title": "Kernel Component Classification v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "components"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": ["kernel-component-classification/v1"]
+    },
+    "components": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/component" }
+    }
+  },
+  "definitions": {
+    "repoPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!.*\\\\)(?!.*//)(?!\\.\\.?(?:/|$))(?!.*\\/\\.\\.?(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$"
+    },
+    "layer": {
+      "type": "string",
+      "enum": [
+        "k0-trust-primitive",
+        "k1-runtime-kernel",
+        "d1-distribution",
+        "c2-capability",
+        "a3-adapter",
+        "legacy-v1"
+      ]
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "layer",
+        "current_role",
+        "owner_candidate",
+        "tcb_included",
+        "reason",
+        "migration_target",
+        "legacy_status"
+      ],
+      "properties": {
+        "path": { "$ref": "#/definitions/repoPath" },
+        "layer": { "$ref": "#/definitions/layer" },
+        "current_role": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "owner_candidate": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,62}$"
+        },
+        "tcb_included": { "type": "boolean" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "migration_target": {
+          "oneOf": [
+            { "type": "string", "minLength": 1, "maxLength": 240 },
+            { "type": "null" }
+          ]
+        },
+        "legacy_status": {
+          "type": "string",
+          "enum": ["not-legacy", "transitional", "sunset-gated"]
+        }
+      }
+    }
+  }
+}

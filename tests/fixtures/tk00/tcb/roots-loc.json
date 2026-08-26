@@ -1,0 +1,14 @@
+{
+  "schema_version": "kernel-tcb-roots/v1",
+  "classification_path": "tests/fixtures/tk00/tcb/classification.json",
+  "runtime_roots": [
+    { "id": "loc-vector", "path": "tests/fixtures/tk00/tcb/loc-vector.ps1", "role": "Known line vector.", "layer": "k1-runtime-kernel", "reason": "Freezes LOC semantics." }
+  ],
+  "distribution_roots": [
+    { "id": "fixture-leaf", "path": "tests/fixtures/tk00/tcb/leaf.psm1", "role": "Schema-required second trust path.", "layer": "k0-trust-primitive", "reason": "Keeps fixture roots minimal." }
+  ],
+  "trust_artifacts": [],
+  "manual_edges": [],
+  "external_dependencies": [],
+  "budget": { "baseline_executable_loc": 0, "exceptions": [] }
+}

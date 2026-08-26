@@ -1,0 +1,19 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "memory",
+  "kind": "capability",
+  "description": "Unknown fields must fail.",
+  "default_activation": false,
+  "dependencies": { "kernel_api": "v1", "modules": [] },
+  "requested_capabilities": [],
+  "ownership": { "owned_paths": ["skills/obsidian-memory/**"], "watch_paths": [] },
+  "entrypoints": { "commands": [], "hooks": [] },
+  "validation": {
+    "owner_tests": ["tests/verify-shared-memory-layers.ps1"],
+    "quick": [],
+    "core_group": "harness-contracts",
+    "changed": [],
+    "full": []
+  },
+  "unexpected": true
+}

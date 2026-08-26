@@ -1,0 +1,18 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "v1-runtime",
+  "kind": "legacy",
+  "description": "Legacy modules cannot be activated by default.",
+  "default_activation": true,
+  "dependencies": { "kernel_api": "v1", "modules": [] },
+  "requested_capabilities": [],
+  "ownership": { "owned_paths": ["skills/entry-router/**"], "watch_paths": [] },
+  "entrypoints": { "commands": [], "hooks": [] },
+  "validation": {
+    "owner_tests": ["tests/verify-v1-v2-coexistence.ps1"],
+    "quick": [],
+    "core_group": "entry-lifecycle",
+    "changed": [],
+    "full": []
+  }
+}

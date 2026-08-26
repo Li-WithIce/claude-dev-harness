@@ -1,0 +1,18 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "Kernel",
+  "kind": "kernel",
+  "description": "Module ids are canonical lowercase and reserved ids are rejected.",
+  "default_activation": false,
+  "dependencies": { "kernel_api": "v1", "modules": [] },
+  "requested_capabilities": [],
+  "ownership": { "owned_paths": ["scripts/lib/Harness.Path.psm1"], "watch_paths": [] },
+  "entrypoints": { "commands": [], "hooks": [] },
+  "validation": {
+    "owner_tests": ["tests/verify-thin-trust-kernel-contracts.ps1"],
+    "quick": [],
+    "core_group": "harness-contracts",
+    "changed": [],
+    "full": []
+  }
+}

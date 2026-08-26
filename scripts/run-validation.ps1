@@ -168,6 +168,7 @@ $coreScriptGroups = [ordered]@{
     )
     'harness-contracts' = @(
         'verify-harness-entry.ps1',
+        'verify-kernel-tcb-inventory.ps1',
         'verify-lite-artifact-validator.ps1',
         'verify-lite-footprint.ps1',
         'verify-minimal-safe-change-policy.ps1',
@@ -181,6 +182,7 @@ $coreScriptGroups = [ordered]@{
         'verify-runtime-state-contract.ps1',
         'verify-skill-manifest.ps1',
         'verify-task-artifact-drift-audit.ps1',
+        'verify-thin-trust-kernel-contracts.ps1',
         'verify-tool-profile.ps1'
     )
 }

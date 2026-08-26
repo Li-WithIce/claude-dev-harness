@@ -1,0 +1,18 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "codex-adapter",
+  "kind": "adapter",
+  "description": "Adapters cannot write task state directly.",
+  "default_activation": false,
+  "dependencies": { "kernel_api": "v1", "modules": [] },
+  "requested_capabilities": ["task-state-write"],
+  "ownership": { "owned_paths": ["runtime-hooks/claude/codex-pretooluse-launcher.ps1"], "watch_paths": [] },
+  "entrypoints": { "commands": [], "hooks": ["runtime-hooks/claude/codex-pretooluse-launcher.ps1"] },
+  "validation": {
+    "owner_tests": ["tests/verify-runtime-hooks.ps1"],
+    "quick": [],
+    "core_group": "harness-contracts",
+    "changed": [],
+    "full": []
+  }
+}
