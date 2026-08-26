@@ -170,7 +170,11 @@ The machine sources are:
 All paths are repository-relative POSIX paths sorted with ordinal semantics. The
 Inventory contains no Git Head, time, user, machine, process, temporary, or
 absolute path. `-Check` constructs the complete JSON in memory, rejects uncovered
-budget growth, compares tracked bytes, and writes nothing. Explicit
+budget growth, compares canonical tracked text bytes, and writes nothing. File,
+artifact, and tracked-inventory bytes preserve any UTF-8 BOM but normalize CRLF
+and CR to LF before SHA-256 or equality checks, so a Git text checkout cannot
+change the inventory. This representation is local to engineering inventory and
+does not introduce the future canonical Runtime hashing contract. Explicit
 `-OutputPath` is the only generation write surface and uses the canonical atomic
 write primitive.
 

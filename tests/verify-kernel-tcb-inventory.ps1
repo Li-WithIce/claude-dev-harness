@@ -61,6 +61,19 @@ function Test-BytesEqual {
     for ($index = 0; $index -lt $Left.Length; $index++) { if ($Left[$index] -ne $Right[$index]) { return $false } }
     return $true
 }
+function ConvertTo-LfBytes {
+    param([byte[]]$Bytes)
+    $normalized = [System.Collections.Generic.List[byte]]::new($Bytes.Length)
+    for ($index = 0; $index -lt $Bytes.Length; $index++) {
+        if ($Bytes[$index] -eq 0x0D) {
+            if ($index + 1 -lt $Bytes.Length -and $Bytes[$index + 1] -eq 0x0A) { $index++ }
+            $normalized.Add(0x0A)
+        } else {
+            $normalized.Add($Bytes[$index])
+        }
+    }
+    return ,$normalized.ToArray()
+}
 function Get-StringLeaves {
     param([object]$Value)
     if ($null -eq $Value) { return }
@@ -104,7 +117,10 @@ Check $classificationValid 'component classification satisfies the strict Schema
 $roots = $rootsText | ConvertFrom-Json -AsHashtable -Depth 100
 $inventory = $inventoryText | ConvertFrom-Json -AsHashtable -Depth 100
 $classification = $classificationText | ConvertFrom-Json -AsHashtable -Depth 100
-$trackedBytes = [IO.File]::ReadAllBytes($inventoryPath)
+[byte[]]$trackedBytes = ConvertTo-LfBytes -Bytes ([IO.File]::ReadAllBytes($inventoryPath))
+$lineEndingLf = [Text.UTF8Encoding]::new($false).GetBytes("alpha`nbeta`n")
+$lineEndingCrlf = [Text.UTF8Encoding]::new($false).GetBytes("alpha`r`nbeta`r`n")
+Check (Test-BytesEqual -Left $lineEndingLf -Right (ConvertTo-LfBytes -Bytes $lineEndingCrlf)) 'inventory comparison normalizes checkout CRLF to canonical LF' 'inventory comparison is checkout-line-ending dependent'
 $trackedDigestBefore = (Get-FileHash -LiteralPath $inventoryPath -Algorithm SHA256).Hash
 $statusBeforeCheck = @(Get-StatusSnapshot)
 $checkRun = Invoke-InventoryGenerator -RootsPath 'kernel-tcb-roots.json' -CheckMode

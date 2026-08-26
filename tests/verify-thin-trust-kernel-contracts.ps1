@@ -15,6 +15,21 @@ function Check {
     if ($Condition) { Write-Output "[PASS] $Success" } else { Write-Output "[FAIL] $Failure"; Add-Failure $Failure }
 }
 function Read-Text { param([string]$Path) return [IO.File]::ReadAllText((Join-Path $RepoRoot $Path), [Text.UTF8Encoding]::new($false, $true)) }
+function Get-LfNormalizedSha256 {
+    param([string]$Path)
+    [byte[]]$bytes = [IO.File]::ReadAllBytes($Path)
+    [void][Text.UTF8Encoding]::new($false, $true).GetString($bytes)
+    $normalized = [System.Collections.Generic.List[byte]]::new($bytes.Length)
+    for ($index = 0; $index -lt $bytes.Length; $index++) {
+        if ($bytes[$index] -eq 0x0D) {
+            if ($index + 1 -lt $bytes.Length -and $bytes[$index + 1] -eq 0x0A) { $index++ }
+            $normalized.Add(0x0A)
+        } else {
+            $normalized.Add($bytes[$index])
+        }
+    }
+    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($normalized.ToArray())).ToLowerInvariant()
+}
 function Test-JsonAgainstSchema {
     param([string]$Path, [string]$SchemaPath)
     try {
@@ -187,12 +202,12 @@ Check ($rolloutClassification.Count -eq 1 -and [string]$rolloutClassification[0]
 Check (@($classification.components | Where-Object { [string]$_.layer -ceq 'c2-capability' -and [bool]$_.tcb_included }).Count -eq 0) 'no C2 capability is included in the measured Kernel TCB' 'a C2 capability leaked into TCB inclusion'
 
 $entryContractPath = Join-Path $RepoRoot 'policies\entry-contract.md'
-$entryContractDigest = (Get-FileHash -LiteralPath $entryContractPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$entryContractDigest = Get-LfNormalizedSha256 -Path $entryContractPath
 $entryContractLines = @(Get-Content -LiteralPath $entryContractPath).Count
 $entryContractBytes = [Text.Encoding]::UTF8.GetByteCount([IO.File]::ReadAllText($entryContractPath))
 Check ($entryContractDigest -ceq '346224d62f82926a11bac09335e97766c08b813b71774a714abea924e49ff93e' -and $entryContractLines -eq 15 -and $entryContractBytes -eq 1852) 'TK-00 leaves the canonical Entry Contract byte-for-byte unchanged' 'Entry Contract content, lines, or bytes changed during TK-00'
-Check ((Get-FileHash -LiteralPath (Join-Path $RepoRoot 'scripts\lib\Harness.Path.psm1') -Algorithm SHA256).Hash.ToLowerInvariant() -ceq '774b55f8095b65f289a78adda04e6ee8752ead48a36653384119a393423e27de') 'TK-00 leaves canonical Harness.Path unchanged' 'Harness.Path changed during TK-00'
-Check ((Get-FileHash -LiteralPath (Join-Path $RepoRoot 'scripts\lib\Harness.AtomicWrite.psm1') -Algorithm SHA256).Hash.ToLowerInvariant() -ceq '44da7ec4ba73f71af2d7f8159cd4e7cb38e967b0e9cc561679d11d8918c5ac31') 'TK-00 leaves canonical Harness.AtomicWrite unchanged' 'Harness.AtomicWrite changed during TK-00'
+Check ((Get-LfNormalizedSha256 -Path (Join-Path $RepoRoot 'scripts\lib\Harness.Path.psm1')) -ceq '774b55f8095b65f289a78adda04e6ee8752ead48a36653384119a393423e27de') 'TK-00 leaves canonical Harness.Path unchanged across checkout line endings' 'Harness.Path changed during TK-00'
+Check ((Get-LfNormalizedSha256 -Path (Join-Path $RepoRoot 'scripts\lib\Harness.AtomicWrite.psm1')) -ceq '44da7ec4ba73f71af2d7f8159cd4e7cb38e967b0e9cc561679d11d8918c5ac31') 'TK-00 leaves canonical Harness.AtomicWrite unchanged across checkout line endings' 'Harness.AtomicWrite changed during TK-00'
 Check (-not (Test-Path -LiteralPath (Join-Path $RepoRoot 'scripts\lib\Harness.Hashing.psm1'))) 'TK-00 does not create Harness.Hashing.psm1' 'Harness.Hashing.psm1 was created in TK-00'
 $trackedRealManifests = @(& git -C $RepoRoot ls-files -- '*module.manifest.json')
 Check ($trackedRealManifests.Count -eq 0) 'TK-00 creates no real module.manifest.json' 'a real tracked module.manifest.json was created in TK-00'

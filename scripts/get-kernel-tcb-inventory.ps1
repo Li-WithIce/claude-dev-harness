@@ -54,6 +54,42 @@ function Get-RepoRelativePath {
     return $relative
 }
 
+function Get-InventoryNormalizedTextBytes {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Label
+    )
+
+    $fullPath = Resolve-RepoFile -Path $Path -Label $Label
+    [byte[]]$bytes = [IO.File]::ReadAllBytes($fullPath)
+    try {
+        [void]$script:Utf8Strict.GetString($bytes)
+    } catch {
+        throw "$Label is not strict UTF-8: $($_.Exception.Message)"
+    }
+
+    $normalized = [System.Collections.Generic.List[byte]]::new($bytes.Length)
+    for ($index = 0; $index -lt $bytes.Length; $index++) {
+        if ($bytes[$index] -eq 0x0D) {
+            if ($index + 1 -lt $bytes.Length -and $bytes[$index + 1] -eq 0x0A) { $index++ }
+            $normalized.Add(0x0A)
+        } else {
+            $normalized.Add($bytes[$index])
+        }
+    }
+    return ,$normalized.ToArray()
+}
+
+function Get-InventoryNormalizedTextDigest {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Label
+    )
+
+    [byte[]]$bytes = Get-InventoryNormalizedTextBytes -Path $Path -Label $Label
+    return 'sha256:' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+}
+
 function Assert-NoDuplicateJsonKeys {
     param(
         [Parameter(Mandatory)][System.Text.Json.JsonElement]$Element,
@@ -542,7 +578,7 @@ foreach ($path in $reachedPaths) {
     $metrics = Get-PowerShellMetrics -Path $path
     $fileOutput.Add([ordered]@{
         path = $path
-        sha256 = Get-HarnessFileDigest -WorkspaceRoot $script:RepoRootResolved -Path $path
+        sha256 = Get-InventoryNormalizedTextDigest -Path $path -Label 'TCB digest source'
         layer = [string]$component.layer
         trust_paths = @(Get-OrdinalStrings -Values @($script:Reach[$path].TrustPaths))
         root_ids = @(Get-OrdinalStrings -Values @($script:Reach[$path].RootIds))
@@ -560,7 +596,7 @@ foreach ($artifact in @($roots.trust_artifacts)) {
     $fullPath = Resolve-RepoFile -Path $path -Label 'trust artifact'
     $artifactByKey.Add($path, [ordered]@{
         path = $path
-        sha256 = Get-HarnessFileDigest -WorkspaceRoot $script:RepoRootResolved -Path $path
+        sha256 = Get-InventoryNormalizedTextDigest -Path $path -Label 'TCB artifact digest source'
         kind = [string]$artifact.kind
         owner_layer = [string]$artifact.owner_layer
         trust_paths = @(Get-OrdinalStrings -Values @($artifact.trust_paths))
@@ -656,7 +692,7 @@ if ($Check) {
         throw "Runtime TCB budget has uncovered growth: baseline=$baseline current=$currentRuntimeLoc delta=$delta covered=$coveredGrowth"
     }
     $trackedPath = Resolve-RepoFile -Path 'kernel-tcb-inventory.json' -Label 'tracked TCB inventory'
-    $trackedBytes = [IO.File]::ReadAllBytes($trackedPath)
+    [byte[]]$trackedBytes = Get-InventoryNormalizedTextBytes -Path 'kernel-tcb-inventory.json' -Label 'tracked TCB inventory'
     $generatedBytes = [Text.UTF8Encoding]::new($false).GetBytes($inventoryText)
     $equal = $trackedBytes.Length -eq $generatedBytes.Length
     $firstDifference = -1
