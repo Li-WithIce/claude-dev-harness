@@ -69,7 +69,7 @@ Check ((@($providers.modules) -join ',') -ceq 'providers' -and @($providers.test
 $maintenance = Get-Route @('scripts/benchmark-harness.ps1')
 Check ((@($maintenance.modules) -join ',') -ceq 'harness-maintenance' -and @($maintenance.tests).Count -eq 7) 'Harness maintenance changes select the remaining verifier set' 'Harness maintenance routing is wrong or incomplete'
 $routing = Get-Route @('.github/workflows/validation.yml')
-Check ($routing.run_all_optional -and @($routing.modules).Count -eq 7 -and @($routing.tests).Count -eq 32) 'routing-surface changes fail safe to every optional verifier' 'routing-surface changes did not select all optional verifiers'
+Check ($routing.run_all_optional -and @($routing.modules).Count -eq 7 -and @($routing.tests).Count -eq 33) 'routing-surface changes fail safe to every optional verifier' 'routing-surface changes did not select all optional verifiers'
 $fullValidationRouting = Get-Route @('.github/workflows/full-validation.yml')
 $allOptionalModules = @($routing.modules | Sort-Object -CaseSensitive -Unique)
 $allOptionalTests = @($routing.tests | Sort-Object -CaseSensitive -Unique)
@@ -219,12 +219,12 @@ $expectedCoreScripts = @(
     'verify-host-benchmark-otel.ps1','verify-host-benchmark-qualification.ps1','verify-release-runner-boundary.ps1','verify-release-isolation-qualification.ps1','verify-release-full-receipt.ps1','verify-release-producer-receipts.ps1','verify-ordinary-ci-receipt.ps1','verify-v2-ci-routing.ps1',
     'verify-v2-install-presets.ps1','verify-preset-lifecycle-qualification.ps1','verify-v2-evidence.ps1',
     'verify-v2-governed-audit.ps1','verify-v2-approval.ps1','verify-v2-readonly-zero-write.ps1',
-    'verify-harness-entry.ps1','verify-kernel-tcb-inventory.ps1','verify-lite-artifact-validator.ps1','verify-lite-footprint.ps1','verify-minimal-safe-change-policy.ps1',
+    'verify-harness-entry.ps1','verify-hashing-module.ps1','verify-kernel-tcb-inventory.ps1','verify-lite-artifact-validator.ps1','verify-lite-footprint.ps1','verify-minimal-safe-change-policy.ps1',
     'verify-no-node-install-dependency.ps1','verify-placeholder-rendering.ps1','verify-workflow-contracts.ps1','verify-workflow-descriptor.ps1',
     'verify-shared-memory-layers.ps1','verify-stage-discipline-matrix.ps1','verify-release-validation.ps1','verify-runtime-state-contract.ps1',
     'verify-skill-manifest.ps1','verify-task-artifact-drift-audit.ps1','verify-thin-trust-kernel-contracts.ps1','verify-tool-profile.ps1'
 )
-$expectedGroupSizes = [ordered]@{'entry-lifecycle'=14;'evaluation-release'=14;'install-evidence'=3;'governance-approval'=3;'harness-contracts'=17}
+$expectedGroupSizes = [ordered]@{'entry-lifecycle'=14;'evaluation-release'=14;'install-evidence'=3;'governance-approval'=3;'harness-contracts'=18}
 $coreGroupAssignments = @($validationAst.FindAll({param($node)$node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -ceq '$coreScriptGroups'},$true))
 $coreGroupNames=[Collections.Generic.List[string]]::new();$coreGroupSizes=[Collections.Generic.List[int]]::new();$actualCoreScripts=[Collections.Generic.List[string]]::new();$coreShapeValid=$validationErrors.Count -eq 0 -and $coreGroupAssignments.Count -eq 1
 if($coreShapeValid){
@@ -268,9 +268,9 @@ if($coreGroupValidateSet.Count -eq 1){
 }
 $coreGroupDefault = if($coreGroupParameters.Count -eq 1){$coreGroupParameters[0].DefaultValue.SafeGetValue()}else{''}
 $optionalCoreOverlap = @($routing.tests | Where-Object {$actualCoreScripts -ccontains $_})
-Check ($coreShapeValid -and ($coreGroupNames -join '|') -ceq (@($expectedGroupSizes.Keys) -join '|') -and ($coreGroupSizes -join '|') -ceq (@($expectedGroupSizes.Values) -join '|') -and $actualCoreScripts.Count -eq 51 -and @($actualCoreScripts | Sort-Object -CaseSensitive -Unique).Count -eq 51 -and ($actualCoreScripts -join '|') -ceq ($expectedCoreScripts -join '|') -and @($actualCoreScripts | Where-Object {-not(Test-Path -LiteralPath (Join-Path $RepoRoot "tests\$_") -PathType Leaf)}).Count -eq 0) 'five core groups contain the exact fifty-one unique scripts in registered order' 'core group shape, boundary, membership, uniqueness, order, or files drifted'
+Check ($coreShapeValid -and ($coreGroupNames -join '|') -ceq (@($expectedGroupSizes.Keys) -join '|') -and ($coreGroupSizes -join '|') -ceq (@($expectedGroupSizes.Values) -join '|') -and $actualCoreScripts.Count -eq 52 -and @($actualCoreScripts | Sort-Object -CaseSensitive -Unique).Count -eq 52 -and ($actualCoreScripts -join '|') -ceq ($expectedCoreScripts -join '|') -and @($actualCoreScripts | Where-Object {-not(Test-Path -LiteralPath (Join-Path $RepoRoot "tests\$_") -PathType Leaf)}).Count -eq 0) 'five core groups contain the exact fifty-two unique scripts in registered order' 'core group shape, boundary, membership, uniqueness, order, or files drifted'
 Check ($flattenValid -and $groupSelectionValid -and $coreGroupDefault -ceq 'all' -and ($coreGroupAllowed -join '|') -ceq ((@('all')+$expectedCoreGroups) -join '|') -and $validation -match "'-CoreGroup',\`$CoreGroup" -and $validation -match "\`$Suite -ne 'core'.*\`$CoreGroup -ne 'all'") 'CoreGroup defaults to the full legacy suite, bridges safely, and rejects non-core use' 'CoreGroup parameter, flattening, bridge, or selection contract drifted'
-Check (($optionalCoreOverlap -join '|') -ceq 'verify-kernel-tcb-inventory.ps1|verify-shared-memory-layers.ps1|verify-thin-trust-kernel-contracts.ps1|verify-v2-runtime-memory-decoupling.ps1') 'optional routes reuse only the two established lightweight verifiers plus the two TK-00 contract verifiers' 'optional routes unexpectedly duplicate core verifier work'
+Check (($optionalCoreOverlap -join '|') -ceq 'verify-hashing-module.ps1|verify-kernel-tcb-inventory.ps1|verify-shared-memory-layers.ps1|verify-thin-trust-kernel-contracts.ps1|verify-v2-runtime-memory-decoupling.ps1') 'optional routes reuse only the established lightweight and architecture contract verifiers' 'optional routes unexpectedly duplicate core verifier work'
 $verifierInventory = @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'tests') -Filter 'verify-*.ps1' -File | Select-Object -ExpandProperty Name | Sort-Object -CaseSensitive -Unique)
 $ordinaryCiVerifiers = @(@($actualCoreScripts | Where-Object { $_ -clike 'verify-*.ps1' }) + @($routing.tests) + 'verify-installation.ps1' | Sort-Object -CaseSensitive -Unique)
 Check (($ordinaryCiVerifiers -join '|') -ceq ($verifierInventory -join '|')) 'ordinary PR CI has a traceable route for every repository verifier' 'one or more repository verifiers have no traceable ordinary PR CI route'
