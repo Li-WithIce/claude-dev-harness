@@ -1,0 +1,1220 @@
+{
+  "schema_version": "kernel-tcb/v1",
+  "generator_contract_version": "kernel-tcb-generator/v1",
+  "roots": [
+    {
+      "id": "workspace-bootstrap",
+      "path": "harness.ps1",
+      "trust_path": "distribution",
+      "role": "Bootstrap and reconcile installed Workspace assets, then project status.",
+      "layer": "d1-distribution",
+      "reason": "The Distribution Trust Path is inventoried separately so the complete installer never becomes a K1 dependency or Runtime budget input."
+    },
+    {
+      "id": "codex-pretooluse-launcher",
+      "path": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",
+      "trust_path": "runtime",
+      "role": "Bridge Codex Hook transport to the installed PreToolUse adapter.",
+      "layer": "a3-adapter",
+      "reason": "The launcher fails closed and is part of the installed Codex protected-write path."
+    },
+    {
+      "id": "claude-pretooluse-adapter",
+      "path": "runtime-hooks/claude/pretooluse.ps1",
+      "trust_path": "runtime",
+      "role": "Deserialize Claude/Codex tool input and delegate to the core Hook.",
+      "layer": "a3-adapter",
+      "reason": "Host mutation input parsing is trusted before core policy receives normalized targets."
+    },
+    {
+      "id": "core-pretooluse",
+      "path": "runtime-hooks/core/pretooluse.ps1",
+      "trust_path": "runtime",
+      "role": "Host-neutral protected-action policy enforcement before writes.",
+      "layer": "k1-runtime-kernel",
+      "reason": "Core enforcement must be inventoried independently from host adapters."
+    },
+    {
+      "id": "entry-contract-compiler",
+      "path": "scripts/generate-entry-contract.ps1",
+      "trust_path": "runtime",
+      "role": "Compile and verify the canonical Entry Contract bootstrap.",
+      "layer": "k1-runtime-kernel",
+      "reason": "Entry Contract is an irreducible Harness trust responsibility."
+    },
+    {
+      "id": "status-cli",
+      "path": "scripts/harness-status.ps1",
+      "trust_path": "runtime",
+      "role": "Read-only Runtime, protocol, host-capability, and protected-policy status projection.",
+      "layer": "k1-runtime-kernel",
+      "reason": "Status is a separate read-only root and must not be inferred from task creation."
+    },
+    {
+      "id": "controlled-write-adapter",
+      "path": "scripts/harness-write-mcp.ps1",
+      "trust_path": "runtime",
+      "role": "MCP host adapter for Kernel-controlled file writes.",
+      "layer": "a3-adapter",
+      "reason": "Covers the ordinary controlled-write entry independent of Hook activation."
+    },
+    {
+      "id": "risk-policy-evaluator",
+      "path": "scripts/lib/Harness.Policy.psm1",
+      "trust_path": "runtime",
+      "role": "Resolve risk routing and execution-profile requirements.",
+      "layer": "k1-runtime-kernel",
+      "reason": "Risk Routing is an irreducible Harness trust responsibility even though host prose performs the first inline classification hop."
+    },
+    {
+      "id": "task-cli",
+      "path": "scripts/task.ps1",
+      "trust_path": "runtime",
+      "role": "Requirement, task lifecycle, status, recovery, Evidence, and Approval CLI.",
+      "layer": "k1-runtime-kernel",
+      "reason": "Covers ordinary durable task and status trust paths."
+    }
+  ],
+  "files": [
+    {
+      "path": "harness.ps1",
+      "sha256": "sha256:e065551af2a7ed9b3642f6372c78e62465ac3e6647cb819a69c82d5cbc5cb337",
+      "layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ],
+      "root_ids": [
+        "workspace-bootstrap"
+      ],
+      "physical_loc": 403,
+      "nonblank_loc": 344,
+      "executable_loc": 340
+    },
+    {
+      "path": "install.ps1",
+      "sha256": "sha256:e3faeb77e3f32b01533f4b703822020a1ad4b21167df9b12b4977b5b4c66174b",
+      "layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ],
+      "root_ids": [
+        "workspace-bootstrap"
+      ],
+      "physical_loc": 3430,
+      "nonblank_loc": 3159,
+      "executable_loc": 3137
+    },
+    {
+      "path": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",
+      "sha256": "sha256:160dc6a41a9207f600bcb6825f76fd043ab618ca5b988f53023efa41828d3a7e",
+      "layer": "a3-adapter",
+      "trust_paths": [
+        "runtime"
+      ],
+      "root_ids": [
+        "codex-pretooluse-launcher"
+      ],
+      "physical_loc": 113,
+      "nonblank_loc": 105,
+      "executable_loc": 103
+    },
+    {
+      "path": "runtime-hooks/claude/pretooluse.ps1",
+      "sha256": "sha256:cf464b8014ecaed0dc088fda8b025bede64dcc2eaf5bb660d073a1e4effe9d56",
+      "layer": "a3-adapter",
+      "trust_paths": [
+        "runtime"
+      ],
+      "root_ids": [
+        "claude-pretooluse-adapter",
+        "codex-pretooluse-launcher"
+      ],
+      "physical_loc": 376,
+      "nonblank_loc": 354,
+      "executable_loc": 351
+    },
+    {
+      "path": "runtime-hooks/core/pretooluse.ps1",
+      "sha256": "sha256:9988edde00fa3429d93b16d94e0c2089ddaf719538cf86df72ce54a15b40b567",
+      "layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "root_ids": [
+        "claude-pretooluse-adapter",
+        "codex-pretooluse-launcher",
+        "core-pretooluse"
+      ],
+      "physical_loc": 68,
+      "nonblank_loc": 67,
+      "executable_loc": 67
+    },
+    {
+      "path": "scripts/generate-entry-contract.ps1",
+      "sha256": "sha256:e2112496f2359a21f7a51f375a0c2f28d3450bc1ad16cbfc6d427da7320bdbb2",
+      "layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "root_ids": [
+        "entry-contract-compiler"
+      ],
+      "physical_loc": 217,
+      "nonblank_loc": 198,
+      "executable_loc": 198
+    },
+    {
+      "path": "scripts/harness-status.ps1",
+      "sha256": "sha256:87f59d978a4a0032ea7fa99b58587eaf7e494361563103ca7a32106d9ad746e5",
+      "layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ],
+      "root_ids": [
+        "status-cli",
+        "workspace-bootstrap"
+      ],
+      "physical_loc": 102,
+      "nonblank_loc": 95,
+      "executable_loc": 94
+    },
+    {
+      "path": "scripts/harness-write-mcp.ps1",
+      "sha256": "sha256:a196fe67bd274762dd9081316426249fead01dac355742c7cbddb165150d1e4b",
+      "layer": "a3-adapter",
+      "trust_paths": [
+        "runtime"
+      ],
+      "root_ids": [
+        "controlled-write-adapter"
+      ],
+      "physical_loc": 146,
+      "nonblank_loc": 134,
+      "executable_loc": 134
+    },
+    {
+      "path": "scripts/install-transaction-common.ps1",
+      "sha256": "sha256:7b33669d5de8c3537030da22be636a84cbb8e3d65a34922f3e34fac917216f9f",
+      "layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ],
+      "root_ids": [
+        "workspace-bootstrap"
+      ],
+      "physical_loc": 1378,
+      "nonblank_loc": 1262,
+      "executable_loc": 1261
+    },
+    {
+      "path": "scripts/lib/Harness.Approval.psm1",
+      "sha256": "sha256:9bff199ac9a411d0c7ba7f1b075b4bad022160e9e02561caec58a9b9a4b56725",
+      "layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ],
+      "root_ids": [
+        "claude-pretooluse-adapter",
+        "codex-pretooluse-launcher",
+        "controlled-write-adapter",
+        "core-pretooluse",
+        "status-cli",
+        "task-cli",
+        "workspace-bootstrap"
+      ],
+      "physical_loc": 189,
+      "nonblank_loc": 175,
+      "executable_loc": 175
+    },
+    {
+      "path": "scripts/lib/Harness.AtomicWrite.psm1",
+      "sha256": "sha256:44da7ec4ba73f71af2d7f8159cd4e7cb38e967b0e9cc561679d11d8918c5ac31",
+      "layer": "k0-trust-primitive",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ],
+      "root_ids": [
+        "claude-pretooluse-adapter",
+        "codex-pretooluse-launcher",
+        "controlled-write-adapter",
+        "core-pretooluse",
+        "risk-policy-evaluator",
+        "status-cli",
+        "task-cli",
+        "workspace-bootstrap"
+      ],
+      "physical_loc": 174,
+      "nonblank_loc": 159,
+      "executable_loc": 159
+    },
+    {
+      "path": "scripts/lib/Harness.ControlledWrite.psm1",
+      "sha256": "sha256:a8f05e91304a2db8027c6b33644aea1ab15cd75224a10f0f2296b73b989846a9",
+      "layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "root_ids": [
+        "controlled-write-adapter"
+      ],
+      "physical_loc": 145,
+      "nonblank_loc": 134,
+      "executable_loc": 134
+    },
+    {
+      "path": "scripts/lib/Harness.Evidence.psm1",
+      "sha256": "sha256:483962f86efcc250a9a9a2c495a2fefdb958d8cbc11540a0b437b085f0f2046e",
+      "layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "root_ids": [
+        "task-cli"
+      ],
+      "physical_loc": 274,
+      "nonblank_loc": 262,
+      "executable_loc": 262
+    },
+    {
+      "path": "scripts/lib/Harness.Governance.psm1",
+      "sha256": "sha256:de5249c21fac0b7e6ef60090c35716ab79e8b9d090eb2c211c6fa646448bda3d",
+      "layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "root_ids": [
+        "task-cli"
+      ],
+      "physical_loc": 141,
+      "nonblank_loc": 129,
+      "executable_loc": 129
+    },
+    {
+      "path": "scripts/lib/Harness.HostCapabilities.psm1",
+      "sha256": "sha256:d821885c57223f359919b1b4372e2f134c225e4b008e428af0119ae12b2ccfc0",
+      "layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ],
+      "root_ids": [
+        "risk-policy-evaluator",
+        "status-cli",
+        "task-cli",
+        "workspace-bootstrap"
+      ],
+      "physical_loc": 233,
+      "nonblank_loc": 217,
+      "executable_loc": 217
+    },
+    {
+      "path": "scripts/lib/Harness.Path.psm1",
+      "sha256": "sha256:774b55f8095b65f289a78adda04e6ee8752ead48a36653384119a393423e27de",
+      "layer": "k0-trust-primitive",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ],
+      "root_ids": [
+        "claude-pretooluse-adapter",
+        "codex-pretooluse-launcher",
+        "controlled-write-adapter",
+        "core-pretooluse",
+        "risk-policy-evaluator",
+        "status-cli",
+        "task-cli",
+        "workspace-bootstrap"
+      ],
+      "physical_loc": 284,
+      "nonblank_loc": 255,
+      "executable_loc": 255
+    },
+    {
+      "path": "scripts/lib/Harness.Policy.psm1",
+      "sha256": "sha256:ff4bf808d1994e79c9bc99174365a2039da58fec804c455b4a6ba40446da1428",
+      "layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "root_ids": [
+        "risk-policy-evaluator"
+      ],
+      "physical_loc": 290,
+      "nonblank_loc": 263,
+      "executable_loc": 263
+    },
+    {
+      "path": "scripts/lib/Harness.ProtectedAction.psm1",
+      "sha256": "sha256:7a78a2d96572ea817b7609b35aa25115b7688e0445634f35e3db34e9445dc094",
+      "layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ],
+      "root_ids": [
+        "claude-pretooluse-adapter",
+        "codex-pretooluse-launcher",
+        "controlled-write-adapter",
+        "core-pretooluse",
+        "status-cli",
+        "workspace-bootstrap"
+      ],
+      "physical_loc": 152,
+      "nonblank_loc": 143,
+      "executable_loc": 143
+    },
+    {
+      "path": "scripts/lib/Harness.Protocol.psm1",
+      "sha256": "sha256:5eedeebf0796590dc1d467085e32d5653dd3e99ae5666bb37658266ffbce496d",
+      "layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ],
+      "root_ids": [
+        "risk-policy-evaluator",
+        "status-cli",
+        "task-cli",
+        "workspace-bootstrap"
+      ],
+      "physical_loc": 301,
+      "nonblank_loc": 278,
+      "executable_loc": 278
+    },
+    {
+      "path": "scripts/lib/Harness.Recovery.psm1",
+      "sha256": "sha256:b7728703e89b6d3dcbaefcf6f00bb35980945ca0a787821122260cb3743fe724",
+      "layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "root_ids": [
+        "task-cli"
+      ],
+      "physical_loc": 161,
+      "nonblank_loc": 148,
+      "executable_loc": 148
+    },
+    {
+      "path": "scripts/lib/Harness.Requirement.psm1",
+      "sha256": "sha256:a28f1d579cc4135cb37c97325481bcb7e51dc3a31b6aaacea83f060744782749",
+      "layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "root_ids": [
+        "task-cli"
+      ],
+      "physical_loc": 439,
+      "nonblank_loc": 398,
+      "executable_loc": 398
+    },
+    {
+      "path": "scripts/lib/Harness.RuntimeDefault.psm1",
+      "sha256": "sha256:664ba05260e3c4268e6d48b88634d9242b402dc304eaee875366b29316dfbd9f",
+      "layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ],
+      "root_ids": [
+        "risk-policy-evaluator",
+        "status-cli",
+        "task-cli",
+        "workspace-bootstrap"
+      ],
+      "physical_loc": 319,
+      "nonblank_loc": 288,
+      "executable_loc": 288
+    },
+    {
+      "path": "scripts/lib/Harness.TaskState.psm1",
+      "sha256": "sha256:cc3cef6c2861b8b0e80ab95a336102a2c4d37f6acd20c779b728f124bcac497b",
+      "layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "root_ids": [
+        "task-cli"
+      ],
+      "physical_loc": 2241,
+      "nonblank_loc": 2138,
+      "executable_loc": 2138
+    },
+    {
+      "path": "scripts/task.ps1",
+      "sha256": "sha256:cf8f63d95b0adcd064c5de5e48051e265dd44f00e83ac103fce6fd497cbada30",
+      "layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "root_ids": [
+        "task-cli"
+      ],
+      "physical_loc": 224,
+      "nonblank_loc": 217,
+      "executable_loc": 217
+    },
+    {
+      "path": "scripts/update-managed-assets.ps1",
+      "sha256": "sha256:31acd17db89971d84092fe124065a1e4b82f377ee5dca99d47caaec7a7fd584a",
+      "layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ],
+      "root_ids": [
+        "workspace-bootstrap"
+      ],
+      "physical_loc": 353,
+      "nonblank_loc": 297,
+      "executable_loc": 297
+    },
+    {
+      "path": "tests/fixture-test-common.ps1",
+      "sha256": "sha256:94910fb1b5eda01c8ce185fc1cb7d2eecf55961e8d7e5ca9bdff5a54e4992e18",
+      "layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ],
+      "root_ids": [
+        "workspace-bootstrap"
+      ],
+      "physical_loc": 184,
+      "nonblank_loc": 153,
+      "executable_loc": 152
+    },
+    {
+      "path": "tests/verify-installation.ps1",
+      "sha256": "sha256:189fe0050480e8d9cad3dc5b9d8a6c241679214383b26d53b13ef4fa6a923f4c",
+      "layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ],
+      "root_ids": [
+        "workspace-bootstrap"
+      ],
+      "physical_loc": 929,
+      "nonblank_loc": 831,
+      "executable_loc": 831
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "agent-configs/claude/CLAUDE.md.template",
+      "sha256": "sha256:cef5ce2d14a13d26099e5e8e9fcbb654b651a94f62e899207e853d51afadf992",
+      "kind": "entry-template",
+      "owner_layer": "a3-adapter",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ],
+      "reason": "Claude installed Entry Contract template is hashed by Runtime Default and rendered by the compiler.",
+      "physical_loc": 26,
+      "bytes": 2831
+    },
+    {
+      "path": "agent-configs/workspace/AGENTS.md.template",
+      "sha256": "sha256:b83e2dab88aaa01b0ea2b05c4f424322386c9be68b9152380a60cf1daca818fc",
+      "kind": "entry-template",
+      "owner_layer": "a3-adapter",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ],
+      "reason": "Workspace installed Entry Contract template is hashed by Runtime Default and rendered by the compiler.",
+      "physical_loc": 29,
+      "bytes": 3590
+    },
+    {
+      "path": "policies/decision-rights.json",
+      "sha256": "sha256:571e4bedc35c601224ecce7c44f1a9f2b49543f091b8f4b2e7d06f74520c4c39",
+      "kind": "policy",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "reason": "Requirement Gate decision ownership is machine enforced from this policy.",
+      "physical_loc": 41,
+      "bytes": 1108
+    },
+    {
+      "path": "policies/entry-contract.md",
+      "sha256": "sha256:346224d62f82926a11bac09335e97766c08b813b71774a714abea924e49ff93e",
+      "kind": "entry-contract",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ],
+      "reason": "Canonical Entry Contract prose compiled into installed host and workspace templates.",
+      "physical_loc": 15,
+      "bytes": 1852
+    },
+    {
+      "path": "policies/execution-profiles.json",
+      "sha256": "sha256:ca428b4bd588fcf7d9feaf89cf13d2a30519e66f37686daf049c8e88a8a21c95",
+      "kind": "policy",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "reason": "Defines allowed persistence and capability composition for Runtime profiles.",
+      "physical_loc": 45,
+      "bytes": 1676
+    },
+    {
+      "path": "policies/protected-actions.json",
+      "sha256": "sha256:dea83985dcdbe992a889d1b3dbad9def8f1ce48e130dc3d01a39bb934632e166",
+      "kind": "policy",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "reason": "Core protected-action rules fail closed before writes.",
+      "physical_loc": 26,
+      "bytes": 708
+    },
+    {
+      "path": "policies/risk-rules.json",
+      "sha256": "sha256:ec97e14f3dde6aace8ce69fe631768de58f65c48b425e2ae5a4d5ffef8a6de0b",
+      "kind": "policy",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "reason": "Defines risk dimensions, thresholds, triggers, and routing overrides.",
+      "physical_loc": 35,
+      "bytes": 1391
+    },
+    {
+      "path": "schemas/approval.schema.json",
+      "sha256": "sha256:38777d258a878599774d254dbfe9eef1b1da12d33dd9067bf40b0c9c007f086f",
+      "kind": "schema",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "reason": "Approval documents are validated before protected completion.",
+      "physical_loc": 74,
+      "bytes": 2817
+    },
+    {
+      "path": "schemas/audit-record.schema.json",
+      "sha256": "sha256:682d88896355c4ff3d86bd1fc4556ce9f941a9d80efe4a3bcdbca9bc629360e6",
+      "kind": "schema",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "reason": "Policy-selected independent audit artifacts use this strict record shape.",
+      "physical_loc": 29,
+      "bytes": 961
+    },
+    {
+      "path": "schemas/current-pointer.schema.json",
+      "sha256": "sha256:d470726bc27fc7aff000b3f5aaf85b542f8b671d2e7001780373710ccc55b932",
+      "kind": "schema",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "reason": "Current task projection and recovery use this strict pointer shape.",
+      "physical_loc": 17,
+      "bytes": 640
+    },
+    {
+      "path": "schemas/event.schema.json",
+      "sha256": "sha256:46f5e84e20cdb5471a5f9d7971de7022518e79fffd1a6df99fc063ec7b4b2f64",
+      "kind": "schema",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "reason": "Task lifecycle event-log records are schema validated.",
+      "physical_loc": 52,
+      "bytes": 1772
+    },
+    {
+      "path": "schemas/evidence.schema.json",
+      "sha256": "sha256:754bd60b94d84e8d9e3444ee7f487e46e350cd5b787c93d6d9df65328f4b7205",
+      "kind": "schema",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "reason": "Evidence Chain completion is bound to this strict document shape.",
+      "physical_loc": 182,
+      "bytes": 7507
+    },
+    {
+      "path": "schemas/protected-actions-overlay.schema.json",
+      "sha256": "sha256:13094bc286c96e31f78cbc0d0897ae9ce323ef7f59c8226eedb5f70f2c7984b3",
+      "kind": "schema",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "reason": "Workspace protected-action overlays cannot weaken core policy and are strictly validated.",
+      "physical_loc": 45,
+      "bytes": 1651
+    },
+    {
+      "path": "schemas/protocol-config.schema.json",
+      "sha256": "sha256:627a3a1ddf058f4d2a94fea046066d5c2107ef3e3686225af159b873b2c5f5d0",
+      "kind": "schema",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "reason": "Workspace protocol configuration and Runtime Default inputs use strict validation.",
+      "physical_loc": 12,
+      "bytes": 475
+    },
+    {
+      "path": "schemas/requirement-contract.schema.json",
+      "sha256": "sha256:16a2fa6fe5df5f89b4d74388be1fc9edffa3beaf8c93e1b8cc73f867c8d7145f",
+      "kind": "schema",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "reason": "Task creation and protected writes bind a clear Requirement Contract.",
+      "physical_loc": 85,
+      "bytes": 2614
+    },
+    {
+      "path": "schemas/runtime-default-decision.schema.json",
+      "sha256": "sha256:2aba476cd4c7f7bf53279026a8b11e3d0d2ad9dc2f30265f2a9a86e7dbc584af",
+      "kind": "schema",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "reason": "Auto protocol selection consumes only this distilled version-neutral Runtime decision.",
+      "physical_loc": 64,
+      "bytes": 2247
+    },
+    {
+      "path": "schemas/task-state.schema.json",
+      "sha256": "sha256:59df09dfbb77127efdfe5943b26c167cfe9a29ece82c9ed07022f275964aefa7",
+      "kind": "schema",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "reason": "Durable task state, replay, recovery, and protected writes validate this shape.",
+      "physical_loc": 70,
+      "bytes": 2860
+    },
+    {
+      "path": "templates/v2/plan.md.template",
+      "sha256": "sha256:e23aa9d252f2a43282aaee6c46766e4bac6479973e62e36e1538aa873ce3938b",
+      "kind": "governance-template",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "reason": "Plan-required Governed tasks create a Contract-bound plan from this template.",
+      "physical_loc": 24,
+      "bytes": 235
+    },
+    {
+      "path": "vault-template/entry/AGENTS.md.template",
+      "sha256": "sha256:100c44acce44312fed3b8107a682e0df02edfb773956f99dec551e22b7fe46b1",
+      "kind": "entry-template",
+      "owner_layer": "a3-adapter",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ],
+      "reason": "Runtime source identity binds the installed compatibility entry template until v1 Sunset gates are satisfied.",
+      "physical_loc": 28,
+      "bytes": 2702
+    }
+  ],
+  "edges": [
+    {
+      "from": "harness.ps1",
+      "to": "scripts/harness-status.ps1",
+      "kind": "manual",
+      "resolution": "manual:runtime-invocation:Join-Path $RepoRoot 'scripts\\harness-status.ps1'",
+      "trust_paths": [
+        "distribution"
+      ]
+    },
+    {
+      "from": "harness.ps1",
+      "to": "scripts/update-managed-assets.ps1",
+      "kind": "manual",
+      "resolution": "manual:runtime-invocation:Join-Path $RepoRoot 'scripts\\update-managed-assets.ps1'",
+      "trust_paths": [
+        "distribution"
+      ]
+    },
+    {
+      "from": "install.ps1",
+      "to": "scripts/install-transaction-common.ps1",
+      "kind": "dot-source",
+      "resolution": "ast-static:. (Join-Path $PSScriptRoot 'scripts\\install-transaction-common.ps1')",
+      "trust_paths": [
+        "distribution"
+      ]
+    },
+    {
+      "from": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",
+      "to": "runtime-hooks/claude/pretooluse.ps1",
+      "kind": "manual",
+      "resolution": "manual:rendered-invocation:hooks-memory\\pretooluse.ps1",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "runtime-hooks/claude/pretooluse.ps1",
+      "to": "runtime-hooks/core/pretooluse.ps1",
+      "kind": "manual",
+      "resolution": "manual:rendered-invocation:runtime-hooks\\core\\pretooluse.ps1",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "runtime-hooks/core/pretooluse.ps1",
+      "to": "scripts/lib/Harness.ProtectedAction.psm1",
+      "kind": "manual",
+      "resolution": "manual:dynamic-import:Import-Module $module -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/harness-status.ps1",
+      "to": "scripts/lib/Harness.HostCapabilities.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $RepoRoot 'scripts\\lib\\Harness.HostCapabilities.psm1') -Force -PassThru -ErrorAction Stop",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/harness-status.ps1",
+      "to": "scripts/lib/Harness.Path.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $RepoRoot 'scripts\\lib\\Harness.Path.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/harness-status.ps1",
+      "to": "scripts/lib/Harness.ProtectedAction.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $RepoRoot 'scripts\\lib\\Harness.ProtectedAction.psm1') -Force -PassThru -ErrorAction Stop",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/harness-status.ps1",
+      "to": "scripts/lib/Harness.Protocol.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $RepoRoot 'scripts\\lib\\Harness.Protocol.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/harness-write-mcp.ps1",
+      "to": "scripts/lib/Harness.ControlledWrite.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'lib\\Harness.ControlledWrite.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.Approval.psm1",
+      "to": "scripts/lib/Harness.AtomicWrite.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.AtomicWrite.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.Approval.psm1",
+      "to": "scripts/lib/Harness.Path.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.AtomicWrite.psm1",
+      "to": "scripts/lib/Harness.Path.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.ControlledWrite.psm1",
+      "to": "scripts/lib/Harness.AtomicWrite.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.AtomicWrite.psm1') -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.ControlledWrite.psm1",
+      "to": "scripts/lib/Harness.Path.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.ControlledWrite.psm1",
+      "to": "scripts/lib/Harness.ProtectedAction.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.ProtectedAction.psm1') -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.Evidence.psm1",
+      "to": "scripts/lib/Harness.Approval.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Approval.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.Evidence.psm1",
+      "to": "scripts/lib/Harness.AtomicWrite.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.AtomicWrite.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.Evidence.psm1",
+      "to": "scripts/lib/Harness.Path.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.Governance.psm1",
+      "to": "scripts/lib/Harness.AtomicWrite.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.AtomicWrite.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.Governance.psm1",
+      "to": "scripts/lib/Harness.Path.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.Policy.psm1",
+      "to": "scripts/lib/Harness.Protocol.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Protocol.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.ProtectedAction.psm1",
+      "to": "scripts/lib/Harness.Approval.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Approval.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.ProtectedAction.psm1",
+      "to": "scripts/lib/Harness.AtomicWrite.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.AtomicWrite.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.ProtectedAction.psm1",
+      "to": "scripts/lib/Harness.Path.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.Protocol.psm1",
+      "to": "scripts/lib/Harness.AtomicWrite.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.AtomicWrite.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.Protocol.psm1",
+      "to": "scripts/lib/Harness.Path.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.Protocol.psm1",
+      "to": "scripts/lib/Harness.RuntimeDefault.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.RuntimeDefault.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.Recovery.psm1",
+      "to": "scripts/lib/Harness.Path.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.Recovery.psm1",
+      "to": "scripts/lib/Harness.TaskState.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.TaskState.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.RuntimeDefault.psm1",
+      "to": "scripts/lib/Harness.HostCapabilities.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.HostCapabilities.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.RuntimeDefault.psm1",
+      "to": "scripts/lib/Harness.Path.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.TaskState.psm1",
+      "to": "scripts/lib/Harness.Approval.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Approval.psm1') -Force -PassThru -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.TaskState.psm1",
+      "to": "scripts/lib/Harness.AtomicWrite.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.AtomicWrite.psm1') -Force -PassThru -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.TaskState.psm1",
+      "to": "scripts/lib/Harness.Evidence.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Evidence.psm1') -Force -PassThru -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.TaskState.psm1",
+      "to": "scripts/lib/Harness.Governance.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Governance.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.TaskState.psm1",
+      "to": "scripts/lib/Harness.Path.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/task.ps1",
+      "to": "scripts/lib/Harness.Protocol.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $RepoRoot 'scripts\\lib\\Harness.Protocol.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/task.ps1",
+      "to": "scripts/lib/Harness.Recovery.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $RepoRoot 'scripts\\lib\\Harness.Recovery.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/task.ps1",
+      "to": "scripts/lib/Harness.Requirement.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $RepoRoot 'scripts\\lib\\Harness.Requirement.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/task.ps1",
+      "to": "scripts/lib/Harness.TaskState.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $RepoRoot 'scripts\\lib\\Harness.TaskState.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/update-managed-assets.ps1",
+      "to": "install.ps1",
+      "kind": "manual",
+      "resolution": "manual:runtime-invocation:Join-Path $RepoRoot 'install.ps1'",
+      "trust_paths": [
+        "distribution"
+      ]
+    },
+    {
+      "from": "scripts/update-managed-assets.ps1",
+      "to": "tests/verify-installation.ps1",
+      "kind": "manual",
+      "resolution": "manual:runtime-invocation:Join-Path $RepoRoot 'tests\\verify-installation.ps1'",
+      "trust_paths": [
+        "distribution"
+      ]
+    },
+    {
+      "from": "tests/verify-installation.ps1",
+      "to": "tests/fixture-test-common.ps1",
+      "kind": "dot-source",
+      "resolution": "ast-static:. (Join-Path $PSScriptRoot 'fixture-test-common.ps1')",
+      "trust_paths": [
+        "distribution"
+      ]
+    }
+  ],
+  "external_dependencies": [
+    {
+      "id": "dotnet-base-class-library",
+      "name": ".NET base class library and System.Text.Json",
+      "reason": "Strict UTF-8, JSON parsing, cryptography, process, and filesystem primitives are provided by the PowerShell host runtime.",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ]
+    },
+    {
+      "id": "git-executable",
+      "name": "Git executable",
+      "reason": "Evidence revision binding, Runtime source identity, workspace discovery, and distribution verification invoke Git without treating it as a repository file.",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ]
+    },
+    {
+      "id": "operating-system-filesystem",
+      "name": "Operating-system filesystem identity, locking, and atomic replacement semantics",
+      "reason": "Containment, reparse rejection, mutexes, atomic replace, and installation convergence depend on OS semantics.",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ]
+    },
+    {
+      "id": "powershell-runtime",
+      "name": "PowerShell 7 runtime and language parser",
+      "reason": "All selected executable roots and AST dependency analysis require PowerShell language and parser semantics.",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ]
+    }
+  ],
+  "unresolved_dependencies": [],
+  "totals": {
+    "file_count": 27,
+    "physical_loc": 13266,
+    "nonblank_loc": 12203,
+    "executable_loc": 12169,
+    "runtime_file_count": 21,
+    "runtime_executable_loc": 6151,
+    "distribution_file_count": 14,
+    "distribution_executable_loc": 7627,
+    "duplicate_edge_count": 3,
+    "artifact_count": 19,
+    "artifact_bytes": 39637
+  },
+  "budget": {
+    "baseline_executable_loc": 6151,
+    "current_executable_loc": 6151,
+    "delta": 0,
+    "covered_growth": 0,
+    "status": "within-baseline",
+    "exceptions": []
+  }
+}
