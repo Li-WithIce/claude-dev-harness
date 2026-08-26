@@ -1,0 +1,12 @@
+{
+  "schema_version": "kernel-component-classification/v1",
+  "components": [
+    { "path": "tests/fixtures/tk00/tcb/cycle-a.psm1", "layer": "k1-runtime-kernel", "current_role": "Cycle fixture A.", "owner_candidate": "trust-kernel", "tcb_included": true, "reason": "Negative cycle fixture.", "migration_target": null, "legacy_status": "not-legacy" },
+    { "path": "tests/fixtures/tk00/tcb/cycle-b.psm1", "layer": "k1-runtime-kernel", "current_role": "Cycle fixture B.", "owner_candidate": "trust-kernel", "tcb_included": true, "reason": "Negative cycle fixture.", "migration_target": null, "legacy_status": "not-legacy" },
+    { "path": "tests/fixtures/tk00/tcb/dynamic-import.ps1", "layer": "k1-runtime-kernel", "current_role": "Dynamic import fixture.", "owner_candidate": "trust-kernel", "tcb_included": true, "reason": "Negative unresolved dependency fixture.", "migration_target": null, "legacy_status": "not-legacy" },
+    { "path": "tests/fixtures/tk00/tcb/leaf.psm1", "layer": "k0-trust-primitive", "current_role": "Static dependency leaf fixture.", "owner_candidate": "trust-kernel", "tcb_included": true, "reason": "Shared positive fixture dependency.", "migration_target": null, "legacy_status": "not-legacy" },
+    { "path": "tests/fixtures/tk00/tcb/loc-vector.ps1", "layer": "k1-runtime-kernel", "current_role": "Known LOC vector fixture.", "owner_candidate": "trust-kernel", "tcb_included": true, "reason": "Freezes PowerShell line accounting.", "migration_target": null, "legacy_status": "not-legacy" },
+    { "path": "tests/fixtures/tk00/tcb/missing-import.ps1", "layer": "k1-runtime-kernel", "current_role": "Missing dependency fixture.", "owner_candidate": "trust-kernel", "tcb_included": true, "reason": "Negative missing dependency fixture.", "migration_target": null, "legacy_status": "not-legacy" },
+    { "path": "tests/fixtures/tk00/tcb/static-entry.ps1", "layer": "k1-runtime-kernel", "current_role": "Static Join-Path import fixture.", "owner_candidate": "trust-kernel", "tcb_included": true, "reason": "Positive AST dependency fixture.", "migration_target": null, "legacy_status": "not-legacy" }
+  ]
+}

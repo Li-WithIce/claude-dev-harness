@@ -1,0 +1,14 @@
+{
+  "schema_version": "kernel-tcb-roots/v1",
+  "classification_path": "tests/fixtures/tk00/tcb/classification.json",
+  "runtime_roots": [
+    { "id": "cycle-entry", "path": "tests/fixtures/tk00/tcb/cycle-a.psm1", "role": "Unexpected dependency cycle.", "layer": "k1-runtime-kernel", "reason": "Must fail closed." }
+  ],
+  "distribution_roots": [
+    { "id": "fixture-leaf", "path": "tests/fixtures/tk00/tcb/leaf.psm1", "role": "Fixture leaf.", "layer": "k0-trust-primitive", "reason": "Schema-required second trust path." }
+  ],
+  "trust_artifacts": [],
+  "manual_edges": [],
+  "external_dependencies": [],
+  "budget": { "baseline_executable_loc": 0, "exceptions": [] }
+}

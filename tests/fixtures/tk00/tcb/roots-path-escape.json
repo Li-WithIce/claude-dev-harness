@@ -1,0 +1,14 @@
+{
+  "schema_version": "kernel-tcb-roots/v1",
+  "classification_path": "../outside.json",
+  "runtime_roots": [
+    { "id": "static-entry", "path": "tests/fixtures/tk00/tcb/static-entry.ps1", "role": "Valid root with invalid classification path.", "layer": "k1-runtime-kernel", "reason": "Isolates path containment validation." }
+  ],
+  "distribution_roots": [
+    { "id": "fixture-leaf", "path": "tests/fixtures/tk00/tcb/leaf.psm1", "role": "Fixture leaf.", "layer": "k0-trust-primitive", "reason": "Schema-required second trust path." }
+  ],
+  "trust_artifacts": [],
+  "manual_edges": [],
+  "external_dependencies": [],
+  "budget": { "baseline_executable_loc": 0, "exceptions": [] }
+}
