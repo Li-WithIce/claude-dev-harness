@@ -15,12 +15,14 @@ if ([string]::IsNullOrWhiteSpace($DatasetPath)) { $DatasetPath = Join-Path $Repo
 $DatasetPath = (Resolve-Path $DatasetPath).Path
 $schemaPath = Join-Path $RepoRoot 'schemas\model-eval-observation.schema.json'
 $modulePath = Join-Path $RepoRoot 'scripts\lib\Harness.ModelEval.psm1'
+$hashingPath = Join-Path $RepoRoot 'scripts\lib\Harness.Hashing.psm1'
 $wrapperPath = Join-Path $RepoRoot 'skills\codex\scripts\invoke_codex.ps1'
 $credentialGuardPath = Join-Path $RepoRoot 'scripts\host-benchmark\HostBenchmark.Trial.ps1'
-foreach ($path in @($schemaPath,$modulePath,$wrapperPath,$credentialGuardPath)) {
+foreach ($path in @($schemaPath,$modulePath,$hashingPath,$wrapperPath,$credentialGuardPath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required model eval input is missing: $path" }
 }
 Import-Module $modulePath -Force
+Import-Module $hashingPath -Force
 . $credentialGuardPath
 
 function Add-ModelFailure {
@@ -42,7 +44,7 @@ foreach ($case in $cases) {
 }
 if ($ValidateOnly) { Write-Output 'STATUS: PASS (model eval definition only; no model session executed)'; exit 0 }
 if ([string]::IsNullOrWhiteSpace($CodexHome)) { throw 'Real model eval requires an explicit dedicated -CodexHome.' }
-$sourceInputPaths = @($PSCommandPath,$DatasetPath,$schemaPath,$wrapperPath,$modulePath,$credentialGuardPath)
+$sourceInputPaths = @($PSCommandPath,$DatasetPath,$schemaPath,$wrapperPath,$modulePath,$hashingPath,$credentialGuardPath)
 if ([string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath = Join-Path ([IO.Path]::GetTempPath()) ('thin-v2-model-eval-' + [guid]::NewGuid().ToString('N') + '.json') }
 elseif (-not [IO.Path]::IsPathRooted($OutputPath)) { $OutputPath = Join-Path (Get-Location).Path $OutputPath }
 $OutputPath = [IO.Path]::GetFullPath($OutputPath)
@@ -114,10 +116,9 @@ try {
                 if([string]$t.tokens.status -ceq 'measured'){$m.input_tokens += [long]$t.tokens.input;$m.output_tokens += [long]$t.tokens.output;$m.token_observations++}
             }
             if($status -ceq 'pass'){$m.passed++}elseif($status -ceq 'unavailable'){$m.unavailable++}else{$m.failed++}
-            $digestBytes=[Text.UTF8Encoding]::new($false).GetBytes($paraphrase)
             $persistedObserved = if ($status -ceq 'pass') { $o } else { $null }
             $persistedTelemetry = if ($status -ceq 'pass') { $t } else { $null }
-            $results.Add([ordered]@{case_id=[string]$case.id;variant=$i+1;paraphrase_digest='sha256:'+[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($digestBytes)).ToLowerInvariant();status=$status;failures=@($failures);workspace_write_count=[int]$run.workspace_write_count;observed=$persistedObserved;telemetry=$persistedTelemetry})
+            $results.Add([ordered]@{case_id=[string]$case.id;variant=$i+1;paraphrase_digest=(Get-HarnessUtf8TextSha256 -Text $paraphrase);status=$status;failures=@($failures);workspace_write_count=[int]$run.workspace_write_count;observed=$persistedObserved;telemetry=$persistedTelemetry})
             if(-not $KeepScratch){Remove-Item (Join-Path $scratch ('workspace-'+$key)),(Join-Path $scratch ('result-'+$key)) -Recurse -Force}
         }
     }

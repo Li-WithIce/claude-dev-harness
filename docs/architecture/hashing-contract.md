@@ -59,14 +59,35 @@ TK-01A does not migrate Release, Qualification, rollout, model-evaluation,
 adapter, installer, uninstall, installation-transaction, generator, mutex, cache,
 or test-only hashing.
 
-## Later JSON boundary
+## TK-01B-Compat migration
 
-TK-01B is not part of this contract and remains two separate future changes:
+TK-01B-Compat completes production raw SHA-256 centralization without defining
+an object serializer. Release, Qualification-contract, rollout,
+model-evaluation, adapter, generator, installer, installation-transaction,
+benchmark, mutex, cache, and telemetry callers keep their existing byte
+construction and delegate only their final SHA-256 operation to the four K0
+functions.
 
-- **TK-01B-Compat** may centralize existing object-specific digest algorithms
-  only while preserving every historical byte sequence and digest;
-- **TK-01B-New** may use `canonical-json/v1` only for a new Schema or Envelope,
-  or when an object explicitly selects that `digest_algorithm`.
+Legacy representations remain unchanged. Callers that historically emitted a
+bare lowercase hexadecimal value continue to remove the `sha256:` prefix only
+after hashing. Comparison-only file hashes continue to compare exact file bytes.
+Existing `ConvertTo-Json` depth, compression, property order, domain prefixes,
+newlines, and UTF-8 behavior remain owned by their current object-specific
+callers.
+
+`Harness.AtomicWrite.psm1` retains `Get-HarnessSha256Text` and
+`Get-HarnessFileDigest` as compatibility APIs. Temporary first-wave forwarding
+functions in Requirement and Runtime Default are removed after their callers
+bind directly to Hashing. Production PowerShell outside `Harness.Hashing.psm1`
+must not execute SHA-256 directly.
+
+## TK-01B-New boundary
+
+TK-01B-New remains a separate, not-started change. It may use
+`canonical-json/v1` only for a new Schema or Envelope, or when an object
+explicitly selects that `digest_algorithm`. Its key ordering, number, Unicode,
+duplicate-key, depth, and encoding semantics require a separately approved byte
+contract before implementation.
 
 No existing Evidence, Receipt, Approval, Contract, Manifest, Installed Asset,
 Source Identity, Task State, or installation-transaction digest is silently

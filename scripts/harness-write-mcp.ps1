@@ -16,6 +16,7 @@ $utf8=[Text.UTF8Encoding]::new($false,$true)
 $OutputEncoding=$utf8
 
 Import-Module (Join-Path $PSScriptRoot 'lib\Harness.ControlledWrite.psm1') -Force -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot 'lib\Harness.Hashing.psm1') -Force -ErrorAction Stop
 
 function Write-McpMessage {
     param($Value)
@@ -61,11 +62,6 @@ function Test-McpExactKeys {
     return @($Required|Where-Object{$actual-cnotcontains$_}).Count-eq0-and@($actual|Where-Object{$_-cnotin@($Required+$Optional)}).Count-eq0
 }
 
-function Get-McpSha256Text {
-    param([string]$Text)
-    return 'sha256:'+([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.UTF8Encoding]::new($false).GetBytes($Text))).ToLowerInvariant())
-}
-
 function Get-McpToolDefinition {
     return [ordered]@{
         name='write_file'
@@ -98,7 +94,7 @@ function Invoke-McpWriteTool {
     foreach($name in @('path','content','expected_current_sha256','task_id','execution_profile','contract_path','contract_digest','approval_id')){if($Arguments.Contains($name)-and$Arguments[$name]-isnot[string]){throw "write_file argument '$name' must be a string"}}
     if($Arguments.Contains('expected_version')-and($Arguments.expected_version-isnot[int]-and$Arguments.expected_version-isnot[long])){throw "write_file argument 'expected_version' must be an integer"}
     if($Arguments.Contains('dry_run')-and$Arguments.dry_run-isnot[bool]){throw "write_file argument 'dry_run' must be a boolean"}
-    $invoke=@{RepoRoot=$RepoRoot;WorkspaceRoot=$WorkspaceRoot;Environment=$Environment;Path=[string]$Arguments.path;Content=[string]$Arguments.content;ExpectedSourceDigest=(Get-McpSha256Text -Text ([string]$Arguments.content));ExpectedCurrentDigest=[string]$Arguments.expected_current_sha256}
+    $invoke=@{RepoRoot=$RepoRoot;WorkspaceRoot=$WorkspaceRoot;Environment=$Environment;Path=[string]$Arguments.path;Content=[string]$Arguments.content;ExpectedSourceDigest=(Get-HarnessUtf8TextSha256 -Text ([string]$Arguments.content));ExpectedCurrentDigest=[string]$Arguments.expected_current_sha256}
     if($Arguments.Contains('task_id')){$invoke.TaskId=[string]$Arguments.task_id}
     if($Arguments.Contains('expected_version')){$invoke.ExpectedVersion=[int]$Arguments.expected_version}
     if($Arguments.Contains('execution_profile')){$invoke.ExecutionProfile=[string]$Arguments.execution_profile}

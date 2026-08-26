@@ -1,5 +1,7 @@
 ﻿# Shared cross-process lock for install/uninstall user-global transactions.
 
+Import-Module (Join-Path $PSScriptRoot 'lib\Harness.Hashing.psm1') -Force -ErrorAction Stop
+
 function Get-NormalizedPath {
     param([string]$Path)
 
@@ -299,13 +301,7 @@ function Get-InstallTransactionMutexName {
 function Get-InstallStateIdentityHash {
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value)
 
-    $sha256 = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $hash = $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Value))
-    } finally {
-        $sha256.Dispose()
-    }
-    return [System.BitConverter]::ToString($hash).Replace('-', '').ToLowerInvariant()
+    return (Get-HarnessUtf8TextSha256 -Text $Value).Substring(7)
 }
 
 function Get-InstallStateFileDigest {
@@ -317,7 +313,7 @@ function Get-InstallStateFileDigest {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         throw "Install state path exists but is not a file: $Path"
     }
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    return (Get-HarnessFileSha256 -Path $Path).Substring(7)
 }
 
 function Get-InstallManifestPlanDigest {
@@ -415,7 +411,7 @@ function Get-InstallBackupPayloadDigest {
         if (-not (Test-Path -LiteralPath $normalizedPath -PathType Leaf)) {
             throw "Backup payload is not a file: $normalizedPath"
         }
-        return (Get-FileHash -LiteralPath $normalizedPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        return (Get-HarnessFileSha256 -Path $normalizedPath).Substring(7)
     }
     if (-not (Test-Path -LiteralPath $normalizedPath -PathType Container)) {
         throw "Backup payload is not a directory: $normalizedPath"
@@ -548,16 +544,10 @@ function Read-InstallTextSnapshot {
     $content = $null
     if ($itemType -eq 'file') {
         $bytes = [System.IO.File]::ReadAllBytes($normalizedPath)
-        $sha256 = [System.Security.Cryptography.SHA256]::Create()
-        try {
-            $hash = $sha256.ComputeHash($bytes)
-        } finally {
-            $sha256.Dispose()
-        }
         $identity = [ordered]@{
             mode = 'exact'
             item_type = 'file'
-            sha256 = [System.BitConverter]::ToString($hash).Replace('-', '').ToLowerInvariant()
+            sha256 = (Get-HarnessSha256Bytes -Bytes $bytes).Substring(7)
         }
         $content = [System.Text.UTF8Encoding]::new($false).GetString($bytes)
         if ($content.Length -gt 0 -and $content[0] -eq [char]0xFEFF) {

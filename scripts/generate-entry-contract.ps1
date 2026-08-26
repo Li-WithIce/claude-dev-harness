@@ -6,6 +6,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'lib\Harness.Hashing.psm1') -Force -ErrorAction Stop
 
 $beginMarker = '<!-- BEGIN GENERATED ENTRY CONTRACT -->'
 $endMarker = '<!-- END GENERATED ENTRY CONTRACT -->'
@@ -76,13 +77,7 @@ foreach ($reservedMarker in @($beginMarker, $endMarker, '<!-- source-sha256:')) 
     }
 }
 $sourceBytes = $utf8NoBom.GetBytes($sourceBody + "`n")
-$sha256 = [System.Security.Cryptography.SHA256]::Create()
-try {
-    $sourceHash = ([System.BitConverter]::ToString($sha256.ComputeHash($sourceBytes))).Replace('-', '').ToLowerInvariant()
-}
-finally {
-    $sha256.Dispose()
-}
+$sourceHash = (Get-HarnessSha256Bytes -Bytes $sourceBytes).Substring(7)
 $generatedBody = "<!-- source-sha256: $sourceHash -->`n$sourceBody"
 
 $plans = @()

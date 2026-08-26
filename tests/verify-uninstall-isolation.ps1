@@ -483,6 +483,7 @@ try {
             $initial = & $case.Initial $claudeHome
             [System.IO.File]::WriteAllText($targetPath, $initial, (New-Object System.Text.UTF8Encoding($false)))
             Copy-RepoPathToFixture -SourceRoot $RepoRoot -FixtureRoot $fixtureRoot -RelativePath 'scripts\install-transaction-common.ps1'
+            Copy-RepoPathToFixture -SourceRoot $RepoRoot -FixtureRoot $fixtureRoot -RelativePath 'scripts\lib\Harness.Hashing.psm1'
             if (@($functionSource.Split([string[]]@($case.Anchor), [System.StringSplitOptions]::None)).Count -ne 2) {
                 $semanticBarrierFailures.Add("$($case.Name): barrier anchor is not unique") | Out-Null
                 continue

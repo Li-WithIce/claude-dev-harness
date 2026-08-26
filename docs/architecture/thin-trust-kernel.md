@@ -63,8 +63,10 @@ K0 owns the smallest reusable mechanisms on which both trust paths rely:
 primitive. `scripts/lib/Harness.Hashing.psm1` is the current canonical Hashing
 primitive and its byte semantics are frozen in `hashing-contract.md`. No
 parallel canonical implementation may be added. TK-01A migrates only the
-documented first-wave K0/K1 callers; canonical JSON remains outside K0 until a
-separately approved TK-01B-New contract exists.
+documented first-wave K0/K1 callers. TK-01B-Compat completes production raw
+SHA-256 delegation while leaving every object-specific serialization algorithm
+with its current owner. Canonical JSON remains outside K0 until a separately
+approved TK-01B-New byte contract exists.
 
 ## K1 — Runtime Trust Kernel
 
@@ -218,10 +220,12 @@ LOC. It is a ratchet:
 - reducing the current total does not require an exception and should be
   followed by an explicit baseline reduction.
 
-The TK-00 initial baseline had no exception. TK-01A keeps that baseline frozen
-and records `KTB-EX-001` for its measured 27-line net increase, expiring at
-TK-01B-Compat. The baseline is a generated observation bound by verifier checks,
-not a permanent architectural constant.
+The TK-00 initial baseline had no exception. TK-01A temporarily recorded
+`KTB-EX-001` for a measured 27-line net increase. TK-01B-Compat removes obsolete
+first-wave forwarding layers, returns the measured Runtime TCB to the frozen
+6151-line baseline, and retires that exception with delta zero. The baseline is
+a generated observation bound by verifier checks, not a permanent architectural
+constant.
 
 ## Terminal SLOs
 

@@ -85,6 +85,8 @@ function Remove-OtlpControlFiles {
     return $removed
 }
 
+Import-Module (Join-Path $PSScriptRoot '..\lib\Harness.Hashing.psm1') -Force -ErrorAction Stop
+
 function Stop-OtlpCollector {
     param([Parameter(Mandatory)]$Collector)
     if ($null -eq $Collector.process) { return $false }
@@ -162,7 +164,7 @@ function Test-OtlpTraceManifest {
             if ($number -lt 1 -or $number -gt $requestCount -or $round -lt 1 -or $round -gt $FreshSessions -or $name -cne $expectedName -or [int64]$entry.bytes -lt 0 -or [string]$entry.sha256 -cnotmatch '^[0-9a-f]{64}$' -or -not $expectedNames.Add($name)) { throw 'manifest file identity is invalid' }
             $path = Join-Path $TraceRoot $name
             $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
-            if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $item.Length -ne [int64]$entry.bytes -or (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$entry.sha256) { throw 'manifest file digest is invalid' }
+            if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $item.Length -ne [int64]$entry.bytes -or (Get-HarnessFileSha256 -Path $path).Substring(7) -cne [string]$entry.sha256) { throw 'manifest file digest is invalid' }
             if (-not $requests.ContainsKey([string]$number)) { $requests[[string]$number] = [ordered]@{round=$round;kinds=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)} }
             if ([int]$requests[[string]$number].round -ne $round -or -not $requests[[string]$number].kinds.Add($kind)) { throw 'manifest request pairing is invalid' }
         }

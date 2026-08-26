@@ -18,6 +18,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
+Import-Module (Join-Path $PSScriptRoot 'lib\Harness.Hashing.psm1') -Force -ErrorAction Stop
 
 function Test-ParentProcessAlive {
     try {
@@ -30,7 +31,7 @@ function Test-ParentProcessAlive {
 
 function Get-Sha256Hex {
     param([Parameter(Mandatory)][byte[]]$Bytes)
-    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
+    return (Get-HarnessSha256Bytes -Bytes $Bytes).Substring(7)
 }
 
 function Publish-ControlJson {

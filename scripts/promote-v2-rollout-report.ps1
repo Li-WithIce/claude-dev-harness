@@ -17,10 +17,11 @@ $PSNativeCommandUseErrorActionPreference = $false
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Split-Path -Parent $PSScriptRoot }
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 $WorkspaceRoot = [IO.Path]::GetFullPath($WorkspaceRoot)
+Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Hashing.psm1') -Force -ErrorAction Stop
 
 function Get-RolloutRawDigest {
     param([Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
-    return 'sha256:' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
+    return Get-HarnessSha256Bytes -Bytes $Bytes
 }
 
 try {

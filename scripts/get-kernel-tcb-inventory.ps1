@@ -14,6 +14,7 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 }
 
 Import-Module (Join-Path $PSScriptRoot 'lib\Harness.AtomicWrite.psm1') -Force -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot 'lib\Harness.Hashing.psm1') -Force -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot 'lib\Harness.Path.psm1') -Force -ErrorAction Stop
 
 $script:RepoRootResolved = Resolve-HarnessWorkspaceRoot -WorkspaceRoot $RepoRoot
@@ -87,7 +88,7 @@ function Get-InventoryNormalizedTextDigest {
     )
 
     [byte[]]$bytes = Get-InventoryNormalizedTextBytes -Path $Path -Label $Label
-    return 'sha256:' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+    return Get-HarnessSha256Bytes -Bytes $bytes
 }
 
 function Assert-NoDuplicateJsonKeys {

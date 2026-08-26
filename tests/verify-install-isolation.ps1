@@ -491,6 +491,7 @@ foreach ($case in $snapshotBarrierCases) {
     New-Item -ItemType Directory -Path (Split-Path -Parent $targetPath),$workspaceRoot -Force | Out-Null
     [System.IO.File]::WriteAllText($targetPath, $case.Initial, (New-Object System.Text.UTF8Encoding($false)))
     Copy-RepoPathToFixture -SourceRoot $RepoRoot -FixtureRoot $fixtureRoot -RelativePath 'scripts\install-transaction-common.ps1'
+    Copy-RepoPathToFixture -SourceRoot $RepoRoot -FixtureRoot $fixtureRoot -RelativePath 'scripts\lib\Harness.Hashing.psm1'
     $instrumentedSource = $installSource
     if (@($instrumentedSource.Split([string[]]@($case.Anchor), [System.StringSplitOptions]::None)).Count -ne 2) {
         $snapshotBarrierFailures.Add("$($case.Name): barrier anchor is not unique") | Out-Null

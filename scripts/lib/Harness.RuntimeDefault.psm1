@@ -26,16 +26,6 @@ $script:RuntimeSourcePaths = @(
     'vault-template/entry/AGENTS.md.template'
 )
 
-function Get-HarnessRuntimeSha256Bytes {
-    param([Parameter(Mandatory)][byte[]]$Bytes)
-    return Get-HarnessSha256Bytes -Bytes $Bytes
-}
-
-function Get-HarnessRuntimeSha256Text {
-    param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
-    return Get-HarnessUtf8TextSha256 -Text $Text
-}
-
 function Invoke-HarnessRuntimeGit {
     param(
         [Parameter(Mandatory)][string]$RepoRoot,
@@ -88,16 +78,16 @@ function Get-HarnessRuntimeSourceIdentity {
         $relative = [string]$_
         $path = Join-Path $root $relative
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw 'runtime-default-source-path-missing' }
-        [ordered]@{ path = $relative; sha256 = Get-HarnessRuntimeSha256Bytes -Bytes ([IO.File]::ReadAllBytes($path)) }
+        [ordered]@{ path = $relative; sha256 = Get-HarnessSha256Bytes -Bytes ([IO.File]::ReadAllBytes($path)) }
     })
-    $pathSetDigest = Get-HarnessRuntimeSha256Text -Text (($script:RuntimeSourcePaths -join "`n") + "`n")
+    $pathSetDigest = Get-HarnessUtf8TextSha256 -Text (($script:RuntimeSourcePaths -join "`n") + "`n")
     $contract = [ordered]@{ schema_version = 'harness-runtime-contract/v1'; paths = $entries }
     return [ordered]@{
         schema_version = 'harness-runtime-source-identity/v1'
         revision = [string]$source[0]
         tree_oid = [string]$source[1]
         path_set_digest = $pathSetDigest
-        runtime_contract_digest = Get-HarnessRuntimeSha256Text -Text ($contract | ConvertTo-Json -Depth 10 -Compress)
+        runtime_contract_digest = Get-HarnessUtf8TextSha256 -Text ($contract | ConvertTo-Json -Depth 10 -Compress)
     }
 }
 
@@ -167,7 +157,7 @@ function Get-HarnessRuntimeDefaultDecisionDigest {
     if ($Document.Contains('expires_at_utc')) { $body.expires_at_utc = $Document.expires_at_utc }
     if ($Document.Contains('workspace_identity_digest')) { $body.workspace_identity_digest = $Document.workspace_identity_digest }
     $body.required_capabilities = @($Document.required_capabilities)
-    return Get-HarnessRuntimeSha256Text -Text ($body | ConvertTo-Json -Depth 10 -Compress)
+    return Get-HarnessUtf8TextSha256 -Text ($body | ConvertTo-Json -Depth 10 -Compress)
 }
 
 function Get-HarnessRuntimeSourceRevision {
@@ -185,7 +175,7 @@ function Get-HarnessRuntimeWorkspaceIdentityDigest {
     param([Parameter(Mandatory)][string]$WorkspaceRoot)
 
     $workspace = Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
-    return Get-HarnessRuntimeSha256Text -Text (Get-HarnessPhysicalPathIdentity -Path $workspace)
+    return Get-HarnessUtf8TextSha256 -Text (Get-HarnessPhysicalPathIdentity -Path $workspace)
 }
 
 function Assert-HarnessRuntimeDefaultDecision {

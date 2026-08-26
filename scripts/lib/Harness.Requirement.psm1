@@ -154,18 +154,6 @@ function Read-DecisionPolicy {
     return [pscustomobject]@{ Document = $policy; Owners = $owners }
 }
 
-function Get-FileDigest {
-    param([string]$Path)
-    return Get-HarnessFileSha256 -Path $Path
-}
-
-function Get-ContractDigest {
-    param([System.Collections.IDictionary]$ContractWithoutDigest)
-
-    $json = $ContractWithoutDigest | ConvertTo-Json -Depth 30 -Compress
-    return Get-HarnessUtf8TextSha256 -Text $json
-}
-
 function Assert-RequestEnvelope {
     param(
         [System.Collections.IDictionary]$Request,
@@ -280,7 +268,7 @@ function Invoke-RequirementInspection {
     foreach ($check in $repoChecks) {
         $path = Resolve-ContainedFile -Root $WorkspaceRoot -Path ([string]$check.path) -Label "repo_check $($check.id)"
         $text = Get-Content -LiteralPath $path -Raw -Encoding utf8
-        $digest = Get-FileDigest -Path $path
+        $digest = Get-HarnessFileSha256 -Path $path
         $containsMatch = -not $check.Contains('contains') -or $text.Contains([string]$check.contains, [System.StringComparison]::Ordinal)
         $digestMatch = -not $check.Contains('sha256') -or $digest -ceq [string]$check.sha256
         $repoEvidence.Add([ordered]@{ id=[string]$check.id; path=[string]$check.path; status=$(if($containsMatch -and $digestMatch){'matched'}else{'repo-evidence-gap'}); digest=$digest })
@@ -411,7 +399,8 @@ function Invoke-RequirementInspection {
             source_authority=$confirmedRequirement.source_authority
         }
         $contract = [ordered]@{}; foreach ($key in $withoutDigest.Keys) { $contract[$key] = $withoutDigest[$key] }
-        $contract.digest = Get-ContractDigest -ContractWithoutDigest $withoutDigest
+        $contractJson = $withoutDigest | ConvertTo-Json -Depth 30 -Compress
+        $contract.digest = Get-HarnessUtf8TextSha256 -Text $contractJson
         $schemaPath = Join-Path $RepoRoot 'schemas\requirement-contract.schema.json'
         if (-not (Test-Json -Json ($contract | ConvertTo-Json -Depth 30 -Compress) -SchemaFile $schemaPath -ErrorAction Stop -WarningAction SilentlyContinue)) {
             throw 'derived Requirement Contract failed schema validation'
