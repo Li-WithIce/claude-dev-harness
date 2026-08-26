@@ -52,6 +52,7 @@ function Test-OrdinalSorted {
 
 $requiredFiles = @(
     'docs/architecture/thin-trust-kernel.md',
+    'docs/architecture/hashing-contract.md',
     'docs/architecture/module-manifest.md',
     'docs/architecture/v1-sunset-contract.md',
     'docs/architecture/entry-contract-policy-parity.md',
@@ -64,6 +65,8 @@ $requiredFiles = @(
     'schemas/kernel-component-classification.schema.json',
     'schemas/module-manifest.schema.json',
     'scripts/get-kernel-tcb-inventory.ps1',
+    'scripts/lib/Harness.Hashing.psm1',
+    'tests/verify-hashing-module.ps1',
     'tests/verify-kernel-tcb-inventory.ps1',
     'tests/verify-thin-trust-kernel-contracts.ps1'
 )
@@ -73,6 +76,8 @@ foreach ($path in $requiredFiles) {
 
 $powerShellPaths = @(
     'scripts/get-kernel-tcb-inventory.ps1',
+    'scripts/lib/Harness.Hashing.psm1',
+    'tests/verify-hashing-module.ps1',
     'tests/verify-kernel-tcb-inventory.ps1',
     'tests/verify-thin-trust-kernel-contracts.ps1'
 ) + @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'tests\fixtures\tk00\tcb') -File | Where-Object { $_.Extension -cin @('.ps1', '.psm1') } | ForEach-Object { [IO.Path]::GetRelativePath($RepoRoot, $_.FullName) })
@@ -85,8 +90,8 @@ foreach ($relative in $powerShellPaths) {
     if (@($errors).Count -ne 0) { $parseFailures.Add("${relative}: $(@($errors | ForEach-Object Message) -join '; ')") }
     if (-not (Test-FileHasUtf8Bom -Path $fullPath)) { $bomFailures.Add($relative) }
 }
-Check ($parseFailures.Count -eq 0) 'all TK-00 PowerShell files parse' "PowerShell parse failures: $($parseFailures -join ' | ')"
-Check ($bomFailures.Count -eq 0) 'all TK-00 PowerShell files follow the UTF-8 BOM convention' "PowerShell BOM failures: $($bomFailures -join ', ')"
+Check ($parseFailures.Count -eq 0) 'all architecture PowerShell files parse' "PowerShell parse failures: $($parseFailures -join ' | ')"
+Check ($bomFailures.Count -eq 0) 'all architecture PowerShell files follow the UTF-8 BOM convention' "PowerShell BOM failures: $($bomFailures -join ', ')"
 
 $jsonPaths = @(
     'kernel-tcb-roots.json',
@@ -101,7 +106,7 @@ $jsonBomFailures = @($jsonPaths | Where-Object {
     $bytes = [IO.File]::ReadAllBytes((Join-Path $RepoRoot $_))
     $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
 })
-Check ($jsonBomFailures.Count -eq 0) 'all TK-00 JSON files are UTF-8 without BOM' "JSON BOM failures: $($jsonBomFailures -join ', ')"
+Check ($jsonBomFailures.Count -eq 0) 'all architecture JSON files are UTF-8 without BOM' "JSON BOM failures: $($jsonBomFailures -join ', ')"
 
 Check (Test-JsonAgainstSchema -Path 'kernel-tcb-roots.json' -SchemaPath 'schemas/kernel-tcb-roots.schema.json') 'kernel roots document satisfies its strict Schema' 'kernel roots document is invalid'
 Check (Test-JsonAgainstSchema -Path 'kernel-tcb-inventory.json' -SchemaPath 'schemas/kernel-tcb.schema.json') 'kernel inventory satisfies its strict Schema' 'kernel inventory is invalid'
@@ -149,6 +154,7 @@ $missingThinHeadings = @($thinHeadings | Where-Object { -not $thinText.Contains(
 $thinTokens = @(
     'scripts/lib/Harness.Path.psm1',
     'scripts/lib/Harness.AtomicWrite.psm1',
+    'scripts/lib/Harness.Hashing.psm1',
     'Runtime transitive executable LOC < 3000',
     'Entry Contract <= 80 lines and <= 1200 tokens',
     'new module central-file modifications = 0',
@@ -196,7 +202,7 @@ $extraComponents = @(Compare-Object $expectedPaths $componentSorted -PassThru | 
 $duplicateComponents = @($componentPaths | Group-Object -CaseSensitive | Where-Object Count -gt 1 | ForEach-Object Name)
 $staleComponents = @($componentPaths | Where-Object { -not (Test-Path -LiteralPath (Join-Path $RepoRoot $_) -PathType Leaf) })
 Check ($missingComponents.Count -eq 0 -and $extraComponents.Count -eq 0 -and $duplicateComponents.Count -eq 0 -and $staleComponents.Count -eq 0 -and (Test-OrdinalSorted -Values $componentPaths)) 'classification dynamically covers every target exactly once with no stale path' "classification coverage drifted: missing=$($missingComponents -join ',') extra=$($extraComponents -join ',') duplicate=$($duplicateComponents -join ',') stale=$($staleComponents -join ',')"
-Check (@($classification.components | Where-Object { [string]$_.layer -ceq 'k0-trust-primitive' -and [string]$_.path -cin @('scripts/lib/Harness.Path.psm1','scripts/lib/Harness.AtomicWrite.psm1') }).Count -eq 2) 'Path and AtomicWrite are the two canonical K0 components' 'canonical K0 component ownership drifted'
+Check (@($classification.components | Where-Object { [string]$_.layer -ceq 'k0-trust-primitive' -and [string]$_.path -cin @('scripts/lib/Harness.Path.psm1','scripts/lib/Harness.AtomicWrite.psm1','scripts/lib/Harness.Hashing.psm1') }).Count -eq 3) 'Path, AtomicWrite, and Hashing are the three canonical K0 components' 'canonical K0 component ownership drifted'
 $rolloutClassification = @($classification.components | Where-Object { [string]$_.path -ceq 'scripts/lib/Harness.RolloutEvidence.psm1' })
 Check ($rolloutClassification.Count -eq 1 -and [string]$rolloutClassification[0].layer -ceq 'c2-capability' -and -not [bool]$rolloutClassification[0].tcb_included) 'RolloutEvidence is honestly classified as C2 and outside Runtime TCB' 'RolloutEvidence classification drifted into Runtime Kernel'
 Check (@($classification.components | Where-Object { [string]$_.layer -ceq 'c2-capability' -and [bool]$_.tcb_included }).Count -eq 0) 'no C2 capability is included in the measured Kernel TCB' 'a C2 capability leaked into TCB inclusion'
@@ -207,17 +213,17 @@ $entryContractLines = @(Get-Content -LiteralPath $entryContractPath).Count
 $entryContractBytes = [Text.Encoding]::UTF8.GetByteCount([IO.File]::ReadAllText($entryContractPath))
 Check ($entryContractDigest -ceq '346224d62f82926a11bac09335e97766c08b813b71774a714abea924e49ff93e' -and $entryContractLines -eq 15 -and $entryContractBytes -eq 1852) 'TK-00 leaves the canonical Entry Contract byte-for-byte unchanged' 'Entry Contract content, lines, or bytes changed during TK-00'
 Check ((Get-LfNormalizedSha256 -Path (Join-Path $RepoRoot 'scripts\lib\Harness.Path.psm1')) -ceq '774b55f8095b65f289a78adda04e6ee8752ead48a36653384119a393423e27de') 'TK-00 leaves canonical Harness.Path unchanged across checkout line endings' 'Harness.Path changed during TK-00'
-Check ((Get-LfNormalizedSha256 -Path (Join-Path $RepoRoot 'scripts\lib\Harness.AtomicWrite.psm1')) -ceq '44da7ec4ba73f71af2d7f8159cd4e7cb38e967b0e9cc561679d11d8918c5ac31') 'TK-00 leaves canonical Harness.AtomicWrite unchanged across checkout line endings' 'Harness.AtomicWrite changed during TK-00'
-Check (-not (Test-Path -LiteralPath (Join-Path $RepoRoot 'scripts\lib\Harness.Hashing.psm1'))) 'TK-00 does not create Harness.Hashing.psm1' 'Harness.Hashing.psm1 was created in TK-00'
+$atomicWriteText = Read-Text -Path 'scripts/lib/Harness.AtomicWrite.psm1'
+Check ($atomicWriteText.Contains("Harness.Hashing.psm1",[StringComparison]::Ordinal) -and $thinText.Contains('scripts/lib/Harness.Hashing.psm1',[StringComparison]::Ordinal)) 'TK-01A installs Hashing as the canonical K0 dependency of AtomicWrite' 'canonical Hashing ownership or AtomicWrite dependency is missing'
 $trackedRealManifests = @(& git -C $RepoRoot ls-files -- '*module.manifest.json')
 Check ($trackedRealManifests.Count -eq 0) 'TK-00 creates no real module.manifest.json' 'a real tracked module.manifest.json was created in TK-00'
 
 $validationText = Read-Text -Path 'scripts/run-validation.ps1'
 $routingText = Read-Text -Path 'scripts/run-changed-optional-validation.ps1'
-Check (@([regex]::Matches($validationText, "'verify-kernel-tcb-inventory\.ps1'")).Count -eq 1 -and @([regex]::Matches($validationText, "'verify-thin-trust-kernel-contracts\.ps1'")).Count -eq 1) 'both TK-00 verifiers are registered exactly once in central validation' 'TK-00 verifier registration is missing or duplicated'
-$routingTokens = @('docs/architecture/*', 'kernel-tcb-*.json', 'kernel-component-classification.json', 'schemas/*kernel*', 'schemas/module-manifest.schema.json', 'scripts/get-kernel-tcb-inventory.ps1', 'tests/verify-*kernel*')
+Check (@([regex]::Matches($validationText, "'verify-hashing-module\.ps1'")).Count -eq 1 -and @([regex]::Matches($validationText, "'verify-kernel-tcb-inventory\.ps1'")).Count -eq 1 -and @([regex]::Matches($validationText, "'verify-thin-trust-kernel-contracts\.ps1'")).Count -eq 1) 'Hashing and TK-00 verifiers are registered exactly once in central validation' 'architecture verifier registration is missing or duplicated'
+$routingTokens = @('docs/architecture/*', 'kernel-tcb-*.json', 'kernel-component-classification.json', 'schemas/*kernel*', 'schemas/module-manifest.schema.json', 'scripts/get-kernel-tcb-inventory.ps1', 'scripts/lib/Harness.Hashing.psm1', 'tests/verify-hashing-module.ps1', 'tests/verify-*kernel*')
 $missingRouting = @($routingTokens | Where-Object { -not $routingText.Contains($_, [StringComparison]::Ordinal) })
-Check ($missingRouting.Count -eq 0) 'changed-path routing covers every TK-00 surface' "changed-path routing omissions: $($missingRouting -join ', ')"
+Check ($missingRouting.Count -eq 0) 'changed-path routing covers every architecture and Hashing surface' "changed-path routing omissions: $($missingRouting -join ', ')"
 
 $tkPaths = @($requiredFiles + $jsonPaths + $powerShellPaths + @(
     'tests/fixtures/tk00/module-manifest-valid.json',
@@ -233,7 +239,7 @@ foreach ($relative in $tkPaths) {
     $text = [IO.File]::ReadAllText($fullPath)
     if ($text -match '(?i)(?:^|[\s''"=])[A-Z]:[\\/]' -or $text -match '(?i)(?:^|[\s''"=])\\\\[A-Za-z0-9._-]+[\\/]') { $absoluteLeaks.Add($relative) }
 }
-Check ($absoluteLeaks.Count -eq 0) 'TK-00 tracked artifacts contain no absolute local or UNC path' "absolute path leaks: $($absoluteLeaks -join ', ')"
+Check ($absoluteLeaks.Count -eq 0) 'architecture tracked artifacts contain no absolute local or UNC path' "absolute path leaks: $($absoluteLeaks -join ', ')"
 
 if ($failures.Count -gt 0) {
     Write-Output "STATUS: FAIL ($($failures.Count) failures)"

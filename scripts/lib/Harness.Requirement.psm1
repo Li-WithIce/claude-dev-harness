@@ -1,6 +1,8 @@
 ﻿Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+Import-Module (Join-Path $PSScriptRoot 'Harness.Hashing.psm1') -Force -ErrorAction Stop
+
 $script:AuthorityRank = [ordered]@{
     'current-user-message' = 0
     'user-confirmed' = 0
@@ -154,20 +156,14 @@ function Read-DecisionPolicy {
 
 function Get-FileDigest {
     param([string]$Path)
-    return ('sha256:' + (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant())
+    return Get-HarnessFileSha256 -Path $Path
 }
 
 function Get-ContractDigest {
     param([System.Collections.IDictionary]$ContractWithoutDigest)
 
     $json = $ContractWithoutDigest | ConvertTo-Json -Depth 30 -Compress
-    $bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($json)
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        return 'sha256:' + ([System.BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()
-    } finally {
-        $sha.Dispose()
-    }
+    return Get-HarnessUtf8TextSha256 -Text $json
 }
 
 function Assert-RequestEnvelope {

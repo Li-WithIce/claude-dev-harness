@@ -4,6 +4,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 
 Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot 'Harness.HostCapabilities.psm1') -Force -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot 'Harness.Hashing.psm1') -Force -ErrorAction Stop
 
 $script:RuntimeDefaultRelativePath = '.assistant/runtime/protocol-default.json'
 $script:RuntimeSourcePaths = @(
@@ -15,6 +16,7 @@ $script:RuntimeSourcePaths = @(
     'schemas/runtime-default-decision.schema.json',
     'scripts/harness-status.ps1',
     'scripts/lib/Harness.AtomicWrite.psm1',
+    'scripts/lib/Harness.Hashing.psm1',
     'scripts/lib/Harness.HostCapabilities.psm1',
     'scripts/lib/Harness.Path.psm1',
     'scripts/lib/Harness.Policy.psm1',
@@ -26,12 +28,12 @@ $script:RuntimeSourcePaths = @(
 
 function Get-HarnessRuntimeSha256Bytes {
     param([Parameter(Mandatory)][byte[]]$Bytes)
-    return 'sha256:' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
+    return Get-HarnessSha256Bytes -Bytes $Bytes
 }
 
 function Get-HarnessRuntimeSha256Text {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
-    return Get-HarnessRuntimeSha256Bytes -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($Text))
+    return Get-HarnessUtf8TextSha256 -Text $Text
 }
 
 function Invoke-HarnessRuntimeGit {

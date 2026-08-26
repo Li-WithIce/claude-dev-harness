@@ -147,6 +147,7 @@ try {
         'scripts/generate-exact-head-engineering-evidence.ps1',
         'scripts/lib/Harness.RolloutEvidence.psm1',
         'scripts/lib/Harness.AtomicWrite.psm1',
+        'scripts/lib/Harness.Hashing.psm1',
         'scripts/lib/Harness.Path.psm1',
         'scripts/host-benchmark/HostBenchmark.Trial.ps1',
         'schemas/exact-head-engineering-evidence.schema.json',

@@ -782,7 +782,7 @@ exit 0
     $fixture = Join-Path $scratch 'runner-source'
     Initialize-GitFixture $fixture
     foreach ($relative in @('scripts\lib','scripts\host-benchmark','skills\codex\scripts','schemas\host-benchmark')) { [void][IO.Directory]::CreateDirectory((Join-Path $fixture $relative)) }
-    foreach ($relative in @('scripts\run-host-benchmark.ps1','scripts\host-benchmark\HostBenchmark.Otel.ps1','scripts\lib\Harness.AtomicWrite.psm1','scripts\lib\Harness.Path.psm1','schemas\host-benchmark\observation.schema.json')) {
+    foreach ($relative in @('scripts\run-host-benchmark.ps1','scripts\host-benchmark\HostBenchmark.Otel.ps1','scripts\lib\Harness.AtomicWrite.psm1','scripts\lib\Harness.Hashing.psm1','scripts\lib\Harness.Path.psm1','schemas\host-benchmark\observation.schema.json')) {
         Copy-Item -LiteralPath (Join-Path $RepoRoot $relative) -Destination (Join-Path $fixture $relative)
     }
     Copy-Item -LiteralPath (Join-Path $RepoRoot 'scripts\host-benchmark\HostBenchmark.Trial.ps1') -Destination (Join-Path $fixture 'scripts\host-benchmark\HostBenchmark.Trial.Real.ps1')

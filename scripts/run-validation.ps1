@@ -168,6 +168,7 @@ $coreScriptGroups = [ordered]@{
     )
     'harness-contracts' = @(
         'verify-harness-entry.ps1',
+        'verify-hashing-module.ps1',
         'verify-kernel-tcb-inventory.ps1',
         'verify-lite-artifact-validator.ps1',
         'verify-lite-footprint.ps1',
