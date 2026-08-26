@@ -2,16 +2,11 @@
 $ErrorActionPreference = 'Stop'
 
 Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop
-
-function Get-HarnessSha256Bytes {
-    param([byte[]]$Bytes)
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try { return 'sha256:' + ([System.BitConverter]::ToString($sha.ComputeHash($Bytes))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
-}
+Import-Module (Join-Path $PSScriptRoot 'Harness.Hashing.psm1') -Force -ErrorAction Stop
 
 function Get-HarnessSha256Text {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Content)
-    return Get-HarnessSha256Bytes -Bytes ((New-Object System.Text.UTF8Encoding($false)).GetBytes($Content))
+    return Get-HarnessUtf8TextSha256 -Text $Content
 }
 
 function Get-HarnessFileDigest {
@@ -19,7 +14,7 @@ function Get-HarnessFileDigest {
     $fullPath = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $Path -Label 'digest path' -AllowMissing
     if (-not (Test-Path -LiteralPath $fullPath)) { return $null }
     if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) { throw "digest path is not a file: $Path" }
-    return 'sha256:' + (Get-FileHash -LiteralPath $fullPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    return Get-HarnessFileSha256 -Path $fullPath
 }
 
 function Write-HarnessAtomicText {
@@ -74,7 +69,7 @@ function Write-HarnessAtomicBytes {
     try {
         $stream = [System.IO.FileStream]::new($tempPath,[System.IO.FileMode]::CreateNew,[System.IO.FileAccess]::Write,[System.IO.FileShare]::None,4096,[System.IO.FileOptions]::WriteThrough)
         try { $stream.Write($SourceBytes,0,$SourceBytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
-        $tempDigest = 'sha256:' + (Get-FileHash -LiteralPath $tempPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $tempDigest = Get-HarnessFileSha256 -Path $tempPath
         if ($tempDigest -cne $ExpectedSourceDigest) { throw 'atomic source digest changed before publish' }
 
         $directoryPath = [System.IO.Path]::GetDirectoryName($fullPath)
@@ -90,22 +85,22 @@ function Write-HarnessAtomicBytes {
             [System.IO.File]::Move($tempPath,$fullPath)
         } else {
             if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) { throw 'atomic target digest changed before publish' }
-            $currentDigest = 'sha256:' + (Get-FileHash -LiteralPath $fullPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            $currentDigest = Get-HarnessFileSha256 -Path $fullPath
             if ($currentDigest -cne $ExpectedCurrentDigest) { throw 'atomic target digest changed before publish' }
             [System.IO.File]::Replace($tempPath,$fullPath,$backupPath,$true)
             $overwrittenDigest = $null
             try {
-                $overwrittenDigest = 'sha256:' + (Get-FileHash -LiteralPath $backupPath -Algorithm SHA256).Hash.ToLowerInvariant()
+                $overwrittenDigest = Get-HarnessFileSha256 -Path $backupPath
                 if ($overwrittenDigest -cne $ExpectedCurrentDigest) { throw 'atomic target digest changed before publish' }
             } catch {
                 $verificationError = $_
                 try {
                     if (-not [System.IO.File]::Exists($backupPath)) { throw 'atomic target backup is unavailable' }
-                    $publishedDigest = 'sha256:' + (Get-FileHash -LiteralPath $fullPath -Algorithm SHA256).Hash.ToLowerInvariant()
+                    $publishedDigest = Get-HarnessFileSha256 -Path $fullPath
                     if ($publishedDigest -cne $ExpectedSourceDigest) { throw 'atomic target conflict recovery changed concurrently' }
                     [System.IO.File]::Replace($backupPath,$fullPath,$rejectedPath,$true)
-                    $restoredDigest = 'sha256:' + (Get-FileHash -LiteralPath $fullPath -Algorithm SHA256).Hash.ToLowerInvariant()
-                    $rejectedDigest = 'sha256:' + (Get-FileHash -LiteralPath $rejectedPath -Algorithm SHA256).Hash.ToLowerInvariant()
+                    $restoredDigest = Get-HarnessFileSha256 -Path $fullPath
+                    $rejectedDigest = Get-HarnessFileSha256 -Path $rejectedPath
                     if (($null -ne $overwrittenDigest -and $restoredDigest -cne $overwrittenDigest) -or $rejectedDigest -cne $ExpectedSourceDigest) { throw 'atomic target conflict recovery changed concurrently' }
                     $cleanupConflictFiles = $true
                 } catch {
@@ -139,13 +134,13 @@ function Remove-HarnessFileIfDigestAtomic {
     $fullPath = Resolve-HarnessContainedPath -WorkspaceRoot $workspace -Path $Path -Label 'atomic delete target' -AllowMissing
     if (-not (Test-Path -LiteralPath $fullPath)) { return $false }
     if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) { throw 'atomic delete target is not a file' }
-    $currentDigest = 'sha256:' + (Get-FileHash -LiteralPath $fullPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $currentDigest = Get-HarnessFileSha256 -Path $fullPath
     if ($currentDigest -cne $ExpectedDigest) { throw 'atomic delete target digest changed' }
     $quarantinePath = Join-Path $workspace ('.harness-delete.{0}.{1}.tmp' -f $PID,[guid]::NewGuid().ToString('N'))
     $restore = $false
     try {
         [System.IO.File]::Move($fullPath,$quarantinePath)
-        $actualDigest = 'sha256:' + (Get-FileHash -LiteralPath $quarantinePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $actualDigest = Get-HarnessFileSha256 -Path $quarantinePath
         if ($actualDigest -cne $ExpectedDigest) { $restore = $true; throw 'atomic delete target digest changed' }
         [System.IO.File]::Delete($quarantinePath)
         return $true

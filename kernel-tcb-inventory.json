@@ -230,7 +230,7 @@
     },
     {
       "path": "scripts/lib/Harness.AtomicWrite.psm1",
-      "sha256": "sha256:44da7ec4ba73f71af2d7f8159cd4e7cb38e967b0e9cc561679d11d8918c5ac31",
+      "sha256": "sha256:0c0287b5a0f8841fb5ae5f979ea480249c17d38223bd3a179d079c0efe193172",
       "layer": "k0-trust-primitive",
       "trust_paths": [
         "distribution",
@@ -246,9 +246,9 @@
         "task-cli",
         "workspace-bootstrap"
       ],
-      "physical_loc": 174,
-      "nonblank_loc": 159,
-      "executable_loc": 159
+      "physical_loc": 169,
+      "nonblank_loc": 155,
+      "executable_loc": 155
     },
     {
       "path": "scripts/lib/Harness.ControlledWrite.psm1",
@@ -291,6 +291,28 @@
       "physical_loc": 141,
       "nonblank_loc": 129,
       "executable_loc": 129
+    },
+    {
+      "path": "scripts/lib/Harness.Hashing.psm1",
+      "sha256": "sha256:8308d40f9e9ee1fbe4233e25a405e7865803171de5aa255309dbd95d9d5171f2",
+      "layer": "k0-trust-primitive",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ],
+      "root_ids": [
+        "claude-pretooluse-adapter",
+        "codex-pretooluse-launcher",
+        "controlled-write-adapter",
+        "core-pretooluse",
+        "risk-policy-evaluator",
+        "status-cli",
+        "task-cli",
+        "workspace-bootstrap"
+      ],
+      "physical_loc": 44,
+      "nonblank_loc": 34,
+      "executable_loc": 34
     },
     {
       "path": "scripts/lib/Harness.HostCapabilities.psm1",
@@ -400,7 +422,7 @@
     },
     {
       "path": "scripts/lib/Harness.Requirement.psm1",
-      "sha256": "sha256:a28f1d579cc4135cb37c97325481bcb7e51dc3a31b6aaacea83f060744782749",
+      "sha256": "sha256:98f72cf1d03e27233357a422395f9977daefd086bb3aa6a302dc1ecc8c3e9172",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
@@ -408,13 +430,13 @@
       "root_ids": [
         "task-cli"
       ],
-      "physical_loc": 439,
-      "nonblank_loc": 398,
-      "executable_loc": 398
+      "physical_loc": 435,
+      "nonblank_loc": 393,
+      "executable_loc": 393
     },
     {
       "path": "scripts/lib/Harness.RuntimeDefault.psm1",
-      "sha256": "sha256:664ba05260e3c4268e6d48b88634d9242b402dc304eaee875366b29316dfbd9f",
+      "sha256": "sha256:662b1ad418897714ad22ef278823312cb8ff10e1bfd08d37915f334e7e186c91",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "distribution",
@@ -426,9 +448,9 @@
         "task-cli",
         "workspace-bootstrap"
       ],
-      "physical_loc": 319,
-      "nonblank_loc": 288,
-      "executable_loc": 288
+      "physical_loc": 321,
+      "nonblank_loc": 290,
+      "executable_loc": 290
     },
     {
       "path": "scripts/lib/Harness.TaskState.psm1",
@@ -861,6 +883,16 @@
     },
     {
       "from": "scripts/lib/Harness.AtomicWrite.psm1",
+      "to": "scripts/lib/Harness.Hashing.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Hashing.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.AtomicWrite.psm1",
       "to": "scripts/lib/Harness.Path.psm1",
       "kind": "import-module",
       "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop",
@@ -1025,6 +1057,25 @@
       "kind": "import-module",
       "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.TaskState.psm1') -Force -ErrorAction Stop",
       "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.Requirement.psm1",
+      "to": "scripts/lib/Harness.Hashing.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Hashing.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.RuntimeDefault.psm1",
+      "to": "scripts/lib/Harness.Hashing.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Hashing.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "distribution",
         "runtime"
       ]
     },
@@ -1197,24 +1248,37 @@
   ],
   "unresolved_dependencies": [],
   "totals": {
-    "file_count": 27,
-    "physical_loc": 13266,
-    "nonblank_loc": 12203,
-    "executable_loc": 12169,
-    "runtime_file_count": 21,
-    "runtime_executable_loc": 6151,
-    "distribution_file_count": 14,
-    "distribution_executable_loc": 7627,
+    "file_count": 28,
+    "physical_loc": 13303,
+    "nonblank_loc": 12230,
+    "executable_loc": 12196,
+    "runtime_file_count": 22,
+    "runtime_executable_loc": 6178,
+    "distribution_file_count": 15,
+    "distribution_executable_loc": 7659,
     "duplicate_edge_count": 3,
     "artifact_count": 19,
     "artifact_bytes": 39637
   },
   "budget": {
     "baseline_executable_loc": 6151,
-    "current_executable_loc": 6151,
-    "delta": 0,
-    "covered_growth": 0,
-    "status": "within-baseline",
-    "exceptions": []
+    "current_executable_loc": 6178,
+    "delta": 27,
+    "covered_growth": 27,
+    "status": "covered-by-exception",
+    "exceptions": [
+      {
+        "id": "KTB-EX-001",
+        "added_lines": 27,
+        "reason": "TK-01A introduces the four-function canonical K0 hashing contract and removes first-wave duplicate SHA-256 implementations, producing a measured net Runtime TCB increase of 27 executable lines.",
+        "new_trust_assumption": "Runtime trust digests now depend on one shared Hashing module and the PowerShell host's SHA-256 and UTF-8-without-BOM primitives instead of three local raw-hash implementations.",
+        "alternatives": [
+          "Keep duplicate SHA-256 implementations in AtomicWrite, Requirement, and RuntimeDefault, which preserves the smaller file count but leaves divergent trust-byte logic.",
+          "Fold all hashing into AtomicWrite, which would conflate pure byte hashing with filesystem mutation and prevent Requirement from using a minimal K0 primitive."
+        ],
+        "repayment_plan": "TK-01B-Compat must remove obsolete compatibility-only hash plumbing while preserving historical bytes and digests, then reduce this exception or the frozen baseline through a separately reviewed measurement change.",
+        "expires_at_milestone": "TK-01B-Compat"
+      }
+    ]
   }
 }

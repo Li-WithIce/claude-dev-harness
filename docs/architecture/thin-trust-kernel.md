@@ -53,16 +53,18 @@ K0 owns the smallest reusable mechanisms on which both trust paths rely:
 - repository and Workspace containment;
 - physical identity and reparse-boundary rejection;
 - strict JSON and Schema validation;
-- the future canonical hashing contract;
+- the canonical hashing contract;
 - atomic write and replace;
 - locking and compare-and-swap support;
 - stable error and result contracts.
 
 `scripts/lib/Harness.Path.psm1` is the current canonical Path primitive.
 `scripts/lib/Harness.AtomicWrite.psm1` is the current canonical Atomic Write
-primitive. TK-00 does not refactor either module or migrate duplicate callers.
-No parallel canonical implementation may be added. `Harness.Hashing.psm1` is a
-TK-01 target and does not exist in TK-00.
+primitive. `scripts/lib/Harness.Hashing.psm1` is the current canonical Hashing
+primitive and its byte semantics are frozen in `hashing-contract.md`. No
+parallel canonical implementation may be added. TK-01A migrates only the
+documented first-wave K0/K1 callers; canonical JSON remains outside K0 until a
+separately approved TK-01B-New contract exists.
 
 ## K1 — Runtime Trust Kernel
 
@@ -216,8 +218,10 @@ LOC. It is a ratchet:
 - reducing the current total does not require an exception and should be
   followed by an explicit baseline reduction.
 
-The initial baseline has no exception. The baseline is a generated current-tree
-observation bound by verifier checks, not a permanent architectural constant.
+The TK-00 initial baseline had no exception. TK-01A keeps that baseline frozen
+and records `KTB-EX-001` for its measured 27-line net increase, expiring at
+TK-01B-Compat. The baseline is a generated observation bound by verifier checks,
+not a permanent architectural constant.
 
 ## Terminal SLOs
 

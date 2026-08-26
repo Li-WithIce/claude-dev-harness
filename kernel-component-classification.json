@@ -372,6 +372,16 @@
       "legacy_status": "not-legacy"
     },
     {
+      "path": "scripts/lib/Harness.Hashing.psm1",
+      "layer": "k0-trust-primitive",
+      "current_role": "Canonical SHA-256 byte, file, UTF-8 text, and normalized-text primitive.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "Runtime trust digests depend on one frozen K0 hashing byte contract.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
       "path": "scripts/lib/Harness.HostCapabilities.psm1",
       "layer": "k1-runtime-kernel",
       "current_role": "Host capability projection used by Runtime Default and status.",
