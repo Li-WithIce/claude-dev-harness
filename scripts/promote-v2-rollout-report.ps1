@@ -20,7 +20,7 @@ $WorkspaceRoot = [IO.Path]::GetFullPath($WorkspaceRoot)
 
 function Get-RolloutRawDigest {
     param([Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
-    return 'sha256:' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
+    return Get-HarnessSha256Bytes -Bytes $Bytes
 }
 
 try {
@@ -28,6 +28,7 @@ try {
     $evidenceModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.RolloutEvidence.psm1') -Force -PassThru -ErrorAction Stop
     $qualificationModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Qualification.psm1') -Force -PassThru -ErrorAction Stop
     $runtimeDefaultModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.RuntimeDefault.psm1') -Force -PassThru -ErrorAction Stop
+    Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Hashing.psm1') -Force -ErrorAction Stop
     $protectedRoots = [Collections.Generic.List[string]]::new()
     $userProfile = [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
     if (-not [string]::IsNullOrWhiteSpace($userProfile)) { $protectedRoots.Add((Join-Path $userProfile '.codex')) }

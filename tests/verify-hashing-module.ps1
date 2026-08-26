@@ -30,6 +30,23 @@ $hashingRelative = 'scripts/lib/Harness.Hashing.psm1'
 $atomicRelative = 'scripts/lib/Harness.AtomicWrite.psm1'
 $requirementRelative = 'scripts/lib/Harness.Requirement.psm1'
 $runtimeDefaultRelative = 'scripts/lib/Harness.RuntimeDefault.psm1'
+$compatMigrationRelatives = @(
+    'scripts/assert-release-runner-boundary.ps1',
+    'scripts/generate-entry-contract.ps1',
+    'scripts/get-kernel-tcb-inventory.ps1',
+    'scripts/harness-write-mcp.ps1',
+    'scripts/host-benchmark/HostBenchmark.Otel.ps1',
+    'scripts/host-benchmark/HostBenchmark.Trial.ps1',
+    'scripts/install-transaction-common.ps1',
+    'scripts/lib/Harness.ModelEval.psm1',
+    'scripts/lib/Harness.RolloutEvidence.psm1',
+    'scripts/promote-v2-rollout-report.ps1',
+    'scripts/receive-otlp-http.ps1',
+    'scripts/run-host-benchmark.ps1',
+    'scripts/run-model-evals.ps1',
+    'scripts/run-preset-lifecycle-qualification.ps1',
+    'scripts/run-v1-stop-loss-qualification.ps1'
+)
 $hashingPath = Join-Path $RepoRoot $hashingRelative
 $atomicPath = Join-Path $RepoRoot $atomicRelative
 $expectedExports = @(
@@ -40,12 +57,12 @@ $expectedExports = @(
 )
 
 $parseFailures = [System.Collections.Generic.List[string]]::new()
-foreach ($relative in @($hashingRelative,$atomicRelative,$requirementRelative,$runtimeDefaultRelative,'tests/verify-hashing-module.ps1')) {
+foreach ($relative in @($hashingRelative,$atomicRelative,$requirementRelative,$runtimeDefaultRelative,'tests/verify-hashing-module.ps1') + $compatMigrationRelatives) {
     $tokens = $null; $errors = $null
     [void][Management.Automation.Language.Parser]::ParseFile((Join-Path $RepoRoot $relative),[ref]$tokens,[ref]$errors)
     if (@($errors).Count -gt 0) { $parseFailures.Add("${relative}: $(@($errors | ForEach-Object Message) -join '; ')") }
 }
-Check ($parseFailures.Count -eq 0) 'Hashing and first-wave PowerShell files parse' "PowerShell parse failures: $($parseFailures -join ' | ')"
+Check ($parseFailures.Count -eq 0) 'Hashing and TK-01B-Compat PowerShell files parse' "PowerShell parse failures: $($parseFailures -join ' | ')"
 Check (Test-FileHasUtf8Bom -Path $hashingPath) 'canonical Hashing module follows the repository UTF-8 BOM convention' 'canonical Hashing module lacks the repository UTF-8 BOM'
 
 $hashingModule = $null
@@ -98,14 +115,45 @@ try {
     $textMismatches = @($legacyTextVectors | Where-Object { (Harness.Hashing\Get-HarnessUtf8TextSha256 -Text $_) -cne (Get-LegacyTextSha256 -Text $_) })
     Check ($textMismatches.Count -eq 0) 'canonical UTF-8 text hashing matches every pre-TK-01A text formula vector' 'one or more pre-TK-01A text digests changed'
 
+    $legacyByteVectors = @([byte[]]::new(0),[byte[]](0x00),[byte[]](0xEF,0xBB,0xBF,0x61),[Text.UTF8Encoding]::new($false).GetBytes('Harness 雪'))
+    $byteMismatches = @($legacyByteVectors | Where-Object { (Harness.Hashing\Get-HarnessSha256Bytes -Bytes $_) -cne (Get-LegacyBytesSha256 -Bytes $_) })
+    Check ($byteMismatches.Count -eq 0) 'canonical byte hashing matches every pre-TK-01B raw formula vector' 'one or more pre-TK-01B raw byte digests changed'
+    Check ((Harness.Hashing\Get-HarnessUtf8TextSha256 -Text 'legacy-bare').Substring(7) -ceq (Get-LegacyTextSha256 -Text 'legacy-bare').Substring(7) -and
+        (Harness.Hashing\Get-HarnessFileSha256 -Path $bomFile).Substring(7) -ceq (Get-LegacyFileSha256 -Path $bomFile).Substring(7)) 'legacy bare lowercase hexadecimal representations remain byte-identical' 'a legacy bare hexadecimal representation changed'
+
     $hashingSource = [IO.File]::ReadAllText($hashingPath)
     $atomicSource = [IO.File]::ReadAllText($atomicPath)
     $requirementSource = [IO.File]::ReadAllText((Join-Path $RepoRoot $requirementRelative))
     $runtimeDefaultSource = [IO.File]::ReadAllText((Join-Path $RepoRoot $runtimeDefaultRelative))
-    Check ($hashingSource -notmatch '(?i)canonical.?json|ConvertTo-Json|digest_algorithm') 'Hashing module contains no canonical JSON or object-digest algorithm' 'Hashing module leaked TK-01B behavior'
+    Check ($hashingSource -notmatch '(?i)canonical.?json|ConvertTo-Json|digest_algorithm') 'Hashing module contains no canonical JSON or object-digest algorithm' 'Hashing module leaked TK-01B-New behavior'
     Check ($atomicSource.Contains("Harness.Hashing.psm1",[StringComparison]::Ordinal) -and $atomicSource -notmatch '\bGet-FileHash\b|Security\.Cryptography\.SHA256') 'AtomicWrite delegates raw SHA-256 to canonical Hashing' 'AtomicWrite retains a parallel raw SHA-256 implementation'
     Check ($requirementSource.Contains("Harness.Hashing.psm1",[StringComparison]::Ordinal) -and $requirementSource.Contains('ConvertTo-Json -Depth 30 -Compress',[StringComparison]::Ordinal) -and $requirementSource -notmatch '\bGet-FileHash\b|Security\.Cryptography\.SHA256|UTF8Encoding') 'Requirement preserves JSON bytes and delegates only final hashing' 'Requirement serialization changed or direct SHA-256 remained'
     Check ($runtimeDefaultSource.Contains("Harness.Hashing.psm1",[StringComparison]::Ordinal) -and $runtimeDefaultSource.Contains("'scripts/lib/Harness.Hashing.psm1'",[StringComparison]::Ordinal) -and $runtimeDefaultSource -notmatch 'Security\.Cryptography\.SHA256|\bHashData\b') 'RuntimeDefault binds Hashing into Source Identity and delegates final hashing' 'RuntimeDefault source binding or SHA-256 delegation is incomplete'
+
+    $missingCompatImports = @($compatMigrationRelatives | Where-Object {
+        $source = [IO.File]::ReadAllText((Join-Path $RepoRoot $_))
+        -not ($source.Contains('Harness.Hashing.psm1',[StringComparison]::Ordinal) -and $source.Contains('Import-Module',[StringComparison]::Ordinal))
+    })
+    Check ($missingCompatImports.Count -eq 0) 'every second-wave production caller has an explicit Hashing dependency' "TK-01B-Compat Hashing import is missing: $($missingCompatImports -join ', ')"
+
+    $productionPaths = @((Join-Path $RepoRoot 'harness.ps1')) + @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'scripts') -File -Recurse | Where-Object { $_.Extension -cin @('.ps1','.psm1') } | ForEach-Object FullName)
+    $directShaViolations = [Collections.Generic.List[string]]::new()
+    foreach ($path in $productionPaths) {
+        $relative = [IO.Path]::GetRelativePath($RepoRoot,$path).Replace([char]92,[char]47)
+        if ($relative -ceq $hashingRelative) { continue }
+        $source = [IO.File]::ReadAllText($path)
+        if ($source -match '(?i)\bGet-FileHash\b|Security\.Cryptography\.SHA256|Cryptography\.SHA256|\.ComputeHash\s*\(|::HashData\s*\(') { $directShaViolations.Add($relative) }
+    }
+    Check ($directShaViolations.Count -eq 0) 'Harness.Hashing is the only production PowerShell SHA-256 implementation' "parallel production SHA-256 implementation remains: $($directShaViolations -join ', ')"
+
+    $runHostSource = [IO.File]::ReadAllText((Join-Path $RepoRoot 'scripts/run-host-benchmark.ps1'))
+    $runModelSource = [IO.File]::ReadAllText((Join-Path $RepoRoot 'scripts/run-model-evals.ps1'))
+    $presetSource = [IO.File]::ReadAllText((Join-Path $RepoRoot 'scripts/run-preset-lifecycle-qualification.ps1'))
+    $v1Source = [IO.File]::ReadAllText((Join-Path $RepoRoot 'scripts/run-v1-stop-loss-qualification.ps1'))
+    Check ($runHostSource.Contains('$hashingPath',[StringComparison]::Ordinal) -and $runHostSource.Contains('$sourceInputPaths',[StringComparison]::Ordinal) -and
+        $runModelSource.Contains('$hashingPath',[StringComparison]::Ordinal) -and $runModelSource.Contains('$sourceInputPaths',[StringComparison]::Ordinal) -and
+        $presetSource.Contains('$hashingScript',[StringComparison]::Ordinal) -and $presetSource.Contains('$inputFiles',[StringComparison]::Ordinal) -and
+        $v1Source.Contains("hashing = Join-Path `$RepoRoot 'scripts\lib\Harness.Hashing.psm1'",[StringComparison]::Ordinal)) 'standalone benchmark, model, lifecycle, and v1 source closures bind Hashing' 'a standalone producer source closure omitted Hashing'
 } finally {
     if ($null -ne $atomicModule) { Remove-Module $atomicModule.Name -Force -ErrorAction Ignore }
     if ($null -ne $hashingModule) { Remove-Module $hashingModule.Name -Force -ErrorAction Ignore }
@@ -119,5 +167,5 @@ if ($failures.Count -gt 0) {
 }
 
 Write-Output 'STATUS: PASS'
-Write-Output 'Hashing contract and first-wave digest compatibility checks passed.'
+Write-Output 'Hashing contract and TK-01B-Compat digest compatibility checks passed.'
 exit 0

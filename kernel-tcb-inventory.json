@@ -151,7 +151,7 @@
     },
     {
       "path": "scripts/generate-entry-contract.ps1",
-      "sha256": "sha256:e2112496f2359a21f7a51f375a0c2f28d3450bc1ad16cbfc6d427da7320bdbb2",
+      "sha256": "sha256:3fa4af32490c881659b3797645f607a6e7a338b4d6110fd8936193e6bae89c3e",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
@@ -159,9 +159,9 @@
       "root_ids": [
         "entry-contract-compiler"
       ],
-      "physical_loc": 217,
-      "nonblank_loc": 198,
-      "executable_loc": 198
+      "physical_loc": 212,
+      "nonblank_loc": 193,
+      "executable_loc": 193
     },
     {
       "path": "scripts/harness-status.ps1",
@@ -181,7 +181,7 @@
     },
     {
       "path": "scripts/harness-write-mcp.ps1",
-      "sha256": "sha256:a196fe67bd274762dd9081316426249fead01dac355742c7cbddb165150d1e4b",
+      "sha256": "sha256:749e8d53ff2298042016cdcc75d65fb76838fc655f5d3acea5303fbaf4cce199",
       "layer": "a3-adapter",
       "trust_paths": [
         "runtime"
@@ -189,13 +189,13 @@
       "root_ids": [
         "controlled-write-adapter"
       ],
-      "physical_loc": 146,
-      "nonblank_loc": 134,
-      "executable_loc": 134
+      "physical_loc": 142,
+      "nonblank_loc": 131,
+      "executable_loc": 131
     },
     {
       "path": "scripts/install-transaction-common.ps1",
-      "sha256": "sha256:7b33669d5de8c3537030da22be636a84cbb8e3d65a34922f3e34fac917216f9f",
+      "sha256": "sha256:765d438e4539db6c4adf9d80a1334a0c8b25af9a39a8db09fa55caede3f75b5f",
       "layer": "d1-distribution",
       "trust_paths": [
         "distribution"
@@ -203,9 +203,9 @@
       "root_ids": [
         "workspace-bootstrap"
       ],
-      "physical_loc": 1378,
-      "nonblank_loc": 1262,
-      "executable_loc": 1261
+      "physical_loc": 1368,
+      "nonblank_loc": 1251,
+      "executable_loc": 1250
     },
     {
       "path": "scripts/lib/Harness.Approval.psm1",
@@ -230,7 +230,7 @@
     },
     {
       "path": "scripts/lib/Harness.AtomicWrite.psm1",
-      "sha256": "sha256:0c0287b5a0f8841fb5ae5f979ea480249c17d38223bd3a179d079c0efe193172",
+      "sha256": "sha256:9f0d67756cd10d8fe8c3dd96d5556ba1cbfef40238bec2efc05407e2a5e3dc49",
       "layer": "k0-trust-primitive",
       "trust_paths": [
         "distribution",
@@ -246,9 +246,9 @@
         "task-cli",
         "workspace-bootstrap"
       ],
-      "physical_loc": 169,
-      "nonblank_loc": 155,
-      "executable_loc": 155
+      "physical_loc": 166,
+      "nonblank_loc": 152,
+      "executable_loc": 152
     },
     {
       "path": "scripts/lib/Harness.ControlledWrite.psm1",
@@ -305,6 +305,7 @@
         "codex-pretooluse-launcher",
         "controlled-write-adapter",
         "core-pretooluse",
+        "entry-contract-compiler",
         "risk-policy-evaluator",
         "status-cli",
         "task-cli",
@@ -422,7 +423,7 @@
     },
     {
       "path": "scripts/lib/Harness.Requirement.psm1",
-      "sha256": "sha256:98f72cf1d03e27233357a422395f9977daefd086bb3aa6a302dc1ecc8c3e9172",
+      "sha256": "sha256:4726227cca9a6710247f975e06f45e0fe25a723d45c40ce6160b8ae374e56395",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
@@ -430,13 +431,13 @@
       "root_ids": [
         "task-cli"
       ],
-      "physical_loc": 435,
-      "nonblank_loc": 393,
-      "executable_loc": 393
+      "physical_loc": 424,
+      "nonblank_loc": 385,
+      "executable_loc": 385
     },
     {
       "path": "scripts/lib/Harness.RuntimeDefault.psm1",
-      "sha256": "sha256:662b1ad418897714ad22ef278823312cb8ff10e1bfd08d37915f334e7e186c91",
+      "sha256": "sha256:be8e2e911edd5e1a8164e219a92b331a7f349ba7069644f012b46778054212a6",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "distribution",
@@ -448,9 +449,9 @@
         "task-cli",
         "workspace-bootstrap"
       ],
-      "physical_loc": 321,
-      "nonblank_loc": 290,
-      "executable_loc": 290
+      "physical_loc": 311,
+      "nonblank_loc": 282,
+      "executable_loc": 282
     },
     {
       "path": "scripts/lib/Harness.TaskState.psm1",
@@ -813,6 +814,15 @@
       ]
     },
     {
+      "from": "scripts/generate-entry-contract.ps1",
+      "to": "scripts/lib/Harness.Hashing.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'lib\\Harness.Hashing.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
       "from": "scripts/harness-status.ps1",
       "to": "scripts/lib/Harness.HostCapabilities.psm1",
       "kind": "import-module",
@@ -859,6 +869,24 @@
       "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'lib\\Harness.ControlledWrite.psm1') -Force -ErrorAction Stop",
       "trust_paths": [
         "runtime"
+      ]
+    },
+    {
+      "from": "scripts/harness-write-mcp.ps1",
+      "to": "scripts/lib/Harness.Hashing.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'lib\\Harness.Hashing.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/install-transaction-common.ps1",
+      "to": "scripts/lib/Harness.Hashing.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'lib\\Harness.Hashing.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "distribution"
       ]
     },
     {
@@ -1249,36 +1277,23 @@
   "unresolved_dependencies": [],
   "totals": {
     "file_count": 28,
-    "physical_loc": 13303,
-    "nonblank_loc": 12230,
-    "executable_loc": 12196,
+    "physical_loc": 13260,
+    "nonblank_loc": 12192,
+    "executable_loc": 12158,
     "runtime_file_count": 22,
-    "runtime_executable_loc": 6178,
+    "runtime_executable_loc": 6151,
     "distribution_file_count": 15,
-    "distribution_executable_loc": 7659,
+    "distribution_executable_loc": 7637,
     "duplicate_edge_count": 3,
     "artifact_count": 19,
     "artifact_bytes": 39637
   },
   "budget": {
     "baseline_executable_loc": 6151,
-    "current_executable_loc": 6178,
-    "delta": 27,
-    "covered_growth": 27,
-    "status": "covered-by-exception",
-    "exceptions": [
-      {
-        "id": "KTB-EX-001",
-        "added_lines": 27,
-        "reason": "TK-01A introduces the four-function canonical K0 hashing contract and removes first-wave duplicate SHA-256 implementations, producing a measured net Runtime TCB increase of 27 executable lines.",
-        "new_trust_assumption": "Runtime trust digests now depend on one shared Hashing module and the PowerShell host's SHA-256 and UTF-8-without-BOM primitives instead of three local raw-hash implementations.",
-        "alternatives": [
-          "Keep duplicate SHA-256 implementations in AtomicWrite, Requirement, and RuntimeDefault, which preserves the smaller file count but leaves divergent trust-byte logic.",
-          "Fold all hashing into AtomicWrite, which would conflate pure byte hashing with filesystem mutation and prevent Requirement from using a minimal K0 primitive."
-        ],
-        "repayment_plan": "TK-01B-Compat must remove obsolete compatibility-only hash plumbing while preserving historical bytes and digests, then reduce this exception or the frozen baseline through a separately reviewed measurement change.",
-        "expires_at_milestone": "TK-01B-Compat"
-      }
-    ]
+    "current_executable_loc": 6151,
+    "delta": 0,
+    "covered_growth": 0,
+    "status": "within-baseline",
+    "exceptions": []
   }
 }

@@ -1,15 +1,15 @@
 ﻿Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'Harness.Hashing.psm1') -Force -ErrorAction Stop
 
 function Get-ModelEvalFileHash {
     param([string]$Path)
-    return 'sha256:' + (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    return Get-HarnessFileSha256 -Path $Path
 }
 
 function Get-ModelEvalTextHash {
     param([AllowEmptyString()][string]$Content)
-    $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($Content)
-    return 'sha256:' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+    return Get-HarnessUtf8TextSha256 -Text $Content
 }
 
 function Invoke-ModelEvalGit {
@@ -88,7 +88,7 @@ function Get-ModelEvalTreeDigest {
         [System.IO.Path]::GetRelativePath($Root,$file.FullName).Replace('\','/') + "`t" + (Get-ModelEvalFileHash $file.FullName)
     }
     $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes(($rows -join "`n"))
-    return 'sha256:' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+    return Get-HarnessSha256Bytes -Bytes $bytes
 }
 
 function Invoke-HarnessModelEvalSession {

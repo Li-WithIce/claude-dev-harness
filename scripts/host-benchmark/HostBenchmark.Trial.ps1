@@ -35,6 +35,8 @@
     } catch { return $false }
 }
 
+Import-Module (Join-Path $PSScriptRoot '..\lib\Harness.Hashing.psm1') -Force -ErrorAction Stop
+
 function Complete-HostPendingOtlpCleanup {
     param([Parameter(Mandatory)]$Pending)
     $collector = $Pending.collector
@@ -148,7 +150,7 @@ function Enter-HostCodexHomeMutex {
     )
     $physical = Get-HostPhysicalPathInfo -Path $Path -RejectLinks
     $lockBytes = [Text.UTF8Encoding]::new($false).GetBytes(('{0}|{1}' -f [string]$physical.volume,[string]$physical.file_id).ToLowerInvariant())
-    $lockHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($lockBytes)).ToLowerInvariant()
+    $lockHash = (Get-HarnessSha256Bytes -Bytes $lockBytes).Substring(7)
     $mutex = [Threading.Mutex]::new($false,"Global\dev-harness.host-benchmark.$lockHash")
     $acquired = $false
     $abandoned = $false
@@ -519,7 +521,7 @@ function Assert-HostCodexHome {
         if ((Test-HostPathAtOrBelow -Path ([string]$resolvedPhysical.physical_path) -Root ([string]$unsafePhysical.physical_path)) -or (Test-HostPathAtOrBelow -Path ([string]$unsafePhysical.physical_path) -Root ([string]$resolvedPhysical.physical_path))) { throw 'host-benchmark-auth-home-unsafe-location' }
     }
     $candidateAuthIdentity = Get-HostFileSystemIdentity -Path (Join-Path $resolved 'auth.json')
-    $candidateAuthDigest = (Get-FileHash -LiteralPath (Join-Path $resolved 'auth.json') -Algorithm SHA256 -ErrorAction Stop).Hash
+    $candidateAuthDigest = Get-HarnessFileSha256 -Path (Join-Path $resolved 'auth.json')
     $defaultHome = if ([string]::IsNullOrWhiteSpace($env:USERPROFILE)) { '' } else { Join-Path $env:USERPROFILE '.codex' }
     foreach ($unsafeHome in @([Environment]::GetEnvironmentVariable('CODEX_HOME',[EnvironmentVariableTarget]::Process),$defaultHome)) {
         if (-not [string]::IsNullOrWhiteSpace($unsafeHome) -and [IO.Path]::GetFullPath($unsafeHome).TrimEnd('\').Equals($resolved,[StringComparison]::OrdinalIgnoreCase)) { throw 'host-benchmark-auth-home-not-dedicated' }
@@ -530,7 +532,7 @@ function Assert-HostCodexHome {
                 if (-not [string]::IsNullOrWhiteSpace([string]$unsafeItem.LinkType)) { throw 'host-benchmark-auth-home-not-dedicated' }
                 $unsafeIdentity = Get-HostFileSystemIdentity -Path $unsafeAuth
                 $sameAuth = [string]$unsafeIdentity.volume -ceq [string]$candidateAuthIdentity.volume -and [string]$unsafeIdentity.file_id -ceq [string]$candidateAuthIdentity.file_id
-                $sameAuthBytes = [string](Get-FileHash -LiteralPath $unsafeAuth -Algorithm SHA256 -ErrorAction Stop).Hash -ceq [string]$candidateAuthDigest
+                $sameAuthBytes = [string](Get-HarnessFileSha256 -Path $unsafeAuth) -ceq [string]$candidateAuthDigest
                 $unsafePhysicalHome = [IO.Path]::GetDirectoryName([string]$unsafeIdentity.physical_path)
                 if ($sameAuth -or $sameAuthBytes -or (Test-HostPathAtOrBelow -Path ([string]$resolvedPhysical.physical_path) -Root $unsafePhysicalHome) -or (Test-HostPathAtOrBelow -Path $unsafePhysicalHome -Root ([string]$resolvedPhysical.physical_path))) { throw 'host-benchmark-auth-home-not-dedicated' }
             }
@@ -579,7 +581,7 @@ function Get-InstalledDesktopUserConfigBinding {
     if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { throw 'host-benchmark-installed-config-invalid' }
     $item = Get-Item -LiteralPath $configPath -Force -ErrorAction Stop
     if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not [string]::IsNullOrWhiteSpace([string]$item.LinkType) -or $item.Length -gt 1MB) { throw 'host-benchmark-installed-config-invalid' }
-    return [ordered]@{status='present';digest=('sha256:' + (Get-FileHash -LiteralPath $configPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant())}
+    return [ordered]@{status='present';digest=(Get-HarnessFileSha256 -Path $configPath)}
 }
 
 function Test-InstalledDesktopUserConfigBinding {
@@ -669,13 +671,13 @@ function Invoke-InstalledDesktopTrialRecovery {
     $saved = [ordered]@{}
     foreach ($name in @('USERPROFILE','HOME','CODEX_HOME')) { $saved[$name] = [Environment]::GetEnvironmentVariable($name,[EnvironmentVariableTarget]::Process) }
     try {
-        $before = (Get-FileHash -LiteralPath (Join-Path $CodexHome 'auth.json') -Algorithm SHA256 -ErrorAction Stop).Hash
+        $before = Get-HarnessFileSha256 -Path (Join-Path $CodexHome 'auth.json')
         $env:USERPROFILE = $profileRoot
         $env:HOME = $profileRoot
         $env:CODEX_HOME = $CodexHome
         $output = @(& pwsh -NoLogo -NoProfile -NonInteractive -File (Join-Path $RepoRoot 'uninstall.ps1') -RecoveryManifestPath ([string]$Recovery.manifest_path) -RepoRoot $RepoRoot 2>&1 | ForEach-Object { [string]$_ })
         if ($LASTEXITCODE -ne 0) { throw 'host-benchmark-installed-recovery-failed' }
-        $after = (Get-FileHash -LiteralPath (Join-Path $CodexHome 'auth.json') -Algorithm SHA256 -ErrorAction Stop).Hash
+        $after = Get-HarnessFileSha256 -Path (Join-Path $CodexHome 'auth.json')
         if ($after -cne $before) { throw 'host-benchmark-installed-recovery-changed-auth' }
         $null = Assert-InstalledDesktopProfileReady -CodexHome $CodexHome
         return $true
@@ -694,13 +696,13 @@ function Invoke-InstalledDesktopTrialCleanup {
     $saved = [ordered]@{}
     foreach ($name in @('USERPROFILE','HOME','CODEX_HOME')) { $saved[$name] = [Environment]::GetEnvironmentVariable($name,[EnvironmentVariableTarget]::Process) }
     try {
-        $before = (Get-FileHash -LiteralPath (Join-Path $CodexHome 'auth.json') -Algorithm SHA256 -ErrorAction Stop).Hash
+        $before = Get-HarnessFileSha256 -Path (Join-Path $CodexHome 'auth.json')
         $env:USERPROFILE = $profileRoot
         $env:HOME = $profileRoot
         $env:CODEX_HOME = $CodexHome
         $output = @(& pwsh -NoLogo -NoProfile -NonInteractive -File (Join-Path $RepoRoot 'uninstall.ps1') -WorkspaceRoot $Workspace -RepoRoot $RepoRoot 2>&1 | ForEach-Object { [string]$_ })
         if ($LASTEXITCODE -ne 0) { throw 'host-benchmark-installed-uninstall-failed' }
-        $after = (Get-FileHash -LiteralPath (Join-Path $CodexHome 'auth.json') -Algorithm SHA256 -ErrorAction Stop).Hash
+        $after = Get-HarnessFileSha256 -Path (Join-Path $CodexHome 'auth.json')
         if ($after -cne $before) { throw 'host-benchmark-installed-uninstall-changed-auth' }
         $null = Assert-InstalledDesktopProfileReady -CodexHome $CodexHome
         return $true
@@ -735,12 +737,12 @@ function Invoke-InstalledDesktopInstall {
     )
     $profileRoot = Get-InstalledDesktopProfileRoot -CodexHome $CodexHome
     $authPath = Join-Path $CodexHome 'auth.json'
-    $before = (Get-FileHash -LiteralPath $authPath -Algorithm SHA256 -ErrorAction Stop).Hash
+    $before = Get-HarnessFileSha256 -Path $authPath
     $configBefore = Get-InstalledDesktopUserConfigBinding -CodexHome $CodexHome
     $installCommandOutput = @(& pwsh -NoLogo -NoProfile -NonInteractive -File (Join-Path $RepoRoot 'install.ps1') -WorkspaceRoot $Workspace -RepoRoot $RepoRoot -Preset core 2>&1 | ForEach-Object { [string]$_ })
     $installExit = $LASTEXITCODE
     try {
-        $afterInstall = (Get-FileHash -LiteralPath $authPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        $afterInstall = Get-HarnessFileSha256 -Path $authPath
         $configAfterInstall = Get-InstalledDesktopUserConfigBinding -CodexHome $CodexHome
     } catch { throw 'host-benchmark-installed-install-profile-integrity-failed' }
     if ($afterInstall -cne $before) { throw 'host-benchmark-installed-install-changed-auth' }
@@ -750,7 +752,7 @@ function Invoke-InstalledDesktopInstall {
     $verifyOutput = @(& pwsh -NoLogo -NoProfile -NonInteractive -File (Join-Path $RepoRoot 'tests\verify-installation.ps1') -WorkspaceRoot $Workspace -RepoRoot $RepoRoot -UserProfileRoot $profileRoot -Scope All 2>&1 | ForEach-Object { [string]$_ })
     $verifyExit = $LASTEXITCODE
     try {
-        $afterVerify = (Get-FileHash -LiteralPath $authPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        $afterVerify = Get-HarnessFileSha256 -Path $authPath
         $configAfterVerify = Get-InstalledDesktopUserConfigBinding -CodexHome $CodexHome
     } catch { throw 'host-benchmark-installed-verification-profile-integrity-failed' }
     if ($afterVerify -cne $before) { throw 'host-benchmark-installed-verification-changed-auth' }

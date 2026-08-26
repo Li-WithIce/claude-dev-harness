@@ -20,13 +20,15 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 
 $atomicWritePath = Join-Path $PSScriptRoot 'lib\Harness.AtomicWrite.psm1'
+$hashingPath = Join-Path $PSScriptRoot 'lib\Harness.Hashing.psm1'
 $pathModulePath = Join-Path $PSScriptRoot 'lib\Harness.Path.psm1'
 $otelContractPath = Join-Path $PSScriptRoot 'host-benchmark\HostBenchmark.Otel.ps1'
 $trialPath = Join-Path $PSScriptRoot 'host-benchmark\HostBenchmark.Trial.ps1'
-foreach ($path in @($atomicWritePath,$pathModulePath,$otelContractPath,$trialPath)) {
+foreach ($path in @($atomicWritePath,$hashingPath,$pathModulePath,$otelContractPath,$trialPath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required host benchmark input is missing: $path" }
 }
 Import-Module $atomicWritePath -Force -ErrorAction Stop
+Import-Module $hashingPath -Force -ErrorAction Stop
 Import-Module $pathModulePath -Force -ErrorAction Stop
 
 function Invoke-HostGit {
@@ -343,7 +345,7 @@ if ($BenchmarkPath -ceq 'installed-desktop-path') {
 }
 
 $sourceStart = Get-HostGitState -Root $RepoRoot
-$sourceInputPaths = @($PSCommandPath,$wrapperPath,$schemaPath,$collectorPath,$atomicWritePath,$pathModulePath,$otelContractPath,$trialPath)
+$sourceInputPaths = @($PSCommandPath,$wrapperPath,$schemaPath,$collectorPath,$atomicWritePath,$hashingPath,$pathModulePath,$otelContractPath,$trialPath)
 if ($BenchmarkPath -ceq 'installed-desktop-path') {
     $sourceInputPaths += @(
         (Join-Path $RepoRoot 'install.ps1'),
@@ -428,6 +430,7 @@ try {
                     $record = New-HostUnavailableTrial -Trial $trial -Diagnostic $diagnostic -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -RawTraceDeleted $preTraceFailure
                 } finally {
                     Import-Module $atomicWritePath -Force -ErrorAction Stop
+                    Import-Module $hashingPath -Force -ErrorAction Stop
                     Import-Module $pathModulePath -Force -ErrorAction Stop
                 }
                 $installedCleanupFailed = $false

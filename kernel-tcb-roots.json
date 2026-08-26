@@ -182,19 +182,6 @@
   ],
   "budget": {
     "baseline_executable_loc": 6151,
-    "exceptions": [
-      {
-        "id": "KTB-EX-001",
-        "added_lines": 27,
-        "reason": "TK-01A introduces the four-function canonical K0 hashing contract and removes first-wave duplicate SHA-256 implementations, producing a measured net Runtime TCB increase of 27 executable lines.",
-        "new_trust_assumption": "Runtime trust digests now depend on one shared Hashing module and the PowerShell host's SHA-256 and UTF-8-without-BOM primitives instead of three local raw-hash implementations.",
-        "alternatives": [
-          "Keep duplicate SHA-256 implementations in AtomicWrite, Requirement, and RuntimeDefault, which preserves the smaller file count but leaves divergent trust-byte logic.",
-          "Fold all hashing into AtomicWrite, which would conflate pure byte hashing with filesystem mutation and prevent Requirement from using a minimal K0 primitive."
-        ],
-        "repayment_plan": "TK-01B-Compat must remove obsolete compatibility-only hash plumbing while preserving historical bytes and digests, then reduce this exception or the frozen baseline through a separately reviewed measurement change.",
-        "expires_at_milestone": "TK-01B-Compat"
-      }
-    ]
+    "exceptions": []
   }
 }

@@ -16,6 +16,7 @@ if (-not [string]::IsNullOrWhiteSpace($TestFailureProbe) -and $ProducerMode -cne
 
 $rolloutModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.RolloutEvidence.psm1') -Force -PassThru -ErrorAction Stop
 $atomicModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.AtomicWrite.psm1') -Force -PassThru -ErrorAction Stop
+Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Hashing.psm1') -Force -ErrorAction Stop
 $powerShellPath = (Get-Process -Id $PID -ErrorAction Stop).Path
 $paths = [ordered]@{
     producer = [IO.Path]::GetFullPath($PSCommandPath)
@@ -24,6 +25,7 @@ $paths = [ordered]@{
     protocol_module = Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1'
     task_state_module = Join-Path $RepoRoot 'scripts\lib\Harness.TaskState.psm1'
     atomic_write = Join-Path $RepoRoot 'scripts\lib\Harness.AtomicWrite.psm1'
+    hashing = Join-Path $RepoRoot 'scripts\lib\Harness.Hashing.psm1'
     path = Join-Path $RepoRoot 'scripts\lib\Harness.Path.psm1'
     schema = Join-Path $RepoRoot 'schemas\v1-stop-loss-report.schema.json'
 }
@@ -33,7 +35,7 @@ $mainUserProfile = [IO.Path]::GetFullPath($env:USERPROFILE)
 
 function Get-V1StopLossBytesDigest {
     param([Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
-    return 'sha256:' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
+    return Get-HarnessSha256Bytes -Bytes $Bytes
 }
 
 function Get-V1StopLossTextDigest {

@@ -4,10 +4,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot 'Harness.Hashing.psm1') -Force -ErrorAction Stop
 
-function Get-HarnessSha256Text {
-    param([Parameter(Mandatory)][AllowEmptyString()][string]$Content)
-    return Get-HarnessUtf8TextSha256 -Text $Content
-}
+function Get-HarnessSha256Text { param([Parameter(Mandatory)][AllowEmptyString()][string]$Content) return Get-HarnessUtf8TextSha256 -Text $Content }
 
 function Get-HarnessFileDigest {
     param([Parameter(Mandatory)][string]$WorkspaceRoot, [Parameter(Mandatory)][string]$Path)

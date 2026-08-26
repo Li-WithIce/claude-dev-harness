@@ -17,6 +17,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'lib\Harness.Hashing.psm1') -Force -ErrorAction Stop
 if (-not $IsWindows) { throw 'release runner account boundary requires Windows' }
 if ([string]::IsNullOrWhiteSpace($ProducerRunnerLabel) -or [string]::IsNullOrWhiteSpace($AggregatorRunnerLabel)) { throw 'release runner labels must be non-empty' }
 if ($ProducerRunnerLabel.Equals($AggregatorRunnerLabel,[StringComparison]::OrdinalIgnoreCase)) { throw 'producer and aggregator runner labels must be different' }
@@ -27,7 +28,7 @@ try { $sid = [string]$identity.User.Value } finally { $identity.Dispose() }
 if ($sid -cnotmatch '^S-[0-9]+(?:-[0-9]+)+$') { throw 'release runner Windows account identity is unavailable' }
 $identityText = "thin-v2-release-runner-account/v1`n$RunId`n$RunAttempt`n$sid"
 $identityBytes = [Text.UTF8Encoding]::new($false).GetBytes($identityText)
-$accountDigest = 'sha256:' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($identityBytes)).ToLowerInvariant()
+$accountDigest = Get-HarnessSha256Bytes -Bytes $identityBytes
 
 function Write-RunnerObservation {
     if ([string]::IsNullOrWhiteSpace($ObservationOutputPath)) { return }

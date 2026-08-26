@@ -17,22 +17,24 @@ if (-not [string]::IsNullOrWhiteSpace($TestFailureStage) -and $ProducerMode -cne
 
 $rolloutModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.RolloutEvidence.psm1') -Force -PassThru -ErrorAction Stop
 $atomicModule = Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.AtomicWrite.psm1') -Force -PassThru -ErrorAction Stop
+Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Hashing.psm1') -Force -ErrorAction Stop
 $powerShellPath = (Get-Process -Id $PID -ErrorAction Stop).Path
 $installScript = Join-Path $RepoRoot 'install.ps1'
 $verifyScript = Join-Path $RepoRoot 'tests\verify-installation.ps1'
 $uninstallScript = Join-Path $RepoRoot 'uninstall.ps1'
 $producerScript = [IO.Path]::GetFullPath($PSCommandPath)
 $atomicScript = Join-Path $RepoRoot 'scripts\lib\Harness.AtomicWrite.psm1'
+$hashingScript = Join-Path $RepoRoot 'scripts\lib\Harness.Hashing.psm1'
 $pathScript = Join-Path $RepoRoot 'scripts\lib\Harness.Path.psm1'
 $schemaPath = Join-Path $RepoRoot 'schemas\preset-lifecycle-report.schema.json'
-$inputFiles = @($installScript,$uninstallScript,$verifyScript,$producerScript,$atomicScript,$pathScript,$schemaPath)
+$inputFiles = @($installScript,$uninstallScript,$verifyScript,$producerScript,$atomicScript,$hashingScript,$pathScript,$schemaPath)
 foreach ($path in $inputFiles) { if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required preset lifecycle input is missing: $path" } }
 if ([string]::IsNullOrWhiteSpace($env:USERPROFILE)) { throw 'USERPROFILE is required for preset lifecycle qualification' }
 $mainUserProfile = [IO.Path]::GetFullPath($env:USERPROFILE)
 
 function Get-PresetLifecycleBytesDigest {
     param([Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
-    return 'sha256:' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
+    return Get-HarnessSha256Bytes -Bytes $Bytes
 }
 
 function Get-PresetLifecycleTextDigest {

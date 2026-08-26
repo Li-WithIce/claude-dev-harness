@@ -1,13 +1,14 @@
 ﻿Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
+Import-Module (Join-Path $PSScriptRoot 'Harness.Hashing.psm1') -Force -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop
 $script:RolloutAtomicModule = Import-Module (Join-Path $PSScriptRoot 'Harness.AtomicWrite.psm1') -Force -PassThru -ErrorAction Stop
 . (Join-Path $PSScriptRoot '..\host-benchmark\HostBenchmark.Trial.ps1')
 
 function Get-ReleaseSha256Bytes {
     param([Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
-    return 'sha256:' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
+    return Get-HarnessSha256Bytes -Bytes $Bytes
 }
 
 function Get-ReleaseSha256Text {
@@ -2941,7 +2942,7 @@ function Invoke-HarnessRolloutPublicationTransaction {
     $sourceBytes = [IO.File]::ReadAllBytes([string]$paths.source)
     if (-not (Test-HarnessRolloutBytesEqual -Left $sourceBytes -Right $ReportBytes)) { throw 'rollout-promotion-input-bytes-changed' }
     $workspace = [string]$paths.workspace
-    $mutexHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.UTF8Encoding]::new($false).GetBytes([string]$paths.workspace_identity))).ToLowerInvariant()
+    $mutexHash = (Get-HarnessUtf8TextSha256 -Text ([string]$paths.workspace_identity)).Substring(7)
     $mutex = [Threading.Mutex]::new($false,"Global\dev-harness.rollout-promotion.$mutexHash")
     $acquired = $false
     $createdParents = [Collections.Generic.List[string]]::new()
