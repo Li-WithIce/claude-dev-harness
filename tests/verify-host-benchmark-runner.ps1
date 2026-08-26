@@ -168,8 +168,9 @@ $trialInvokeStart=$runnerText.IndexOf('$record = Invoke-HostTrial')
 $trialInvokeEnd=$runnerText.IndexOf('$installedCleanupFailed =',$trialInvokeStart)
 $trialInvokeBlock=if($trialInvokeStart-ge0-and$trialInvokeEnd-gt$trialInvokeStart){$runnerText.Substring($trialInvokeStart,$trialInvokeEnd-$trialInvokeStart)}else{''}
 $atomicReloadIndex=$trialInvokeBlock.IndexOf('Import-Module $atomicWritePath -Force')
+$hashingReloadIndex=$trialInvokeBlock.IndexOf('Import-Module $hashingPath -Force')
 $pathReloadIndex=$trialInvokeBlock.IndexOf('Import-Module $pathModulePath -Force')
-Check ($trialInvokeBlock-match'finally\s*\{'-and$atomicReloadIndex-ge0-and$pathReloadIndex-gt$atomicReloadIndex) 'runner does not restore AtomicWrite then Path after every trial return or exception'
+Check ($trialInvokeBlock-match'finally\s*\{'-and$atomicReloadIndex-ge0-and$hashingReloadIndex-gt$atomicReloadIndex-and$pathReloadIndex-gt$hashingReloadIndex) 'runner does not restore AtomicWrite, Hashing, then Path after every trial return or exception'
 Check ($runnerText-match"gpt-5\.6-sol"-and$runnerText-match"ValidateSet\('max'\)"-and$trialText-match"'\-Sandbox','danger-full-access','\-ApprovalPolicy','never','\-Ephemeral'"-and$trialText-match'if \(\$installedMode\) \{ \$wrapperArguments \+= ''\-LoadUserConfig'' \} else \{ \$wrapperArguments \+= ''\-Isolated'' \}') 'release model/max or explicit cognitive/installed invocation contract missing'
 Check ($text-match'\$protocolNames = @\(''bare'',''v1'',''v2''\)'-and$text-match'HARNESS_PROTOCOL = \$Protocol'-and$text-match'fresh_ephemeral_session_per_invocation=\$true') 'bare/v1/v2 fresh-session comparison contract missing'
 Check ($text-match'install_duration_included=\$false'-and$text-match'total_duration_ms'-and$text-match'sum_codex_process_duration_ms'-and$text-match'first_useful_action_ms'-and$text-match'successful_request_sends'-and$text-match'loaded_files'-and$text-match'artifact_writes'-and$text-match'runtime_writes'-and$text-match'tokens') 'required host metrics or latency boundary missing'

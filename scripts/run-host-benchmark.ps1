@@ -430,6 +430,7 @@ try {
                     $record = New-HostUnavailableTrial -Trial $trial -Diagnostic $diagnostic -SourceRevision ([string]$groupSourceStart.revision) -SourceCommitTree ([string]$groupSourceStart.commit_tree_oid) -RawTraceDeleted $preTraceFailure
                 } finally {
                     Import-Module $atomicWritePath -Force -ErrorAction Stop
+                    Import-Module $hashingPath -Force -ErrorAction Stop
                     Import-Module $pathModulePath -Force -ErrorAction Stop
                 }
                 $installedCleanupFailed = $false
