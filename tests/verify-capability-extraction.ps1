@@ -167,13 +167,18 @@ try {
     )
     foreach ($name in $allArtifacts) { [IO.File]::WriteAllText((Join-Path $tempRoot $name),'{}',[Text.UTF8Encoding]::new($false)) }
     $revision = [string]@(& git -c core.fsmonitor=false -C $RepoRoot rev-parse HEAD)[0]
+    & git -c core.fsmonitor=false -C $RepoRoot diff --quiet --no-ext-diff
+    $worktreeClean = $LASTEXITCODE -eq 0
+    & git -c core.fsmonitor=false -C $RepoRoot diff --cached --quiet --no-ext-diff
+    $indexClean = $LASTEXITCODE -eq 0
+    $bindingProducerMode = if ($worktreeClean -and $indexClean) { 'formal' } else { 'test-only' }
     foreach ($kind in @('model','host')) {
         $output = Join-Path $tempRoot "$kind-capability-source-binding.json"
-        $writerOutput = @(& $powerShell -NoLogo -NoProfile -NonInteractive -File $writerPath -RepoRoot $RepoRoot -Kind $kind -ArtifactRoot $tempRoot -OutputPath $output -SourceRevision $revision -ProducerMode test-only 2>&1)
+        $writerOutput = @(& $powerShell -NoLogo -NoProfile -NonInteractive -File $writerPath -RepoRoot $RepoRoot -Kind $kind -ArtifactRoot $tempRoot -OutputPath $output -SourceRevision $revision -ProducerMode $bindingProducerMode 2>&1)
         if ($LASTEXITCODE -ne 0) { throw "$kind binding fixture failed: $($writerOutput -join ' | ')" }
     }
     $fullPath = Join-Path $tempRoot 'full-capability-source-binding.json'
-    $fullOutput = @(& $powerShell -NoLogo -NoProfile -NonInteractive -File $writerPath -RepoRoot $RepoRoot -Kind full -ArtifactRoot $tempRoot -OutputPath $fullPath -SourceRevision $revision -ProducerMode test-only 2>&1)
+    $fullOutput = @(& $powerShell -NoLogo -NoProfile -NonInteractive -File $writerPath -RepoRoot $RepoRoot -Kind full -ArtifactRoot $tempRoot -OutputPath $fullPath -SourceRevision $revision -ProducerMode $bindingProducerMode 2>&1)
     $fullExit = $LASTEXITCODE
     $bindingSchemaValid = $fullExit -eq 0
     foreach ($kind in @('model','host','full')) {
@@ -181,10 +186,10 @@ try {
         try { if (-not (Test-Json -Json ([IO.File]::ReadAllText($path)) -SchemaFile $bindingSchemaPath -ErrorAction Stop -WarningAction SilentlyContinue)) { $bindingSchemaValid = $false } }
         catch { $bindingSchemaValid = $false }
     }
-    Check $bindingSchemaValid 'model, host, and full bundle sidecars satisfy the strict binding Schema' "Capability source binding fixture failed: $($fullOutput -join ' | ')"
+    Check $bindingSchemaValid "model, host, and full bundle sidecars satisfy the strict binding Schema in $bindingProducerMode mode" "Capability source binding fixture failed: $($fullOutput -join ' | ')"
 
     [IO.File]::WriteAllText((Join-Path $tempRoot 'model-eval.json'),'{"tampered":true}',[Text.UTF8Encoding]::new($false))
-    $tamperOutput = @(& $powerShell -NoLogo -NoProfile -NonInteractive -File $writerPath -RepoRoot $RepoRoot -Kind full -ArtifactRoot $tempRoot -OutputPath $fullPath -SourceRevision $revision -ProducerMode test-only 2>&1)
+    $tamperOutput = @(& $powerShell -NoLogo -NoProfile -NonInteractive -File $writerPath -RepoRoot $RepoRoot -Kind full -ArtifactRoot $tempRoot -OutputPath $fullPath -SourceRevision $revision -ProducerMode $bindingProducerMode 2>&1)
     Check ($LASTEXITCODE -ne 0 -and ($tamperOutput -join "`n") -match 'artifact digest mismatch') 'full binding rejects a tampered upstream bundle artifact' 'full binding accepted a tampered upstream artifact or failed ambiguously'
 
     $bindingText = [IO.File]::ReadAllText((Join-Path $tempRoot 'model-capability-source-binding.json'))
