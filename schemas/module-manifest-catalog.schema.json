@@ -1,0 +1,206 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/module-manifest-catalog.schema.json",
+  "title": "Harness Module Manifest Catalog v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generator_contract_version",
+    "manifest_root",
+    "source_manifests",
+    "modules",
+    "core_groups",
+    "quick_tests",
+    "full_tests",
+    "optional_routes",
+    "test_owners",
+    "unresolved_dependencies",
+    "ownership_conflicts",
+    "totals"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["module-manifest-catalog/v0"] },
+    "generator_contract_version": { "type": "string", "enum": ["module-manifest-generator/v0"] },
+    "manifest_root": { "type": "string", "enum": ["modules"] },
+    "source_manifests": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["module_id", "path", "digest"],
+        "properties": {
+          "module_id": { "$ref": "#/definitions/moduleId" },
+          "path": { "$ref": "#/definitions/manifestPath" },
+          "digest": { "$ref": "#/definitions/sha256" }
+        }
+      }
+    },
+    "modules": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/module" }
+    },
+    "core_groups": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry-lifecycle", "evaluation-release", "install-evidence", "governance-approval", "harness-contracts"],
+      "properties": {
+        "entry-lifecycle": { "$ref": "#/definitions/nonEmptyTestArray" },
+        "evaluation-release": { "$ref": "#/definitions/nonEmptyTestArray" },
+        "install-evidence": { "$ref": "#/definitions/nonEmptyTestArray" },
+        "governance-approval": { "$ref": "#/definitions/nonEmptyTestArray" },
+        "harness-contracts": { "$ref": "#/definitions/nonEmptyTestArray" }
+      }
+    },
+    "quick_tests": { "$ref": "#/definitions/testArray" },
+    "full_tests": { "$ref": "#/definitions/nonEmptyTestArray" },
+    "optional_routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["module_id", "manifest_path", "match_paths", "tests"],
+        "properties": {
+          "module_id": { "$ref": "#/definitions/moduleId" },
+          "manifest_path": { "$ref": "#/definitions/manifestPath" },
+          "match_paths": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "$ref": "#/definitions/ownedPath" }
+          },
+          "tests": { "$ref": "#/definitions/nonEmptyTestArray" }
+        }
+      }
+    },
+    "test_owners": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "module_id"],
+        "properties": {
+          "path": { "$ref": "#/definitions/testPath" },
+          "module_id": { "$ref": "#/definitions/moduleId" }
+        }
+      }
+    },
+    "unresolved_dependencies": { "type": "array", "maxItems": 0 },
+    "ownership_conflicts": { "type": "array", "maxItems": 0 },
+    "totals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest_count", "module_count", "owner_test_count", "core_test_count", "quick_test_count", "full_test_count", "optional_route_count"],
+      "properties": {
+        "manifest_count": { "type": "integer", "minimum": 1 },
+        "module_count": { "type": "integer", "minimum": 1 },
+        "owner_test_count": { "type": "integer", "minimum": 1 },
+        "core_test_count": { "type": "integer", "minimum": 1 },
+        "quick_test_count": { "type": "integer", "minimum": 1 },
+        "full_test_count": { "type": "integer", "minimum": 1 },
+        "optional_route_count": { "type": "integer", "minimum": 1 }
+      }
+    }
+  },
+  "definitions": {
+    "moduleId": { "type": "string", "pattern": "^(?!(?:kernel|core|runtime|legacy|none)$)[a-z][a-z0-9-]{1,62}$" },
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "trackedPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!.*\\\\)(?!.*//)(?!\\.\\.?(?:/|$))(?!.*\\/\\.\\.?(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$"
+    },
+    "ownedPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 243,
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!.*\\\\)(?!.*//)(?!\\.\\.?(?:/|$))(?!.*\\/\\.\\.?(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*(?:/\\*\\*)?$"
+    },
+    "manifestPath": { "type": "string", "pattern": "^modules/[a-z][a-z0-9-]{1,62}/module\\.manifest\\.json$" },
+    "testPath": { "type": "string", "pattern": "^tests/(?:verify-[A-Za-z0-9._-]+|run-scenario-evals)\\.ps1$" },
+    "capability": {
+      "type": "string",
+      "enum": [
+        "filesystem-read",
+        "filesystem-write",
+        "network",
+        "process-execution",
+        "task-state-read",
+        "task-state-write",
+        "capability-read",
+        "capability-write",
+        "kernel-policy-read",
+        "kernel-policy-write"
+      ]
+    },
+    "testArray": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/testPath" }
+    },
+    "nonEmptyTestArray": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/testPath" }
+    },
+    "module": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module_id", "kind", "description", "default_activation", "dependencies", "requested_capabilities", "ownership", "entrypoints", "validation"],
+      "properties": {
+        "module_id": { "$ref": "#/definitions/moduleId" },
+        "kind": { "type": "string", "enum": ["kernel", "capability", "adapter", "legacy"] },
+        "description": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "default_activation": { "type": "boolean" },
+        "dependencies": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kernel_api", "modules"],
+          "properties": {
+            "kernel_api": { "type": "string", "enum": ["v1"] },
+            "modules": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/definitions/moduleId" } }
+          }
+        },
+        "requested_capabilities": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/definitions/capability" } },
+        "ownership": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["owned_paths", "watch_paths"],
+          "properties": {
+            "owned_paths": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/definitions/ownedPath" } },
+            "watch_paths": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/definitions/ownedPath" } }
+          }
+        },
+        "entrypoints": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["commands", "hooks"],
+          "properties": {
+            "commands": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/definitions/trackedPath" } },
+            "hooks": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/definitions/trackedPath" } }
+          }
+        },
+        "validation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["owner_tests", "quick", "core_group", "changed", "full"],
+          "properties": {
+            "owner_tests": { "$ref": "#/definitions/nonEmptyTestArray" },
+            "quick": { "$ref": "#/definitions/testArray" },
+            "core_group": { "oneOf": [{ "type": "string", "enum": ["entry-lifecycle", "evaluation-release", "install-evidence", "governance-approval", "harness-contracts"] }, { "type": "null" }] },
+            "changed": { "$ref": "#/definitions/testArray" },
+            "full": { "$ref": "#/definitions/testArray" }
+          }
+        }
+      }
+    }
+  }
+}

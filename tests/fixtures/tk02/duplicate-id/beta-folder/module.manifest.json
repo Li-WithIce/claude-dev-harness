@@ -1,0 +1,21 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "alpha-module",
+  "kind": "kernel",
+  "description": "Duplicate module identity fixture B.",
+  "default_activation": true,
+  "dependencies": { "kernel_api": "v1", "modules": [] },
+  "requested_capabilities": ["filesystem-read"],
+  "ownership": {
+    "owned_paths": ["tests/fixtures/tk02/duplicate-id/beta-folder/module.manifest.json"],
+    "watch_paths": []
+  },
+  "entrypoints": { "commands": [], "hooks": [] },
+  "validation": {
+    "owner_tests": ["tests/verify-canonical-json.ps1"],
+    "quick": [],
+    "core_group": null,
+    "changed": [],
+    "full": []
+  }
+}

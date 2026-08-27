@@ -1,0 +1,73 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "harness-maintenance",
+  "kind": "capability",
+  "description": "Repository maintenance, validation process control, baseline checks, and install isolation verification.",
+  "default_activation": false,
+  "dependencies": {
+    "kernel_api": "v1",
+    "modules": ["distribution", "release-evidence", "thin-trust-kernel"]
+  },
+  "requested_capabilities": ["filesystem-read", "filesystem-write", "process-execution"],
+  "ownership": {
+    "owned_paths": [
+      "modules/harness-maintenance/**",
+      "scripts/benchmark-harness.ps1",
+      "scripts/invoke-validation-check.ps1",
+      "scripts/lib/Harness.ValidationJob.cs",
+      "scripts/lib/Harness.ValidationProcess.ps1",
+      "scripts/run-changed-optional-validation.ps1",
+      "scripts/run-validation.ps1",
+      "scripts/write-ordinary-ci-receipt.ps1",
+      "tests/fixtures/v2/**"
+    ],
+    "watch_paths": [
+      "install.ps1",
+      "runtime-hooks/**",
+      "schemas/**",
+      "scripts/install-transaction-common.ps1",
+      "scripts/update-managed-assets.ps1",
+      "uninstall.ps1"
+    ]
+  },
+  "entrypoints": {
+    "commands": [
+      "scripts/run-validation.ps1",
+      "scripts/run-changed-optional-validation.ps1",
+      "scripts/benchmark-harness.ps1"
+    ],
+    "hooks": []
+  },
+  "validation": {
+    "owner_tests": [
+      "tests/verify-change-contract.ps1",
+      "tests/verify-install-isolation.ps1",
+      "tests/verify-installation.ps1",
+      "tests/verify-runtime-hooks.ps1",
+      "tests/verify-uninstall-isolation.ps1",
+      "tests/verify-update-managed-assets.ps1",
+      "tests/verify-v2-baseline-benchmark.ps1",
+      "tests/verify-v2-policy-contracts.ps1"
+    ],
+    "quick": [],
+    "core_group": null,
+    "changed": [
+      "tests/verify-change-contract.ps1",
+      "tests/verify-install-isolation.ps1",
+      "tests/verify-runtime-hooks.ps1",
+      "tests/verify-uninstall-isolation.ps1",
+      "tests/verify-update-managed-assets.ps1",
+      "tests/verify-v2-baseline-benchmark.ps1",
+      "tests/verify-v2-policy-contracts.ps1"
+    ],
+    "full": [
+      "tests/verify-change-contract.ps1",
+      "tests/verify-install-isolation.ps1",
+      "tests/verify-runtime-hooks.ps1",
+      "tests/verify-uninstall-isolation.ps1",
+      "tests/verify-update-managed-assets.ps1",
+      "tests/verify-v2-baseline-benchmark.ps1",
+      "tests/verify-v2-policy-contracts.ps1"
+    ]
+  }
+}

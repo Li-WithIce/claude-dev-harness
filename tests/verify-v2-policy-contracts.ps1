@@ -111,6 +111,7 @@ $expectedSchemaFiles = @(
     'kernel-component-classification.schema.json',
     'kernel-tcb-roots.schema.json',
     'kernel-tcb.schema.json',
+    'module-manifest-catalog.schema.json',
     'module-manifest.schema.json',
     'ordinary-ci-receipt.schema.json',
     'protected-actions-overlay.schema.json',

@@ -1,0 +1,41 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "md-html",
+  "kind": "capability",
+  "description": "Optional Markdown review rendering and HTML presentation capability.",
+  "default_activation": false,
+  "dependencies": {
+    "kernel_api": "v1",
+    "modules": ["entry-kernel"]
+  },
+  "requested_capabilities": ["filesystem-read", "filesystem-write", "process-execution"],
+  "ownership": {
+    "owned_paths": [
+      "modules/md-html/**",
+      "scripts/render-review-html.ps1",
+      "skills/md-html/**",
+      "tests/fixtures/md-html/**"
+    ],
+    "watch_paths": []
+  },
+  "entrypoints": {
+    "commands": ["scripts/render-review-html.ps1"],
+    "hooks": []
+  },
+  "validation": {
+    "owner_tests": [
+      "tests/verify-md-html-review-renderer.ps1",
+      "tests/verify-render-review-html.ps1"
+    ],
+    "quick": [],
+    "core_group": null,
+    "changed": [
+      "tests/verify-md-html-review-renderer.ps1",
+      "tests/verify-render-review-html.ps1"
+    ],
+    "full": [
+      "tests/verify-md-html-review-renderer.ps1",
+      "tests/verify-render-review-html.ps1"
+    ]
+  }
+}

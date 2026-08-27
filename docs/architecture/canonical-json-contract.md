@@ -75,13 +75,16 @@ implementation, and `Harness.Hashing` retains its exact four-function surface.
 
 `canonical-json/v1` is opt-in for a new Schema or Envelope, or for an object
 whose contract explicitly selects that `digest_algorithm`. TK-01B-New does not
-add a generic algorithm router and does not create a business Envelope.
+add a generic algorithm router and does not create a business Envelope. TK-02 is
+the first explicit adopter: the new Manifest catalog contract hashes each
+`harness-module/v0` source after canonicalization and emits its own canonical
+catalog bytes.
 
-No existing Evidence, Receipt, Approval, Requirement Contract, Manifest,
-Installed Asset, Source Identity, Task State, installation transaction, Release,
-Qualification, rollout, benchmark, or model-evaluation byte sequence or digest
-is reinterpreted. Those historical algorithms remain with their current owners.
+No pre-TK-02 Evidence, Receipt, Approval, Requirement Contract, Installed Asset,
+Source Identity, Task State, installation transaction, Release, Qualification,
+rollout, benchmark, or model-evaluation byte sequence or digest is reinterpreted.
+Those historical algorithms remain with their current owners.
 
-The primitive is classified as K0. There is no selected Runtime or Distribution
-caller initially, so it remains outside the generated transitive TCB until a
-separately contracted new object imports it.
+The primitive is classified as K0. TK-02 imports it only from C2 engineering
+construction code; no selected Runtime or Distribution root reaches that code.
+It therefore remains outside the generated transitive TCB.
