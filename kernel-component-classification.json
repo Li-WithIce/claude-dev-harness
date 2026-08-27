@@ -362,6 +362,16 @@
       "legacy_status": "not-legacy"
     },
     {
+      "path": "scripts/lib/Harness.CapabilitySource.psm1",
+      "layer": "c2-capability",
+      "current_role": "Strict consumer for current Capability source closure records.",
+      "owner_candidate": "engineering-validation",
+      "tcb_included": false,
+      "reason": "Capability source consumption is confined to build and Evidence production outside Runtime and Distribution.",
+      "migration_target": "manifest-construction-module",
+      "legacy_status": "not-legacy"
+    },
+    {
       "path": "scripts/lib/Harness.ControlledWrite.psm1",
       "layer": "k1-runtime-kernel",
       "current_role": "Kernel-controlled file write service.",
@@ -750,6 +760,16 @@
       "reason": "Retained until active validation routing no longer depends on v1 artifacts.",
       "migration_target": "v1-sunset/V1S-09",
       "legacy_status": "sunset-gated"
+    },
+    {
+      "path": "scripts/write-capability-source-binding.ps1",
+      "layer": "c2-capability",
+      "current_role": "Canonical Capability source sidecar writer for Release bundles.",
+      "owner_candidate": "release-evidence",
+      "tcb_included": false,
+      "reason": "Release bundle provenance binding is an Evidence producer concern outside Runtime.",
+      "migration_target": "release-evidence-module",
+      "legacy_status": "not-legacy"
     },
     {
       "path": "scripts/write-ordinary-ci-receipt.ps1",

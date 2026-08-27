@@ -32,7 +32,7 @@ $definitions = @($manifestCatalog.Catalog.optional_routes | ForEach-Object {
         tests = @($_.tests | ForEach-Object { Split-Path -Leaf ([string]$_) })
     }
 })
-$routingSurfaces = @('.github/workflows/*','module-manifest-catalog.json','modules/*/module.manifest.json','schemas/module-manifest*.json','scripts/get-module-manifest-catalog.ps1','scripts/lib/Harness.ModuleManifest.psm1','scripts/run-validation.ps1','scripts/run-changed-optional-validation.ps1','tests/verify-v2-ci-routing.ps1','install.ps1','uninstall.ps1','scripts/run-isolated-install-smoke.ps1')
+$routingSurfaces = @('.github/workflows/*','capability-source-catalog.json','module-manifest-catalog.json','modules/*/module.manifest.json','schemas/capability-source*.json','schemas/module-manifest*.json','scripts/get-module-manifest-catalog.ps1','scripts/lib/Harness.CapabilitySource.psm1','scripts/lib/Harness.ModuleManifest.psm1','scripts/run-validation.ps1','scripts/run-changed-optional-validation.ps1','scripts/write-capability-source-binding.ps1','tests/verify-v2-ci-routing.ps1','install.ps1','uninstall.ps1','scripts/run-isolated-install-smoke.ps1')
 
 function Test-AnyPattern {
     param([string]$Path,[string[]]$Patterns)

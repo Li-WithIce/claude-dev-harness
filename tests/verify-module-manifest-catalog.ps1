@@ -36,12 +36,15 @@ function Test-BytesEqual {
 $modulePath = Join-Path $RepoRoot 'scripts/lib/Harness.ModuleManifest.psm1'
 $generatorPath = Join-Path $RepoRoot 'scripts/get-module-manifest-catalog.ps1'
 $catalogPath = Join-Path $RepoRoot 'module-manifest-catalog.json'
-$catalogSchemaPath = Join-Path $RepoRoot 'schemas/module-manifest-catalog.schema.json'
+$capabilitySourceCatalogPath = Join-Path $RepoRoot 'capability-source-catalog.json'
+$catalogSchemaPath = Join-Path $RepoRoot 'schemas/module-manifest-catalog-v1.schema.json'
+$capabilitySourceCatalogSchemaPath = Join-Path $RepoRoot 'schemas/capability-source-catalog.schema.json'
 $sourceSchemaPath = Join-Path $RepoRoot 'schemas/module-manifest.schema.json'
+$sourceV1SchemaPath = Join-Path $RepoRoot 'schemas/module-manifest-v1.schema.json'
 $attributesPath = Join-Path $RepoRoot '.gitattributes'
 $testPath = Join-Path $RepoRoot 'tests/verify-module-manifest-catalog.ps1'
-$requiredFiles = @($modulePath,$generatorPath,$catalogPath,$catalogSchemaPath,$sourceSchemaPath,$attributesPath,$testPath)
-Check (@($requiredFiles | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) }).Count -eq 0) 'Manifest generator, Schemas, catalog, and verifier exist' 'one or more TK-02 construction files are missing'
+$requiredFiles = @($modulePath,$generatorPath,$catalogPath,$capabilitySourceCatalogPath,$catalogSchemaPath,$capabilitySourceCatalogSchemaPath,$sourceSchemaPath,$sourceV1SchemaPath,$attributesPath,$testPath)
+Check (@($requiredFiles | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) }).Count -eq 0) 'Manifest generator, v0/v1 Schemas, dual catalogs, and verifier exist' 'one or more Manifest construction files are missing'
 
 $parseFailures = [System.Collections.Generic.List[string]]::new()
 foreach ($path in @($modulePath,$generatorPath,$testPath)) {
@@ -64,12 +67,12 @@ try {
     $repeat = Harness.ModuleManifest\Get-HarnessModuleManifestCatalog -RepoRoot $RepoRoot
     Check (Test-BytesEqual -Left $result.Bytes -Right $repeat.Bytes) 'repeated construction is byte-for-byte deterministic' 'Manifest construction output changed between identical runs'
 
-    $expectedModules = @('codex-adapter','distribution','entry-kernel','harness-maintenance','legacy-v1','md-html','memory','providers','release-evidence','task-governance','team','thin-trust-kernel')
+    $expectedModules = @('benchmark','codex-adapter','distribution','entry-kernel','harness-maintenance','legacy-v1','md-html','memory','providers','release-evidence','task-governance','team','thin-trust-kernel')
     $actualModules = @($result.Catalog.modules | ForEach-Object { [string]$_.module_id })
-    Check (($actualModules -join '|') -ceq ($expectedModules -join '|')) 'catalog contains the exact 12 Phase 0 modules in ordinal order' "module discovery or ordering drifted: $($actualModules -join ', ')"
+    Check (($actualModules -join '|') -ceq ($expectedModules -join '|')) 'catalog contains the exact 13 mixed-version modules in ordinal order' "module discovery or ordering drifted: $($actualModules -join ', ')"
 
     $totals = $result.Catalog.totals
-    Check ($totals.manifest_count -eq 12 -and $totals.module_count -eq 12 -and $totals.owner_test_count -eq 84 -and $totals.core_test_count -eq 54 -and $totals.quick_test_count -eq 1 -and $totals.full_test_count -eq 82 -and $totals.optional_route_count -eq 8) 'catalog totals freeze 12 modules, 84 owners, 54 core checks, 82 full checks, and 8 routes' "catalog totals drifted: $($totals | ConvertTo-Json -Compress)"
+    Check ($totals.manifest_count -eq 13 -and $totals.module_count -eq 13 -and $totals.v0_module_count -eq 6 -and $totals.v1_module_count -eq 7 -and $totals.capability_source_count -eq 7 -and $totals.capability_source_file_reference_count -eq 171 -and $totals.owner_test_count -eq 85 -and $totals.core_test_count -eq 54 -and $totals.quick_test_count -eq 1 -and $totals.full_test_count -eq 83 -and $totals.optional_route_count -eq 8) 'catalog totals freeze 6 v0 plus 7 v1 modules, 85 owners, 54 core checks, 83 full checks, and 8 routes' "catalog totals drifted: $($totals | ConvertTo-Json -Compress)"
     Check (@($result.Catalog.unresolved_dependencies).Count -eq 0 -and @($result.Catalog.ownership_conflicts).Count -eq 0) 'constructed catalog has no unresolved dependency or ownership conflict' 'catalog contains unresolved dependencies or ownership conflicts'
 
     $expectedGroupNames = @('entry-lifecycle','evaluation-release','install-evidence','governance-approval','harness-contracts')
@@ -84,16 +87,16 @@ try {
 
     $ownerPaths = @($result.Catalog.test_owners | ForEach-Object { [string]$_.path })
     $duplicateOwners = @($ownerPaths | Group-Object -CaseSensitive | Where-Object Count -ne 1)
-    Check ($ownerPaths.Count -eq 84 -and $duplicateOwners.Count -eq 0 -and $ownerPaths -ccontains 'tests/verify-installation.ps1' -and $ownerPaths -ccontains 'tests/run-scenario-evals.ps1') 'every verifier and scenario runner has exactly one owner' 'verifier ownership is incomplete, duplicated, or missing special runners'
+    Check ($ownerPaths.Count -eq 85 -and $duplicateOwners.Count -eq 0 -and $ownerPaths -ccontains 'tests/verify-capability-extraction.ps1' -and $ownerPaths -ccontains 'tests/verify-installation.ps1' -and $ownerPaths -ccontains 'tests/run-scenario-evals.ps1') 'every verifier and scenario runner has exactly one owner' 'verifier ownership is incomplete, duplicated, or missing special runners'
 
     $routeModules = @($result.Catalog.optional_routes | ForEach-Object { [string]$_.module_id })
     $optionalTests = Get-OrdinalStrings -Values @($result.Catalog.optional_routes | ForEach-Object { @($_.tests) } | Select-Object -Unique)
     $coreTests = Get-OrdinalStrings -Values @($expectedGroupNames | ForEach-Object { @($result.Catalog.core_groups[$_]) } | Select-Object -Unique)
     $coreOverlap = @($optionalTests | Where-Object { $coreTests -ccontains $_ })
-    Check (($routeModules -join '|') -ceq 'codex-adapter|harness-maintenance|legacy-v1|md-html|memory|providers|team|thin-trust-kernel' -and $optionalTests.Count -eq 36 -and $coreOverlap.Count -eq 7) 'optional routing derives 8 domains, 36 unique checks, and 7 intentional core overlaps' "optional route topology drifted: modules=$($routeModules -join ',') tests=$($optionalTests.Count) overlap=$($coreOverlap.Count)"
+    Check (($routeModules -join '|') -ceq 'codex-adapter|harness-maintenance|legacy-v1|md-html|memory|providers|team|thin-trust-kernel' -and $optionalTests.Count -eq 37 -and $coreOverlap.Count -eq 7) 'optional routing derives 8 domains, 37 unique checks, and 7 intentional core overlaps' "optional route topology drifted: modules=$($routeModules -join ',') tests=$($optionalTests.Count) overlap=$($coreOverlap.Count)"
 
     $validFixture = Harness.ModuleManifest\Get-HarnessModuleManifestCatalog -RepoRoot $RepoRoot -ManifestRoot 'tests/fixtures/tk02/valid'
-    Check ($validFixture.Catalog.totals.module_count -eq 2 -and @($validFixture.Catalog.unresolved_dependencies).Count -eq 0) 'valid dependency fixture constructs successfully' 'valid Manifest dependency fixture failed construction'
+    Check ($validFixture.Catalog.schema_version -ceq 'module-manifest-catalog/v0' -and $null -eq $validFixture.CapabilitySourceCatalog -and $validFixture.Catalog.totals.module_count -eq 2 -and @($validFixture.Catalog.unresolved_dependencies).Count -eq 0) 'all-v0 fixture remains byte-contract compatible without a source catalog' 'valid v0 Manifest dependency fixture changed contract or failed construction'
     Check (Test-ConstructionFailure -ManifestRoot 'tests/fixtures/tk02/missing-dependency' -Pattern 'does not exist') 'missing module dependency fails construction' 'missing dependency fixture did not fail closed'
     Check (Test-ConstructionFailure -ManifestRoot 'tests/fixtures/tk02/missing-reference' -Pattern 'does not exist|tracked regular file') 'missing verifier reference fails construction' 'missing verifier reference fixture did not fail closed'
     Check (Test-ConstructionFailure -ManifestRoot 'tests/fixtures/tk02/invalid-schema' -Pattern 'Schema') 'invalid source Schema fails construction' 'invalid source Schema fixture did not fail closed'
@@ -112,24 +115,30 @@ try {
     Check $sourceDigestsValid 'every source Manifest digest uses canonical-json/v1 bytes' 'one or more source Manifest digests do not match canonical-json/v1'
 
     [byte[]]$trackedBytes = [IO.File]::ReadAllBytes($catalogPath)
+    [byte[]]$trackedCapabilitySourceBytes = [IO.File]::ReadAllBytes($capabilitySourceCatalogPath)
     Check (Test-BytesEqual -Left $trackedBytes -Right $result.Bytes) 'tracked catalog matches generated bytes exactly' 'tracked catalog is stale or non-deterministic'
+    Check (Test-BytesEqual -Left $trackedCapabilitySourceBytes -Right $result.CapabilitySourceBytes) 'tracked Capability source catalog matches generated bytes exactly' 'tracked Capability source catalog is stale or non-deterministic'
     $noBom = $trackedBytes.Length -lt 3 -or -not ($trackedBytes[0] -eq 0xEF -and $trackedBytes[1] -eq 0xBB -and $trackedBytes[2] -eq 0xBF)
     $oneLf = $trackedBytes.Length -gt 0 -and $trackedBytes[-1] -eq 0x0A -and ($trackedBytes.Length -eq 1 -or $trackedBytes[-2] -ne 0x0A)
     Check ($noBom -and $oneLf) 'catalog is UTF-8 without BOM and ends with exactly one LF' 'catalog encoding or terminal newline contract drifted'
     $attributesText = [IO.File]::ReadAllText($attributesPath)
     $catalogLfRules = @([regex]::Matches($attributesText,'(?m)^/module-manifest-catalog\.json text eol=lf\r?$'))
-    Check ($catalogLfRules.Count -eq 1) 'Git checkout pins the generated catalog to LF bytes' 'catalog is not protected from Windows checkout CRLF conversion'
+    $capabilitySourceLfRules = @([regex]::Matches($attributesText,'(?m)^/capability-source-catalog\.json text eol=lf\r?$'))
+    Check ($catalogLfRules.Count -eq 1 -and $capabilitySourceLfRules.Count -eq 1) 'Git checkout pins both generated catalogs to LF bytes' 'one or both catalogs are not protected from Windows checkout CRLF conversion'
     $catalogText = [Text.UTF8Encoding]::new($false,$true).GetString($trackedBytes)
     try { $catalogSchemaValid = Test-Json -Json $catalogText -SchemaFile $catalogSchemaPath -ErrorAction Stop -WarningAction SilentlyContinue } catch { $catalogSchemaValid = $false }
-    Check $catalogSchemaValid 'tracked catalog satisfies its strict Schema' 'tracked catalog failed Schema validation'
+    $capabilitySourceCatalogText = [Text.UTF8Encoding]::new($false,$true).GetString($trackedCapabilitySourceBytes)
+    try { $capabilitySourceSchemaValid = Test-Json -Json $capabilitySourceCatalogText -SchemaFile $capabilitySourceCatalogSchemaPath -ErrorAction Stop -WarningAction SilentlyContinue } catch { $capabilitySourceSchemaValid = $false }
+    Check ($catalogSchemaValid -and $capabilitySourceSchemaValid) 'both tracked catalogs satisfy their strict Schemas' 'one or both tracked catalogs failed Schema validation'
 
     $catalogWriteTimeBefore = (Get-Item -LiteralPath $catalogPath).LastWriteTimeUtc.Ticks
     $powerShell = (Get-Process -Id $PID -ErrorAction Stop).Path
     $checkOutput = @(& $powerShell -NoLogo -NoProfile -NonInteractive -File $generatorPath -RepoRoot $RepoRoot -Check 2>&1)
     $checkExit = $LASTEXITCODE
     [byte[]]$trackedBytesAfterCheck = [IO.File]::ReadAllBytes($catalogPath)
+    [byte[]]$trackedCapabilitySourceBytesAfterCheck = [IO.File]::ReadAllBytes($capabilitySourceCatalogPath)
     $catalogWriteTimeAfter = (Get-Item -LiteralPath $catalogPath).LastWriteTimeUtc.Ticks
-    Check ($checkExit -eq 0 -and ($checkOutput -join "`n") -match 'STATUS: PASS' -and (Test-BytesEqual -Left $trackedBytes -Right $trackedBytesAfterCheck) -and $catalogWriteTimeBefore -eq $catalogWriteTimeAfter) 'generator -Check validates tracked bytes with zero writes' 'generator -Check failed, rewrote the catalog, or changed its timestamp'
+    Check ($checkExit -eq 0 -and ($checkOutput -join "`n") -match 'STATUS: PASS' -and (Test-BytesEqual -Left $trackedBytes -Right $trackedBytesAfterCheck) -and (Test-BytesEqual -Left $trackedCapabilitySourceBytes -Right $trackedCapabilitySourceBytesAfterCheck) -and $catalogWriteTimeBefore -eq $catalogWriteTimeAfter) 'generator -Check validates dual tracked bytes with zero writes' 'generator -Check failed or rewrote a tracked catalog'
 
     $alternateRelative = 'tests/fixtures/tk02/alternate-catalog-output.json'
     $alternateFullPath = Join-Path $RepoRoot $alternateRelative

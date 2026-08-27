@@ -1,0 +1,21 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "sample-legacy",
+  "kind": "capability",
+  "description": "Mixed-version v0 compatibility fixture.",
+  "default_activation": false,
+  "dependencies": { "kernel_api": "v1", "modules": [] },
+  "requested_capabilities": ["filesystem-read"],
+  "ownership": {
+    "owned_paths": ["tests/fixtures/tk04/mixed/sample-legacy/module.manifest.json"],
+    "watch_paths": []
+  },
+  "entrypoints": { "commands": [], "hooks": [] },
+  "validation": {
+    "owner_tests": ["tests/verify-hashing-module.ps1"],
+    "quick": [],
+    "core_group": null,
+    "changed": [],
+    "full": ["tests/verify-hashing-module.ps1"]
+  }
+}

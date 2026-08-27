@@ -1,0 +1,76 @@
+{
+  "schema_version": "harness-module/v1",
+  "module_id": "benchmark",
+  "module_version": "1.0.0",
+  "classification_owner": "benchmark",
+  "kind": "capability",
+  "description": "Model evaluation, host benchmark, telemetry collection, and baseline performance production.",
+  "default_activation": false,
+  "dependencies": {
+    "kernel_api": "v1",
+    "modules": ["codex-adapter", "distribution", "harness-maintenance", "thin-trust-kernel"]
+  },
+  "requested_capabilities": ["filesystem-read", "filesystem-write", "network", "process-execution"],
+  "ownership": {
+    "owned_paths": [
+      "modules/benchmark/**",
+      "schemas/host-benchmark/**",
+      "schemas/model-eval-observation.schema.json",
+      "scripts/benchmark-harness.ps1",
+      "scripts/host-benchmark/**",
+      "scripts/lib/Harness.ModelEval.psm1",
+      "scripts/receive-otlp-http.ps1",
+      "scripts/run-host-benchmark.ps1",
+      "scripts/run-model-evals.ps1",
+      "tests/evals/**",
+      "tests/run-scenario-evals.ps1",
+      "tests/scenarios/**"
+    ],
+    "watch_paths": [
+      "docs/testing/scenario-evals.md",
+      "scripts/lib/Harness.AtomicWrite.psm1",
+      "scripts/lib/Harness.Hashing.psm1",
+      "scripts/lib/Harness.Path.psm1",
+      "skills/codex/**"
+    ]
+  },
+  "package": {
+    "code": [
+      "scripts/benchmark-harness.ps1",
+      "scripts/host-benchmark/**",
+      "scripts/lib/Harness.ModelEval.psm1",
+      "scripts/receive-otlp-http.ps1",
+      "scripts/run-host-benchmark.ps1",
+      "scripts/run-model-evals.ps1"
+    ],
+    "schemas": [
+      "schemas/host-benchmark/**",
+      "schemas/model-eval-observation.schema.json"
+    ],
+    "tests": [
+      "tests/evals/**",
+      "tests/run-scenario-evals.ps1",
+      "tests/scenarios/**"
+    ],
+    "install_assets": []
+  },
+  "exports": {
+    "commands": [
+      "scripts/benchmark-harness.ps1",
+      "scripts/receive-otlp-http.ps1",
+      "scripts/run-host-benchmark.ps1",
+      "scripts/run-model-evals.ps1"
+    ],
+    "hooks": [],
+    "libraries": ["scripts/lib/Harness.ModelEval.psm1"]
+  },
+  "validation": {
+    "owner_tests": ["tests/run-scenario-evals.ps1"],
+    "quick": [],
+    "core_groups": {
+      "evaluation-release": ["tests/run-scenario-evals.ps1"]
+    },
+    "changed": [],
+    "full": []
+  }
+}

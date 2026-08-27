@@ -221,6 +221,12 @@ jobs:
           pwsh -NoLogo -NoProfile -NonInteractive -File scripts/write-release-producer-receipt.ps1 -RepoRoot $PWD -Kind model -RunnerObservationPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'model-runner-observation.json') -ModelReportPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'model-eval.json') -OutputPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'release-model-receipt.json') -RunId $env:GITHUB_RUN_ID -RunAttempt $env:GITHUB_RUN_ATTEMPT -CheckoutSha $env:GITHUB_SHA -Conclusion success -ProducerMode formal
           exit $LASTEXITCODE
 
+      - name: Bind model evidence to Capability source closure
+        shell: pwsh
+        run: |
+          pwsh -NoLogo -NoProfile -NonInteractive -File scripts/write-capability-source-binding.ps1 -RepoRoot $PWD -Kind model -ArtifactRoot $env:RELEASE_EVIDENCE_ROOT -OutputPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'model-capability-source-binding.json') -SourceRevision $env:GITHUB_SHA -ProducerMode formal
+          exit $LASTEXITCODE
+
       - name: Upload model evidence
         if: ${{ success() && steps.model_dir.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -230,6 +236,7 @@ jobs:
             ${{ env.RELEASE_EVIDENCE_ROOT }}/model-runner-observation.json
             ${{ env.RELEASE_EVIDENCE_ROOT }}/model-eval.json
             ${{ env.RELEASE_EVIDENCE_ROOT }}/release-model-receipt.json
+            ${{ env.RELEASE_EVIDENCE_ROOT }}/model-capability-source-binding.json
           if-no-files-found: error
 
   release-host:
@@ -317,6 +324,12 @@ jobs:
           pwsh -NoLogo -NoProfile -NonInteractive -File scripts/write-release-producer-receipt.ps1 -RepoRoot $PWD -Kind host -RunnerObservationPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'host-runner-observation.json') -CognitiveHostReportPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'cognitive-host.json') -InstalledDesktopPrimaryReportPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'installed-desktop-primary.json') -InstalledDesktopDistinctReportPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'installed-desktop-distinct.json') -OutputPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'release-host-receipt.json') -RunId $env:GITHUB_RUN_ID -RunAttempt $env:GITHUB_RUN_ATTEMPT -CheckoutSha $env:GITHUB_SHA -Conclusion success -ProducerMode formal
           exit $LASTEXITCODE
 
+      - name: Bind host evidence to Capability source closure
+        shell: pwsh
+        run: |
+          pwsh -NoLogo -NoProfile -NonInteractive -File scripts/write-capability-source-binding.ps1 -RepoRoot $PWD -Kind host -ArtifactRoot $env:RELEASE_EVIDENCE_ROOT -OutputPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'host-capability-source-binding.json') -SourceRevision $env:GITHUB_SHA -ProducerMode formal
+          exit $LASTEXITCODE
+
       - name: Upload host evidence
         if: ${{ success() && steps.host_dir.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -332,6 +345,7 @@ jobs:
             ${{ env.RELEASE_EVIDENCE_ROOT }}/lifecycle-full.json
             ${{ env.RELEASE_EVIDENCE_ROOT }}/v1-stop-loss.json
             ${{ env.RELEASE_EVIDENCE_ROOT }}/release-host-receipt.json
+            ${{ env.RELEASE_EVIDENCE_ROOT }}/host-capability-source-binding.json
           if-no-files-found: error
 
   release-full:
@@ -449,6 +463,13 @@ jobs:
           pwsh -NoLogo -NoProfile -NonInteractive -File scripts/write-release-full-receipt.ps1 -RepoRoot $PWD -ExactHeadReportPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'exact-head-engineering.json') -ReleaseIsolationReportPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'release-isolation.json') -ReleaseModelReceiptPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'release-model-receipt.json') -ReleaseHostReceiptPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'release-host-receipt.json') -V1StopLossReportPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'v1-stop-loss.json') -LifecycleCoreReportPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'lifecycle-core.json') -LifecycleGovernedReportPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'lifecycle-governed.json') -LifecycleFullReportPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'lifecycle-full.json') -AggregatorObservationPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'aggregator-runner-observation.json') -OutputPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'release-full-receipt.json') -RunId $env:GITHUB_RUN_ID -RunAttempt $env:GITHUB_RUN_ATTEMPT -CheckoutSha $env:GITHUB_SHA -Conclusion success -ProducerMode formal
           exit $LASTEXITCODE
 
+      - name: Verify upstream bindings and bind full evidence to Capability source closure
+        if: ${{ github.ref == 'refs/heads/codex/harness-v2-default-promotion' }}
+        shell: pwsh
+        run: |
+          pwsh -NoLogo -NoProfile -NonInteractive -File scripts/write-capability-source-binding.ps1 -RepoRoot $PWD -Kind full -ArtifactRoot $env:RELEASE_EVIDENCE_ROOT -OutputPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'full-capability-source-binding.json') -SourceRevision $env:GITHUB_SHA -ProducerMode formal -ModelBindingPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'model-capability-source-binding.json') -HostBindingPath (Join-Path $env:RELEASE_EVIDENCE_ROOT 'host-capability-source-binding.json')
+          exit $LASTEXITCODE
+
       - name: Legacy full validation and rollout eligibility report
         if: ${{ github.ref != 'refs/heads/codex/harness-v2-default-promotion' }}
         shell: pwsh
@@ -465,6 +486,7 @@ jobs:
             ${{ env.RELEASE_EVIDENCE_ROOT }}/release-isolation.json
             ${{ env.RELEASE_EVIDENCE_ROOT }}/exact-head-engineering.json
             ${{ env.RELEASE_EVIDENCE_ROOT }}/release-full-receipt.json
+            ${{ env.RELEASE_EVIDENCE_ROOT }}/full-capability-source-binding.json
           if-no-files-found: error
 
       - name: Upload legacy rollout evidence

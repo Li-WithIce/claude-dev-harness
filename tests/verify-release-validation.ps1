@@ -557,8 +557,10 @@ $defaultPromotionCondition = "github.event_name == 'workflow_dispatch' && github
 $pushBlock = [regex]::Match($workflow,'(?ms)^  push:\s*\r?$.*?(?=^  schedule:\s*\r?$)').Value
 $modelBundlePaths = @([regex]::Matches($modelUpload,'(?m)^\s+\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/(?<name>[a-z0-9-]+\.json)\s*$') | ForEach-Object { $_.Groups['name'].Value })
 $hostBundlePaths = @([regex]::Matches($hostUpload,'(?m)^\s+\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/(?<name>[a-z0-9-]+\.json)\s*$') | ForEach-Object { $_.Groups['name'].Value })
-$expectedModelBundlePaths = @('model-runner-observation.json','model-eval.json','release-model-receipt.json')
-$expectedHostBundlePaths = @('host-runner-observation.json','cognitive-host.json','installed-desktop-primary.json','installed-desktop-distinct.json','lifecycle-core.json','lifecycle-governed.json','lifecycle-full.json','v1-stop-loss.json','release-host-receipt.json')
+$currentBundlePaths = @([regex]::Matches($currentReleaseUpload,'(?m)^\s+\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/(?<name>[a-z0-9-]+\.json)\s*$') | ForEach-Object { $_.Groups['name'].Value })
+$expectedModelBundlePaths = @('model-runner-observation.json','model-eval.json','release-model-receipt.json','model-capability-source-binding.json')
+$expectedHostBundlePaths = @('host-runner-observation.json','cognitive-host.json','installed-desktop-primary.json','installed-desktop-distinct.json','lifecycle-core.json','lifecycle-governed.json','lifecycle-full.json','v1-stop-loss.json','release-host-receipt.json','host-capability-source-binding.json')
+$expectedCurrentBundlePaths = @('aggregator-runner-observation.json','release-isolation.json','exact-head-engineering.json','release-full-receipt.json','full-capability-source-binding.json')
 
 if ($runnerBoundaryParseErrors.Count -eq 0 -and $runnerBoundaryBytes.Length -ge 3 -and
     $runnerBoundaryBytes[0] -eq 0xEF -and $runnerBoundaryBytes[1] -eq 0xBB -and $runnerBoundaryBytes[2] -eq 0xBF) {
@@ -787,7 +789,9 @@ if ($runner -match '(?m)^\s*\[int\]\$CheckTimeoutSeconds = 360\s*$' -and
 
 if ($releaseModelJob -match 'run-model-evals\.ps1[^\r\n]+-TimeoutSeconds 120[^\r\n]+-CodexHome \$env:HOST_BENCHMARK_CODEX_HOME[^\r\n]+model-eval\.json' -and
     @([regex]::Matches($releaseModelJob,'scripts/write-release-producer-receipt\.ps1')).Count -eq 1 -and
+    @([regex]::Matches($releaseModelJob,'scripts/write-capability-source-binding\.ps1')).Count -eq 1 -and
     $releaseModelJob -match 'write-release-producer-receipt\.ps1[^\r\n]+-Kind model[^\r\n]+model-runner-observation\.json[^\r\n]+-ModelReportPath[^\r\n]+model-eval\.json[^\r\n]+release-model-receipt\.json[^\r\n]+-CheckoutSha \$env:GITHUB_SHA[^\r\n]+-Conclusion success[^\r\n]+-ProducerMode formal' -and
+    $releaseModelJob -match 'write-capability-source-binding\.ps1[^\r\n]+-Kind model[^\r\n]+model-capability-source-binding\.json[^\r\n]+-SourceRevision \$env:GITHUB_SHA[^\r\n]+-ProducerMode formal' -and
     @([regex]::Matches($releaseHostJob,'scripts/run-host-benchmark\.ps1')).Count -eq 3 -and
     @([regex]::Matches($releaseHostJob,'-BenchmarkPath cognitive-fast-path')).Count -eq 1 -and
     @([regex]::Matches($releaseHostJob,'-BenchmarkPath installed-desktop-path')).Count -eq 2 -and
@@ -797,7 +801,9 @@ if ($releaseModelJob -match 'run-model-evals\.ps1[^\r\n]+-TimeoutSeconds 120[^\r
     @('core','governed','full' | Where-Object { @([regex]::Matches($releaseHostJob,("-Preset {0}\b" -f $_))).Count -eq 1 }).Count -eq 3 -and
     @([regex]::Matches($releaseHostJob,'scripts/run-v1-stop-loss-qualification\.ps1')).Count -eq 1 -and
     @([regex]::Matches($releaseHostJob,'scripts/write-release-producer-receipt\.ps1')).Count -eq 1 -and
+    @([regex]::Matches($releaseHostJob,'scripts/write-capability-source-binding\.ps1')).Count -eq 1 -and
     $releaseHostJob -match 'write-release-producer-receipt\.ps1[^\r\n]+-Kind host[^\r\n]+host-runner-observation\.json[^\r\n]+cognitive-host\.json[^\r\n]+installed-desktop-primary\.json[^\r\n]+installed-desktop-distinct\.json[^\r\n]+release-host-receipt\.json[^\r\n]+-CheckoutSha \$env:GITHUB_SHA[^\r\n]+-Conclusion success[^\r\n]+-ProducerMode formal' -and
+    $releaseHostJob -match 'write-capability-source-binding\.ps1[^\r\n]+-Kind host[^\r\n]+host-capability-source-binding\.json[^\r\n]+-SourceRevision \$env:GITHUB_SHA[^\r\n]+-ProducerMode formal' -and
     $releaseHostJob -notmatch '(?i)Fixture|ValidateOnly|diagnostic-smoke|EligibilityReportPath' -and
     $releaseHostJob -match '(?m)^\s*needs:\s*release-model\s*$' -and
     $releaseModelJob -notmatch '(?m)^\s*continue-on-error:' -and $releaseHostJob -notmatch '(?m)^\s*continue-on-error:') {
@@ -837,6 +843,7 @@ $aggregatorBoundaryIndex = $releaseJob.IndexOf('scripts/assert-release-runner-bo
 $aggregatorDownloadIndex = $releaseJob.IndexOf('actions/download-artifact@',[StringComparison]::Ordinal)
 $aggregatorObservationIndex = $releaseJob.IndexOf("aggregator-runner-observation.json",[StringComparison]::Ordinal)
 $releaseFullReceiptIndex = $releaseJob.IndexOf('scripts/write-release-full-receipt.ps1',[StringComparison]::Ordinal)
+$releaseFullBindingIndex = $releaseJob.IndexOf('scripts/write-capability-source-binding.ps1',[StringComparison]::Ordinal)
 if ($producerBoundaryValid -and
     $releaseJob -match '(?m)^\s*MODEL_PRODUCER_ACCOUNT_DIGEST:\s*\$\{\{\s*needs\.release-model\.outputs\.runner_account_digest\s*\}\}\s*$' -and
     $releaseJob -match '(?m)^\s*HOST_PRODUCER_ACCOUNT_DIGEST:\s*\$\{\{\s*needs\.release-host\.outputs\.runner_account_digest\s*\}\}\s*$' -and
@@ -864,6 +871,8 @@ if ($releaseJob -match '(?ms)^\s*needs:\s*\r?\n\s*- release-model\s*\r?\n\s*- re
     $releaseJob -match '!cancelled\(\)' -and $releaseJob -notmatch 'always\(\)' -and
     @([regex]::Matches($releaseJob,[regex]::Escape($downloadAction))).Count -eq 4 -and
     $releaseJob -match 'write-release-full-receipt\.ps1[^\r\n]+exact-head-engineering\.json[^\r\n]+release-isolation\.json[^\r\n]+release-model-receipt\.json[^\r\n]+release-host-receipt\.json[^\r\n]+v1-stop-loss\.json[^\r\n]+lifecycle-core\.json[^\r\n]+lifecycle-governed\.json[^\r\n]+lifecycle-full\.json[^\r\n]+aggregator-runner-observation\.json[^\r\n]+release-full-receipt\.json' -and
+    @([regex]::Matches($releaseJob,'scripts/write-capability-source-binding\.ps1')).Count -eq 1 -and $releaseFullBindingIndex -gt $releaseFullReceiptIndex -and
+    $releaseJob -match 'write-capability-source-binding\.ps1[^\r\n]+-Kind full[^\r\n]+full-capability-source-binding\.json[^\r\n]+-SourceRevision \$env:GITHUB_SHA[^\r\n]+-ProducerMode formal[^\r\n]+model-capability-source-binding\.json[^\r\n]+host-capability-source-binding\.json' -and
     $releaseJob -match '(?s)Legacy full validation.*?generate-v2-rollout-report\.ps1[^\r\n]+-ModelEvalReportPath[^\r\n]+model-eval\.json[^\r\n]+-HostBenchmarkReportPath[^\r\n]+host-benchmark\.json' -and
     $releaseJob -match 'GITHUB_RUN_ID-\$env:GITHUB_RUN_ATTEMPT\\aggregate' -and
     $rolloutGenerator -match 'ModelEvalReportPath' -and
@@ -883,11 +892,11 @@ if ($releaseJob -match '(?ms)^\s*needs:\s*\r?\n\s*- release-model\s*\r?\n\s*- re
 if ($modelUpload -match [regex]::Escape($uploadAction) -and $modelUpload -match '\$\{\{ success\(\)' -and $modelUpload -match '(?m)^\s*if-no-files-found:\s*error\s*$' -and ($modelBundlePaths -join '|') -ceq ($expectedModelBundlePaths -join '|') -and
     $hostUpload -match [regex]::Escape($uploadAction) -and $hostUpload -match '\$\{\{ success\(\)' -and $hostUpload -match '(?m)^\s*if-no-files-found:\s*error\s*$' -and ($hostBundlePaths -join '|') -ceq ($expectedHostBundlePaths -join '|') -and
     $currentReleaseUpload -match [regex]::Escape($uploadAction) -and $currentReleaseUpload -match '(?m)^\s*if-no-files-found:\s*error\s*$' -and
-    @([regex]::Matches($currentReleaseUpload,'(?m)^\s+\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/[a-z0-9-]+\.json\s*$')).Count -eq 4 -and
+    ($currentBundlePaths -join '|') -ceq ($expectedCurrentBundlePaths -join '|') -and
     $legacyReleaseUpload -match '!cancelled\(\)' -and $legacyReleaseUpload -match [regex]::Escape($uploadAction) -and $legacyReleaseUpload -match '(?m)^\s*if-no-files-found:\s*warn\s*$' -and
     @([regex]::Matches($legacyReleaseUpload,'(?m)^\s+\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/[a-z0-9-]+\.json\s*$')).Count -eq 3 -and
     ($modelUpload + $hostUpload + $currentReleaseUpload + $legacyReleaseUpload) -notmatch '(?i)auth\.json|CODEX_ACCESS_TOKEN|OPENAI_API_KEY|secrets\.') {
-    Add-Check 'release CI uses exact fresh 3-file, 9-file, current 4-file, and legacy 3-file bundles'
+    Add-Check 'release CI uses exact fresh 4-file, 10-file, current 5-file, and legacy 3-file bundles'
 } else {
     Add-Failure 'release artifact uploads must be success-only, exact, and credential-free'
 }

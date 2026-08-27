@@ -1,0 +1,33 @@
+{
+  "schema_version": "harness-module/v1",
+  "module_id": "alpha-capability",
+  "module_version": "1.0.0",
+  "classification_owner": "providers",
+  "kind": "capability",
+  "description": "First duplicate classification owner fixture.",
+  "default_activation": false,
+  "dependencies": { "kernel_api": "v1", "modules": [] },
+  "requested_capabilities": ["filesystem-read"],
+  "ownership": {
+    "owned_paths": [
+      "scripts/audit-context-provider-usage.ps1",
+      "tests/fixtures/tk04/duplicate-owner/alpha-capability/**",
+      "tests/verify-provider-usage-recording.ps1"
+    ],
+    "watch_paths": []
+  },
+  "package": {
+    "code": ["scripts/audit-context-provider-usage.ps1"],
+    "schemas": [],
+    "tests": ["tests/verify-provider-usage-recording.ps1"],
+    "install_assets": []
+  },
+  "exports": { "commands": ["scripts/audit-context-provider-usage.ps1"], "hooks": [], "libraries": [] },
+  "validation": {
+    "owner_tests": ["tests/verify-provider-usage-recording.ps1"],
+    "quick": [],
+    "core_groups": {},
+    "changed": [],
+    "full": []
+  }
+}

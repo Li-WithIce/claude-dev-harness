@@ -1,0 +1,33 @@
+{
+  "schema_version": "harness-module/v1",
+  "module_id": "export-not-code",
+  "module_version": "1.0.0",
+  "classification_owner": "engineering-validation",
+  "kind": "capability",
+  "description": "Invalid export role fixture.",
+  "default_activation": false,
+  "dependencies": { "kernel_api": "v1", "modules": [] },
+  "requested_capabilities": ["filesystem-read"],
+  "ownership": {
+    "owned_paths": [
+      "scripts/lib/Harness.Hashing.psm1",
+      "tests/fixtures/tk04/invalid-export/export-not-code/**",
+      "tests/verify-hashing-module.ps1"
+    ],
+    "watch_paths": []
+  },
+  "package": {
+    "code": ["scripts/lib/Harness.Hashing.psm1"],
+    "schemas": [],
+    "tests": ["tests/verify-hashing-module.ps1"],
+    "install_assets": []
+  },
+  "exports": { "commands": ["tests/verify-hashing-module.ps1"], "hooks": [], "libraries": [] },
+  "validation": {
+    "owner_tests": ["tests/verify-hashing-module.ps1"],
+    "quick": [],
+    "core_groups": {},
+    "changed": [],
+    "full": []
+  }
+}

@@ -5,7 +5,10 @@
 TK-00 freezes the architectural boundary used by later Thin Trust Kernel work.
 TK-01 centralizes hashing and adds the opt-in canonical JSON primitive. TK-02
 implements Manifest v0 construction and validation routing without changing
-Runtime behavior, installation authorization, activation, or v1 Sunset. A later
+Runtime behavior, installation authorization, activation, or v1 Sunset. TK-04
+extracts the seven C2 Capability packages, adds their Git-index source closure,
+and binds current Release bundles with separate sidecars while preserving all
+historical receipt bytes. A later
 boundary change requires an explicit Architecture Decision or Change Contract
 that states the reason, TCB impact, new trust assumptions, alternatives,
 migration, and verification.
@@ -70,8 +73,9 @@ SHA-256 delegation while leaving every historical serialization algorithm with
 its current owner.
 
 `scripts/lib/Harness.CanonicalJson.psm1` is the canonical two-function JSON byte
-primitive defined by `canonical-json-contract.md`. TK-02 explicitly adopts it
-for the new Manifest catalog contract through C2 engineering construction code.
+primitive defined by `canonical-json-contract.md`. TK-02 and TK-04 explicitly
+adopt it for new Manifest, source-closure, and binding objects through C2
+engineering construction code.
 No selected Runtime or Distribution root imports that code, so CanonicalJson
 remains outside the measured TCB and no historical digest is migrated.
 
@@ -111,12 +115,13 @@ D1 must not implement Runtime protocol or risk routing.
 
 ## C2 — Capability Modules
 
-Current candidates include Memory, Team, release-evidence, benchmark and model
-evaluation, Markdown-to-HTML, Providers, and engineering validation. A future
-capability owns its code, Schema, tests, routing declaration, install assets,
-dependencies, requested capabilities, and module manifest. C2 may call K0 and a
-documented K1 public API. K1 must never import C2, and C2 must never import a host
-adapter.
+The seven extracted domains are Memory, Team, release-evidence, Benchmark,
+Markdown-to-HTML, Providers, and engineering validation. Each v1 Capability owns
+its code, Schema, tests, routing declaration, install assets, dependencies,
+requested capabilities, and module manifest. Its exact package closure is bound
+by `capability-source/v1` using raw Git-index blob SHA-256 and explicit
+`canonical-json/v1`. C2 may call K0 and a documented K1 public API. K1 must never
+import C2, and C2 must never import a host adapter.
 
 `Harness.RolloutEvidence.psm1` is currently C2 release-evidence because current
 AST imports bind it to Release and Qualification producer scripts; no selected
@@ -127,6 +132,13 @@ ordinary Runtime root imports it. TK-00 does not split that module.
 components. They validate tracked Manifest inputs and produce validation
 metadata; they cannot grant capabilities, activate modules, install assets, or
 write task state.
+
+`scripts/lib/Harness.CapabilitySource.psm1` consumes the current dual catalogs
+read-only. `scripts/write-capability-source-binding.ps1` is a C2
+release-evidence producer for separate model, host, and full bundle sidecars.
+Neither is reachable from a selected Runtime or Distribution root. The full
+sidecar validates both upstream producer sidecars before binding its own four
+artifacts; existing receipts and public report Schemas are unchanged.
 
 ## A3 — Host Adapters
 
@@ -239,7 +251,9 @@ first-wave forwarding layers, returns the measured Runtime TCB to the frozen
 6151-line baseline, and retires that exception with delta zero. TK-01B-New adds
 an initially unreferenced K0 primitive. TK-02 adds a C2-only construction caller,
 but no selected trust-path import, so the transitive Runtime measurement remains
-6151 with delta zero. The baseline is a generated observation bound by verifier
+6151 with delta zero. TK-04 adds only C2 construction and Release producer
+paths, so selected Runtime reachability and the measured 6151-line baseline
+remain unchanged. The baseline is a generated observation bound by verifier
 checks, not a permanent architectural constant.
 
 ## Terminal SLOs

@@ -54,6 +54,7 @@ $requiredFiles = @(
     'docs/architecture/thin-trust-kernel.md',
     'docs/architecture/hashing-contract.md',
     'docs/architecture/canonical-json-contract.md',
+    'docs/architecture/capability-source.md',
     'docs/architecture/module-manifest.md',
     'docs/architecture/v1-sunset-contract.md',
     'docs/architecture/entry-contract-policy-parity.md',
@@ -61,17 +62,26 @@ $requiredFiles = @(
     'kernel-tcb-roots.json',
     'kernel-tcb-inventory.json',
     'kernel-component-classification.json',
+    'capability-source-catalog.json',
     'module-manifest-catalog.json',
     'schemas/kernel-tcb-roots.schema.json',
     'schemas/kernel-tcb.schema.json',
     'schemas/kernel-component-classification.schema.json',
+    'schemas/capability-source-binding.schema.json',
+    'schemas/capability-source-catalog.schema.json',
+    'schemas/capability-source.schema.json',
+    'schemas/module-manifest-catalog-v1.schema.json',
     'schemas/module-manifest-catalog.schema.json',
+    'schemas/module-manifest-v1.schema.json',
     'schemas/module-manifest.schema.json',
     'scripts/get-kernel-tcb-inventory.ps1',
     'scripts/get-module-manifest-catalog.ps1',
+    'scripts/lib/Harness.CapabilitySource.psm1',
     'scripts/lib/Harness.CanonicalJson.psm1',
     'scripts/lib/Harness.Hashing.psm1',
     'scripts/lib/Harness.ModuleManifest.psm1',
+    'scripts/write-capability-source-binding.ps1',
+    'tests/verify-capability-extraction.ps1',
     'tests/verify-canonical-json.ps1',
     'tests/verify-hashing-module.ps1',
     'tests/verify-kernel-tcb-inventory.ps1',
@@ -86,9 +96,12 @@ foreach ($path in $requiredFiles) {
 $powerShellPaths = @(
     'scripts/get-kernel-tcb-inventory.ps1',
     'scripts/get-module-manifest-catalog.ps1',
+    'scripts/lib/Harness.CapabilitySource.psm1',
     'scripts/lib/Harness.CanonicalJson.psm1',
     'scripts/lib/Harness.Hashing.psm1',
     'scripts/lib/Harness.ModuleManifest.psm1',
+    'scripts/write-capability-source-binding.ps1',
+    'tests/verify-capability-extraction.ps1',
     'tests/verify-canonical-json.ps1',
     'tests/verify-hashing-module.ps1',
     'tests/verify-kernel-tcb-inventory.ps1',
@@ -112,15 +125,22 @@ $jsonPaths = @(
     'kernel-tcb-roots.json',
     'kernel-tcb-inventory.json',
     'kernel-component-classification.json',
+    'capability-source-catalog.json',
     'module-manifest-catalog.json',
     'schemas/kernel-tcb-roots.schema.json',
     'schemas/kernel-tcb.schema.json',
     'schemas/kernel-component-classification.schema.json',
+    'schemas/capability-source-binding.schema.json',
+    'schemas/capability-source-catalog.schema.json',
+    'schemas/capability-source.schema.json',
+    'schemas/module-manifest-catalog-v1.schema.json',
     'schemas/module-manifest-catalog.schema.json',
+    'schemas/module-manifest-v1.schema.json',
     'schemas/module-manifest.schema.json'
 ) + @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'modules') -Filter 'module.manifest.json' -File -Recurse | ForEach-Object { [IO.Path]::GetRelativePath($RepoRoot, $_.FullName) }) +
     @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'tests\fixtures\tk00') -Filter '*.json' -File -Recurse | ForEach-Object { [IO.Path]::GetRelativePath($RepoRoot, $_.FullName) }) +
-    @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'tests\fixtures\tk02') -Filter '*.json' -File -Recurse | ForEach-Object { [IO.Path]::GetRelativePath($RepoRoot, $_.FullName) })
+    @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'tests\fixtures\tk02') -Filter '*.json' -File -Recurse | ForEach-Object { [IO.Path]::GetRelativePath($RepoRoot, $_.FullName) }) +
+    @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'tests\fixtures\tk04') -Filter '*.json' -File -Recurse | ForEach-Object { [IO.Path]::GetRelativePath($RepoRoot, $_.FullName) })
 $jsonBomFailures = @($jsonPaths | Where-Object {
     $bytes = [IO.File]::ReadAllBytes((Join-Path $RepoRoot $_))
     $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
@@ -130,7 +150,8 @@ Check ($jsonBomFailures.Count -eq 0) 'all architecture JSON files are UTF-8 with
 Check (Test-JsonAgainstSchema -Path 'kernel-tcb-roots.json' -SchemaPath 'schemas/kernel-tcb-roots.schema.json') 'kernel roots document satisfies its strict Schema' 'kernel roots document is invalid'
 Check (Test-JsonAgainstSchema -Path 'kernel-tcb-inventory.json' -SchemaPath 'schemas/kernel-tcb.schema.json') 'kernel inventory satisfies its strict Schema' 'kernel inventory is invalid'
 Check (Test-JsonAgainstSchema -Path 'kernel-component-classification.json' -SchemaPath 'schemas/kernel-component-classification.schema.json') 'component classification satisfies its strict Schema' 'component classification is invalid'
-Check (Test-JsonAgainstSchema -Path 'module-manifest-catalog.json' -SchemaPath 'schemas/module-manifest-catalog.schema.json') 'Manifest catalog satisfies its strict Schema' 'Manifest catalog is invalid'
+Check (Test-JsonAgainstSchema -Path 'module-manifest-catalog.json' -SchemaPath 'schemas/module-manifest-catalog-v1.schema.json') 'mixed Manifest catalog satisfies its strict v1 Schema' 'mixed Manifest catalog is invalid'
+Check (Test-JsonAgainstSchema -Path 'capability-source-catalog.json' -SchemaPath 'schemas/capability-source-catalog.schema.json') 'Capability source catalog satisfies its strict Schema' 'Capability source catalog is invalid'
 
 $manifestSchema = 'schemas/module-manifest.schema.json'
 Check (Test-JsonAgainstSchema -Path 'tests/fixtures/tk00/module-manifest-valid.json' -SchemaPath $manifestSchema) 'valid Manifest Phase 0 fixture passes' 'valid Manifest Phase 0 fixture was rejected'
@@ -138,8 +159,14 @@ $invalidManifests = @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'tests\fix
 $acceptedInvalid = @($invalidManifests | Where-Object { Test-JsonAgainstSchema -Path ([IO.Path]::GetRelativePath($RepoRoot, $_.FullName)) -SchemaPath $manifestSchema } | ForEach-Object Name)
 Check ($invalidManifests.Count -ge 10 -and $acceptedInvalid.Count -eq 0) 'all critical invalid Manifest fixtures fail Schema validation' "invalid Manifest fixtures were accepted or missing: $($acceptedInvalid -join ', ')"
 $productionManifests = @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'modules') -Filter 'module.manifest.json' -File -Recurse | Sort-Object FullName)
-$invalidProductionManifests = @($productionManifests | Where-Object { -not (Test-JsonAgainstSchema -Path ([IO.Path]::GetRelativePath($RepoRoot, $_.FullName)) -SchemaPath $manifestSchema) } | ForEach-Object FullName)
-Check ($productionManifests.Count -eq 12 -and $invalidProductionManifests.Count -eq 0) 'all 12 real Manifest v0 documents satisfy the frozen source Schema' "real Manifest inventory or Schema validity drifted: $($invalidProductionManifests -join ', ')"
+$invalidProductionManifests = @($productionManifests | Where-Object {
+    $relative = [IO.Path]::GetRelativePath($RepoRoot, $_.FullName)
+    $document = Read-Text -Path $relative | ConvertFrom-Json -Depth 20
+    $schema = if ([string]$document.schema_version -ceq 'harness-module/v1') { 'schemas/module-manifest-v1.schema.json' } else { $manifestSchema }
+    -not (Test-JsonAgainstSchema -Path $relative -SchemaPath $schema)
+} | ForEach-Object FullName)
+$v1ProductionCount = @($productionManifests | Where-Object { (Read-Text -Path ([IO.Path]::GetRelativePath($RepoRoot,$_.FullName)) | ConvertFrom-Json -Depth 20).schema_version -ceq 'harness-module/v1' }).Count
+Check ($productionManifests.Count -eq 13 -and $v1ProductionCount -eq 7 -and $invalidProductionManifests.Count -eq 0) 'all 13 real Manifests satisfy their frozen v0 or v1 source Schema, with exactly seven v1 Capabilities' "real Manifest inventory or Schema validity drifted: $($invalidProductionManifests -join ', ')"
 
 $manifestText = Read-Text -Path 'docs/architecture/module-manifest.md'
 $manifestRequirements = @(
@@ -232,9 +259,10 @@ $canonicalClassification = @($classification.components | Where-Object { [string
 Check ($canonicalClassification.Count -eq 1 -and [string]$canonicalClassification[0].layer -ceq 'k0-trust-primitive' -and -not [bool]$canonicalClassification[0].tcb_included) 'CanonicalJson is K0 but remains outside current trust-path reachability until explicit adoption' 'CanonicalJson classification or current TCB reachability drifted'
 $rolloutClassification = @($classification.components | Where-Object { [string]$_.path -ceq 'scripts/lib/Harness.RolloutEvidence.psm1' })
 Check ($rolloutClassification.Count -eq 1 -and [string]$rolloutClassification[0].layer -ceq 'c2-capability' -and -not [bool]$rolloutClassification[0].tcb_included) 'RolloutEvidence is honestly classified as C2 and outside Runtime TCB' 'RolloutEvidence classification drifted into Runtime Kernel'
-$manifestConstructionPaths = @('scripts/get-module-manifest-catalog.ps1','scripts/lib/Harness.ModuleManifest.psm1')
+$manifestConstructionPaths = @('scripts/get-module-manifest-catalog.ps1','scripts/lib/Harness.CapabilitySource.psm1','scripts/lib/Harness.ModuleManifest.psm1')
 $manifestConstructionClassification = @($classification.components | Where-Object { [string]$_.path -cin $manifestConstructionPaths })
-Check ($manifestConstructionClassification.Count -eq 2 -and @($manifestConstructionClassification | Where-Object { [string]$_.layer -cne 'c2-capability' -or [bool]$_.tcb_included -or [string]$_.owner_candidate -cne 'engineering-validation' }).Count -eq 0) 'Manifest generator and constructor are C2 engineering components outside Runtime TCB' 'Manifest construction classification leaked into Runtime TCB or another owner'
+Check ($manifestConstructionClassification.Count -eq 3 -and @($manifestConstructionClassification | Where-Object { [string]$_.layer -cne 'c2-capability' -or [bool]$_.tcb_included -or [string]$_.owner_candidate -cne 'engineering-validation' }).Count -eq 0) 'Manifest generator, constructor, and source consumer are C2 engineering components outside Runtime TCB' 'Manifest construction classification leaked into Runtime TCB or another owner'
+Check (@($classification.components | Where-Object { [string]$_.layer -ceq 'c2-capability' }).Count -eq 41) 'classification freezes all 41 TK-04 C2 implementation paths' 'TK-04 C2 classification count drifted'
 Check (@($classification.components | Where-Object { [string]$_.layer -ceq 'c2-capability' -and [bool]$_.tcb_included }).Count -eq 0) 'no C2 capability is included in the measured Kernel TCB' 'a C2 capability leaked into TCB inclusion'
 
 $entryContractPath = Join-Path $RepoRoot 'policies\entry-contract.md'
@@ -249,7 +277,7 @@ $canonicalText = Read-Text -Path 'docs/architecture/canonical-json-contract.md'
 Check ($canonicalText.Contains('canonical-json/v1',[StringComparison]::Ordinal) -and $canonicalText.Contains('-9007199254740991',[StringComparison]::Ordinal) -and $canonicalText.Contains('UTF-8 without a BOM',[StringComparison]::Ordinal) -and $canonicalText.Contains('TK-02 is', [StringComparison]::Ordinal) -and $canonicalText.Contains('no selected Runtime or Distribution root', [StringComparison]::Ordinal)) 'canonical-json/v1 freezes its algorithm and records the C2-only TK-02 adoption boundary' 'canonical-json/v1 architecture or adoption boundary is incomplete'
 $trackedRealManifests = @(& git -C $RepoRoot ls-files -- 'modules/*/module.manifest.json')
 $expectedRealManifests = @($productionManifests | ForEach-Object { [IO.Path]::GetRelativePath($RepoRoot,$_.FullName).Replace([char]92,[char]47) } | Sort-Object -CaseSensitive)
-Check ($trackedRealManifests.Count -eq 12 -and (($trackedRealManifests | Sort-Object -CaseSensitive) -join '|') -ceq ($expectedRealManifests -join '|')) 'TK-02 tracks exactly the 12 real module.manifest.json inputs' 'real tracked Manifest discovery set drifted'
+Check ($trackedRealManifests.Count -eq 13 -and (($trackedRealManifests | Sort-Object -CaseSensitive) -join '|') -ceq ($expectedRealManifests -join '|')) 'TK-04 tracks exactly the 13 real mixed-version module.manifest.json inputs' 'real tracked Manifest discovery set drifted'
 
 $validationText = Read-Text -Path 'scripts/run-validation.ps1'
 $routingText = Read-Text -Path 'scripts/run-changed-optional-validation.ps1'

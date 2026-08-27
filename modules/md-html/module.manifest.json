@@ -1,6 +1,8 @@
 {
-  "schema_version": "harness-module/v0",
+  "schema_version": "harness-module/v1",
   "module_id": "md-html",
+  "module_version": "1.0.0",
+  "classification_owner": "md-html",
   "kind": "capability",
   "description": "Optional Markdown review rendering and HTML presentation capability.",
   "default_activation": false,
@@ -14,13 +16,26 @@
       "modules/md-html/**",
       "scripts/render-review-html.ps1",
       "skills/md-html/**",
-      "tests/fixtures/md-html/**"
+      "tests/fixtures/md-html/**",
+      "tests/verify-md-html-review-renderer.ps1",
+      "tests/verify-render-review-html.ps1"
     ],
     "watch_paths": []
   },
-  "entrypoints": {
+  "package": {
+    "code": ["scripts/render-review-html.ps1"],
+    "schemas": [],
+    "tests": [
+      "tests/fixtures/md-html/**",
+      "tests/verify-md-html-review-renderer.ps1",
+      "tests/verify-render-review-html.ps1"
+    ],
+    "install_assets": ["skills/md-html/**"]
+  },
+  "exports": {
     "commands": ["scripts/render-review-html.ps1"],
-    "hooks": []
+    "hooks": [],
+    "libraries": []
   },
   "validation": {
     "owner_tests": [
@@ -28,7 +43,7 @@
       "tests/verify-render-review-html.ps1"
     ],
     "quick": [],
-    "core_group": null,
+    "core_groups": {},
     "changed": [
       "tests/verify-md-html-review-renderer.ps1",
       "tests/verify-render-review-html.ps1"

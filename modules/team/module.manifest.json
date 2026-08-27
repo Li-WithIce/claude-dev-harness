@@ -1,6 +1,8 @@
 {
-  "schema_version": "harness-module/v0",
+  "schema_version": "harness-module/v1",
   "module_id": "team",
+  "module_version": "1.0.0",
+  "classification_owner": "team",
   "kind": "capability",
   "description": "Optional multi-agent team preset and orchestration surface.",
   "default_activation": false,
@@ -14,7 +16,10 @@
       "docs/team-write-authority.md",
       "modules/team/**",
       "scripts/export-team-preset.ps1",
-      "skills/workflow-team/**"
+      "skills/workflow-team/**",
+      "tests/verify-aiteamcode-skill-contract.ps1",
+      "tests/verify-team-orchestration.ps1",
+      "tests/verify-team-preset.ps1"
     ],
     "watch_paths": [
       "scripts/invoke-harness-skill-dispatcher.ps1",
@@ -22,9 +27,26 @@
       "scripts/invoke-harness-skill.ps1"
     ]
   },
-  "entrypoints": {
+  "package": {
+    "code": [
+      "scripts/export-team-preset.ps1",
+      "skills/workflow-team/scripts/**"
+    ],
+    "schemas": [],
+    "tests": [
+      "tests/verify-aiteamcode-skill-contract.ps1",
+      "tests/verify-team-orchestration.ps1",
+      "tests/verify-team-preset.ps1"
+    ],
+    "install_assets": [
+      "docs/team-write-authority.md",
+      "skills/workflow-team/SKILL.md"
+    ]
+  },
+  "exports": {
     "commands": ["scripts/export-team-preset.ps1", "skills/workflow-team/scripts/spawn-team.ps1"],
-    "hooks": []
+    "hooks": [],
+    "libraries": []
   },
   "validation": {
     "owner_tests": [
@@ -33,7 +55,7 @@
       "tests/verify-team-preset.ps1"
     ],
     "quick": [],
-    "core_group": null,
+    "core_groups": {},
     "changed": [
       "tests/verify-aiteamcode-skill-contract.ps1",
       "tests/verify-team-orchestration.ps1",

@@ -1,20 +1,26 @@
-# Module Manifest Phase 0 Contract
+# Module Manifest v0/v1 Construction Contract
 
 ## Status and authority
 
-Manifest Phase 0 uses `schema_version: harness-module/v0`. The phase name and
-Schema version must not be described as Phase 0 plus `harness-module/v1`.
-TK-00 froze `schemas/module-manifest.schema.json` and its first fixtures. TK-02
-implements the construction-only reader, 12 real manifests, deterministic
-catalog, validation selection, and changed-path routing. It does not create an
-installer, activator, permission grant, or Runtime router.
+Manifest Phase 0 remains frozen as `schema_version: harness-module/v0` in
+`schemas/module-manifest.schema.json`. TK-04 does not rewrite that Schema or its
+historical construction bytes. It adds `harness-module/v1` only for the seven
+C2 Capability domains and emits a mixed `module-manifest-catalog/v1`. Kernel,
+Adapter, Distribution, task-governance, and `legacy-v1` remain v0.
+
+The exact v1 set is `benchmark`, `harness-maintenance`, `md-html`, `memory`,
+`providers`, `release-evidence`, and `team`. Their exact
+`classification_owner` values are respectively `benchmark`,
+`engineering-validation`, `md-html`, `memory`, `providers`,
+`release-evidence`, and `team`. No eighth v1 module or duplicate owner is
+accepted by production construction.
 
 Phase 0 is a construction-input contract for discovery, ownership, watch paths,
 validation ownership, changed-path routing, dependencies, entrypoints, and
 requested capability declarations. It does not drive installation, activation,
 default profiles, Protected Action changes, write permission, or Kernel identity.
 
-## Required shape
+## v0 required shape
 
 Every document has exactly these top-level fields:
 
@@ -80,8 +86,8 @@ Across a discovered manifest set:
 - shared K0 paths are owned by the Kernel module;
 - other modules may watch, but not own, shared K0 paths.
 
-A future `Harness.Hashing.psm1` would therefore be owned by Kernel and watched by
-release-evidence, distribution, and task-state. TK-00 does not create it.
+`Harness.Hashing.psm1` is owned by the Thin Trust Kernel v0 module and watched by
+the consumers that depend on its frozen K0 byte contract.
 
 ## Stable CoreGroup identity
 
@@ -99,7 +105,33 @@ a separate versioned CI Contract change. “Zero central-file modification” is
 target only for discovery, validation, and routing; install or activation policy
 remains centrally authorized.
 
-## TK-02 construction and discovery safety
+For v1 Capability documents, `validation.core_groups` replaces the singular
+v0 `core_group`. It is a strict object whose only possible keys are the same
+five stable identities. A Capability may contribute an explicit ordered subset
+to more than one group, but every contributed test must be one of that module's
+`owner_tests`. TK-04 preserves the exact pre-existing 14/14/3/3/20 group
+membership and order.
+
+## v1 Capability package shape
+
+`schemas/module-manifest-v1.schema.json` keeps the shared identity, dependency,
+capability request, ownership, and validation fields and adds:
+
+- `module_version`, a strict semantic version;
+- `classification_owner`, one of the seven frozen C2 owner domains;
+- `package.code`, `package.schemas`, `package.tests`, and
+  `package.install_assets`;
+- `exports.commands`, `exports.hooks`, and `exports.libraries`;
+- `validation.core_groups`.
+
+Every tracked file under a Capability's primary ownership, except its own
+Manifest, belongs to exactly one package role. Role overlap, an incomplete role
+closure, an export outside `package.code`, a non-`.psm1` library, or an owner
+test outside `package.tests` fails construction. These package and export fields
+are descriptive build inputs only. `default_activation` is exactly false, and
+`kind` is exactly `capability`.
+
+## Construction and discovery safety
 
 `scripts/lib/Harness.ModuleManifest.psm1` discovers only tracked regular files at
 `modules/<module_id>/module.manifest.json`. Physical discovery and the Git index
@@ -109,12 +141,17 @@ module ids, requires every referenced file and dependency module, rejects cycles
 rejects multiple primary owners and verifier owners, and sorts constructed sets
 ordinally.
 
-`scripts/get-module-manifest-catalog.ps1` writes or checks the tracked
-`module-manifest-catalog.json`. Each source digest explicitly uses
-`canonical-json/v1`; the catalog is canonical UTF-8 without BOM plus exactly one
-terminal LF and satisfies `schemas/module-manifest-catalog.schema.json`.
-`.gitattributes` pins that generated file to `eol=lf`, so a Windows checkout
-cannot rewrite the byte contract. `-Check` is zero-write.
+`scripts/get-module-manifest-catalog.ps1` writes or checks both tracked outputs.
+An all-v0 fixture still emits the historical `module-manifest-catalog/v0` bytes
+and no source catalog. Production emits `module-manifest-catalog/v1` plus
+`capability-source-catalog/v1`. Both outputs use canonical UTF-8 without BOM
+plus exactly one terminal LF, and `.gitattributes` pins both to `eol=lf`.
+`-Check` validates both byte sequences with zero writes.
+
+The v1 package closure and raw Git-index blob hashing contract are specified in
+`capability-source.md`. `scripts/lib/Harness.CapabilitySource.psm1` is a strict,
+read-only consumer of the current dual catalogs. It provides no installation,
+activation, Runtime, task-state, or authorization path.
 
 `scripts/run-validation.ps1` derives quick, full, and the five stable CoreGroups
 from that catalog. `scripts/run-changed-optional-validation.ps1` derives its eight
@@ -123,8 +160,8 @@ before scheduling any verifier. The fail-closed contract is exact: any
 construction failure must execute zero tests. This includes Schema, reference,
 dependency, ownership, and catalog-drift failures.
 
-The 12 Phase 0 modules cover the five CoreGroups, seven existing optional
-domains, and a separate `legacy-v1` marker. The marker has
+The 13 mixed-version modules cover the five CoreGroups, eight existing optional
+routes, and a separate `legacy-v1` marker. The marker has
 `default_activation: false` and names only the four active Sunset-gated
 compatibility paths. TK-02 neither deletes those paths nor executes a Sunset
 gate.
@@ -134,4 +171,6 @@ path escape, backslash path, invalid kind, legacy default activation, adapter
 task-state write, capability Kernel Policy ownership, Kernel capability write,
 and duplicate owned path. TK-02 adds constructed-set fixtures for a valid
 dependency, a missing dependency, a cycle, overlapping primary ownership, and
-multiple verifier owners.
+multiple verifier owners. TK-04 adds mixed v0/v1, strict v1 Schema, package
+role, classification-owner, Git-index source closure, stale-catalog, and Release
+sidecar fixtures.
