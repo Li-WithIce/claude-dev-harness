@@ -1,0 +1,29 @@
+{
+  "schema_version": "harness-module/v1",
+  "module_id": "role-overlap",
+  "module_version": "1.0.0",
+  "classification_owner": "engineering-validation",
+  "kind": "capability",
+  "description": "Invalid package role overlap fixture.",
+  "default_activation": false,
+  "dependencies": { "kernel_api": "v1", "modules": [] },
+  "requested_capabilities": ["filesystem-read"],
+  "ownership": {
+    "owned_paths": ["tests/fixtures/tk04/invalid-role-overlap/role-overlap/**", "tests/verify-hashing-module.ps1"],
+    "watch_paths": []
+  },
+  "package": {
+    "code": ["tests/verify-hashing-module.ps1"],
+    "schemas": [],
+    "tests": ["tests/verify-hashing-module.ps1"],
+    "install_assets": []
+  },
+  "exports": { "commands": [], "hooks": [], "libraries": [] },
+  "validation": {
+    "owner_tests": ["tests/verify-hashing-module.ps1"],
+    "quick": [],
+    "core_groups": {},
+    "changed": [],
+    "full": []
+  }
+}

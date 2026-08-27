@@ -1,0 +1,212 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/module-manifest-v1.schema.json",
+  "title": "Harness Capability Module Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "module_id",
+    "module_version",
+    "classification_owner",
+    "kind",
+    "description",
+    "default_activation",
+    "dependencies",
+    "requested_capabilities",
+    "ownership",
+    "package",
+    "exports",
+    "validation"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["harness-module/v1"] },
+    "module_id": { "$ref": "#/definitions/moduleId" },
+    "module_version": { "$ref": "#/definitions/moduleVersion" },
+    "classification_owner": {
+      "type": "string",
+      "enum": [
+        "benchmark",
+        "engineering-validation",
+        "md-html",
+        "memory",
+        "providers",
+        "release-evidence",
+        "team"
+      ]
+    },
+    "kind": { "type": "string", "enum": ["capability"] },
+    "description": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "default_activation": { "type": "boolean", "const": false },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kernel_api", "modules"],
+      "properties": {
+        "kernel_api": { "type": "string", "enum": ["v1"] },
+        "modules": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/moduleId" }
+        }
+      }
+    },
+    "requested_capabilities": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/capability" },
+      "not": { "contains": { "enum": ["kernel-policy-write"] } }
+    },
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owned_paths", "watch_paths"],
+      "properties": {
+        "owned_paths": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "allOf": [
+              { "$ref": "#/definitions/packagePath" },
+              { "not": { "pattern": "^policies(?:/|$)" } }
+            ]
+          }
+        },
+        "watch_paths": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/packagePath" }
+        }
+      }
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "schemas", "tests", "install_assets"],
+      "properties": {
+        "code": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/packagePath" }
+        },
+        "schemas": {
+          "type": "array",
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/packagePath" }
+        },
+        "tests": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 512,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/packagePath" }
+        },
+        "install_assets": {
+          "type": "array",
+          "maxItems": 512,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/packagePath" }
+        }
+      }
+    },
+    "exports": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commands", "hooks", "libraries"],
+      "properties": {
+        "commands": { "$ref": "#/definitions/trackedPathArray" },
+        "hooks": { "$ref": "#/definitions/trackedPathArray" },
+        "libraries": { "$ref": "#/definitions/trackedPathArray" }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner_tests", "quick", "core_groups", "changed", "full"],
+      "properties": {
+        "owner_tests": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/verifierPath" }
+        },
+        "quick": { "$ref": "#/definitions/verifierArray" },
+        "core_groups": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "entry-lifecycle": { "$ref": "#/definitions/verifierArray" },
+            "evaluation-release": { "$ref": "#/definitions/verifierArray" },
+            "install-evidence": { "$ref": "#/definitions/verifierArray" },
+            "governance-approval": { "$ref": "#/definitions/verifierArray" },
+            "harness-contracts": { "$ref": "#/definitions/verifierArray" }
+          }
+        },
+        "changed": { "$ref": "#/definitions/verifierArray" },
+        "full": { "$ref": "#/definitions/verifierArray" }
+      }
+    }
+  },
+  "definitions": {
+    "moduleId": {
+      "type": "string",
+      "pattern": "^(?!(?:kernel|core|runtime|legacy|none)$)[a-z][a-z0-9-]{1,62}$"
+    },
+    "moduleVersion": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$"
+    },
+    "trackedPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!.*\\\\)(?!.*//)(?!\\.\\.?(?:/|$))(?!.*\\/\\.\\.?(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$"
+    },
+    "packagePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 243,
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!.*\\\\)(?!.*//)(?!\\.\\.?(?:/|$))(?!.*\\/\\.\\.?(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*(?:/\\*\\*)?$"
+    },
+    "verifierPath": {
+      "type": "string",
+      "pattern": "^tests/(?:verify-[A-Za-z0-9._-]+|run-scenario-evals)\\.ps1$"
+    },
+    "capability": {
+      "type": "string",
+      "enum": [
+        "filesystem-read",
+        "filesystem-write",
+        "network",
+        "process-execution",
+        "task-state-read",
+        "task-state-write",
+        "capability-read",
+        "capability-write",
+        "kernel-policy-read",
+        "kernel-policy-write"
+      ]
+    },
+    "trackedPathArray": {
+      "type": "array",
+      "maxItems": 128,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/trackedPath" }
+    },
+    "verifierArray": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/verifierPath" }
+    }
+  }
+}

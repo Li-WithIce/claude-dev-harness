@@ -1,0 +1,33 @@
+{
+  "schema_version": "harness-module/v1",
+  "module_id": "beta-capability",
+  "module_version": "1.0.0",
+  "classification_owner": "providers",
+  "kind": "capability",
+  "description": "Second duplicate classification owner fixture.",
+  "default_activation": false,
+  "dependencies": { "kernel_api": "v1", "modules": [] },
+  "requested_capabilities": ["filesystem-read"],
+  "ownership": {
+    "owned_paths": [
+      "scripts/lib/Harness.ModelEval.psm1",
+      "tests/fixtures/tk04/duplicate-owner/beta-capability/**",
+      "tests/verify-model-eval-runner.ps1"
+    ],
+    "watch_paths": []
+  },
+  "package": {
+    "code": ["scripts/lib/Harness.ModelEval.psm1"],
+    "schemas": [],
+    "tests": ["tests/verify-model-eval-runner.ps1"],
+    "install_assets": []
+  },
+  "exports": { "commands": [], "hooks": [], "libraries": ["scripts/lib/Harness.ModelEval.psm1"] },
+  "validation": {
+    "owner_tests": ["tests/verify-model-eval-runner.ps1"],
+    "quick": [],
+    "core_groups": {},
+    "changed": [],
+    "full": []
+  }
+}

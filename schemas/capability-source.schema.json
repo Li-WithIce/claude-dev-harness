@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/capability-source.schema.json",
+  "title": "Harness Capability Source Envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "module_id",
+    "module_version",
+    "manifest_digest",
+    "digest_algorithm",
+    "source_basis",
+    "files",
+    "source_digest"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["capability-source/v1"] },
+    "module_id": { "$ref": "#/definitions/moduleId" },
+    "module_version": { "$ref": "#/definitions/moduleVersion" },
+    "manifest_digest": { "$ref": "#/definitions/sha256" },
+    "digest_algorithm": { "type": "string", "enum": ["canonical-json/v1"] },
+    "source_basis": { "type": "string", "enum": ["git-index-blob/v1"] },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2048,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": { "$ref": "#/definitions/trackedPath" },
+          "sha256": { "$ref": "#/definitions/sha256" }
+        }
+      }
+    },
+    "source_digest": { "$ref": "#/definitions/sha256" }
+  },
+  "definitions": {
+    "moduleId": { "type": "string", "pattern": "^(?!(?:kernel|core|runtime|legacy|none)$)[a-z][a-z0-9-]{1,62}$" },
+    "moduleVersion": { "type": "string", "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$" },
+    "trackedPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!.*\\\\)(?!.*//)(?!\\.\\.?(?:/|$))(?!.*\\/\\.\\.?(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$"
+    },
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+  }
+}

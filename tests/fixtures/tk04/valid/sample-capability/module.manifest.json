@@ -1,0 +1,40 @@
+{
+  "schema_version": "harness-module/v1",
+  "module_id": "sample-capability",
+  "module_version": "1.0.0",
+  "classification_owner": "providers",
+  "kind": "capability",
+  "description": "Tracked fixture for mixed-version Capability package construction.",
+  "default_activation": false,
+  "dependencies": {
+    "kernel_api": "v1",
+    "modules": []
+  },
+  "requested_capabilities": ["filesystem-read", "process-execution"],
+  "ownership": {
+    "owned_paths": [
+      "scripts/audit-context-provider-usage.ps1",
+      "tests/fixtures/tk04/valid/sample-capability/**",
+      "tests/verify-provider-usage-recording.ps1"
+    ],
+    "watch_paths": []
+  },
+  "package": {
+    "code": ["scripts/audit-context-provider-usage.ps1"],
+    "schemas": [],
+    "tests": ["tests/verify-provider-usage-recording.ps1"],
+    "install_assets": []
+  },
+  "exports": {
+    "commands": ["scripts/audit-context-provider-usage.ps1"],
+    "hooks": [],
+    "libraries": []
+  },
+  "validation": {
+    "owner_tests": ["tests/verify-provider-usage-recording.ps1"],
+    "quick": [],
+    "core_groups": {},
+    "changed": ["tests/verify-provider-usage-recording.ps1"],
+    "full": ["tests/verify-provider-usage-recording.ps1"]
+  }
+}

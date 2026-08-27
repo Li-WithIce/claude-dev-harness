@@ -1,0 +1,320 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/module-manifest-catalog-v1.schema.json",
+  "title": "Harness Mixed Module Manifest Catalog v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generator_contract_version",
+    "manifest_root",
+    "source_manifests",
+    "modules",
+    "capability_source_catalog_digest",
+    "core_groups",
+    "quick_tests",
+    "full_tests",
+    "optional_routes",
+    "test_owners",
+    "unresolved_dependencies",
+    "ownership_conflicts",
+    "totals"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["module-manifest-catalog/v1"] },
+    "generator_contract_version": { "type": "string", "enum": ["module-manifest-generator/v1"] },
+    "manifest_root": { "type": "string", "enum": ["modules"] },
+    "source_manifests": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["module_id", "schema_version", "path", "digest"],
+        "properties": {
+          "module_id": { "$ref": "#/definitions/moduleId" },
+          "schema_version": { "type": "string", "enum": ["harness-module/v0", "harness-module/v1"] },
+          "path": { "$ref": "#/definitions/manifestPath" },
+          "digest": { "$ref": "#/definitions/sha256" }
+        }
+      }
+    },
+    "modules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          { "$ref": "#/definitions/moduleV0" },
+          { "$ref": "#/definitions/moduleV1" }
+        ]
+      }
+    },
+    "capability_source_catalog_digest": { "$ref": "#/definitions/sha256" },
+    "core_groups": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry-lifecycle", "evaluation-release", "install-evidence", "governance-approval", "harness-contracts"],
+      "properties": {
+        "entry-lifecycle": { "$ref": "#/definitions/nonEmptyTestArray" },
+        "evaluation-release": { "$ref": "#/definitions/nonEmptyTestArray" },
+        "install-evidence": { "$ref": "#/definitions/nonEmptyTestArray" },
+        "governance-approval": { "$ref": "#/definitions/nonEmptyTestArray" },
+        "harness-contracts": { "$ref": "#/definitions/nonEmptyTestArray" }
+      }
+    },
+    "quick_tests": { "$ref": "#/definitions/testArray" },
+    "full_tests": { "$ref": "#/definitions/nonEmptyTestArray" },
+    "optional_routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["module_id", "manifest_path", "match_paths", "tests"],
+        "properties": {
+          "module_id": { "$ref": "#/definitions/moduleId" },
+          "manifest_path": { "$ref": "#/definitions/manifestPath" },
+          "match_paths": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "$ref": "#/definitions/packagePath" }
+          },
+          "tests": { "$ref": "#/definitions/nonEmptyTestArray" }
+        }
+      }
+    },
+    "test_owners": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "module_id"],
+        "properties": {
+          "path": { "$ref": "#/definitions/testPath" },
+          "module_id": { "$ref": "#/definitions/moduleId" }
+        }
+      }
+    },
+    "unresolved_dependencies": { "type": "array", "maxItems": 0 },
+    "ownership_conflicts": { "type": "array", "maxItems": 0 },
+    "totals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest_count",
+        "module_count",
+        "v0_module_count",
+        "v1_module_count",
+        "capability_source_count",
+        "capability_source_file_reference_count",
+        "owner_test_count",
+        "core_test_count",
+        "quick_test_count",
+        "full_test_count",
+        "optional_route_count"
+      ],
+      "properties": {
+        "manifest_count": { "type": "integer", "minimum": 1 },
+        "module_count": { "type": "integer", "minimum": 1 },
+        "v0_module_count": { "type": "integer", "minimum": 1 },
+        "v1_module_count": { "type": "integer", "minimum": 1 },
+        "capability_source_count": { "type": "integer", "minimum": 1 },
+        "capability_source_file_reference_count": { "type": "integer", "minimum": 1 },
+        "owner_test_count": { "type": "integer", "minimum": 1 },
+        "core_test_count": { "type": "integer", "minimum": 1 },
+        "quick_test_count": { "type": "integer", "minimum": 1 },
+        "full_test_count": { "type": "integer", "minimum": 1 },
+        "optional_route_count": { "type": "integer", "minimum": 1 }
+      }
+    }
+  },
+  "definitions": {
+    "moduleId": { "type": "string", "pattern": "^(?!(?:kernel|core|runtime|legacy|none)$)[a-z][a-z0-9-]{1,62}$" },
+    "moduleVersion": { "type": "string", "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$" },
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "trackedPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!.*\\\\)(?!.*//)(?!\\.\\.?(?:/|$))(?!.*\\/\\.\\.?(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$"
+    },
+    "packagePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 243,
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!.*\\\\)(?!.*//)(?!\\.\\.?(?:/|$))(?!.*\\/\\.\\.?(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*(?:/\\*\\*)?$"
+    },
+    "manifestPath": { "type": "string", "pattern": "^modules/[a-z][a-z0-9-]{1,62}/module\\.manifest\\.json$" },
+    "testPath": { "type": "string", "pattern": "^tests/(?:verify-[A-Za-z0-9._-]+|run-scenario-evals)\\.ps1$" },
+    "capability": {
+      "type": "string",
+      "enum": [
+        "filesystem-read",
+        "filesystem-write",
+        "network",
+        "process-execution",
+        "task-state-read",
+        "task-state-write",
+        "capability-read",
+        "capability-write",
+        "kernel-policy-read",
+        "kernel-policy-write"
+      ]
+    },
+    "stringPathArray": {
+      "type": "array",
+      "maxItems": 512,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/packagePath" }
+    },
+    "trackedPathArray": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/trackedPath" }
+    },
+    "testArray": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/testPath" }
+    },
+    "nonEmptyTestArray": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/testPath" }
+    },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kernel_api", "modules"],
+      "properties": {
+        "kernel_api": { "type": "string", "enum": ["v1"] },
+        "modules": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/definitions/moduleId" } }
+      }
+    },
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owned_paths", "watch_paths"],
+      "properties": {
+        "owned_paths": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/definitions/packagePath" } },
+        "watch_paths": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/definitions/packagePath" } }
+      }
+    },
+    "entrypoints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commands", "hooks"],
+      "properties": {
+        "commands": { "$ref": "#/definitions/trackedPathArray" },
+        "hooks": { "$ref": "#/definitions/trackedPathArray" }
+      }
+    },
+    "exports": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commands", "hooks", "libraries"],
+      "properties": {
+        "commands": { "$ref": "#/definitions/trackedPathArray" },
+        "hooks": { "$ref": "#/definitions/trackedPathArray" },
+        "libraries": { "$ref": "#/definitions/trackedPathArray" }
+      }
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "schemas", "tests", "install_assets"],
+      "properties": {
+        "code": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/definitions/packagePath" } },
+        "schemas": { "$ref": "#/definitions/stringPathArray" },
+        "tests": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/definitions/packagePath" } },
+        "install_assets": { "$ref": "#/definitions/stringPathArray" }
+      }
+    },
+    "validationV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner_tests", "quick", "core_group", "changed", "full"],
+      "properties": {
+        "owner_tests": { "$ref": "#/definitions/nonEmptyTestArray" },
+        "quick": { "$ref": "#/definitions/testArray" },
+        "core_group": {
+          "oneOf": [
+            { "type": "string", "enum": ["entry-lifecycle", "evaluation-release", "install-evidence", "governance-approval", "harness-contracts"] },
+            { "type": "null" }
+          ]
+        },
+        "changed": { "$ref": "#/definitions/testArray" },
+        "full": { "$ref": "#/definitions/testArray" }
+      }
+    },
+    "validationV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner_tests", "quick", "core_groups", "changed", "full"],
+      "properties": {
+        "owner_tests": { "$ref": "#/definitions/nonEmptyTestArray" },
+        "quick": { "$ref": "#/definitions/testArray" },
+        "core_groups": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "entry-lifecycle": { "$ref": "#/definitions/testArray" },
+            "evaluation-release": { "$ref": "#/definitions/testArray" },
+            "install-evidence": { "$ref": "#/definitions/testArray" },
+            "governance-approval": { "$ref": "#/definitions/testArray" },
+            "harness-contracts": { "$ref": "#/definitions/testArray" }
+          }
+        },
+        "changed": { "$ref": "#/definitions/testArray" },
+        "full": { "$ref": "#/definitions/testArray" }
+      }
+    },
+    "moduleV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "module_id", "kind", "description", "default_activation", "dependencies", "requested_capabilities", "ownership", "entrypoints", "validation"],
+      "properties": {
+        "schema_version": { "type": "string", "enum": ["harness-module/v0"] },
+        "module_id": { "$ref": "#/definitions/moduleId" },
+        "kind": { "type": "string", "enum": ["kernel", "capability", "adapter", "legacy"] },
+        "description": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "default_activation": { "type": "boolean" },
+        "dependencies": { "$ref": "#/definitions/dependencies" },
+        "requested_capabilities": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/definitions/capability" } },
+        "ownership": { "$ref": "#/definitions/ownership" },
+        "entrypoints": { "$ref": "#/definitions/entrypoints" },
+        "validation": { "$ref": "#/definitions/validationV0" }
+      }
+    },
+    "moduleV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "module_id", "module_version", "classification_owner", "kind", "description", "default_activation", "dependencies", "requested_capabilities", "ownership", "package", "exports", "validation", "capability_source_digest"],
+      "properties": {
+        "schema_version": { "type": "string", "enum": ["harness-module/v1"] },
+        "module_id": { "$ref": "#/definitions/moduleId" },
+        "module_version": { "$ref": "#/definitions/moduleVersion" },
+        "classification_owner": {
+          "type": "string",
+          "enum": ["benchmark", "engineering-validation", "md-html", "memory", "providers", "release-evidence", "team"]
+        },
+        "kind": { "type": "string", "enum": ["capability"] },
+        "description": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "default_activation": { "type": "boolean", "const": false },
+        "dependencies": { "$ref": "#/definitions/dependencies" },
+        "requested_capabilities": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/definitions/capability" } },
+        "ownership": { "$ref": "#/definitions/ownership" },
+        "package": { "$ref": "#/definitions/package" },
+        "exports": { "$ref": "#/definitions/exports" },
+        "validation": { "$ref": "#/definitions/validationV1" },
+        "capability_source_digest": { "$ref": "#/definitions/sha256" }
+      }
+    }
+  }
+}

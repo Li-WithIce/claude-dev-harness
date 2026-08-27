@@ -12,6 +12,7 @@
   "ownership": {
     "owned_paths": [
       ".gitattributes",
+      "capability-source-catalog.json",
       "docs/architecture/**",
       "kernel-component-classification.json",
       "kernel-tcb-inventory.json",
@@ -21,26 +22,36 @@
       "schemas/kernel-component-classification.schema.json",
       "schemas/kernel-tcb-roots.schema.json",
       "schemas/kernel-tcb.schema.json",
-      "schemas/module-manifest-catalog.schema.json",
-      "schemas/module-manifest.schema.json",
-      "scripts/get-kernel-tcb-inventory.ps1",
-      "scripts/get-module-manifest-catalog.ps1",
       "scripts/lib/Harness.AtomicWrite.psm1",
       "scripts/lib/Harness.CanonicalJson.psm1",
       "scripts/lib/Harness.Hashing.psm1",
-      "scripts/lib/Harness.ModuleManifest.psm1",
       "scripts/lib/Harness.Path.psm1",
-      "tests/fixtures/tk00/**",
-      "tests/fixtures/tk02/**"
+      "tests/fixtures/tk00/**"
     ],
     "watch_paths": [
+      "modules/**",
+      "schemas/capability-source-binding.schema.json",
+      "schemas/capability-source-catalog.schema.json",
+      "schemas/capability-source.schema.json",
+      "schemas/module-manifest-catalog-v1.schema.json",
+      "schemas/module-manifest-catalog.schema.json",
+      "schemas/module-manifest-v1.schema.json",
+      "schemas/module-manifest.schema.json",
+      "scripts/get-kernel-tcb-inventory.ps1",
+      "scripts/get-module-manifest-catalog.ps1",
+      "scripts/lib/Harness.CapabilitySource.psm1",
+      "scripts/lib/Harness.ModuleManifest.psm1",
       "scripts/run-changed-optional-validation.ps1",
       "scripts/run-validation.ps1",
+      "scripts/write-capability-source-binding.ps1",
+      "tests/fixtures/tk02/**",
+      "tests/fixtures/tk04/**",
+      "tests/verify-capability-extraction.ps1",
       "tests/verify-v2-ci-routing.ps1"
     ]
   },
   "entrypoints": {
-    "commands": ["scripts/get-kernel-tcb-inventory.ps1", "scripts/get-module-manifest-catalog.ps1"],
+    "commands": [],
     "hooks": []
   },
   "validation": {

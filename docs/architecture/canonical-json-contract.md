@@ -78,13 +78,15 @@ whose contract explicitly selects that `digest_algorithm`. TK-01B-New does not
 add a generic algorithm router and does not create a business Envelope. TK-02 is
 the first explicit adopter: the new Manifest catalog contract hashes each
 `harness-module/v0` source after canonicalization and emits its own canonical
-catalog bytes.
+catalog bytes. TK-04 adds only new Manifest v1, Capability source closure, and
+Release sidecar objects that explicitly declare `canonical-json/v1`; it does
+not reinterpret any historical report or receipt.
 
 No pre-TK-02 Evidence, Receipt, Approval, Requirement Contract, Installed Asset,
 Source Identity, Task State, installation transaction, Release, Qualification,
 rollout, benchmark, or model-evaluation byte sequence or digest is reinterpreted.
 Those historical algorithms remain with their current owners.
 
-The primitive is classified as K0. TK-02 imports it only from C2 engineering
-construction code; no selected Runtime or Distribution root reaches that code.
+The primitive is classified as K0. TK-02 and TK-04 import it only from C2
+engineering construction and Release sidecar code; no selected Runtime or Distribution root reaches that code.
 It therefore remains outside the generated transitive TCB.
