@@ -71,6 +71,10 @@ foreach ($path in @($modulePath,$consumerPath,$writerPath,$generatorPath,$PSComm
 Check ($parseFailures.Count -eq 0) 'all TK-04 PowerShell files parse' "TK-04 PowerShell parse failures: $($parseFailures -join ' | ')"
 $bomFailures = @(@($consumerPath,$writerPath,$PSCommandPath) | Where-Object { -not (Test-FileHasUtf8Bom -Path $_) })
 Check ($bomFailures.Count -eq 0) 'new TK-04 PowerShell files follow the UTF-8 BOM convention' "TK-04 PowerShell BOM failures: $($bomFailures -join ', ')"
+$verifierText = [IO.File]::ReadAllText($PSCommandPath)
+$externalSearchCommand = [string]::Concat('r','g')
+$externalSearchPattern = '(?m)(?:^|[;&|()\s])' + [regex]::Escape($externalSearchCommand) + '(?:\s|$)'
+Check ($verifierText -notmatch $externalSearchPattern) 'TK-04 verifier relies only on runner-portable search primitives' 'TK-04 verifier depends on a non-baseline external search executable'
 
 $manifestModule = $null
 $consumerModule = $null
@@ -203,7 +207,28 @@ try {
     Check ($oldDrift.Count -eq 0) 'historical Release receipt Schemas and writers remain byte-compatible' "historical Release contract bytes changed: $($oldDrift -join ', ')"
 
     $newSource = [IO.File]::ReadAllText($consumerPath) + "`n" + [IO.File]::ReadAllText($writerPath)
-    $runtimeImports = @(rg -l 'Harness\.CapabilitySource|write-capability-source-binding' (Join-Path $RepoRoot 'runtime') (Join-Path $RepoRoot 'runtime-hooks') (Join-Path $RepoRoot 'install.ps1') (Join-Path $RepoRoot 'scripts/install-transaction-common.ps1') 2>$null)
+    $runtimeImportTargets = @(
+        (Join-Path $RepoRoot 'runtime'),
+        (Join-Path $RepoRoot 'runtime-hooks'),
+        (Join-Path $RepoRoot 'install.ps1'),
+        (Join-Path $RepoRoot 'scripts/install-transaction-common.ps1')
+    )
+    $runtimeImports = @(
+        foreach ($target in $runtimeImportTargets) {
+            $files = if (Test-Path -LiteralPath $target -PathType Leaf) {
+                @((Get-Item -LiteralPath $target -Force))
+            } elseif (Test-Path -LiteralPath $target -PathType Container) {
+                @(Get-ChildItem -LiteralPath $target -File -Recurse -Force)
+            } else {
+                @()
+            }
+            foreach ($file in $files) {
+                if ([IO.File]::ReadAllText($file.FullName) -match 'Harness\.CapabilitySource|write-capability-source-binding') {
+                    $file.FullName
+                }
+            }
+        }
+    )
     Check ($newSource -notmatch '(?i)Harness\.(?:Policy|Approval|ControlledWrite)|kernel-policy-write|default_activation\s*=\s*true' -and $runtimeImports.Count -eq 0) 'Capability extraction adds no Runtime, install, or authorization authority' 'Capability extraction leaked into Runtime/install or added authorization behavior'
 } finally {
     if (-not [string]::IsNullOrWhiteSpace($tempRoot) -and (Test-Path -LiteralPath $tempRoot -PathType Container)) { Remove-Item -LiteralPath $tempRoot -Recurse -Force }
