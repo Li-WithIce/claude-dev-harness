@@ -128,12 +128,18 @@ try {
     $aFirst = Invoke-Adapter -Fixture $fixtureA -Model 'host-model/one' -Session 'workspace-a-session'
     $aSecond = Invoke-Adapter -Fixture $fixtureA -Model 'host-model/two' -Session 'workspace-a-session'
     $bFirst = Invoke-Adapter -Fixture $fixtureB -Model 'host-model/three'
+    $aFirstSessionProperty = if ($null -eq $aFirst.Record) { $null } else { $aFirst.Record.PSObject.Properties['session'] }
+    $aSecondSessionProperty = if ($null -eq $aSecond.Record) { $null } else { $aSecond.Record.PSObject.Properties['session'] }
+    $aFirstSession = if ($null -eq $aFirstSessionProperty) { '' } else { [string]$aFirstSessionProperty.Value }
+    $aSecondSession = if ($null -eq $aSecondSessionProperty) { '' } else { [string]$aSecondSessionProperty.Value }
+    $bSessionProperty = if ($null -eq $bFirst.Record) { $null } else { $bFirst.Record.PSObject.Properties['session'] }
+    $bSession = if ($null -eq $bSessionProperty) { '' } else { [string]$bSessionProperty.Value }
     Check ($aFirst.ExitCode -eq 0 -and $aSecond.ExitCode -eq 0 -and
         $aFirst.Record.model -ceq 'host-model/one' -and $aSecond.Record.model -ceq 'host-model/two') `
         'host model override reaches the adapter without changing its contract' 'host model override did not reach the adapter'
-    Check ($bFirst.ExitCode -eq 0 -and $bFirst.Record.workspace -ceq $fixtureB.Root -and [string]::IsNullOrEmpty([string]$bFirst.Record.session)) `
+    Check ($bFirst.ExitCode -eq 0 -and $bFirst.Record.workspace -ceq $fixtureB.Root -and [string]::IsNullOrEmpty($bSession)) `
         'workspace B starts without inheriting workspace A resume session' 'workspace B inherited another workspace resume session'
-    Check ($aFirst.Record.session -ceq 'workspace-a-session' -and $aFirst.Record.workspace -ceq $fixtureA.Root) `
+    Check ($aFirstSession -ceq 'workspace-a-session' -and $aSecondSession -ceq 'workspace-a-session' -and $aFirst.Record.workspace -ceq $fixtureA.Root) `
         'explicit resume session remains scoped to its requested workspace fixture' 'explicit resume session lost its workspace scope'
     Check ($aContractHash -ceq (Get-FileHash $fixtureA.Contract -Algorithm SHA256).Hash -and
         $aStateHash -ceq (Get-FileHash $fixtureA.State -Algorithm SHA256).Hash -and

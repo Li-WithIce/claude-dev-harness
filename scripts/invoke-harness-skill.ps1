@@ -348,7 +348,7 @@ function Invoke-ExternalPowerShellScript {
         } finally {
             $requestStream.Dispose()
         }
-        $powerShellPath = (Get-Command pwsh -CommandType Application -ErrorAction Stop).Source
+        $powerShellPath = @(Get-Command pwsh -CommandType Application -ErrorAction Stop)[0].Source
         $output = @(& $powerShellPath -NoProfile -NonInteractive -File $supervisorPath -TargetScriptPath $resolvedScriptPath -RequestPath $requestPath -OutputPath $Parameters.Output -TimeoutSeconds 1815 2>&1 | ForEach-Object { [string]$_ })
         return [pscustomobject]@{
             ExitCode = $LASTEXITCODE

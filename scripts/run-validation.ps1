@@ -19,7 +19,7 @@ param(
 )
 
 if ($PSVersionTable.PSVersion.Major -eq 5) {
-    $pwshCommand = Get-Command pwsh -CommandType Application -ErrorAction Stop
+    $pwshCommand = @(Get-Command pwsh -CommandType Application -ErrorAction Stop)[0]
     $bridgeArguments = [Collections.Generic.List[string]]::new()
     foreach ($argument in @('-NoLogo','-NoProfile','-NonInteractive','-File',[IO.Path]::GetFullPath($PSCommandPath),'-Suite',$Suite,'-CoreGroup',$CoreGroup,'-CheckTimeoutSeconds',[string]$CheckTimeoutSeconds)) {
         [void]$bridgeArguments.Add([string]$argument)
