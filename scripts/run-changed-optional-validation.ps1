@@ -11,6 +11,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Split-Path -Parent $PSScriptRoot }
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
+$manifestModulePath = Join-Path $RepoRoot 'scripts\lib\Harness.ModuleManifest.psm1'
+Import-Module $manifestModulePath -Force -ErrorAction Stop
+$manifestCatalog = Assert-HarnessModuleManifestCatalogCurrent -RepoRoot $RepoRoot
 
 if (-not [string]::IsNullOrWhiteSpace($ChangedPathsFile)) {
     $resolvedList = (Resolve-Path -LiteralPath $ChangedPathsFile).Path
@@ -22,24 +25,36 @@ $normalizedPaths = @($ChangedPaths | ForEach-Object {
     $path
 } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
 
-$definitions = @(
-    [ordered]@{name='memory';patterns=@('skills/obsidian-memory/*','scripts/*memory*','scripts/*runtime-inbox*','tests/verify-*memory*','tests/verify-*runtime-inbox*','.assistant/*memory*','vault-template/*memory*');tests=@('verify-archive-memory-candidates.ps1','verify-memory-health-report.ps1','verify-memory-maintain.ps1','verify-memory-provider-boundary.ps1','verify-repair-shared-memory.ps1','verify-runtime-inbox.ps1','verify-shared-memory-layers.ps1','verify-triage-runtime-inbox.ps1','verify-v2-runtime-memory-decoupling.ps1')},
-    [ordered]@{name='team';patterns=@('skills/workflow-team/*','scripts/*team*','scripts/invoke-harness-skill*.ps1','tests/verify-aiteamcode-*','tests/verify-team-*');tests=@('verify-aiteamcode-skill-contract.ps1','verify-team-orchestration.ps1','verify-team-preset.ps1')},
-    [ordered]@{name='md-html';patterns=@('skills/md-html/*','scripts/*render*html*','tests/verify-md-html-*','tests/verify-render-review-html.ps1');tests=@('verify-md-html-review-renderer.ps1','verify-render-review-html.ps1')},
-    [ordered]@{name='codex-adapter';patterns=@('skills/codex/*','scripts/invoke_codex.ps1','scripts/ask_codex.ps1','agent-configs/codex/*','tests/verify-ask-codex.ps1','tests/verify-codex-entry-autoload.ps1');tests=@('verify-ask-codex.ps1','verify-codex-entry-autoload.ps1')},
-    [ordered]@{name='providers';patterns=@('policies/*provider*','scripts/*provider*','scripts/lib/*Provider*','tests/verify-*provider*','agent-configs/*provider*');tests=@('verify-code-intel-provider-boundary.ps1','verify-context-provider-boundary.ps1','verify-context-provider-install-isolation.ps1','verify-context-provider-vnext.ps1','verify-experimental-provider-docs.ps1','verify-provider-routing-matrix.ps1','verify-provider-usage-recording.ps1')},
-    [ordered]@{name='thin-trust-kernel';patterns=@('docs/architecture/*','kernel-tcb-*.json','kernel-component-classification.json','schemas/*kernel*','schemas/module-manifest.schema.json','scripts/get-kernel-tcb-inventory.ps1','scripts/lib/Harness.CanonicalJson.psm1','scripts/lib/Harness.Hashing.psm1','tests/fixtures/tk00/*','tests/verify-canonical-json.ps1','tests/verify-hashing-module.ps1','tests/verify-*kernel*');tests=@('verify-canonical-json.ps1','verify-hashing-module.ps1','verify-kernel-tcb-inventory.ps1','verify-thin-trust-kernel-contracts.ps1')},
-    [ordered]@{name='harness-maintenance';patterns=@('install.ps1','uninstall.ps1','runtime-hooks/*','schemas/*','scripts/benchmark-harness.ps1','scripts/install-transaction-common.ps1','scripts/lite-artifact-parser.ps1','scripts/update-managed-assets.ps1','scripts/validate-lite-artifacts.ps1','tests/fixtures/v2/*','tests/verify-change-contract.ps1','tests/verify-install-isolation.ps1','tests/verify-runtime-hooks.ps1','tests/verify-uninstall-isolation.ps1','tests/verify-update-managed-assets.ps1','tests/verify-v2-baseline-benchmark.ps1','tests/verify-v2-policy-contracts.ps1');tests=@('verify-change-contract.ps1','verify-install-isolation.ps1','verify-runtime-hooks.ps1','verify-uninstall-isolation.ps1','verify-update-managed-assets.ps1','verify-v2-baseline-benchmark.ps1','verify-v2-policy-contracts.ps1')}
-)
-$routingSurfaces = @('.github/workflows/*','scripts/run-validation.ps1','scripts/run-changed-optional-validation.ps1','tests/verify-v2-ci-routing.ps1','install.ps1','uninstall.ps1','scripts/run-isolated-install-smoke.ps1')
+$definitions = @($manifestCatalog.Catalog.optional_routes | ForEach-Object {
+    [ordered]@{
+        name = [string]$_.module_id
+        patterns = @($_.match_paths)
+        tests = @($_.tests | ForEach-Object { Split-Path -Leaf ([string]$_) })
+    }
+})
+$routingSurfaces = @('.github/workflows/*','module-manifest-catalog.json','modules/*/module.manifest.json','schemas/module-manifest*.json','scripts/get-module-manifest-catalog.ps1','scripts/lib/Harness.ModuleManifest.psm1','scripts/run-validation.ps1','scripts/run-changed-optional-validation.ps1','tests/verify-v2-ci-routing.ps1','install.ps1','uninstall.ps1','scripts/run-isolated-install-smoke.ps1')
 
 function Test-AnyPattern {
+    param([string]$Path,[string[]]$Patterns)
+    foreach ($pattern in $Patterns) {
+        $candidate = [string]$pattern
+        if ($candidate.EndsWith('/**',[StringComparison]::Ordinal)) {
+            $base = $candidate.Substring(0,$candidate.Length-3)
+            if ($Path -ceq $base -or $Path.StartsWith($base + '/',[StringComparison]::Ordinal)) { return $true }
+        } elseif ($Path -ceq $candidate) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Test-AnyRoutingSurface {
     param([string]$Path,[string[]]$Patterns)
     foreach ($pattern in $Patterns) { if ($Path -like $pattern) { return $true } }
     return $false
 }
 
-$runAll = @($normalizedPaths | Where-Object { Test-AnyPattern -Path $_ -Patterns $routingSurfaces }).Count -gt 0
+$runAll = @($normalizedPaths | Where-Object { Test-AnyRoutingSurface -Path $_ -Patterns $routingSurfaces }).Count -gt 0
 $selectedModules = [System.Collections.Generic.List[string]]::new()
 $selectedTests = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
 foreach ($definition in $definitions) {

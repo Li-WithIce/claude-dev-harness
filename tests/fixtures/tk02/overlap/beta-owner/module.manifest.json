@@ -1,0 +1,21 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "beta-owner",
+  "kind": "kernel",
+  "description": "Ownership overlap fixture B.",
+  "default_activation": true,
+  "dependencies": { "kernel_api": "v1", "modules": [] },
+  "requested_capabilities": ["filesystem-read"],
+  "ownership": {
+    "owned_paths": ["scripts/lib/Harness.Hashing.psm1"],
+    "watch_paths": []
+  },
+  "entrypoints": { "commands": [], "hooks": [] },
+  "validation": {
+    "owner_tests": ["tests/verify-canonical-json.ps1"],
+    "quick": [],
+    "core_group": null,
+    "changed": [],
+    "full": []
+  }
+}

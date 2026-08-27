@@ -114,6 +114,9 @@ function Add-PowerShellScriptCheck {
 
 $repoRootResolved = Resolve-RepoRoot -RequestedRoot $RepoRoot
 $testsRoot = Join-Path $repoRootResolved 'tests'
+$manifestModulePath = Join-Path $repoRootResolved 'scripts\lib\Harness.ModuleManifest.psm1'
+Import-Module $manifestModulePath -Force -ErrorAction Stop
+$manifestCatalog = Assert-HarnessModuleManifestCatalogCurrent -RepoRoot $repoRootResolved
 $script:GitPath = Resolve-Executable -Candidates @('git.exe', 'git') -Purpose 'git checks'
 $checks = New-Object System.Collections.Generic.List[object]
 $skips = New-Object System.Collections.Generic.List[string]
@@ -123,75 +126,14 @@ if ($IncludeCachedDiff) {
     Add-GitCheck -Checks $checks -Name 'git diff --cached --check' -ArgumentList @('diff', '--cached', '--check')
 }
 
-$coreScriptGroups = [ordered]@{
-    'entry-lifecycle' = @(
-        'verify-adversarial-review-gate.ps1',
-        'verify-entry-routing-clarification.ps1',
-        'verify-v2-entry-contract.ps1',
-        'verify-v2-protocol-config.ps1',
-        'verify-runtime-qualification-decoupling.ps1',
-        'verify-v2-direct-no-artifacts.ps1',
-        'verify-v2-requirement-gate.ps1',
-        'verify-v2-json-compat.ps1',
-        'verify-v2-task-state.ps1',
-        'verify-v2-model-neutrality.ps1',
-        'verify-v1-v2-coexistence.ps1',
-        'verify-v1-to-v2-migration.ps1',
-        'verify-v2-default-flip.ps1',
-        'verify-v2-runtime-memory-decoupling.ps1'
-    )
-    'evaluation-release' = @(
-        'run-scenario-evals.ps1',
-        'verify-model-eval-runner.ps1',
-        'verify-rollout-evidence.ps1',
-        'verify-exact-head-engineering-evidence.ps1',
-        'verify-v1-stop-loss-qualification.ps1',
-        'verify-host-benchmark-runner.ps1',
-        'verify-host-benchmark-otel.ps1',
-        'verify-host-benchmark-qualification.ps1',
-        'verify-release-runner-boundary.ps1',
-        'verify-release-isolation-qualification.ps1',
-        'verify-release-full-receipt.ps1',
-        'verify-release-producer-receipts.ps1',
-        'verify-ordinary-ci-receipt.ps1',
-        'verify-v2-ci-routing.ps1'
-    )
-    'install-evidence' = @(
-        'verify-v2-install-presets.ps1',
-        'verify-preset-lifecycle-qualification.ps1',
-        'verify-v2-evidence.ps1'
-    )
-    'governance-approval' = @(
-        'verify-v2-governed-audit.ps1',
-        'verify-v2-approval.ps1',
-        'verify-v2-readonly-zero-write.ps1'
-    )
-    'harness-contracts' = @(
-        'verify-canonical-json.ps1',
-        'verify-harness-entry.ps1',
-        'verify-hashing-module.ps1',
-        'verify-kernel-tcb-inventory.ps1',
-        'verify-lite-artifact-validator.ps1',
-        'verify-lite-footprint.ps1',
-        'verify-minimal-safe-change-policy.ps1',
-        'verify-no-node-install-dependency.ps1',
-        'verify-placeholder-rendering.ps1',
-        'verify-workflow-contracts.ps1',
-        'verify-workflow-descriptor.ps1',
-        'verify-shared-memory-layers.ps1',
-        'verify-stage-discipline-matrix.ps1',
-        'verify-release-validation.ps1',
-        'verify-runtime-state-contract.ps1',
-        'verify-skill-manifest.ps1',
-        'verify-task-artifact-drift-audit.ps1',
-        'verify-thin-trust-kernel-contracts.ps1',
-        'verify-tool-profile.ps1'
-    )
+$coreScriptGroups = [ordered]@{}
+foreach ($groupName in @($manifestCatalog.Catalog.core_groups.Keys)) {
+    $coreScriptGroups[$groupName] = @($manifestCatalog.Catalog.core_groups[$groupName] | ForEach-Object { Split-Path -Leaf ([string]$_) })
 }
 $coreScripts = @($coreScriptGroups.Values | ForEach-Object { $_ })
 
 if ($Suite -eq 'quick') {
-    $scriptNames = @('verify-lite-footprint.ps1')
+    $scriptNames = @($manifestCatalog.Catalog.quick_tests | ForEach-Object { Split-Path -Leaf ([string]$_) })
 } elseif ($Suite -eq 'core') {
     if ($CoreGroup -eq 'all') {
         $scriptNames = $coreScripts
@@ -199,10 +141,7 @@ if ($Suite -eq 'quick') {
         $scriptNames = @($coreScriptGroups[$CoreGroup])
     }
 } else {
-    $scriptNames = Get-ChildItem -LiteralPath $testsRoot -Filter 'verify-*.ps1' -File |
-        Where-Object { $_.Name -ne 'verify-installation.ps1' } |
-        Sort-Object Name |
-        Select-Object -ExpandProperty Name
+    $scriptNames = @($manifestCatalog.Catalog.full_tests | ForEach-Object { Split-Path -Leaf ([string]$_) })
 }
 
 foreach ($scriptName in $scriptNames) {

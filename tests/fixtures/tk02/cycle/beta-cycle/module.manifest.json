@@ -1,0 +1,21 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "beta-cycle",
+  "kind": "capability",
+  "description": "Dependency cycle fixture B.",
+  "default_activation": false,
+  "dependencies": { "kernel_api": "v1", "modules": ["alpha-cycle"] },
+  "requested_capabilities": ["filesystem-read"],
+  "ownership": {
+    "owned_paths": ["tests/fixtures/tk02/cycle/beta-cycle/module.manifest.json"],
+    "watch_paths": []
+  },
+  "entrypoints": { "commands": [], "hooks": [] },
+  "validation": {
+    "owner_tests": ["tests/verify-canonical-json.ps1"],
+    "quick": [],
+    "core_group": null,
+    "changed": [],
+    "full": []
+  }
+}

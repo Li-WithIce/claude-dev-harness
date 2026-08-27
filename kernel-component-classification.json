@@ -242,6 +242,16 @@
       "legacy_status": "not-legacy"
     },
     {
+      "path": "scripts/get-module-manifest-catalog.ps1",
+      "layer": "c2-capability",
+      "current_role": "Deterministic tracked Module Manifest catalog generator and drift checker.",
+      "owner_candidate": "engineering-validation",
+      "tcb_included": false,
+      "reason": "Manifest construction runs only in engineering validation and is not imported by selected Runtime or Distribution roots.",
+      "migration_target": "manifest-construction-module",
+      "legacy_status": "not-legacy"
+    },
+    {
       "path": "scripts/get-repo-inventory.ps1",
       "layer": "c2-capability",
       "current_role": "Engineering repository inventory command.",
@@ -409,6 +419,16 @@
       "tcb_included": false,
       "reason": "Model evaluation is a C2 producer and is excluded from Runtime imports.",
       "migration_target": "benchmark-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.ModuleManifest.psm1",
+      "layer": "c2-capability",
+      "current_role": "Strict Manifest discovery, ownership, dependency, and validation catalog constructor.",
+      "owner_candidate": "engineering-validation",
+      "tcb_included": false,
+      "reason": "The construction library adopts K0 primitives but has no selected Runtime or Distribution caller.",
+      "migration_target": "manifest-construction-module",
       "legacy_status": "not-legacy"
     },
     {

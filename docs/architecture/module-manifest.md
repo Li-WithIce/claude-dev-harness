@@ -4,9 +4,10 @@
 
 Manifest Phase 0 uses `schema_version: harness-module/v0`. The phase name and
 Schema version must not be described as Phase 0 plus `harness-module/v1`.
-TK-00 defines `schemas/module-manifest.schema.json` and fixtures only. It does
-not create a real module manifest, discovery router, installer, activator, or
-permission grant.
+TK-00 froze `schemas/module-manifest.schema.json` and its first fixtures. TK-02
+implements the construction-only reader, 12 real manifests, deterministic
+catalog, validation selection, and changed-path routing. It does not create an
+installer, activator, permission grant, or Runtime router.
 
 Phase 0 is a construction-input contract for discovery, ownership, watch paths,
 validation ownership, changed-path routing, dependencies, entrypoints, and
@@ -98,15 +99,38 @@ a separate versioned CI Contract change. “Zero central-file modification” is
 target only for discovery, validation, and routing; install or activation policy
 remains centrally authorized.
 
-## Future discovery safety
+## TK-02 construction and discovery safety
 
-A future implementation must require each manifest to be a tracked regular file,
-reject reparse or symlink aliases, enforce unique module ids, require referenced
-files and dependency modules, reject dependency cycles and multiple primary
-owners, sort output ordinally, and execute zero tests after any Schema or
-construction failure. Phase 0 does not implement that router.
+`scripts/lib/Harness.ModuleManifest.psm1` discovers only tracked regular files at
+`modules/<module_id>/module.manifest.json`. Physical discovery and the Git index
+must contain the same exact set. The constructor rejects reparse or symlink
+aliases through canonical physical containment, enforces case-insensitive unique
+module ids, requires every referenced file and dependency module, rejects cycles,
+rejects multiple primary owners and verifier owners, and sorts constructed sets
+ordinally.
+
+`scripts/get-module-manifest-catalog.ps1` writes or checks the tracked
+`module-manifest-catalog.json`. Each source digest explicitly uses
+`canonical-json/v1`; the catalog is canonical UTF-8 without BOM plus exactly one
+terminal LF and satisfies `schemas/module-manifest-catalog.schema.json`.
+`-Check` is zero-write.
+
+`scripts/run-validation.ps1` derives quick, full, and the five stable CoreGroups
+from that catalog. `scripts/run-changed-optional-validation.ps1` derives its eight
+module routes from the same catalog. Both construct and byte-check the catalog
+before scheduling any verifier. The fail-closed contract is exact: any
+construction failure must execute zero tests. This includes Schema, reference,
+dependency, ownership, and catalog-drift failures.
+
+The 12 Phase 0 modules cover the five CoreGroups, seven existing optional
+domains, and a separate `legacy-v1` marker. The marker has
+`default_activation: false` and names only the four active Sunset-gated
+compatibility paths. TK-02 neither deletes those paths nor executes a Sunset
+gate.
 
 The TK-00 fixtures cover a valid capability plus unknown fields, invalid id,
 path escape, backslash path, invalid kind, legacy default activation, adapter
 task-state write, capability Kernel Policy ownership, Kernel capability write,
-and duplicate owned path.
+and duplicate owned path. TK-02 adds constructed-set fixtures for a valid
+dependency, a missing dependency, a cycle, overlapping primary ownership, and
+multiple verifier owners.

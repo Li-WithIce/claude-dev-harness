@@ -1,0 +1,41 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "legacy-v1",
+  "kind": "legacy",
+  "description": "Inactive-by-declaration marker for the four active v1 compatibility paths retained behind Sunset gates.",
+  "default_activation": false,
+  "dependencies": {
+    "kernel_api": "v1",
+    "modules": ["entry-kernel"]
+  },
+  "requested_capabilities": ["filesystem-read", "filesystem-write", "process-execution"],
+  "ownership": {
+    "owned_paths": [
+      "modules/legacy-v1/**",
+      "scripts/advance-stage.ps1",
+      "scripts/lite-artifact-parser.ps1",
+      "scripts/migrate-task-v1-to-v2.ps1",
+      "scripts/validate-lite-artifacts.ps1"
+    ],
+    "watch_paths": [
+      "docs/architecture/v1-sunset-contract.md",
+      "kernel-component-classification.json",
+      "scripts/lib/Harness.Protocol.psm1"
+    ]
+  },
+  "entrypoints": {
+    "commands": [
+      "scripts/advance-stage.ps1",
+      "scripts/migrate-task-v1-to-v2.ps1",
+      "scripts/validate-lite-artifacts.ps1"
+    ],
+    "hooks": []
+  },
+  "validation": {
+    "owner_tests": ["tests/verify-v1-manifest-marker.ps1"],
+    "quick": [],
+    "core_group": null,
+    "changed": ["tests/verify-v1-manifest-marker.ps1"],
+    "full": ["tests/verify-v1-manifest-marker.ps1"]
+  }
+}

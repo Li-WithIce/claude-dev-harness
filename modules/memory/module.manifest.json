@@ -1,0 +1,75 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "memory",
+  "kind": "capability",
+  "description": "Optional shared-memory health, maintenance, repair, inbox, and prompt-hook behavior.",
+  "default_activation": false,
+  "dependencies": {
+    "kernel_api": "v1",
+    "modules": ["entry-kernel"]
+  },
+  "requested_capabilities": ["filesystem-read", "filesystem-write", "process-execution", "task-state-read"],
+  "ownership": {
+    "owned_paths": [
+      "modules/memory/**",
+      "runtime-hooks/memory/**",
+      "scripts/append-runtime-inbox.ps1",
+      "scripts/archive-memory-candidates.ps1",
+      "scripts/check-shared-memory-layers.ps1",
+      "scripts/memory-health-report.ps1",
+      "scripts/memory-health.ps1",
+      "scripts/memory-maintain.ps1",
+      "scripts/repair-shared-memory.ps1",
+      "scripts/resolve-obsidian-memory-script.ps1",
+      "scripts/triage-runtime-inbox.ps1",
+      "skills/obsidian-memory/**",
+      "vault-template/MEMORY.md"
+    ],
+    "watch_paths": [
+      "scripts/lib/Harness.RuntimeDefault.psm1",
+      "scripts/lib/Harness.TaskState.psm1"
+    ]
+  },
+  "entrypoints": {
+    "commands": [
+      "scripts/memory-health.ps1",
+      "scripts/memory-maintain.ps1",
+      "scripts/repair-shared-memory.ps1",
+      "scripts/triage-runtime-inbox.ps1"
+    ],
+    "hooks": ["runtime-hooks/memory/userpromptsubmit.js"]
+  },
+  "validation": {
+    "owner_tests": [
+      "tests/verify-archive-memory-candidates.ps1",
+      "tests/verify-memory-health-report.ps1",
+      "tests/verify-memory-maintain.ps1",
+      "tests/verify-memory-provider-boundary.ps1",
+      "tests/verify-repair-shared-memory.ps1",
+      "tests/verify-runtime-inbox.ps1",
+      "tests/verify-triage-runtime-inbox.ps1"
+    ],
+    "quick": [],
+    "core_group": null,
+    "changed": [
+      "tests/verify-archive-memory-candidates.ps1",
+      "tests/verify-memory-health-report.ps1",
+      "tests/verify-memory-maintain.ps1",
+      "tests/verify-memory-provider-boundary.ps1",
+      "tests/verify-repair-shared-memory.ps1",
+      "tests/verify-runtime-inbox.ps1",
+      "tests/verify-shared-memory-layers.ps1",
+      "tests/verify-triage-runtime-inbox.ps1",
+      "tests/verify-v2-runtime-memory-decoupling.ps1"
+    ],
+    "full": [
+      "tests/verify-archive-memory-candidates.ps1",
+      "tests/verify-memory-health-report.ps1",
+      "tests/verify-memory-maintain.ps1",
+      "tests/verify-memory-provider-boundary.ps1",
+      "tests/verify-repair-shared-memory.ps1",
+      "tests/verify-runtime-inbox.ps1",
+      "tests/verify-triage-runtime-inbox.ps1"
+    ]
+  }
+}

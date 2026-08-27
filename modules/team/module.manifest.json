@@ -1,0 +1,48 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "team",
+  "kind": "capability",
+  "description": "Optional multi-agent team preset and orchestration surface.",
+  "default_activation": false,
+  "dependencies": {
+    "kernel_api": "v1",
+    "modules": ["entry-kernel"]
+  },
+  "requested_capabilities": ["filesystem-read", "filesystem-write", "process-execution"],
+  "ownership": {
+    "owned_paths": [
+      "docs/team-write-authority.md",
+      "modules/team/**",
+      "scripts/export-team-preset.ps1",
+      "skills/workflow-team/**"
+    ],
+    "watch_paths": [
+      "scripts/invoke-harness-skill-dispatcher.ps1",
+      "scripts/invoke-harness-skill-supervisor.ps1",
+      "scripts/invoke-harness-skill.ps1"
+    ]
+  },
+  "entrypoints": {
+    "commands": ["scripts/export-team-preset.ps1", "skills/workflow-team/scripts/spawn-team.ps1"],
+    "hooks": []
+  },
+  "validation": {
+    "owner_tests": [
+      "tests/verify-aiteamcode-skill-contract.ps1",
+      "tests/verify-team-orchestration.ps1",
+      "tests/verify-team-preset.ps1"
+    ],
+    "quick": [],
+    "core_group": null,
+    "changed": [
+      "tests/verify-aiteamcode-skill-contract.ps1",
+      "tests/verify-team-orchestration.ps1",
+      "tests/verify-team-preset.ps1"
+    ],
+    "full": [
+      "tests/verify-aiteamcode-skill-contract.ps1",
+      "tests/verify-team-orchestration.ps1",
+      "tests/verify-team-preset.ps1"
+    ]
+  }
+}

@@ -3,10 +3,12 @@
 ## Status and purpose
 
 TK-00 freezes the architectural boundary used by later Thin Trust Kernel work.
-It does not move code, change Runtime behavior, implement manifests, migrate
-hashing, or execute v1 Sunset. A later boundary change requires an explicit
-Architecture Decision or Change Contract that states the reason, TCB impact,
-new trust assumptions, alternatives, migration, and verification.
+TK-01 centralizes hashing and adds the opt-in canonical JSON primitive. TK-02
+implements Manifest v0 construction and validation routing without changing
+Runtime behavior, installation authorization, activation, or v1 Sunset. A later
+boundary change requires an explicit Architecture Decision or Change Contract
+that states the reason, TCB impact, new trust assumptions, alternatives,
+migration, and verification.
 
 The Harness has three irreducible responsibilities:
 
@@ -68,11 +70,10 @@ SHA-256 delegation while leaving every historical serialization algorithm with
 its current owner.
 
 `scripts/lib/Harness.CanonicalJson.psm1` is the canonical two-function JSON byte
-primitive defined by `canonical-json-contract.md`. TK-01B-New classifies it as
-K0, but no selected Runtime or Distribution root imports it until a separately
-contracted new Schema, Envelope, or explicit `digest_algorithm` adopts
-`canonical-json/v1`. Its current classification is therefore not TCB-included,
-and no existing digest is migrated.
+primitive defined by `canonical-json-contract.md`. TK-02 explicitly adopts it
+for the new Manifest catalog contract through C2 engineering construction code.
+No selected Runtime or Distribution root imports that code, so CanonicalJson
+remains outside the measured TCB and no historical digest is migrated.
 
 ## K1 — Runtime Trust Kernel
 
@@ -120,6 +121,12 @@ adapter.
 `Harness.RolloutEvidence.psm1` is currently C2 release-evidence because current
 AST imports bind it to Release and Qualification producer scripts; no selected
 ordinary Runtime root imports it. TK-00 does not split that module.
+
+`scripts/lib/Harness.ModuleManifest.psm1` and
+`scripts/get-module-manifest-catalog.ps1` are C2 engineering construction
+components. They validate tracked Manifest inputs and produce validation
+metadata; they cannot grant capabilities, activate modules, install assets, or
+write task state.
 
 ## A3 — Host Adapters
 
@@ -230,9 +237,10 @@ The TK-00 initial baseline had no exception. TK-01A temporarily recorded
 `KTB-EX-001` for a measured 27-line net increase. TK-01B-Compat removes obsolete
 first-wave forwarding layers, returns the measured Runtime TCB to the frozen
 6151-line baseline, and retires that exception with delta zero. TK-01B-New adds
-an unreferenced K0 primitive but no selected trust-path import, so the transitive
-Runtime measurement remains 6151 with delta zero. The baseline is a generated
-observation bound by verifier checks, not a permanent architectural constant.
+an initially unreferenced K0 primitive. TK-02 adds a C2-only construction caller,
+but no selected trust-path import, so the transitive Runtime measurement remains
+6151 with delta zero. The baseline is a generated observation bound by verifier
+checks, not a permanent architectural constant.
 
 ## Terminal SLOs
 
