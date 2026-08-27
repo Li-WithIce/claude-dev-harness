@@ -129,9 +129,10 @@ function Get-ArtifactRecords {
 }
 
 function Assert-FormalSource {
-    $head = (& git -c core.fsmonitor=false -C $RepoRoot rev-parse HEAD 2>&1)
-    if ($LASTEXITCODE -ne 0 -or @($head).Count -ne 1) { throw 'unable to resolve formal source HEAD' }
-    if ([string]$head[0] -cne $SourceRevision) { throw 'formal source revision does not match HEAD' }
+    $headOutput = @(& git -c core.fsmonitor=false -C $RepoRoot rev-parse HEAD 2>&1)
+    if ($LASTEXITCODE -ne 0 -or $headOutput.Count -ne 1) { throw 'unable to resolve formal source HEAD' }
+    $headRevision = [string]$headOutput[0]
+    if ($headRevision -cne $SourceRevision) { throw 'formal source revision does not match HEAD' }
     & git -c core.fsmonitor=false -C $RepoRoot diff --quiet --no-ext-diff
     if ($LASTEXITCODE -ne 0) { throw 'formal source has unstaged tracked changes' }
     & git -c core.fsmonitor=false -C $RepoRoot diff --cached --quiet --no-ext-diff
