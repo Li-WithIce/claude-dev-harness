@@ -81,13 +81,17 @@ functions in Requirement and Runtime Default are removed after their callers
 bind directly to Hashing. Production PowerShell outside `Harness.Hashing.psm1`
 must not execute SHA-256 directly.
 
-## TK-01B-New boundary
+## TK-01B-New canonical JSON
 
-TK-01B-New remains a separate, not-started change. It may use
-`canonical-json/v1` only for a new Schema or Envelope, or when an object
-explicitly selects that `digest_algorithm`. Its key ordering, number, Unicode,
-duplicate-key, depth, and encoding semantics require a separately approved byte
-contract before implementation.
+TK-01B-New is implemented as the separate
+`scripts/lib/Harness.CanonicalJson.psm1` K0 primitive. Its approved
+`canonical-json/v1` byte semantics and exact two-function API are frozen in
+`canonical-json-contract.md`. Hashing remains a four-function raw SHA-256
+primitive and contains no object serializer.
+
+Canonical JSON is opt-in only for a new Schema or Envelope, or when an object's
+contract explicitly selects that `digest_algorithm`. No generic digest router
+or business Envelope is introduced by TK-01B-New.
 
 No existing Evidence, Receipt, Approval, Contract, Manifest, Installed Asset,
 Source Identity, Task State, or installation-transaction digest is silently

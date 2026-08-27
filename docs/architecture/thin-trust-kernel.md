@@ -62,11 +62,17 @@ K0 owns the smallest reusable mechanisms on which both trust paths rely:
 `scripts/lib/Harness.AtomicWrite.psm1` is the current canonical Atomic Write
 primitive. `scripts/lib/Harness.Hashing.psm1` is the current canonical Hashing
 primitive and its byte semantics are frozen in `hashing-contract.md`. No
-parallel canonical implementation may be added. TK-01A migrates only the
-documented first-wave K0/K1 callers. TK-01B-Compat completes production raw
-SHA-256 delegation while leaving every object-specific serialization algorithm
-with its current owner. Canonical JSON remains outside K0 until a separately
-approved TK-01B-New byte contract exists.
+parallel SHA-256 implementation may be added. TK-01A migrates only the
+documented first-wave K0/K1 callers, and TK-01B-Compat completes production raw
+SHA-256 delegation while leaving every historical serialization algorithm with
+its current owner.
+
+`scripts/lib/Harness.CanonicalJson.psm1` is the canonical two-function JSON byte
+primitive defined by `canonical-json-contract.md`. TK-01B-New classifies it as
+K0, but no selected Runtime or Distribution root imports it until a separately
+contracted new Schema, Envelope, or explicit `digest_algorithm` adopts
+`canonical-json/v1`. Its current classification is therefore not TCB-included,
+and no existing digest is migrated.
 
 ## K1 — Runtime Trust Kernel
 
@@ -223,9 +229,10 @@ LOC. It is a ratchet:
 The TK-00 initial baseline had no exception. TK-01A temporarily recorded
 `KTB-EX-001` for a measured 27-line net increase. TK-01B-Compat removes obsolete
 first-wave forwarding layers, returns the measured Runtime TCB to the frozen
-6151-line baseline, and retires that exception with delta zero. The baseline is
-a generated observation bound by verifier checks, not a permanent architectural
-constant.
+6151-line baseline, and retires that exception with delta zero. TK-01B-New adds
+an unreferenced K0 primitive but no selected trust-path import, so the transitive
+Runtime measurement remains 6151 with delta zero. The baseline is a generated
+observation bound by verifier checks, not a permanent architectural constant.
 
 ## Terminal SLOs
 
