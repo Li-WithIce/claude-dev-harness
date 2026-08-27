@@ -342,6 +342,16 @@
       "legacy_status": "not-legacy"
     },
     {
+      "path": "scripts/lib/Harness.CanonicalJson.psm1",
+      "layer": "k0-trust-primitive",
+      "current_role": "Canonical JSON byte serialization and digest primitive for explicitly new trust objects.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": false,
+      "reason": "The approved K0 primitive has no selected Runtime or Distribution caller until a new Schema, Envelope, or explicit digest_algorithm adopts canonical-json/v1.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
       "path": "scripts/lib/Harness.ControlledWrite.psm1",
       "layer": "k1-runtime-kernel",
       "current_role": "Kernel-controlled file write service.",

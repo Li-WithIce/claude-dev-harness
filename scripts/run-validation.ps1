@@ -167,6 +167,7 @@ $coreScriptGroups = [ordered]@{
         'verify-v2-readonly-zero-write.ps1'
     )
     'harness-contracts' = @(
+        'verify-canonical-json.ps1',
         'verify-harness-entry.ps1',
         'verify-hashing-module.ps1',
         'verify-kernel-tcb-inventory.ps1',

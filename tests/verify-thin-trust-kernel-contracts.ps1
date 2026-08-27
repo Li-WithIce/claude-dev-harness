@@ -53,6 +53,7 @@ function Test-OrdinalSorted {
 $requiredFiles = @(
     'docs/architecture/thin-trust-kernel.md',
     'docs/architecture/hashing-contract.md',
+    'docs/architecture/canonical-json-contract.md',
     'docs/architecture/module-manifest.md',
     'docs/architecture/v1-sunset-contract.md',
     'docs/architecture/entry-contract-policy-parity.md',
@@ -65,7 +66,9 @@ $requiredFiles = @(
     'schemas/kernel-component-classification.schema.json',
     'schemas/module-manifest.schema.json',
     'scripts/get-kernel-tcb-inventory.ps1',
+    'scripts/lib/Harness.CanonicalJson.psm1',
     'scripts/lib/Harness.Hashing.psm1',
+    'tests/verify-canonical-json.ps1',
     'tests/verify-hashing-module.ps1',
     'tests/verify-kernel-tcb-inventory.ps1',
     'tests/verify-thin-trust-kernel-contracts.ps1'
@@ -76,7 +79,9 @@ foreach ($path in $requiredFiles) {
 
 $powerShellPaths = @(
     'scripts/get-kernel-tcb-inventory.ps1',
+    'scripts/lib/Harness.CanonicalJson.psm1',
     'scripts/lib/Harness.Hashing.psm1',
+    'tests/verify-canonical-json.ps1',
     'tests/verify-hashing-module.ps1',
     'tests/verify-kernel-tcb-inventory.ps1',
     'tests/verify-thin-trust-kernel-contracts.ps1'
@@ -154,6 +159,7 @@ $missingThinHeadings = @($thinHeadings | Where-Object { -not $thinText.Contains(
 $thinTokens = @(
     'scripts/lib/Harness.Path.psm1',
     'scripts/lib/Harness.AtomicWrite.psm1',
+    'scripts/lib/Harness.CanonicalJson.psm1',
     'scripts/lib/Harness.Hashing.psm1',
     'Runtime transitive executable LOC < 3000',
     'Entry Contract <= 80 lines and <= 1200 tokens',
@@ -202,7 +208,9 @@ $extraComponents = @(Compare-Object $expectedPaths $componentSorted -PassThru | 
 $duplicateComponents = @($componentPaths | Group-Object -CaseSensitive | Where-Object Count -gt 1 | ForEach-Object Name)
 $staleComponents = @($componentPaths | Where-Object { -not (Test-Path -LiteralPath (Join-Path $RepoRoot $_) -PathType Leaf) })
 Check ($missingComponents.Count -eq 0 -and $extraComponents.Count -eq 0 -and $duplicateComponents.Count -eq 0 -and $staleComponents.Count -eq 0 -and (Test-OrdinalSorted -Values $componentPaths)) 'classification dynamically covers every target exactly once with no stale path' "classification coverage drifted: missing=$($missingComponents -join ',') extra=$($extraComponents -join ',') duplicate=$($duplicateComponents -join ',') stale=$($staleComponents -join ',')"
-Check (@($classification.components | Where-Object { [string]$_.layer -ceq 'k0-trust-primitive' -and [string]$_.path -cin @('scripts/lib/Harness.Path.psm1','scripts/lib/Harness.AtomicWrite.psm1','scripts/lib/Harness.Hashing.psm1') }).Count -eq 3) 'Path, AtomicWrite, and Hashing are the three canonical K0 components' 'canonical K0 component ownership drifted'
+Check (@($classification.components | Where-Object { [string]$_.layer -ceq 'k0-trust-primitive' -and [string]$_.path -cin @('scripts/lib/Harness.Path.psm1','scripts/lib/Harness.AtomicWrite.psm1','scripts/lib/Harness.CanonicalJson.psm1','scripts/lib/Harness.Hashing.psm1') }).Count -eq 4) 'Path, AtomicWrite, CanonicalJson, and Hashing are the four canonical K0 components' 'canonical K0 component ownership drifted'
+$canonicalClassification = @($classification.components | Where-Object { [string]$_.path -ceq 'scripts/lib/Harness.CanonicalJson.psm1' })
+Check ($canonicalClassification.Count -eq 1 -and [string]$canonicalClassification[0].layer -ceq 'k0-trust-primitive' -and -not [bool]$canonicalClassification[0].tcb_included) 'CanonicalJson is K0 but remains outside current trust-path reachability until explicit adoption' 'CanonicalJson classification or current TCB reachability drifted'
 $rolloutClassification = @($classification.components | Where-Object { [string]$_.path -ceq 'scripts/lib/Harness.RolloutEvidence.psm1' })
 Check ($rolloutClassification.Count -eq 1 -and [string]$rolloutClassification[0].layer -ceq 'c2-capability' -and -not [bool]$rolloutClassification[0].tcb_included) 'RolloutEvidence is honestly classified as C2 and outside Runtime TCB' 'RolloutEvidence classification drifted into Runtime Kernel'
 Check (@($classification.components | Where-Object { [string]$_.layer -ceq 'c2-capability' -and [bool]$_.tcb_included }).Count -eq 0) 'no C2 capability is included in the measured Kernel TCB' 'a C2 capability leaked into TCB inclusion'
@@ -215,15 +223,17 @@ Check ($entryContractDigest -ceq '346224d62f82926a11bac09335e97766c08b813b71774a
 Check ((Get-LfNormalizedSha256 -Path (Join-Path $RepoRoot 'scripts\lib\Harness.Path.psm1')) -ceq '774b55f8095b65f289a78adda04e6ee8752ead48a36653384119a393423e27de') 'TK-00 leaves canonical Harness.Path unchanged across checkout line endings' 'Harness.Path changed during TK-00'
 $atomicWriteText = Read-Text -Path 'scripts/lib/Harness.AtomicWrite.psm1'
 Check ($atomicWriteText.Contains("Harness.Hashing.psm1",[StringComparison]::Ordinal) -and $thinText.Contains('scripts/lib/Harness.Hashing.psm1',[StringComparison]::Ordinal)) 'TK-01A installs Hashing as the canonical K0 dependency of AtomicWrite' 'canonical Hashing ownership or AtomicWrite dependency is missing'
+$canonicalText = Read-Text -Path 'docs/architecture/canonical-json-contract.md'
+Check ($canonicalText.Contains('canonical-json/v1',[StringComparison]::Ordinal) -and $canonicalText.Contains('-9007199254740991',[StringComparison]::Ordinal) -and $canonicalText.Contains('UTF-8 without a BOM',[StringComparison]::Ordinal) -and $canonicalText.Contains('no selected Runtime or Distribution',[StringComparison]::Ordinal)) 'TK-01B-New freezes its algorithm, numeric, encoding, and reachability boundaries' 'canonical-json/v1 architecture contract is incomplete'
 $trackedRealManifests = @(& git -C $RepoRoot ls-files -- '*module.manifest.json')
 Check ($trackedRealManifests.Count -eq 0) 'TK-00 creates no real module.manifest.json' 'a real tracked module.manifest.json was created in TK-00'
 
 $validationText = Read-Text -Path 'scripts/run-validation.ps1'
 $routingText = Read-Text -Path 'scripts/run-changed-optional-validation.ps1'
-Check (@([regex]::Matches($validationText, "'verify-hashing-module\.ps1'")).Count -eq 1 -and @([regex]::Matches($validationText, "'verify-kernel-tcb-inventory\.ps1'")).Count -eq 1 -and @([regex]::Matches($validationText, "'verify-thin-trust-kernel-contracts\.ps1'")).Count -eq 1) 'Hashing and TK-00 verifiers are registered exactly once in central validation' 'architecture verifier registration is missing or duplicated'
-$routingTokens = @('docs/architecture/*', 'kernel-tcb-*.json', 'kernel-component-classification.json', 'schemas/*kernel*', 'schemas/module-manifest.schema.json', 'scripts/get-kernel-tcb-inventory.ps1', 'scripts/lib/Harness.Hashing.psm1', 'tests/verify-hashing-module.ps1', 'tests/verify-*kernel*')
+Check (@([regex]::Matches($validationText, "'verify-canonical-json\.ps1'")).Count -eq 1 -and @([regex]::Matches($validationText, "'verify-hashing-module\.ps1'")).Count -eq 1 -and @([regex]::Matches($validationText, "'verify-kernel-tcb-inventory\.ps1'")).Count -eq 1 -and @([regex]::Matches($validationText, "'verify-thin-trust-kernel-contracts\.ps1'")).Count -eq 1) 'Canonical JSON, Hashing, and TK-00 verifiers are registered exactly once in central validation' 'architecture verifier registration is missing or duplicated'
+$routingTokens = @('docs/architecture/*', 'kernel-tcb-*.json', 'kernel-component-classification.json', 'schemas/*kernel*', 'schemas/module-manifest.schema.json', 'scripts/get-kernel-tcb-inventory.ps1', 'scripts/lib/Harness.CanonicalJson.psm1', 'scripts/lib/Harness.Hashing.psm1', 'tests/verify-canonical-json.ps1', 'tests/verify-hashing-module.ps1', 'tests/verify-*kernel*')
 $missingRouting = @($routingTokens | Where-Object { -not $routingText.Contains($_, [StringComparison]::Ordinal) })
-Check ($missingRouting.Count -eq 0) 'changed-path routing covers every architecture and Hashing surface' "changed-path routing omissions: $($missingRouting -join ', ')"
+Check ($missingRouting.Count -eq 0) 'changed-path routing covers every architecture, Canonical JSON, and Hashing surface' "changed-path routing omissions: $($missingRouting -join ', ')"
 
 $tkPaths = @($requiredFiles + $jsonPaths + $powerShellPaths + @(
     'tests/fixtures/tk00/module-manifest-valid.json',
