@@ -113,7 +113,8 @@ ordinally.
 `module-manifest-catalog.json`. Each source digest explicitly uses
 `canonical-json/v1`; the catalog is canonical UTF-8 without BOM plus exactly one
 terminal LF and satisfies `schemas/module-manifest-catalog.schema.json`.
-`-Check` is zero-write.
+`.gitattributes` pins that generated file to `eol=lf`, so a Windows checkout
+cannot rewrite the byte contract. `-Check` is zero-write.
 
 `scripts/run-validation.ps1` derives quick, full, and the five stable CoreGroups
 from that catalog. `scripts/run-changed-optional-validation.ps1` derives its eight

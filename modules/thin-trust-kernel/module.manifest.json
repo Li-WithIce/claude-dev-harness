@@ -11,6 +11,7 @@
   "requested_capabilities": ["filesystem-read", "process-execution"],
   "ownership": {
     "owned_paths": [
+      ".gitattributes",
       "docs/architecture/**",
       "kernel-component-classification.json",
       "kernel-tcb-inventory.json",

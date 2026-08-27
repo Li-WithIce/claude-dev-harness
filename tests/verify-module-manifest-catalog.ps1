@@ -38,8 +38,9 @@ $generatorPath = Join-Path $RepoRoot 'scripts/get-module-manifest-catalog.ps1'
 $catalogPath = Join-Path $RepoRoot 'module-manifest-catalog.json'
 $catalogSchemaPath = Join-Path $RepoRoot 'schemas/module-manifest-catalog.schema.json'
 $sourceSchemaPath = Join-Path $RepoRoot 'schemas/module-manifest.schema.json'
+$attributesPath = Join-Path $RepoRoot '.gitattributes'
 $testPath = Join-Path $RepoRoot 'tests/verify-module-manifest-catalog.ps1'
-$requiredFiles = @($modulePath,$generatorPath,$catalogPath,$catalogSchemaPath,$sourceSchemaPath,$testPath)
+$requiredFiles = @($modulePath,$generatorPath,$catalogPath,$catalogSchemaPath,$sourceSchemaPath,$attributesPath,$testPath)
 Check (@($requiredFiles | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) }).Count -eq 0) 'Manifest generator, Schemas, catalog, and verifier exist' 'one or more TK-02 construction files are missing'
 
 $parseFailures = [System.Collections.Generic.List[string]]::new()
@@ -115,6 +116,9 @@ try {
     $noBom = $trackedBytes.Length -lt 3 -or -not ($trackedBytes[0] -eq 0xEF -and $trackedBytes[1] -eq 0xBB -and $trackedBytes[2] -eq 0xBF)
     $oneLf = $trackedBytes.Length -gt 0 -and $trackedBytes[-1] -eq 0x0A -and ($trackedBytes.Length -eq 1 -or $trackedBytes[-2] -ne 0x0A)
     Check ($noBom -and $oneLf) 'catalog is UTF-8 without BOM and ends with exactly one LF' 'catalog encoding or terminal newline contract drifted'
+    $attributesText = [IO.File]::ReadAllText($attributesPath)
+    $catalogLfRules = @([regex]::Matches($attributesText,'(?m)^/module-manifest-catalog\.json text eol=lf\r?$'))
+    Check ($catalogLfRules.Count -eq 1) 'Git checkout pins the generated catalog to LF bytes' 'catalog is not protected from Windows checkout CRLF conversion'
     $catalogText = [Text.UTF8Encoding]::new($false,$true).GetString($trackedBytes)
     try { $catalogSchemaValid = Test-Json -Json $catalogText -SchemaFile $catalogSchemaPath -ErrorAction Stop -WarningAction SilentlyContinue } catch { $catalogSchemaValid = $false }
     Check $catalogSchemaValid 'tracked catalog satisfies its strict Schema' 'tracked catalog failed Schema validation'

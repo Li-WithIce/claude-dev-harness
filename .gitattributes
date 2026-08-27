@@ -3,3 +3,4 @@
 /agent-configs/codex/AGENTS.md.template text eol=lf
 /agent-configs/claude/CLAUDE.md.template text eol=lf
 /vault-template/entry/AGENTS.md.template text eol=lf
+/module-manifest-catalog.json text eol=lf
