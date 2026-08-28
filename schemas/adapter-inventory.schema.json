@@ -1,0 +1,99 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/adapter-inventory.schema.json",
+  "title": "Adapter Inventory v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generator_contract_version",
+    "source_basis",
+    "classification",
+    "metric_contract",
+    "adapters",
+    "totals",
+    "digest_algorithm",
+    "inventory_digest"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["adapter-inventory/v1"] },
+    "generator_contract_version": { "type": "string", "enum": ["adapter-inventory-generator/v1"] },
+    "source_basis": { "type": "string", "enum": ["git-index-blob/v1"] },
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "$ref": "#/definitions/repoPath" },
+        "sha256": { "$ref": "#/definitions/sha256" }
+      }
+    },
+    "metric_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["powershell", "javascript", "maximum_executable_loc", "maximum_physical_line_length"],
+      "properties": {
+        "powershell": { "type": "string", "enum": ["powershell-token-lines/v1"] },
+        "javascript": { "type": "string", "enum": ["javascript-lexical-token-lines/v1"] },
+        "maximum_executable_loc": { "type": "integer", "const": 199 },
+        "maximum_physical_line_length": { "type": "integer", "const": 300 }
+      }
+    },
+    "adapters": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": { "$ref": "#/definitions/adapter" }
+    },
+    "totals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adapter_count", "powershell_count", "javascript_count", "executable_loc", "maximum_adapter_executable_loc", "threshold_breaches"],
+      "properties": {
+        "adapter_count": { "type": "integer", "minimum": 1 },
+        "powershell_count": { "type": "integer", "minimum": 0 },
+        "javascript_count": { "type": "integer", "minimum": 0 },
+        "executable_loc": { "type": "integer", "minimum": 0 },
+        "maximum_adapter_executable_loc": { "type": "integer", "minimum": 0, "maximum": 199 },
+        "threshold_breaches": { "type": "integer", "const": 0 }
+      }
+    },
+    "digest_algorithm": { "type": "string", "enum": ["canonical-json/v1"] },
+    "inventory_digest": { "$ref": "#/definitions/sha256" }
+  },
+  "definitions": {
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "repoPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!.*\\\\)(?!.*//)(?!\\.\\.?(?:/|$))(?!.*/\\.\\.?(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$"
+    },
+    "operation": {
+      "type": "string",
+      "enum": ["preflight_action", "controlled_write", "prepare_delegation", "commit_delegation"]
+    },
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "layer", "language", "raw_sha256", "physical_loc", "nonblank_loc", "executable_loc", "maximum_line_length", "tcb_included", "kernel_api_operations"],
+      "properties": {
+        "path": { "$ref": "#/definitions/repoPath" },
+        "layer": { "type": "string", "enum": ["a3-adapter"] },
+        "language": { "type": "string", "enum": ["powershell", "javascript"] },
+        "raw_sha256": { "$ref": "#/definitions/sha256" },
+        "physical_loc": { "type": "integer", "minimum": 1 },
+        "nonblank_loc": { "type": "integer", "minimum": 1 },
+        "executable_loc": { "type": "integer", "minimum": 1, "maximum": 199 },
+        "maximum_line_length": { "type": "integer", "minimum": 1, "maximum": 300 },
+        "tcb_included": { "type": "boolean" },
+        "kernel_api_operations": {
+          "type": "array",
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/operation" }
+        }
+      }
+    }
+  }
+}

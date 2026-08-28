@@ -1,0 +1,225 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/adapter-kernel-api.schema.json",
+  "title": "Adapter Kernel API v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "message_type", "body"],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["adapter-kernel-api/v1"] },
+    "message_type": { "type": "string", "enum": ["request", "response"] },
+    "body": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "message_type": { "const": "request" } } },
+      "then": {
+        "oneOf": [
+          { "properties": { "body": { "$ref": "#/definitions/preflightRequest" } } },
+          { "properties": { "body": { "$ref": "#/definitions/controlledWriteRequest" } } },
+          { "properties": { "body": { "$ref": "#/definitions/prepareDelegationRequest" } } },
+          { "properties": { "body": { "$ref": "#/definitions/commitDelegationRequest" } } }
+        ]
+      }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "response" } } },
+      "then": {
+        "oneOf": [
+          { "properties": { "body": { "$ref": "#/definitions/preflightResponse" } } },
+          { "properties": { "body": { "$ref": "#/definitions/controlledWriteResponse" } } },
+          { "properties": { "body": { "$ref": "#/definitions/prepareDelegationResponse" } } },
+          { "properties": { "body": { "$ref": "#/definitions/commitDelegationResponse" } } }
+        ]
+      }
+    }
+  ],
+  "definitions": {
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "stringArray": {
+      "type": "array",
+      "maxItems": 256,
+      "items": { "type": "string" }
+    },
+    "nullableInteger": {
+      "oneOf": [
+        { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        { "type": "null" }
+      ]
+    },
+    "nullableBoolean": {
+      "oneOf": [
+        { "type": "boolean" },
+        { "type": "null" }
+      ]
+    },
+    "protectedOperation": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema_version", "environment", "action_category", "targets", "approval_type", "approval_scope", "identity"],
+          "properties": {
+            "schema_version": { "type": "string", "enum": ["protected-operation/v1"] },
+            "environment": { "type": "string" },
+            "action_category": { "type": "string", "enum": ["protected-write"] },
+            "targets": { "$ref": "#/definitions/stringArray" },
+            "approval_type": { "type": "string", "enum": ["none", "product", "architecture", "production"] },
+            "approval_scope": { "$ref": "#/definitions/stringArray" },
+            "identity": { "$ref": "#/definitions/sha256" }
+          }
+        }
+      ]
+    },
+    "preflightRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "repo_root", "workspace_root", "workspace_root_fallback", "permission_mode", "session_mode", "action_mode", "action_kind", "shell_text", "patch_text", "changed_paths", "task_id", "expected_version", "environment", "dry_run", "user_instruction"],
+      "properties": {
+        "operation": { "type": "string", "enum": ["preflight_action"] },
+        "repo_root": { "type": "string", "minLength": 1 },
+        "workspace_root": { "type": "string" },
+        "workspace_root_fallback": { "type": "string" },
+        "permission_mode": { "type": "string", "enum": ["", "default", "bypassPermissions"] },
+        "session_mode": { "type": "string", "enum": ["read-only", "write"] },
+        "action_mode": { "type": "string", "enum": ["read", "write"] },
+        "action_kind": { "type": "string", "enum": ["shell", "apply_patch", "file_mutation", "normalized_action"] },
+        "shell_text": { "type": "string" },
+        "patch_text": { "type": "string" },
+        "changed_paths": { "$ref": "#/definitions/stringArray" },
+        "task_id": { "type": "string" },
+        "expected_version": { "$ref": "#/definitions/nullableInteger" },
+        "environment": { "type": "string" },
+        "dry_run": { "type": "boolean" },
+        "user_instruction": { "type": "string" }
+      }
+    },
+    "controlledWriteRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "repo_root", "workspace_root", "environment", "target_path", "content", "expected_current_sha256", "task_id", "expected_version", "execution_profile", "contract_path", "contract_digest", "approval_id", "dry_run"],
+      "properties": {
+        "operation": { "type": "string", "enum": ["controlled_write"] },
+        "repo_root": { "type": "string", "minLength": 1 },
+        "workspace_root": { "type": "string", "minLength": 1 },
+        "environment": { "type": "string" },
+        "target_path": { "type": "string", "minLength": 1 },
+        "content": { "type": "string" },
+        "expected_current_sha256": { "type": "string", "pattern": "^(?:missing|sha256:[0-9a-f]{64})$" },
+        "task_id": { "type": "string" },
+        "expected_version": { "$ref": "#/definitions/nullableInteger" },
+        "execution_profile": { "type": "string" },
+        "contract_path": { "type": "string" },
+        "contract_digest": { "type": "string" },
+        "approval_id": { "type": "string" },
+        "dry_run": { "$ref": "#/definitions/nullableBoolean" }
+      }
+    },
+    "prepareDelegationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "repo_root", "workspace_root", "task_id", "stage", "skill", "tool", "tool_profile_id", "mode", "payload_json"],
+      "properties": {
+        "operation": { "type": "string", "enum": ["prepare_delegation"] },
+        "repo_root": { "type": "string", "minLength": 1 },
+        "workspace_root": { "type": "string", "minLength": 1 },
+        "task_id": { "type": "string", "pattern": "^(?!(?:none|idle|unknown)$)[a-z0-9][a-z0-9-]{0,63}$" },
+        "stage": { "type": "string" },
+        "skill": { "type": "string" },
+        "tool": { "type": "string" },
+        "tool_profile_id": { "type": "string" },
+        "mode": { "type": "string", "enum": ["readonly", "writable"] },
+        "payload_json": { "type": "string" }
+      }
+    },
+    "commitDelegationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "delegation_id", "succeeded", "artifact_base64", "session_id", "diagnostics"],
+      "properties": {
+        "operation": { "type": "string", "enum": ["commit_delegation"] },
+        "delegation_id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+        "succeeded": { "type": "boolean" },
+        "artifact_base64": { "type": "string" },
+        "session_id": { "type": "string" },
+        "diagnostics": { "$ref": "#/definitions/stringArray" }
+      }
+    },
+    "preflightResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "allowed", "protected", "matched_rules", "required_scopes", "approval_id", "operation_identity", "protected_operation"],
+      "properties": {
+        "operation": { "type": "string", "enum": ["preflight_action"] },
+        "allowed": { "type": "boolean" },
+        "protected": { "type": "boolean" },
+        "matched_rules": { "$ref": "#/definitions/stringArray" },
+        "required_scopes": { "$ref": "#/definitions/stringArray" },
+        "approval_id": { "oneOf": [{ "type": "string" }, { "type": "null" }] },
+        "operation_identity": { "oneOf": [{ "$ref": "#/definitions/sha256" }, { "type": "null" }] },
+        "protected_operation": { "$ref": "#/definitions/protectedOperation" }
+      }
+    },
+    "controlledWriteResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "written", "dry_run", "path", "digest", "protected", "matched_rules", "approval_id", "operation_identity", "protected_operation"],
+      "properties": {
+        "operation": { "type": "string", "enum": ["controlled_write"] },
+        "written": { "type": "boolean" },
+        "dry_run": { "type": "boolean" },
+        "path": { "type": "string", "minLength": 1 },
+        "digest": { "$ref": "#/definitions/sha256" },
+        "protected": { "type": "boolean" },
+        "matched_rules": { "$ref": "#/definitions/stringArray" },
+        "approval_id": { "oneOf": [{ "type": "string" }, { "type": "null" }] },
+        "operation_identity": { "oneOf": [{ "$ref": "#/definitions/sha256" }, { "type": "null" }] },
+        "protected_operation": { "$ref": "#/definitions/protectedOperation" }
+      }
+    },
+    "prepareDelegationResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "delegation_id", "backend_script", "backend_output_path", "backend_task", "backend_workspace", "backend_files", "backend_session", "backend_model", "backend_reasoning", "backend_timeout_seconds", "backend_read_only", "warnings"],
+      "properties": {
+        "operation": { "type": "string", "enum": ["prepare_delegation"] },
+        "delegation_id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+        "backend_script": { "type": "string", "minLength": 1 },
+        "backend_output_path": { "type": "string", "minLength": 1 },
+        "backend_task": { "type": "string", "minLength": 1 },
+        "backend_workspace": { "type": "string", "minLength": 1 },
+        "backend_files": { "$ref": "#/definitions/stringArray" },
+        "backend_session": { "type": "string" },
+        "backend_model": { "type": "string" },
+        "backend_reasoning": { "type": "string", "minLength": 1 },
+        "backend_timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 1800 },
+        "backend_read_only": { "type": "boolean", "const": true },
+        "warnings": { "$ref": "#/definitions/stringArray" }
+      }
+    },
+    "adapterResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "status", "artifact_paths", "next_stage_hint", "handoff", "errors"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["delegated", "error", "rejected"] },
+        "artifact_paths": { "$ref": "#/definitions/stringArray" },
+        "next_stage_hint": { "type": "string" },
+        "handoff": { "type": "string" },
+        "errors": { "$ref": "#/definitions/stringArray" }
+      }
+    },
+    "commitDelegationResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "result", "warnings"],
+      "properties": {
+        "operation": { "type": "string", "enum": ["commit_delegation"] },
+        "result": { "$ref": "#/definitions/adapterResult" },
+        "warnings": { "$ref": "#/definitions/stringArray" }
+      }
+    }
+  }
+}

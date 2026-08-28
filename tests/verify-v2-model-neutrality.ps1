@@ -78,6 +78,7 @@ function Invoke-Adapter([object]$Fixture, [string]$Model, [string]$Session = '')
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Split-Path -Parent $PSScriptRoot }
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 $script:AdapterPath = Join-Path $RepoRoot 'scripts\invoke-harness-skill.ps1'
+$adapterKernelPath = Join-Path $RepoRoot 'scripts\lib\Harness.AdapterDelegation.psm1'
 $script:Passes = [Collections.Generic.List[string]]::new()
 $script:Failures = [Collections.Generic.List[string]]::new()
 $repoBefore = @(& git -C $RepoRoot status --porcelain --untracked-files=all)
@@ -112,9 +113,9 @@ try {
         $profileText = Get-Content -LiteralPath (Join-Path $RepoRoot "agent-configs\profiles\$profileName.yaml") -Raw -Encoding utf8
         Check ($profileText -match '(?m)^model:\s*inherit\s*$') "$profileName inherits the host model" "$profileName still pins a concrete model"
     }
-    $adapterText = Get-Content -LiteralPath $script:AdapterPath -Raw -Encoding utf8
-    Check ($adapterText -match [regex]::Escape("codex\scripts\invoke_codex.ps1") -and $adapterText -notmatch [regex]::Escape("codex\scripts\ask_codex.ps1")) `
-        'adapter resolves the canonical invoke_codex wrapper' 'adapter still resolves the legacy ask_codex wrapper'
+    $adapterKernelText = Get-Content -LiteralPath $adapterKernelPath -Raw -Encoding utf8
+    Check ($adapterKernelText -match [regex]::Escape("codex\scripts\invoke_codex.ps1") -and $adapterKernelText -notmatch [regex]::Escape("codex\scripts\ask_codex.ps1")) `
+        'delegation K1 resolves the canonical invoke_codex wrapper' 'delegation K1 still resolves the legacy ask_codex wrapper'
     Check ((Test-Path (Join-Path $RepoRoot 'skills\codex\scripts\ask_codex.ps1')) -and (Test-Path (Join-Path $RepoRoot 'skills\codex\scripts\ask_codex.sh'))) `
         'legacy ask_codex compatibility shims remain present' 'legacy ask_codex compatibility shim is missing'
 

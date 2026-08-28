@@ -61,7 +61,7 @@ Check ((@($memory.modules) -join ',') -ceq 'memory' -and @($memory.tests).Count 
 $team = Get-Route @('skills/workflow-team/SKILL.md')
 Check ((@($team.modules) -join ',') -ceq 'team' -and @($team.tests).Count -eq 3 -and @($team.tests) -ccontains 'verify-aiteamcode-skill-contract.ps1') 'Team changes select complete Team validation' 'Team changed-path routing is wrong or incomplete'
 $adapterDispatch = Get-Route @('scripts/invoke-harness-skill-dispatcher.ps1')
-Check ((@($adapterDispatch.modules) -join ',') -ceq 'team' -and @($adapterDispatch.tests) -ccontains 'verify-aiteamcode-skill-contract.ps1') 'Harness adapter dispatcher changes select lifecycle validation' 'Harness adapter dispatcher change skipped lifecycle validation'
+Check ((@($adapterDispatch.modules) -join ',') -ceq 'harness-maintenance,team' -and @($adapterDispatch.tests) -ccontains 'verify-aiteamcode-skill-contract.ps1' -and @($adapterDispatch.tests) -ccontains 'verify-thin-adapters.ps1') 'Harness adapter dispatcher changes select lifecycle and thin-adapter validation' 'Harness adapter dispatcher change skipped lifecycle or thin-adapter validation'
 $html = Get-Route @('skills/md-html/SKILL.md')
 Check ((@($html.modules) -join ',') -ceq 'md-html' -and @($html.tests).Count -eq 2) 'md-html changes select renderer validation' 'md-html changed-path routing is wrong'
 $codex = Get-Route @('skills/codex/SKILL.md')
@@ -69,9 +69,9 @@ Check ((@($codex.modules) -join ',') -ceq 'codex-adapter' -and @($codex.tests) -
 $providers = Get-Route @('scripts/audit-context-provider-usage.ps1')
 Check ((@($providers.modules) -join ',') -ceq 'providers' -and @($providers.tests).Count -eq 7) 'Provider changes select complete provider validation' 'Provider changed-path routing is wrong or incomplete'
 $maintenance = Get-Route @('scripts/get-repo-inventory.ps1')
-Check ((@($maintenance.modules) -join ',') -ceq 'harness-maintenance' -and @($maintenance.tests).Count -eq 8 -and @($maintenance.tests) -ccontains 'verify-capability-extraction.ps1') 'Harness maintenance changes select the complete construction verifier set' 'Harness maintenance routing is wrong or incomplete'
+Check ((@($maintenance.modules) -join ',') -ceq 'harness-maintenance' -and @($maintenance.tests).Count -eq 9 -and @($maintenance.tests) -ccontains 'verify-capability-extraction.ps1' -and @($maintenance.tests) -ccontains 'verify-thin-adapters.ps1') 'Harness maintenance changes select the complete construction verifier set' 'Harness maintenance routing is wrong or incomplete'
 $routing = Get-Route @('.github/workflows/validation.yml')
-Check ($routing.run_all_optional -and @($routing.modules).Count -eq 8 -and @($routing.tests).Count -eq 37) 'routing-surface changes fail safe to every optional verifier' 'routing-surface changes did not select all optional verifiers'
+Check ($routing.run_all_optional -and @($routing.modules).Count -eq 8 -and @($routing.tests).Count -eq 38) 'routing-surface changes fail safe to every optional verifier' 'routing-surface changes did not select all optional verifiers'
 $legacy = Get-Route @('scripts/advance-stage.ps1')
 Check ((@($legacy.modules) -join ',') -ceq 'legacy-v1' -and (@($legacy.tests) -join ',') -ceq 'verify-v1-manifest-marker.ps1') 'legacy-v1 changes select only the explicit marker contract' 'legacy-v1 changed-path routing is wrong or expanded into Sunset'
 $fullValidationRouting = Get-Route @('.github/workflows/full-validation.yml')
@@ -223,7 +223,7 @@ $validationAst=[System.Management.Automation.Language.Parser]::ParseFile($valida
 $manifestCatalogText = Get-Content -LiteralPath $manifestCatalogPath -Raw -Encoding utf8
 $manifestCatalog = $manifestCatalogText | ConvertFrom-Json -AsHashtable -Depth 100
 $expectedGroupNames = @('entry-lifecycle','evaluation-release','install-evidence','governance-approval','harness-contracts')
-$expectedGroupSizes = @(14,14,3,3,20)
+$expectedGroupSizes = @(14,14,3,3,21)
 $catalogGroupKeys = @($manifestCatalog.core_groups.Keys | Sort-Object -CaseSensitive)
 $coreGroupNames = @($expectedGroupNames)
 $coreGroupSizes = @($coreGroupNames | ForEach-Object { @($manifestCatalog.core_groups[$_]).Count })
@@ -237,7 +237,8 @@ $validationFirstCheckIndex = $validation.IndexOf('Add-GitCheck -Checks',[StringC
 $routerCatalogIndex = $routerSource.IndexOf('Assert-HarnessModuleManifestCatalogCurrent',[StringComparison]::Ordinal)
 $routerExecutionIndex = $routerSource.IndexOf('foreach ($testName in $testNames)',[StringComparison]::Ordinal)
 $verifierLiterals = @([regex]::Matches($validation,"'(?<name>verify-[a-z0-9-]+\.ps1)'") | ForEach-Object { $_.Groups['name'].Value } | Sort-Object -CaseSensitive -Unique)
-$unexpectedVerifierLiterals = @($verifierLiterals | Where-Object { $_ -cnotin @('verify-host-benchmark-qualification.ps1','verify-installation.ps1') })
+$allowedValidationVerifierLiterals = @('verify-capability-extraction.ps1','verify-host-benchmark-qualification.ps1','verify-installation.ps1','verify-v2-approval.ps1','verify-v2-ci-routing.ps1','verify-v2-evidence.ps1','verify-v2-governed-audit.ps1','verify-v2-install-presets.ps1')
+$unexpectedVerifierLiterals = @($verifierLiterals | Where-Object { $_ -cnotin $allowedValidationVerifierLiterals })
 $catalogDerivationValid = $validationErrors.Count -eq 0 -and $catalogShapeValid -and
     $validation.Contains('Catalog.core_groups',[StringComparison]::Ordinal) -and
     $validation.Contains('Catalog.quick_tests',[StringComparison]::Ordinal) -and
@@ -280,9 +281,9 @@ if($coreGroupValidateSet.Count -eq 1){
 }
 $coreGroupDefault = if($coreGroupParameters.Count -eq 1){$coreGroupParameters[0].DefaultValue.SafeGetValue()}else{''}
 $optionalCoreOverlap = @($routing.tests | Where-Object {$actualCoreScripts -ccontains $_})
-Check ($catalogDerivationValid -and ($coreGroupNames -join '|') -ceq ($expectedGroupNames -join '|') -and ($coreGroupSizes -join '|') -ceq ($expectedGroupSizes -join '|') -and $actualCoreScripts.Count -eq 54 -and @($actualCoreScripts | Sort-Object -CaseSensitive -Unique).Count -eq 54 -and @($actualCoreScripts | Where-Object {-not(Test-Path -LiteralPath (Join-Path $RepoRoot "tests\$_") -PathType Leaf)}).Count -eq 0) 'five core groups derive the exact fifty-four unique scripts from the tracked catalog' 'catalog derivation, CoreGroup boundary, membership, uniqueness, order, or files drifted'
+Check ($catalogDerivationValid -and ($coreGroupNames -join '|') -ceq ($expectedGroupNames -join '|') -and ($coreGroupSizes -join '|') -ceq ($expectedGroupSizes -join '|') -and $actualCoreScripts.Count -eq 55 -and @($actualCoreScripts | Sort-Object -CaseSensitive -Unique).Count -eq 55 -and @($actualCoreScripts | Where-Object {-not(Test-Path -LiteralPath (Join-Path $RepoRoot "tests\$_") -PathType Leaf)}).Count -eq 0) 'five core groups derive the exact fifty-five unique scripts from the tracked catalog' 'catalog derivation, CoreGroup boundary, membership, uniqueness, order, or files drifted'
 Check ($flattenValid -and $groupSelectionValid -and $coreGroupDefault -ceq 'all' -and ($coreGroupAllowed -join '|') -ceq ((@('all')+$expectedCoreGroups) -join '|') -and $validation -match "'-CoreGroup',\`$CoreGroup" -and $validation -match "\`$Suite -ne 'core'.*\`$CoreGroup -ne 'all'") 'CoreGroup defaults to the full legacy suite, bridges safely, and rejects non-core use' 'CoreGroup parameter, flattening, bridge, or selection contract drifted'
-Check (($optionalCoreOverlap -join '|') -ceq 'verify-canonical-json.ps1|verify-hashing-module.ps1|verify-kernel-tcb-inventory.ps1|verify-module-manifest-catalog.ps1|verify-shared-memory-layers.ps1|verify-thin-trust-kernel-contracts.ps1|verify-v2-runtime-memory-decoupling.ps1') 'optional routes reuse only the seven established lightweight and architecture contract verifiers' 'optional routes unexpectedly duplicate core verifier work'
+Check (($optionalCoreOverlap -join '|') -ceq 'verify-canonical-json.ps1|verify-hashing-module.ps1|verify-kernel-tcb-inventory.ps1|verify-module-manifest-catalog.ps1|verify-shared-memory-layers.ps1|verify-thin-adapters.ps1|verify-thin-trust-kernel-contracts.ps1|verify-v2-runtime-memory-decoupling.ps1') 'optional routes reuse only the eight established lightweight and architecture contract verifiers' 'optional routes unexpectedly duplicate core verifier work'
 $verifierInventory = @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'tests') -Filter 'verify-*.ps1' -File | Select-Object -ExpandProperty Name | Sort-Object -CaseSensitive -Unique)
 $ordinaryCiVerifiers = @(@($actualCoreScripts | Where-Object { $_ -clike 'verify-*.ps1' }) + @($routing.tests) + 'verify-installation.ps1' | Sort-Object -CaseSensitive -Unique)
 Check (($ordinaryCiVerifiers -join '|') -ceq ($verifierInventory -join '|')) 'ordinary PR CI has a traceable route for every repository verifier' 'one or more repository verifiers have no traceable ordinary PR CI route'

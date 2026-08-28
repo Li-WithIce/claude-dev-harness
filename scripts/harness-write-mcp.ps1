@@ -15,8 +15,7 @@ $utf8=[Text.UTF8Encoding]::new($false,$true)
 [Console]::OutputEncoding=$utf8
 $OutputEncoding=$utf8
 
-Import-Module (Join-Path $PSScriptRoot 'lib\Harness.ControlledWrite.psm1') -Force -ErrorAction Stop
-Import-Module (Join-Path $PSScriptRoot 'lib\Harness.Hashing.psm1') -Force -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot 'lib\Harness.AdapterAction.psm1') -Force -ErrorAction Stop
 
 function Write-McpMessage {
     param($Value)
@@ -27,10 +26,23 @@ function Write-McpMessage {
 function ConvertFrom-McpJsonElement {
     param([Parameter(Mandatory)][Text.Json.JsonElement]$Element)
     switch($Element.ValueKind){
-        'Object'{$value=[Management.Automation.OrderedHashtable]::new();foreach($property in $Element.EnumerateObject()){if($value.Contains($property.Name)){throw 'duplicate JSON object key'};$value[$property.Name]=ConvertFrom-McpJsonElement -Element $property.Value};return $value}
+        'Object'{
+            $value=[Management.Automation.OrderedHashtable]::new()
+            foreach($property in $Element.EnumerateObject()){
+                if($value.Contains($property.Name)){throw 'duplicate JSON object key'}
+                $value[$property.Name]=ConvertFrom-McpJsonElement -Element $property.Value
+            }
+            return $value
+        }
         'Array'{$items=[Collections.Generic.List[object]]::new();foreach($item in $Element.EnumerateArray()){$items.Add((ConvertFrom-McpJsonElement -Element $item))};return ,$items.ToArray()}
         'String'{return $Element.GetString()}
-        'Number'{[long]$integer=0;if($Element.TryGetInt64([ref]$integer)){return $integer};[decimal]$decimal=0;if($Element.TryGetDecimal([ref]$decimal)){return $decimal};return $Element.GetDouble()}
+        'Number'{
+            [long]$integer=0
+            if($Element.TryGetInt64([ref]$integer)){return $integer}
+            [decimal]$decimal=0
+            if($Element.TryGetDecimal([ref]$decimal)){return $decimal}
+            return $Element.GetDouble()
+        }
         'True'{return $true}
         'False'{return $false}
         'Null'{return $null}
@@ -40,14 +52,21 @@ function ConvertFrom-McpJsonElement {
 
 function ConvertFrom-McpJson {
     param([string]$Json)
-    $options=[Text.Json.JsonDocumentOptions]::new();$options.MaxDepth=64;$options.AllowTrailingCommas=$false;$options.CommentHandling=[Text.Json.JsonCommentHandling]::Disallow
+    $options=[Text.Json.JsonDocumentOptions]::new()
+    $options.MaxDepth=64
+    $options.AllowTrailingCommas=$false
+    $options.CommentHandling=[Text.Json.JsonCommentHandling]::Disallow
     $document=[Text.Json.JsonDocument]::Parse($Json,$options)
     try{return ConvertFrom-McpJsonElement -Element $document.RootElement}finally{$document.Dispose()}
 }
 
 function New-McpError {
     param($Id,[int]$Code,[string]$Message)
-    return [ordered]@{jsonrpc='2.0';id=$Id;error=[ordered]@{code=$Code;message=$Message}}
+    return [ordered]@{
+        jsonrpc='2.0'
+        id=$Id
+        error=[ordered]@{code=$Code;message=$Message}
+    }
 }
 
 function New-McpResult {
@@ -82,7 +101,12 @@ function Get-McpToolDefinition {
             }
             required=@('path','content','expected_current_sha256')
         }
-        annotations=[ordered]@{readOnlyHint=$false;destructiveHint=$true;idempotentHint=$false;openWorldHint=$false}
+        annotations=[ordered]@{
+            readOnlyHint=$false
+            destructiveHint=$true
+            idempotentHint=$false
+            openWorldHint=$false
+        }
     }
 }
 
@@ -94,15 +118,27 @@ function Invoke-McpWriteTool {
     foreach($name in @('path','content','expected_current_sha256','task_id','execution_profile','contract_path','contract_digest','approval_id')){if($Arguments.Contains($name)-and$Arguments[$name]-isnot[string]){throw "write_file argument '$name' must be a string"}}
     if($Arguments.Contains('expected_version')-and($Arguments.expected_version-isnot[int]-and$Arguments.expected_version-isnot[long])){throw "write_file argument 'expected_version' must be an integer"}
     if($Arguments.Contains('dry_run')-and$Arguments.dry_run-isnot[bool]){throw "write_file argument 'dry_run' must be a boolean"}
-    $invoke=@{RepoRoot=$RepoRoot;WorkspaceRoot=$WorkspaceRoot;Environment=$Environment;Path=[string]$Arguments.path;Content=[string]$Arguments.content;ExpectedSourceDigest=(Get-HarnessUtf8TextSha256 -Text ([string]$Arguments.content));ExpectedCurrentDigest=[string]$Arguments.expected_current_sha256}
-    if($Arguments.Contains('task_id')){$invoke.TaskId=[string]$Arguments.task_id}
-    if($Arguments.Contains('expected_version')){$invoke.ExpectedVersion=[int]$Arguments.expected_version}
-    if($Arguments.Contains('execution_profile')){$invoke.ExecutionProfile=[string]$Arguments.execution_profile}
-    if($Arguments.Contains('contract_path')){$invoke.ContractPath=[string]$Arguments.contract_path}
-    if($Arguments.Contains('contract_digest')){$invoke.ContractDigest=[string]$Arguments.contract_digest}
-    if($Arguments.Contains('approval_id')){$invoke.ApprovalId=[string]$Arguments.approval_id}
-    if($Arguments.Contains('dry_run')){$invoke.DryRun=[bool]$Arguments.dry_run}
-    return Invoke-HarnessControlledWrite @invoke
+    $body=(Invoke-HarnessAdapterControlledWrite -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -Environment $Environment `
+        -TargetPath ([string]$Arguments.path) -Content ([string]$Arguments.content) `
+        -ExpectedCurrentSha256 ([string]$Arguments.expected_current_sha256) `
+        -TaskId $(if($Arguments.Contains('task_id')){[string]$Arguments.task_id}else{''}) `
+        -ExpectedVersion $(if($Arguments.Contains('expected_version')){[int]$Arguments.expected_version}else{$null}) `
+        -ExecutionProfile $(if($Arguments.Contains('execution_profile')){[string]$Arguments.execution_profile}else{''}) `
+        -ContractPath $(if($Arguments.Contains('contract_path')){[string]$Arguments.contract_path}else{''}) `
+        -ContractDigest $(if($Arguments.Contains('contract_digest')){[string]$Arguments.contract_digest}else{''}) `
+        -ApprovalId $(if($Arguments.Contains('approval_id')){[string]$Arguments.approval_id}else{''}) `
+        -DryRun $(if($Arguments.Contains('dry_run')){[bool]$Arguments.dry_run}else{$null})).body
+    return [ordered]@{
+        written=$body.written
+        dry_run=$body.dry_run
+        path=$body.path
+        digest=$body.digest
+        protected=$body.protected
+        matched_rules=@($body.matched_rules)
+        approval_id=$body.approval_id
+        operation_identity=$body.operation_identity
+        protected_operation=$body.protected_operation
+    }
 }
 
 while($true){
@@ -117,18 +153,34 @@ while($true){
     try{
         switch($method){
             'initialize'{
-                $result=[ordered]@{protocolVersion='2025-11-25';capabilities=[ordered]@{tools=[ordered]@{listChanged=$false}};serverInfo=[ordered]@{name='dev-harness-write';version='1.0.0'};instructions='Writes are confined to the configured workspace and enforced by Harness policy.'}
+                $result=[ordered]@{
+                    protocolVersion='2025-11-25'
+                    capabilities=[ordered]@{tools=[ordered]@{listChanged=$false}}
+                    serverInfo=[ordered]@{name='dev-harness-write';version='1.0.0'}
+                    instructions='Writes are confined to the configured workspace and enforced by Harness policy.'
+                }
                 Write-McpMessage (New-McpResult -Id $id -Result $result)
             }
             'ping'{Write-McpMessage (New-McpResult -Id $id -Result ([ordered]@{}))}
             'tools/list'{Write-McpMessage (New-McpResult -Id $id -Result ([ordered]@{tools=@(Get-McpToolDefinition)}))}
             'tools/call'{
-                if(-not$request.Contains('params')-or$request.params-isnot[Collections.IDictionary]-or-not(Test-McpExactKeys -Value $request.params -Required @('name','arguments') -Optional @('_meta'))-or$request.params.name-isnot[string]-or$request.params.arguments-isnot[Collections.IDictionary]-or($request.params.Contains('_meta')-and$request.params._meta-isnot[Collections.IDictionary])){Write-McpMessage (New-McpError -Id $id -Code -32602 -Message 'Invalid params');continue}
+                $invalidParams=-not$request.Contains('params')-or
+                    $request.params-isnot[Collections.IDictionary]-or
+                    -not(Test-McpExactKeys -Value $request.params -Required @('name','arguments') -Optional @('_meta'))-or
+                    $request.params.name-isnot[string]-or
+                    $request.params.arguments-isnot[Collections.IDictionary]-or
+                    ($request.params.Contains('_meta')-and$request.params._meta-isnot[Collections.IDictionary])
+                if($invalidParams){Write-McpMessage (New-McpError -Id $id -Code -32602 -Message 'Invalid params');continue}
                 if([string]$request.params.name-cne'write_file'){Write-McpMessage (New-McpError -Id $id -Code -32602 -Message 'Unknown tool');continue}
                 try{
                     $toolResult=Invoke-McpWriteTool -Arguments $request.params.arguments
                     $text=$toolResult|ConvertTo-Json -Depth 20 -Compress
-                    Write-McpMessage (New-McpResult -Id $id -Result ([ordered]@{content=@([ordered]@{type='text';text=$text});structuredContent=$toolResult;isError=$false}))
+                    $callResult=[ordered]@{
+                        content=@([ordered]@{type='text';text=$text})
+                        structuredContent=$toolResult
+                        isError=$false
+                    }
+                    Write-McpMessage (New-McpResult -Id $id -Result $callResult)
                 }catch{
                     Write-McpMessage (New-McpResult -Id $id -Result ([ordered]@{content=@([ordered]@{type='text';text=$_.Exception.Message});isError=$true}))
                 }

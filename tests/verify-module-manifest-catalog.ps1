@@ -72,13 +72,13 @@ try {
     Check (($actualModules -join '|') -ceq ($expectedModules -join '|')) 'catalog contains the exact 13 mixed-version modules in ordinal order' "module discovery or ordering drifted: $($actualModules -join ', ')"
 
     $totals = $result.Catalog.totals
-    Check ($totals.manifest_count -eq 13 -and $totals.module_count -eq 13 -and $totals.v0_module_count -eq 6 -and $totals.v1_module_count -eq 7 -and $totals.capability_source_count -eq 7 -and $totals.capability_source_file_reference_count -eq 171 -and $totals.owner_test_count -eq 85 -and $totals.core_test_count -eq 54 -and $totals.quick_test_count -eq 1 -and $totals.full_test_count -eq 83 -and $totals.optional_route_count -eq 8) 'catalog totals freeze 6 v0 plus 7 v1 modules, 85 owners, 54 core checks, 83 full checks, and 8 routes' "catalog totals drifted: $($totals | ConvertTo-Json -Compress)"
+    Check ($totals.manifest_count -eq 13 -and $totals.module_count -eq 13 -and $totals.v0_module_count -eq 6 -and $totals.v1_module_count -eq 7 -and $totals.capability_source_count -eq 7 -and $totals.capability_source_file_reference_count -eq 174 -and $totals.owner_test_count -eq 86 -and $totals.core_test_count -eq 55 -and $totals.quick_test_count -eq 1 -and $totals.full_test_count -eq 84 -and $totals.optional_route_count -eq 8) 'catalog totals freeze 6 v0 plus 7 v1 modules, 86 owners, 55 core checks, 84 full checks, and 8 routes' "catalog totals drifted: $($totals | ConvertTo-Json -Compress)"
     Check (@($result.Catalog.unresolved_dependencies).Count -eq 0 -and @($result.Catalog.ownership_conflicts).Count -eq 0) 'constructed catalog has no unresolved dependency or ownership conflict' 'catalog contains unresolved dependencies or ownership conflicts'
 
     $expectedGroupNames = @('entry-lifecycle','evaluation-release','install-evidence','governance-approval','harness-contracts')
     $actualGroupNames = @($result.Catalog.core_groups.Keys)
     $groupCounts = @($expectedGroupNames | ForEach-Object { @($result.Catalog.core_groups[$_]).Count })
-    Check (($actualGroupNames -join '|') -ceq ($expectedGroupNames -join '|') -and ($groupCounts -join '|') -ceq '14|14|3|3|20') 'five stable CoreGroups are derived with exact 14/14/3/3/20 membership' "CoreGroup names or counts drifted: names=$($actualGroupNames -join ',') counts=$($groupCounts -join ',')"
+    Check (($actualGroupNames -join '|') -ceq ($expectedGroupNames -join '|') -and ($groupCounts -join '|') -ceq '14|14|3|3|21') 'five stable CoreGroups are derived with exact 14/14/3/3/21 membership' "CoreGroup names or counts drifted: names=$($actualGroupNames -join ',') counts=$($groupCounts -join ',')"
     Check (@($result.Catalog.quick_tests).Count -eq 1 -and [string]$result.Catalog.quick_tests[0] -ceq 'tests/verify-lite-footprint.ps1') 'quick validation derives only verify-lite-footprint' 'quick validation selection drifted'
 
     $full = Get-OrdinalStrings -Values @($result.Catalog.full_tests)
@@ -87,13 +87,13 @@ try {
 
     $ownerPaths = @($result.Catalog.test_owners | ForEach-Object { [string]$_.path })
     $duplicateOwners = @($ownerPaths | Group-Object -CaseSensitive | Where-Object Count -ne 1)
-    Check ($ownerPaths.Count -eq 85 -and $duplicateOwners.Count -eq 0 -and $ownerPaths -ccontains 'tests/verify-capability-extraction.ps1' -and $ownerPaths -ccontains 'tests/verify-installation.ps1' -and $ownerPaths -ccontains 'tests/run-scenario-evals.ps1') 'every verifier and scenario runner has exactly one owner' 'verifier ownership is incomplete, duplicated, or missing special runners'
+    Check ($ownerPaths.Count -eq 86 -and $duplicateOwners.Count -eq 0 -and $ownerPaths -ccontains 'tests/verify-capability-extraction.ps1' -and $ownerPaths -ccontains 'tests/verify-installation.ps1' -and $ownerPaths -ccontains 'tests/run-scenario-evals.ps1' -and $ownerPaths -ccontains 'tests/verify-thin-adapters.ps1') 'every verifier and scenario runner has exactly one owner' 'verifier ownership is incomplete, duplicated, or missing special runners'
 
     $routeModules = @($result.Catalog.optional_routes | ForEach-Object { [string]$_.module_id })
     $optionalTests = Get-OrdinalStrings -Values @($result.Catalog.optional_routes | ForEach-Object { @($_.tests) } | Select-Object -Unique)
     $coreTests = Get-OrdinalStrings -Values @($expectedGroupNames | ForEach-Object { @($result.Catalog.core_groups[$_]) } | Select-Object -Unique)
     $coreOverlap = @($optionalTests | Where-Object { $coreTests -ccontains $_ })
-    Check (($routeModules -join '|') -ceq 'codex-adapter|harness-maintenance|legacy-v1|md-html|memory|providers|team|thin-trust-kernel' -and $optionalTests.Count -eq 37 -and $coreOverlap.Count -eq 7) 'optional routing derives 8 domains, 37 unique checks, and 7 intentional core overlaps' "optional route topology drifted: modules=$($routeModules -join ',') tests=$($optionalTests.Count) overlap=$($coreOverlap.Count)"
+    Check (($routeModules -join '|') -ceq 'codex-adapter|harness-maintenance|legacy-v1|md-html|memory|providers|team|thin-trust-kernel' -and $optionalTests.Count -eq 38 -and $coreOverlap.Count -eq 8) 'optional routing derives 8 domains, 38 unique checks, and 8 intentional core overlaps' "optional route topology drifted: modules=$($routeModules -join ',') tests=$($optionalTests.Count) overlap=$($coreOverlap.Count)"
 
     $validFixture = Harness.ModuleManifest\Get-HarnessModuleManifestCatalog -RepoRoot $RepoRoot -ManifestRoot 'tests/fixtures/tk02/valid'
     Check ($validFixture.Catalog.schema_version -ceq 'module-manifest-catalog/v0' -and $null -eq $validFixture.CapabilitySourceCatalog -and $validFixture.Catalog.totals.module_count -eq 2 -and @($validFixture.Catalog.unresolved_dependencies).Count -eq 0) 'all-v0 fixture remains byte-contract compatible without a source catalog' 'valid v0 Manifest dependency fixture changed contract or failed construction'

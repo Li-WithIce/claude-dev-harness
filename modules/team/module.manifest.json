@@ -22,9 +22,11 @@
       "tests/verify-team-preset.ps1"
     ],
     "watch_paths": [
+      "schemas/adapter-kernel-api.schema.json",
       "scripts/invoke-harness-skill-dispatcher.ps1",
       "scripts/invoke-harness-skill-supervisor.ps1",
-      "scripts/invoke-harness-skill.ps1"
+      "scripts/invoke-harness-skill.ps1",
+      "scripts/lib/Harness.AdapterDelegation.psm1"
     ]
   },
   "package": {

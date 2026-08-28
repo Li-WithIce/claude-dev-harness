@@ -8,7 +8,9 @@ implements Manifest v0 construction and validation routing without changing
 Runtime behavior, installation authorization, activation, or v1 Sunset. TK-04
 extracts the seven C2 Capability packages, adds their Git-index source closure,
 and binds current Release bundles with separate sidecars while preserving all
-historical receipt bytes. A later
+historical receipt bytes. TK-05 adds the strict four-operation Adapter Kernel
+API, makes the exact nine current A3 paths thin, and binds their raw source and
+executable LOC through `adapter-inventory/v1`. A later
 boundary change requires an explicit Architecture Decision or Change Contract
 that states the reason, TCB impact, new trust assumptions, alternatives,
 migration, and verification.
@@ -87,6 +89,10 @@ K1 is limited to:
 - Requirement Gate resolution;
 - risk and execution-profile policy evaluation;
 - Protected Action evaluation;
+- the strict `preflight_action`, `controlled_write`, `prepare_delegation`, and
+  `commit_delegation` Adapter API, including path and patch validation, trust
+  digest calculation, Policy calls, plan generation CAS, artifact publication,
+  trace update, cleanup, and atomic commit;
 - the task-state state machine, journal, CAS, and recovery projection;
 - Evidence, Approval, Receipt-facing trust contracts used by ordinary task
   completion;
@@ -146,8 +152,20 @@ A3 is limited to host input deserialization, a Kernel API call, host output
 serialization, and necessary exit-code mapping. An adapter must not write task
 state directly, compute trust digests, embed risk-policy constants, validate a
 capability's private business Schema, or contain Release Qualification logic.
-The terminal target is fewer than 200 executable LOC per adapter; TK-00 records
-the target but does not refactor current adapters.
+The terminal target is fewer than 200 executable LOC per adapter. TK-05 reaches
+that target for the exact nine classified paths without adding helpers or
+forwarding shims. `adapter-inventory.json` records their raw Git index blob
+digests, PowerShell token-line or JavaScript lexical-token metrics, direct
+Kernel API operations, and a 300-character physical-line ceiling that rejects
+LOC packing. The generator rejects real unstaged source changes while remaining
+stable across checkout line-ending conversion.
+
+`adapter-kernel-api/v1` has exactly four logical operations. Its strict request
+and response Schema rejects unknown fields. The PowerShell surface exports one
+function per operation; operation-specific names are the only callable
+authority, so no generic command, file, Policy, or caller-supplied trust-digest
+escape exists. `harness-module/v1` remains capability-only and is not an
+Adapter router.
 
 ## legacy-v1
 
@@ -195,6 +213,9 @@ The machine sources are:
   ownership table;
 - `scripts/get-kernel-tcb-inventory.ps1` — strict AST generator;
 - `kernel-tcb-inventory.json` — tracked deterministic output.
+- `schemas/adapter-kernel-api.schema.json` — strict four-operation K1 boundary;
+- `scripts/get-adapter-inventory.ps1` — strict A3 metric and source generator;
+- `adapter-inventory.json` — tracked deterministic nine-path A3 output.
 
 All paths are repository-relative POSIX paths sorted with ordinal semantics. The
 Inventory contains no Git Head, time, user, machine, process, temporary, or
@@ -253,8 +274,12 @@ an initially unreferenced K0 primitive. TK-02 adds a C2-only construction caller
 but no selected trust-path import, so the transitive Runtime measurement remains
 6151 with delta zero. TK-04 adds only C2 construction and Release producer
 paths, so selected Runtime reachability and the measured 6151-line baseline
-remain unchanged. The baseline is a generated observation bound by verifier
-checks, not a permanent architectural constant.
+remain unchanged. TK-05 removes the redundant core Hook wrapper as a selected
+root, selects `Harness.AdapterAction` through the thin Hook and MCP roots, and
+measures 6150 executable LOC with no exception. The stable core Hook path
+remains a compatibility CLI outside selected ordinary reachability. The
+baseline is a generated observation bound by verifier checks, not a permanent
+architectural constant.
 
 ## Terminal SLOs
 

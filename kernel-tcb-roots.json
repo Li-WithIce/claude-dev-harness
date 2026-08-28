@@ -38,18 +38,11 @@
       "reason": "Covers the ordinary controlled-write entry independent of Hook activation."
     },
     {
-      "id": "core-pretooluse",
-      "path": "runtime-hooks/core/pretooluse.ps1",
-      "role": "Host-neutral protected-action policy enforcement before writes.",
-      "layer": "k1-runtime-kernel",
-      "reason": "Core enforcement must be inventoried independently from host adapters."
-    },
-    {
       "id": "claude-pretooluse-adapter",
       "path": "runtime-hooks/claude/pretooluse.ps1",
-      "role": "Deserialize Claude/Codex tool input and delegate to the core Hook.",
+      "role": "Deserialize Claude/Codex tool input and call K1 preflight_action.",
       "layer": "a3-adapter",
-      "reason": "Host mutation input parsing is trusted before core policy receives normalized targets."
+      "reason": "Host mutation transport remains selected while patch, path, and Policy authority move into Harness.AdapterAction."
     },
     {
       "id": "codex-pretooluse-launcher",
@@ -77,6 +70,7 @@
     { "path": "policies/protected-actions.json", "kind": "policy", "reason": "Core protected-action rules fail closed before writes.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
     { "path": "policies/risk-rules.json", "kind": "policy", "reason": "Defines risk dimensions, thresholds, triggers, and routing overrides.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
     { "path": "schemas/approval.schema.json", "kind": "schema", "reason": "Approval documents are validated before protected completion.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/adapter-kernel-api.schema.json", "kind": "schema", "reason": "The strict four-operation Adapter request and response contract binds the public K1 boundary.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
     { "path": "schemas/audit-record.schema.json", "kind": "schema", "reason": "Policy-selected independent audit artifacts use this strict record shape.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
     { "path": "schemas/current-pointer.schema.json", "kind": "schema", "reason": "Current task projection and recovery use this strict pointer shape.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
     { "path": "schemas/event.schema.json", "kind": "schema", "reason": "Task lifecycle event-log records are schema validated.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
@@ -127,22 +121,13 @@
       "reviewed_by_contract": "TK-00"
     },
     {
-      "from": "runtime-hooks/core/pretooluse.ps1",
-      "to": "scripts/lib/Harness.ProtectedAction.psm1",
+      "from": "runtime-hooks/claude/pretooluse.ps1",
+      "to": "scripts/lib/Harness.AdapterAction.psm1",
       "kind": "dynamic-import",
       "expression": "Import-Module $module -Force -ErrorAction Stop",
-      "reason": "The core Hook constructs a contained canonical module path immediately before import.",
-      "resolution_limit": "Import-Module receives a variable, so the generic AST resolver deliberately fails closed without this exact reviewed edge.",
-      "reviewed_by_contract": "TK-00"
-    },
-    {
-      "from": "runtime-hooks/claude/pretooluse.ps1",
-      "to": "runtime-hooks/core/pretooluse.ps1",
-      "kind": "rendered-invocation",
-      "expression": "runtime-hooks\\core\\pretooluse.ps1",
-      "reason": "The installed host adapter renders REPO_ROOT and launches the host-neutral core Hook.",
-      "resolution_limit": "The tracked source contains a distribution placeholder rather than a resolvable repository path expression.",
-      "reviewed_by_contract": "TK-00"
+      "reason": "The installed host adapter renders REPO_ROOT and imports only the strict K1 Adapter Action API.",
+      "resolution_limit": "The tracked source contains a distribution placeholder assigned to a variable, so the generic AST resolver cannot resolve the module path.",
+      "reviewed_by_contract": "TK-05"
     },
     {
       "from": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",

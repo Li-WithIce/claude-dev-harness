@@ -28,6 +28,9 @@ function New-IsolatedRepoFixture {
         'scripts\invoke-harness-skill.ps1',
         'scripts\invoke-harness-skill-dispatcher.ps1',
         'scripts\invoke-harness-skill-supervisor.ps1',
+        'scripts\lib\Harness.AdapterDelegation.psm1',
+        'scripts\lib\Harness.Hashing.psm1',
+        'scripts\lib\Harness.Path.psm1',
         'scripts\generate-skills-index.ps1',
         'scripts\lite-artifact-parser.ps1',
         'scripts\validate-lite-artifacts.ps1',
@@ -36,6 +39,7 @@ function New-IsolatedRepoFixture {
         'skills\obsidian-memory\scripts\runtime-state-common.ps1',
         'agent-configs\profiles',
         'agent-configs\workflows',
+        'schemas\adapter-kernel-api.schema.json',
         'skills\entry-router',
         'skills\plan',
         'skills\review',
@@ -763,7 +767,7 @@ Start-Sleep -Milliseconds 4000
 [System.IO.File]::WriteAllText($MarkerPath, $Token, [System.Text.UTF8Encoding]::new($false))
 Start-Sleep -Milliseconds 4000
 '@
-    $ownerHost = (Get-Command pwsh -CommandType Application -ErrorAction Stop).Source
+    $ownerHost = (@(Get-Command pwsh -CommandType Application -ErrorAction Stop)[0]).Source
     foreach ($ownerCase in @(
             [pscustomobject]@{ Name = 'natural'; TimeoutSeconds = 10; RootSleep = '$null'; ExpectedExit = 0; OutputCount = 768 }
             [pscustomobject]@{ Name = 'timeout'; TimeoutSeconds = 2; RootSleep = 'Start-Sleep -Seconds 30'; ExpectedExit = 124; OutputCount = 8 }

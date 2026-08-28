@@ -34,10 +34,10 @@
     {
       "path": "runtime-hooks/claude/pretooluse.ps1",
       "layer": "a3-adapter",
-      "current_role": "Claude and Codex file-mutation input adapter.",
+      "current_role": "Thin Claude and Codex file-mutation input adapter for adapter-kernel-api/v1.",
       "owner_candidate": "host-adapters",
       "tcb_included": true,
-      "reason": "Normalizes host tool input before calling the core policy hook.",
+      "reason": "Deserializes host input and calls the K1 preflight_action operation without owning patch, path, or Policy decisions.",
       "migration_target": "claude-adapter",
       "legacy_status": "not-legacy"
     },
@@ -74,10 +74,10 @@
     {
       "path": "runtime-hooks/core/pretooluse.ps1",
       "layer": "k1-runtime-kernel",
-      "current_role": "Host-neutral protected-action policy hook.",
+      "current_role": "Compatibility CLI for host-neutral protected-action preflight.",
       "owner_candidate": "trust-kernel",
-      "tcb_included": true,
-      "reason": "Enforces write policy before protected tool execution.",
+      "tcb_included": false,
+      "reason": "The stable CLI path remains compatible, while ordinary host adapters now call the selected K1 Adapter Action module directly.",
       "migration_target": null,
       "legacy_status": "not-legacy"
     },
@@ -232,6 +232,16 @@
       "legacy_status": "not-legacy"
     },
     {
+      "path": "scripts/get-adapter-inventory.ps1",
+      "layer": "c2-capability",
+      "current_role": "Deterministic adapter-inventory/v1 generator and zero-write drift checker.",
+      "owner_candidate": "engineering-validation",
+      "tcb_included": false,
+      "reason": "Engineering validation measures Adapter source and API boundaries but is not imported by Runtime or Distribution roots.",
+      "migration_target": "engineering-validation-module",
+      "legacy_status": "not-legacy"
+    },
+    {
       "path": "scripts/get-kernel-tcb-inventory.ps1",
       "layer": "c2-capability",
       "current_role": "Read-only reproducible Kernel TCB inventory generator.",
@@ -274,10 +284,10 @@
     {
       "path": "scripts/harness-write-mcp.ps1",
       "layer": "a3-adapter",
-      "current_role": "MCP write adapter delegating to Kernel controlled-write policy.",
+      "current_role": "Thin MCP JSON-RPC adapter for adapter-kernel-api/v1 controlled_write.",
       "owner_candidate": "host-adapters",
       "tcb_included": true,
-      "reason": "Adapter participates in the ordinary protected-write trust path.",
+      "reason": "The Adapter preserves MCP transport while K1 calculates trust digests, evaluates policy, and commits the write.",
       "migration_target": "mcp-adapter",
       "legacy_status": "not-legacy"
     },
@@ -314,10 +324,10 @@
     {
       "path": "scripts/invoke-harness-skill.ps1",
       "layer": "a3-adapter",
-      "current_role": "Host-facing single skill invocation entry.",
+      "current_role": "Thin host-facing skill delegation and process bridge.",
       "owner_candidate": "host-adapters",
       "tcb_included": false,
-      "reason": "Capability invocation is not imported by Runtime Kernel.",
+      "reason": "The Adapter calls prepare_delegation and commit_delegation while K1 owns plan CAS, artifact publication, and trace commit.",
       "migration_target": "host-skill-adapter",
       "legacy_status": "not-legacy"
     },
@@ -329,6 +339,26 @@
       "tcb_included": false,
       "reason": "Validation process control is outside ordinary Runtime.",
       "migration_target": "engineering-validation-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.AdapterAction.psm1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "K1 preflight_action and controlled_write Adapter API implementation.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "Selected Hook and MCP roots delegate patch, path, trust-digest, Policy, and controlled commit authority here.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.AdapterDelegation.psm1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "K1 prepare_delegation and commit_delegation implementation.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": false,
+      "reason": "Skill delegation uses this K1 API outside the selected ordinary Runtime roots; it owns plan generation CAS, artifact publication, and trace commit.",
+      "migration_target": null,
       "legacy_status": "not-legacy"
     },
     {
