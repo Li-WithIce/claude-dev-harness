@@ -12,6 +12,7 @@
   "ownership": {
     "owned_paths": [
       ".gitattributes",
+      "adapter-inventory.json",
       "capability-source-catalog.json",
       "docs/architecture/**",
       "kernel-component-classification.json",
@@ -30,6 +31,8 @@
     ],
     "watch_paths": [
       "modules/**",
+      "schemas/adapter-inventory.schema.json",
+      "schemas/adapter-kernel-api.schema.json",
       "schemas/capability-source-binding.schema.json",
       "schemas/capability-source-catalog.schema.json",
       "schemas/capability-source.schema.json",
@@ -37,16 +40,20 @@
       "schemas/module-manifest-catalog.schema.json",
       "schemas/module-manifest-v1.schema.json",
       "schemas/module-manifest.schema.json",
+      "scripts/get-adapter-inventory.ps1",
       "scripts/get-kernel-tcb-inventory.ps1",
       "scripts/get-module-manifest-catalog.ps1",
       "scripts/lib/Harness.CapabilitySource.psm1",
       "scripts/lib/Harness.ModuleManifest.psm1",
+      "scripts/lib/Harness.AdapterAction.psm1",
+      "scripts/lib/Harness.AdapterDelegation.psm1",
       "scripts/run-changed-optional-validation.ps1",
       "scripts/run-validation.ps1",
       "scripts/write-capability-source-binding.ps1",
       "tests/fixtures/tk02/**",
       "tests/fixtures/tk04/**",
       "tests/verify-capability-extraction.ps1",
+      "tests/verify-thin-adapters.ps1",
       "tests/verify-v2-ci-routing.ps1"
     ]
   },

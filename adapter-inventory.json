@@ -1,0 +1,142 @@
+{
+  "schema_version": "adapter-inventory/v1",
+  "generator_contract_version": "adapter-inventory-generator/v1",
+  "source_basis": "tracked-working-tree-raw-bytes/v1",
+  "classification": {
+    "path": "kernel-component-classification.json",
+    "sha256": "sha256:6ff2a95fa0ffbe2c53113270c66dfb51d397e8f390dd23e209c485a00e20f862"
+  },
+  "metric_contract": {
+    "powershell": "powershell-token-lines/v1",
+    "javascript": "javascript-lexical-token-lines/v1",
+    "maximum_executable_loc": 199,
+    "maximum_physical_line_length": 300
+  },
+  "adapters": [
+    {
+      "path": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",
+      "layer": "a3-adapter",
+      "language": "powershell",
+      "raw_sha256": "sha256:160dc6a41a9207f600bcb6825f76fd043ab618ca5b988f53023efa41828d3a7e",
+      "physical_loc": 113,
+      "nonblank_loc": 105,
+      "executable_loc": 103,
+      "maximum_line_length": 93,
+      "tcb_included": true,
+      "kernel_api_operations": []
+    },
+    {
+      "path": "runtime-hooks/claude/pretooluse.ps1",
+      "layer": "a3-adapter",
+      "language": "powershell",
+      "raw_sha256": "sha256:6a9f25000af854ffa6e71cbdefe21d226362f63e655152970e53c48c88bc320e",
+      "physical_loc": 84,
+      "nonblank_loc": 79,
+      "executable_loc": 79,
+      "maximum_line_length": 145,
+      "tcb_included": true,
+      "kernel_api_operations": [
+        "preflight_action"
+      ]
+    },
+    {
+      "path": "runtime-hooks/claude/stop.js",
+      "layer": "a3-adapter",
+      "language": "javascript",
+      "raw_sha256": "sha256:d689414e01de7feb2be26a69d7ac794a76a687274e43e4d1d18beabefac2516d",
+      "physical_loc": 173,
+      "nonblank_loc": 155,
+      "executable_loc": 93,
+      "maximum_line_length": 272,
+      "tcb_included": false,
+      "kernel_api_operations": []
+    },
+    {
+      "path": "runtime-hooks/claude/userpromptsubmit.js",
+      "layer": "a3-adapter",
+      "language": "javascript",
+      "raw_sha256": "sha256:3cc8e7ff1da0e139c074ce9d513badd1af436746ed4a5fc3602d41ef677ca19f",
+      "physical_loc": 57,
+      "nonblank_loc": 49,
+      "executable_loc": 49,
+      "maximum_line_length": 208,
+      "tcb_included": false,
+      "kernel_api_operations": []
+    },
+    {
+      "path": "runtime-hooks/claude/workspace-resolver.js",
+      "layer": "a3-adapter",
+      "language": "javascript",
+      "raw_sha256": "sha256:90b15415c5cb688629eb8d29539e404fcf0e0ce829a2072935911a9ac156a3bc",
+      "physical_loc": 48,
+      "nonblank_loc": 42,
+      "executable_loc": 42,
+      "maximum_line_length": 101,
+      "tcb_included": false,
+      "kernel_api_operations": []
+    },
+    {
+      "path": "scripts/harness-write-mcp.ps1",
+      "layer": "a3-adapter",
+      "language": "powershell",
+      "raw_sha256": "sha256:91ecd3462f809f77d8e1035d4f9dc39149e5e5f7d1112136edd51b3589cb76a8",
+      "physical_loc": 194,
+      "nonblank_loc": 183,
+      "executable_loc": 183,
+      "maximum_line_length": 276,
+      "tcb_included": true,
+      "kernel_api_operations": [
+        "controlled_write"
+      ]
+    },
+    {
+      "path": "scripts/invoke-harness-skill-dispatcher.ps1",
+      "layer": "a3-adapter",
+      "language": "powershell",
+      "raw_sha256": "sha256:dbc0141ff621bb0133ebfa54068ab22f0d1bf92e21a0bb3932340ff922ffd83a",
+      "physical_loc": 201,
+      "nonblank_loc": 182,
+      "executable_loc": 181,
+      "maximum_line_length": 148,
+      "tcb_included": false,
+      "kernel_api_operations": []
+    },
+    {
+      "path": "scripts/invoke-harness-skill-supervisor.ps1",
+      "layer": "a3-adapter",
+      "language": "powershell",
+      "raw_sha256": "sha256:41da06c67e564c6104206a6a743eed3bf829ee8374012c8e8a09086311a7d7e0",
+      "physical_loc": 210,
+      "nonblank_loc": 197,
+      "executable_loc": 196,
+      "maximum_line_length": 217,
+      "tcb_included": false,
+      "kernel_api_operations": []
+    },
+    {
+      "path": "scripts/invoke-harness-skill.ps1",
+      "layer": "a3-adapter",
+      "language": "powershell",
+      "raw_sha256": "sha256:06cff585d30d844e9dcb08f9de0d9e1ebca7608522c1a92153a6c1b91201e012",
+      "physical_loc": 160,
+      "nonblank_loc": 152,
+      "executable_loc": 152,
+      "maximum_line_length": 139,
+      "tcb_included": false,
+      "kernel_api_operations": [
+        "commit_delegation",
+        "prepare_delegation"
+      ]
+    }
+  ],
+  "totals": {
+    "adapter_count": 9,
+    "powershell_count": 6,
+    "javascript_count": 3,
+    "executable_loc": 1078,
+    "maximum_adapter_executable_loc": 196,
+    "threshold_breaches": 0
+  },
+  "digest_algorithm": "canonical-json/v1",
+  "inventory_digest": "sha256:2affb749076d3fcf1a85313bb50b65ac26ecd8c3d93fdab7e586d1dc92b58d54"
+}

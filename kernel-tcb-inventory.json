@@ -22,17 +22,9 @@
       "id": "claude-pretooluse-adapter",
       "path": "runtime-hooks/claude/pretooluse.ps1",
       "trust_path": "runtime",
-      "role": "Deserialize Claude/Codex tool input and delegate to the core Hook.",
+      "role": "Deserialize Claude/Codex tool input and call K1 preflight_action.",
       "layer": "a3-adapter",
-      "reason": "Host mutation input parsing is trusted before core policy receives normalized targets."
-    },
-    {
-      "id": "core-pretooluse",
-      "path": "runtime-hooks/core/pretooluse.ps1",
-      "trust_path": "runtime",
-      "role": "Host-neutral protected-action policy enforcement before writes.",
-      "layer": "k1-runtime-kernel",
-      "reason": "Core enforcement must be inventoried independently from host adapters."
+      "reason": "Host mutation transport remains selected while patch, path, and Policy authority move into Harness.AdapterAction."
     },
     {
       "id": "entry-contract-compiler",
@@ -120,7 +112,7 @@
     },
     {
       "path": "runtime-hooks/claude/pretooluse.ps1",
-      "sha256": "sha256:cf464b8014ecaed0dc088fda8b025bede64dcc2eaf5bb660d073a1e4effe9d56",
+      "sha256": "sha256:6a9f25000af854ffa6e71cbdefe21d226362f63e655152970e53c48c88bc320e",
       "layer": "a3-adapter",
       "trust_paths": [
         "runtime"
@@ -129,25 +121,9 @@
         "claude-pretooluse-adapter",
         "codex-pretooluse-launcher"
       ],
-      "physical_loc": 376,
-      "nonblank_loc": 354,
-      "executable_loc": 351
-    },
-    {
-      "path": "runtime-hooks/core/pretooluse.ps1",
-      "sha256": "sha256:9988edde00fa3429d93b16d94e0c2089ddaf719538cf86df72ce54a15b40b567",
-      "layer": "k1-runtime-kernel",
-      "trust_paths": [
-        "runtime"
-      ],
-      "root_ids": [
-        "claude-pretooluse-adapter",
-        "codex-pretooluse-launcher",
-        "core-pretooluse"
-      ],
-      "physical_loc": 68,
-      "nonblank_loc": 67,
-      "executable_loc": 67
+      "physical_loc": 84,
+      "nonblank_loc": 79,
+      "executable_loc": 79
     },
     {
       "path": "scripts/generate-entry-contract.ps1",
@@ -181,7 +157,7 @@
     },
     {
       "path": "scripts/harness-write-mcp.ps1",
-      "sha256": "sha256:749e8d53ff2298042016cdcc75d65fb76838fc655f5d3acea5303fbaf4cce199",
+      "sha256": "sha256:91ecd3462f809f77d8e1035d4f9dc39149e5e5f7d1112136edd51b3589cb76a8",
       "layer": "a3-adapter",
       "trust_paths": [
         "runtime"
@@ -189,9 +165,9 @@
       "root_ids": [
         "controlled-write-adapter"
       ],
-      "physical_loc": 142,
-      "nonblank_loc": 131,
-      "executable_loc": 131
+      "physical_loc": 194,
+      "nonblank_loc": 183,
+      "executable_loc": 183
     },
     {
       "path": "scripts/install-transaction-common.ps1",
@@ -208,6 +184,22 @@
       "executable_loc": 1250
     },
     {
+      "path": "scripts/lib/Harness.AdapterAction.psm1",
+      "sha256": "sha256:dcb225e6382e75fe9038066f977afdd3f3b8814c69c7ad4ce3646a088e935eaa",
+      "layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "root_ids": [
+        "claude-pretooluse-adapter",
+        "codex-pretooluse-launcher",
+        "controlled-write-adapter"
+      ],
+      "physical_loc": 307,
+      "nonblank_loc": 286,
+      "executable_loc": 286
+    },
+    {
       "path": "scripts/lib/Harness.Approval.psm1",
       "sha256": "sha256:9bff199ac9a411d0c7ba7f1b075b4bad022160e9e02561caec58a9b9a4b56725",
       "layer": "k1-runtime-kernel",
@@ -219,7 +211,6 @@
         "claude-pretooluse-adapter",
         "codex-pretooluse-launcher",
         "controlled-write-adapter",
-        "core-pretooluse",
         "status-cli",
         "task-cli",
         "workspace-bootstrap"
@@ -240,7 +231,6 @@
         "claude-pretooluse-adapter",
         "codex-pretooluse-launcher",
         "controlled-write-adapter",
-        "core-pretooluse",
         "risk-policy-evaluator",
         "status-cli",
         "task-cli",
@@ -258,6 +248,8 @@
         "runtime"
       ],
       "root_ids": [
+        "claude-pretooluse-adapter",
+        "codex-pretooluse-launcher",
         "controlled-write-adapter"
       ],
       "physical_loc": 145,
@@ -304,7 +296,6 @@
         "claude-pretooluse-adapter",
         "codex-pretooluse-launcher",
         "controlled-write-adapter",
-        "core-pretooluse",
         "entry-contract-compiler",
         "risk-policy-evaluator",
         "status-cli",
@@ -345,7 +336,6 @@
         "claude-pretooluse-adapter",
         "codex-pretooluse-launcher",
         "controlled-write-adapter",
-        "core-pretooluse",
         "risk-policy-evaluator",
         "status-cli",
         "task-cli",
@@ -381,7 +371,6 @@
         "claude-pretooluse-adapter",
         "codex-pretooluse-launcher",
         "controlled-write-adapter",
-        "core-pretooluse",
         "status-cli",
         "workspace-bootstrap"
       ],
@@ -613,6 +602,18 @@
       "bytes": 1391
     },
     {
+      "path": "schemas/adapter-kernel-api.schema.json",
+      "sha256": "sha256:847ecff3df6dd2f4fde8abffa7c87e650ef51c761d839b12bd22f0854a18f015",
+      "kind": "schema",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "reason": "The strict four-operation Adapter request and response contract binds the public K1 boundary.",
+      "physical_loc": 225,
+      "bytes": 10864
+    },
+    {
       "path": "schemas/approval.schema.json",
       "sha256": "sha256:38777d258a878599774d254dbfe9eef1b1da12d33dd9067bf40b0c9c007f086f",
       "kind": "schema",
@@ -797,16 +798,7 @@
     },
     {
       "from": "runtime-hooks/claude/pretooluse.ps1",
-      "to": "runtime-hooks/core/pretooluse.ps1",
-      "kind": "manual",
-      "resolution": "manual:rendered-invocation:runtime-hooks\\core\\pretooluse.ps1",
-      "trust_paths": [
-        "runtime"
-      ]
-    },
-    {
-      "from": "runtime-hooks/core/pretooluse.ps1",
-      "to": "scripts/lib/Harness.ProtectedAction.psm1",
+      "to": "scripts/lib/Harness.AdapterAction.psm1",
       "kind": "manual",
       "resolution": "manual:dynamic-import:Import-Module $module -Force -ErrorAction Stop",
       "trust_paths": [
@@ -864,18 +856,9 @@
     },
     {
       "from": "scripts/harness-write-mcp.ps1",
-      "to": "scripts/lib/Harness.ControlledWrite.psm1",
+      "to": "scripts/lib/Harness.AdapterAction.psm1",
       "kind": "import-module",
-      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'lib\\Harness.ControlledWrite.psm1') -Force -ErrorAction Stop",
-      "trust_paths": [
-        "runtime"
-      ]
-    },
-    {
-      "from": "scripts/harness-write-mcp.ps1",
-      "to": "scripts/lib/Harness.Hashing.psm1",
-      "kind": "import-module",
-      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'lib\\Harness.Hashing.psm1') -Force -ErrorAction Stop",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'lib\\Harness.AdapterAction.psm1') -Force -ErrorAction Stop",
       "trust_paths": [
         "runtime"
       ]
@@ -887,6 +870,42 @@
       "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'lib\\Harness.Hashing.psm1') -Force -ErrorAction Stop",
       "trust_paths": [
         "distribution"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.AdapterAction.psm1",
+      "to": "scripts/lib/Harness.ControlledWrite.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.ControlledWrite.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.AdapterAction.psm1",
+      "to": "scripts/lib/Harness.Hashing.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Hashing.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.AdapterAction.psm1",
+      "to": "scripts/lib/Harness.Path.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.AdapterAction.psm1",
+      "to": "scripts/lib/Harness.ProtectedAction.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.ProtectedAction.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
       ]
     },
     {
@@ -1277,21 +1296,21 @@
   "unresolved_dependencies": [],
   "totals": {
     "file_count": 28,
-    "physical_loc": 13260,
-    "nonblank_loc": 12192,
-    "executable_loc": 12158,
+    "physical_loc": 13259,
+    "nonblank_loc": 12188,
+    "executable_loc": 12157,
     "runtime_file_count": 22,
-    "runtime_executable_loc": 6151,
+    "runtime_executable_loc": 6150,
     "distribution_file_count": 15,
     "distribution_executable_loc": 7637,
     "duplicate_edge_count": 3,
-    "artifact_count": 19,
-    "artifact_bytes": 39637
+    "artifact_count": 20,
+    "artifact_bytes": 50501
   },
   "budget": {
     "baseline_executable_loc": 6151,
-    "current_executable_loc": 6151,
-    "delta": 0,
+    "current_executable_loc": 6150,
+    "delta": -1,
     "covered_growth": 0,
     "status": "within-baseline",
     "exceptions": []

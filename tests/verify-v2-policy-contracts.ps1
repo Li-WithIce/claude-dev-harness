@@ -102,6 +102,8 @@ $parseErrors = $null
 Assert-True -Condition (@($parseErrors).Count -eq 0) -Success 'policy verifier parses as PowerShell' -Failure 'policy verifier has PowerShell parse errors'
 
 $expectedSchemaFiles = @(
+    'adapter-inventory.schema.json',
+    'adapter-kernel-api.schema.json',
     'approval.schema.json',
     'audit-record.schema.json',
     'capability-source-binding.schema.json',

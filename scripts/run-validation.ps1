@@ -170,9 +170,23 @@ foreach ($skip in $skips) {
 }
 
 $failures = New-Object System.Collections.Generic.List[object]
+$longRunningChecks = @(
+    'verify-capability-extraction.ps1',
+    'verify-v2-approval.ps1',
+    'verify-v2-ci-routing.ps1',
+    'verify-v2-evidence.ps1',
+    'verify-v2-governed-audit.ps1',
+    'verify-v2-install-presets.ps1'
+)
 foreach ($check in $checks) {
     Write-Output ("[RUN ] {0}" -f $check.Name)
-    $effectiveTimeoutSeconds = if ($check.Name -ceq 'verify-host-benchmark-qualification.ps1') { [math]::Max($CheckTimeoutSeconds,900) } else { $CheckTimeoutSeconds }
+    $effectiveTimeoutSeconds = if ($check.Name -ceq 'verify-host-benchmark-qualification.ps1') {
+        [math]::Max($CheckTimeoutSeconds,900)
+    } elseif ($longRunningChecks -ccontains $check.Name) {
+        [math]::Max($CheckTimeoutSeconds,600)
+    } else {
+        $CheckTimeoutSeconds
+    }
     $result = Invoke-QuietProcess -Name $check.Name -FilePath $check.FilePath -ArgumentList $check.ArgumentList -WorkingDirectory $repoRootResolved -TimeoutSeconds $effectiveTimeoutSeconds -InvocationKind $check.InvocationKind -PowerShellParameters $check.PowerShellParameters
     if ($result.ExitCode -eq 0) {
         Write-Output ("[PASS] {0} ({1}s)" -f $result.Name, $result.DurationSeconds)

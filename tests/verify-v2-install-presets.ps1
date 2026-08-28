@@ -1183,15 +1183,16 @@ try {
             }
         }
 
-        $adapterTokens = $null
-        $adapterErrors = $null
-        $adapterAst = [System.Management.Automation.Language.Parser]::ParseFile($installedPreToolHook,[ref]$adapterTokens,[ref]$adapterErrors)
-        $adapterFunctions = @($adapterAst.FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true))
-        $pathValidatorAst = @($adapterFunctions | Where-Object Name -CEQ 'Assert-ApplyPatchRelativePath')[0]
-        $patchParserAst = @($adapterFunctions | Where-Object Name -CEQ 'Get-ApplyPatchChangedPaths')[0]
-        if (@($adapterErrors).Count -eq 0 -and $null -ne $pathValidatorAst -and $null -ne $patchParserAst) {
+        $actionModuleTokens = $null
+        $actionModuleErrors = $null
+        $actionModulePath = Join-Path $RepoRoot 'scripts\lib\Harness.AdapterAction.psm1'
+        $actionModuleAst = [System.Management.Automation.Language.Parser]::ParseFile($actionModulePath,[ref]$actionModuleTokens,[ref]$actionModuleErrors)
+        $actionModuleFunctions = @($actionModuleAst.FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true))
+        $pathValidatorAst = @($actionModuleFunctions | Where-Object Name -CEQ 'Assert-HarnessApplyPatchRelativePath')[0]
+        $patchParserAst = @($actionModuleFunctions | Where-Object Name -CEQ 'Get-HarnessApplyPatchChangedPaths')[0]
+        if (@($actionModuleErrors).Count -eq 0 -and $null -ne $pathValidatorAst -and $null -ne $patchParserAst) {
             $pathValidatorBody = $pathValidatorAst.Body.GetScriptBlock()
-            function Assert-ApplyPatchRelativePath { param([string]$Path) & $pathValidatorBody -Path $Path }
+            function Assert-HarnessApplyPatchRelativePath { param([string]$Path) & $pathValidatorBody -Path $Path }
             $patchParserBody = $patchParserAst.Body.GetScriptBlock()
             foreach ($controlPath in @("a$([char]0)b.txt","a`rb.txt","a`nb.txt")) {
                 try {
@@ -1224,7 +1225,7 @@ try {
                 Add-Failure 'direct apply_patch parser grammar-aware target extraction is invalid'
             }
         } else {
-            Add-Failure 'installed direct apply_patch parser functions are unavailable or do not parse'
+            Add-Failure 'K1 direct apply_patch parser functions are unavailable or do not parse'
         }
 
         $rootCases = @(

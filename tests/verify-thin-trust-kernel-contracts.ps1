@@ -62,11 +62,14 @@ $requiredFiles = @(
     'kernel-tcb-roots.json',
     'kernel-tcb-inventory.json',
     'kernel-component-classification.json',
+    'adapter-inventory.json',
     'capability-source-catalog.json',
     'module-manifest-catalog.json',
     'schemas/kernel-tcb-roots.schema.json',
     'schemas/kernel-tcb.schema.json',
     'schemas/kernel-component-classification.schema.json',
+    'schemas/adapter-inventory.schema.json',
+    'schemas/adapter-kernel-api.schema.json',
     'schemas/capability-source-binding.schema.json',
     'schemas/capability-source-catalog.schema.json',
     'schemas/capability-source.schema.json',
@@ -75,6 +78,7 @@ $requiredFiles = @(
     'schemas/module-manifest-v1.schema.json',
     'schemas/module-manifest.schema.json',
     'scripts/get-kernel-tcb-inventory.ps1',
+    'scripts/get-adapter-inventory.ps1',
     'scripts/get-module-manifest-catalog.ps1',
     'scripts/lib/Harness.CapabilitySource.psm1',
     'scripts/lib/Harness.CanonicalJson.psm1',
@@ -87,6 +91,7 @@ $requiredFiles = @(
     'tests/verify-kernel-tcb-inventory.ps1',
     'tests/verify-module-manifest-catalog.ps1',
     'tests/verify-thin-trust-kernel-contracts.ps1',
+    'tests/verify-thin-adapters.ps1',
     'tests/verify-v1-manifest-marker.ps1'
 )
 foreach ($path in $requiredFiles) {
@@ -94,6 +99,7 @@ foreach ($path in $requiredFiles) {
 }
 
 $powerShellPaths = @(
+    'scripts/get-adapter-inventory.ps1',
     'scripts/get-kernel-tcb-inventory.ps1',
     'scripts/get-module-manifest-catalog.ps1',
     'scripts/lib/Harness.CapabilitySource.psm1',
@@ -107,6 +113,7 @@ $powerShellPaths = @(
     'tests/verify-kernel-tcb-inventory.ps1',
     'tests/verify-module-manifest-catalog.ps1',
     'tests/verify-thin-trust-kernel-contracts.ps1',
+    'tests/verify-thin-adapters.ps1',
     'tests/verify-v1-manifest-marker.ps1'
 ) + @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'tests\fixtures\tk00\tcb') -File | Where-Object { $_.Extension -cin @('.ps1', '.psm1') } | ForEach-Object { [IO.Path]::GetRelativePath($RepoRoot, $_.FullName) })
 $parseFailures = [System.Collections.Generic.List[string]]::new()
@@ -122,6 +129,7 @@ Check ($parseFailures.Count -eq 0) 'all architecture PowerShell files parse' "Po
 Check ($bomFailures.Count -eq 0) 'all architecture PowerShell files follow the UTF-8 BOM convention' "PowerShell BOM failures: $($bomFailures -join ', ')"
 
 $jsonPaths = @(
+    'adapter-inventory.json',
     'kernel-tcb-roots.json',
     'kernel-tcb-inventory.json',
     'kernel-component-classification.json',
@@ -130,6 +138,8 @@ $jsonPaths = @(
     'schemas/kernel-tcb-roots.schema.json',
     'schemas/kernel-tcb.schema.json',
     'schemas/kernel-component-classification.schema.json',
+    'schemas/adapter-inventory.schema.json',
+    'schemas/adapter-kernel-api.schema.json',
     'schemas/capability-source-binding.schema.json',
     'schemas/capability-source-catalog.schema.json',
     'schemas/capability-source.schema.json',
@@ -262,7 +272,7 @@ Check ($rolloutClassification.Count -eq 1 -and [string]$rolloutClassification[0]
 $manifestConstructionPaths = @('scripts/get-module-manifest-catalog.ps1','scripts/lib/Harness.CapabilitySource.psm1','scripts/lib/Harness.ModuleManifest.psm1')
 $manifestConstructionClassification = @($classification.components | Where-Object { [string]$_.path -cin $manifestConstructionPaths })
 Check ($manifestConstructionClassification.Count -eq 3 -and @($manifestConstructionClassification | Where-Object { [string]$_.layer -cne 'c2-capability' -or [bool]$_.tcb_included -or [string]$_.owner_candidate -cne 'engineering-validation' }).Count -eq 0) 'Manifest generator, constructor, and source consumer are C2 engineering components outside Runtime TCB' 'Manifest construction classification leaked into Runtime TCB or another owner'
-Check (@($classification.components | Where-Object { [string]$_.layer -ceq 'c2-capability' }).Count -eq 41) 'classification freezes all 41 TK-04 C2 implementation paths' 'TK-04 C2 classification count drifted'
+Check (@($classification.components | Where-Object { [string]$_.layer -ceq 'c2-capability' }).Count -eq 42) 'classification contains the 41 TK-04 C2 paths plus the TK-05 Adapter inventory generator' 'C2 classification count drifted'
 Check (@($classification.components | Where-Object { [string]$_.layer -ceq 'c2-capability' -and [bool]$_.tcb_included }).Count -eq 0) 'no C2 capability is included in the measured Kernel TCB' 'a C2 capability leaked into TCB inclusion'
 
 $entryContractPath = Join-Path $RepoRoot 'policies\entry-contract.md'
