@@ -32,7 +32,7 @@ function Test-HarnessEvidenceExcludedPath {
     } else {
         [System.StringComparison]::Ordinal
     }
-    if ($Path.Equals('.assistant/runtime',$comparison) -or $Path.StartsWith('.assistant/runtime/',$comparison)) { return $true }
+    if ($Path.Equals('.assistant/runtime',$comparison) -or $Path.StartsWith('.assistant/runtime/',$comparison) -or $Path.Equals('.qoder',$comparison) -or $Path.StartsWith('.qoder/',$comparison)) { return $true }
     foreach ($exactPath in @($ExactPaths)) {
         if ($Path.Equals([string]$exactPath,$comparison)) { return $true }
     }
@@ -148,14 +148,14 @@ function Get-HarnessEvidenceRevision {
         foreach($excluded in @($exactExclusions|Sort-Object)){$pathspec.Add($(if($runningOnWindows){":(icase,literal,exclude)$excluded"}else{":(literal,exclude)$excluded"}))}
         $working=Invoke-HarnessEvidenceGit -GitPath $gitPath -WorkspaceRoot $gitToolRoot -Arguments (@('diff','--ignore-submodules=none','--no-ext-diff','--no-textconv','--binary','--')+@($pathspec));if($working.ExitCode -ne 0){throw 'unable to compute working diff for Evidence revision'};$workingDiff=$working.Text
         $staged=Invoke-HarnessEvidenceGit -GitPath $gitPath -WorkspaceRoot $gitToolRoot -Arguments (@('diff','--cached','--ignore-submodules=none','--no-ext-diff','--no-textconv','--binary','--')+@($pathspec));if($staged.ExitCode -ne 0){throw 'unable to compute staged diff for Evidence revision'};$stagedDiff=$staged.Text
-        $others=Invoke-HarnessEvidenceGit -GitPath $gitPath -WorkspaceRoot $gitToolRoot -Arguments @('ls-files','--others','--exclude-standard','--','.');if($others.ExitCode-ne0){throw 'unable to enumerate untracked files for Evidence revision'}
+        $others=Invoke-HarnessEvidenceGit -GitPath $gitPath -WorkspaceRoot $gitToolRoot -Arguments @('ls-files','--others','--exclude-standard','--','.',$(if($runningOnWindows){':(top,icase,literal,exclude).qoder'}else{':(top,literal,exclude).qoder'}),$(if($runningOnWindows){':(top,icase,glob,exclude).qoder/**'}else{':(top,glob,exclude).qoder/**'}));if($others.ExitCode-ne0){throw 'unable to enumerate untracked files for Evidence revision'}
         foreach($path in @($others.Lines|ForEach-Object{$_.Replace('\','/')}|Sort-Object)){
             if(Test-HarnessEvidenceExcludedPath -Path $path -ExactPaths @($exactExclusions)){continue}
             $untracked.Add([ordered]@{path=$path;digest=(Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $path)})
         }
         if([string]::IsNullOrEmpty($workingDiff)-and[string]::IsNullOrEmpty($stagedDiff)-and$untracked.Count-eq 0){return $head}
     } else {
-        foreach($file in Get-ChildItem -LiteralPath $WorkspaceRoot -File -Force -Recurse|Sort-Object FullName){
+        foreach($file in Get-ChildItem -LiteralPath $WorkspaceRoot -Force|Where-Object{-not(Test-HarnessEvidenceExcludedPath -Path $_.Name -ExactPaths @())}|ForEach-Object{if($_.PSIsContainer){Get-ChildItem -LiteralPath $_.FullName -File -Force -Recurse}else{$_}}|Sort-Object FullName){
             $relative=Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path $file.FullName
             if(Test-HarnessEvidenceExcludedPath -Path $relative -ExactPaths @($exactExclusions)){continue}
             $untracked.Add([ordered]@{path=$relative;digest=(Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $file.FullName)})

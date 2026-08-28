@@ -258,7 +258,7 @@
     },
     {
       "path": "scripts/lib/Harness.Evidence.psm1",
-      "sha256": "sha256:483962f86efcc250a9a9a2c495a2fefdb958d8cbc11540a0b437b085f0f2046e",
+      "sha256": "sha256:c3f8a376ebe1a78d1218f55e12fa16be4ddb96bbe59fe1fd7acd9d837d29c48a",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
