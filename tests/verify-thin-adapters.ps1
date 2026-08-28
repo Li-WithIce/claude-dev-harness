@@ -15,6 +15,23 @@ function Test-Schema($Value,[string]$Schema){
     try{return Test-Json -Json ($Value|ConvertTo-Json -Depth 40 -Compress) -SchemaFile (Join-Path $RepoRoot $Schema) -ErrorAction Stop -WarningAction SilentlyContinue}
     catch{return $false}
 }
+function Get-IndexBlobSha256([string]$Path){
+    $git=@(Get-Command git -CommandType Application -ErrorAction Stop)[0].Source
+    $start=[Diagnostics.ProcessStartInfo]::new()
+    $start.FileName=$git;$start.UseShellExecute=$false;$start.CreateNoWindow=$true
+    $start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
+    foreach($argument in @('-c','core.fsmonitor=false','-C',$RepoRoot,'show',(':'+$Path))){[void]$start.ArgumentList.Add($argument)}
+    $process=[Diagnostics.Process]::new();$process.StartInfo=$start
+    try{
+        if(-not$process.Start()){throw "unable to start Git index hash: $Path"}
+        $stderrTask=$process.StandardError.ReadToEndAsync()
+        $hash=[Security.Cryptography.SHA256]::Create()
+        try{[byte[]]$digest=$hash.ComputeHash($process.StandardOutput.BaseStream)}finally{$hash.Dispose()}
+        $process.WaitForExit();$stderr=$stderrTask.GetAwaiter().GetResult()
+        if($process.ExitCode-ne0){throw "unable to hash Git index blob: $Path`: $($stderr.Trim())"}
+        return 'sha256:'+[Convert]::ToHexString($digest).ToLowerInvariant()
+    }finally{$process.Dispose()}
+}
 
 $powershellPaths=@(
     'runtime-hooks/claude/pretooluse.ps1',
@@ -103,8 +120,9 @@ $actualInventoryDigest=Get-HarnessCanonicalJsonSha256 -JsonBytes $bytes
 Check ([string]$inventory.inventory_digest-ceq$actualInventoryDigest-and[string]$inventory.digest_algorithm-ceq'canonical-json/v1') 'Adapter inventory digest is canonical-json/v1 over its exact body' 'Adapter inventory digest binding is stale'
 $inventoryPaths=@($inventory.adapters|ForEach-Object{[string]$_.path}|Sort-Object)
 $rawDigestsValid=$true
-foreach($entry in $inventory.adapters){if([string]$entry.raw_sha256-cne (Get-HarnessFileSha256 -Path (Join-Path $RepoRoot ([string]$entry.path)))){$rawDigestsValid=$false}}
-Check (($inventoryPaths-join'|')-ceq($expectedA3-join'|')-and$rawDigestsValid) 'Adapter inventory binds exact A3 raw source bytes' 'Adapter inventory path or raw digest binding is stale'
+foreach($entry in $inventory.adapters){if([string]$entry.raw_sha256-cne (Get-IndexBlobSha256 -Path ([string]$entry.path))){$rawDigestsValid=$false}}
+$classificationDigestValid=[string]$inventory.classification.sha256-ceq(Get-IndexBlobSha256 -Path ([string]$inventory.classification.path))
+Check (($inventoryPaths-join'|')-ceq($expectedA3-join'|')-and$rawDigestsValid-and$classificationDigestValid-and[string]$inventory.source_basis-ceq'git-index-blob/v1') 'Adapter inventory binds exact Git index blobs for classification and A3 sources' 'Adapter inventory path, source basis, or index blob digest binding is stale'
 Check ([int]$inventory.totals.adapter_count-eq9-and[int]$inventory.totals.maximum_adapter_executable_loc-lt200-and[int]$inventory.totals.threshold_breaches-eq0) 'all nine Adapters are below 200 executable LOC' 'an Adapter LOC threshold is breached'
 $beforeHash=(Get-FileHash -LiteralPath $inventoryPath -Algorithm SHA256).Hash
 $beforeWrite=(Get-Item -LiteralPath $inventoryPath).LastWriteTimeUtc

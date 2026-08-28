@@ -1,7 +1,7 @@
 {
   "schema_version": "adapter-inventory/v1",
   "generator_contract_version": "adapter-inventory-generator/v1",
-  "source_basis": "tracked-working-tree-raw-bytes/v1",
+  "source_basis": "git-index-blob/v1",
   "classification": {
     "path": "kernel-component-classification.json",
     "sha256": "sha256:6ff2a95fa0ffbe2c53113270c66dfb51d397e8f390dd23e209c485a00e20f862"
@@ -138,5 +138,5 @@
     "threshold_breaches": 0
   },
   "digest_algorithm": "canonical-json/v1",
-  "inventory_digest": "sha256:2affb749076d3fcf1a85313bb50b65ac26ecd8c3d93fdab7e586d1dc92b58d54"
+  "inventory_digest": "sha256:33dafcd52a9bb63404569bb306dbcafff6f91d9bf5da416edcf376ecf01f004f"
 }

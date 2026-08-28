@@ -154,9 +154,11 @@ state directly, compute trust digests, embed risk-policy constants, validate a
 capability's private business Schema, or contain Release Qualification logic.
 The terminal target is fewer than 200 executable LOC per adapter. TK-05 reaches
 that target for the exact nine classified paths without adding helpers or
-forwarding shims. `adapter-inventory.json` records their raw source digests,
-PowerShell token-line or JavaScript lexical-token metrics, direct Kernel API
-operations, and a 300-character physical-line ceiling that rejects LOC packing.
+forwarding shims. `adapter-inventory.json` records their raw Git index blob
+digests, PowerShell token-line or JavaScript lexical-token metrics, direct
+Kernel API operations, and a 300-character physical-line ceiling that rejects
+LOC packing. The generator rejects real unstaged source changes while remaining
+stable across checkout line-ending conversion.
 
 `adapter-kernel-api/v1` has exactly four logical operations. Its strict request
 and response Schema rejects unknown fields. The PowerShell surface exports one

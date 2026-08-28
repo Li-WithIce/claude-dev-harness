@@ -73,6 +73,45 @@ function Read-StrictDocument {
     }
 }
 
+function Assert-WorktreeMatchesIndex {
+    param([string]$Path,[string]$Label)
+
+    $null = & git -c core.fsmonitor=false -C $RepoRoot diff --quiet --no-ext-diff -- $Path
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -eq 1) { throw "$Label has unstaged bytes and cannot enter an index-bound inventory: $Path" }
+    if ($exitCode -ne 0) { throw "$Label worktree/index comparison failed: $Path" }
+}
+
+function Get-IndexBlobSha256 {
+    param([string]$Path)
+
+    $git = @(Get-Command git -CommandType Application -ErrorAction Stop)[0].Source
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $git
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in @('-c','core.fsmonitor=false','-C',$RepoRoot,'show',(':' + $Path))) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) { throw "Unable to start Git for index blob: $Path" }
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $buffer = [IO.MemoryStream]::new()
+        try {
+            $process.StandardOutput.BaseStream.CopyTo($buffer)
+            [byte[]]$bytes = $buffer.ToArray()
+        } finally { $buffer.Dispose() }
+        $process.WaitForExit()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0) { throw "Unable to read Git index blob: $Path`: $($stderr.Trim())" }
+        return Get-HarnessSha256Bytes -Bytes $bytes
+    } finally { $process.Dispose() }
+}
+
 function Get-SourceLines {
     param([string]$Path)
 
@@ -193,6 +232,7 @@ function Assert-AdapterAuthorityBoundary {
 }
 
 $classificationRelative = (Get-HarnessRelativePath -WorkspaceRoot $RepoRoot -Path (Resolve-HarnessContainedPath -WorkspaceRoot $RepoRoot -Path $ClassificationPath -Label 'Adapter classification' -MustExist File)).Replace('\','/')
+Assert-WorktreeMatchesIndex -Path $classificationRelative -Label 'Adapter classification'
 $classification = Read-StrictDocument -Path $classificationRelative -SchemaPath 'schemas/kernel-component-classification.schema.json' -Label 'Adapter classification'
 $classified = @($classification.components | Where-Object { [string]$_.layer -ceq 'a3-adapter' })
 if ($classified.Count -ne 9) { throw "adapter classification must contain exactly nine A3 paths; actual=$($classified.Count)" }
@@ -207,6 +247,7 @@ foreach ($path in $pathList) {
     $fullPath = Resolve-HarnessContainedPath -WorkspaceRoot $RepoRoot -Path $path -Label 'Adapter source' -MustExist File
     $null = & git -C $RepoRoot ls-files --error-unmatch -- $path 2>$null
     if ($LASTEXITCODE -ne 0) { throw "Adapter source is not tracked: $path" }
+    Assert-WorktreeMatchesIndex -Path $path -Label 'Adapter source'
     $extension = [IO.Path]::GetExtension($path).ToLowerInvariant()
     $metrics = switch ($extension) {
         '.ps1' { Get-PowerShellAdapterMetrics -Path $fullPath }
@@ -222,7 +263,7 @@ foreach ($path in $pathList) {
         path=$path
         layer='a3-adapter'
         language=$(if($extension -ceq '.ps1'){'powershell'}else{'javascript'})
-        raw_sha256=Get-HarnessFileSha256 -Path $fullPath
+        raw_sha256=Get-IndexBlobSha256 -Path $path
         physical_loc=[int]$metrics.Physical
         nonblank_loc=[int]$metrics.Nonblank
         executable_loc=[int]$metrics.Executable
@@ -235,8 +276,8 @@ foreach ($path in $pathList) {
 $body = [ordered]@{
     schema_version='adapter-inventory/v1'
     generator_contract_version='adapter-inventory-generator/v1'
-    source_basis='tracked-working-tree-raw-bytes/v1'
-    classification=[ordered]@{path=$classificationRelative;sha256=Get-HarnessFileSha256 -Path (Join-Path $RepoRoot $classificationRelative)}
+    source_basis='git-index-blob/v1'
+    classification=[ordered]@{path=$classificationRelative;sha256=Get-IndexBlobSha256 -Path $classificationRelative}
     metric_contract=[ordered]@{
         powershell='powershell-token-lines/v1'
         javascript='javascript-lexical-token-lines/v1'

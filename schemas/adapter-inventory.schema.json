@@ -18,7 +18,7 @@
   "properties": {
     "schema_version": { "type": "string", "enum": ["adapter-inventory/v1"] },
     "generator_contract_version": { "type": "string", "enum": ["adapter-inventory-generator/v1"] },
-    "source_basis": { "type": "string", "enum": ["tracked-working-tree-raw-bytes/v1"] },
+    "source_basis": { "type": "string", "enum": ["git-index-blob/v1"] },
     "classification": {
       "type": "object",
       "additionalProperties": false,
