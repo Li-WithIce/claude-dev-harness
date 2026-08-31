@@ -9,6 +9,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# TK-03: retained source is not a live lifecycle writer, including retirement.
+[Console]::Error.WriteLine('v1-memory-repair-retired: preserve legacy history; use explicit paused migration maintenance.')
+exit 2
+
 . "$PSScriptRoot\resolve-obsidian-memory-script.ps1"
 
 function Invoke-InactiveTaskRetirement {

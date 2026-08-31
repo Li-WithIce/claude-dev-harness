@@ -1,0 +1,38 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "archived-legacy",
+  "kind": "legacy",
+  "description": "TK-03 explicit archived validation boundary fixture.",
+  "default_activation": false,
+  "dependencies": {
+    "kernel_api": "v1",
+    "modules": []
+  },
+  "requested_capabilities": [
+    "filesystem-read"
+  ],
+  "ownership": {
+    "owned_paths": [
+      "tests/fixtures/tk03/archive-active-route/archived-legacy/module.manifest.json"
+    ],
+    "watch_paths": []
+  },
+  "entrypoints": {
+    "commands": [],
+    "hooks": []
+  },
+  "validation": {
+    "owner_tests": [
+      "tests/verify-v1-v2-coexistence.ps1"
+    ],
+    "quick": [],
+    "core_group": null,
+    "changed": [],
+    "full": [
+      "tests/verify-v1-v2-coexistence.ps1"
+    ],
+    "archived": [
+      "tests/verify-v1-v2-coexistence.ps1"
+    ]
+  }
+}

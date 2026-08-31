@@ -28,6 +28,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# TK-03 retains these historical bytes below for the separately approved removal diff.
+# No v1 lifecycle execution, plan read, mirror sync or pointer write remains authorized.
+[Console]::Error.WriteLine('v1-lifecycle-retired: use explicit migration maintenance or v2 recovery')
+exit 2
+
 . (Join-Path $PSScriptRoot 'lite-artifact-parser.ps1')
 
 Assert-LiteTaskId -TaskId $TaskId

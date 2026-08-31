@@ -80,19 +80,23 @@ try {
     Assert-True -Condition ($exports.Count -eq 1 -and $exports[0] -ceq 'Resolve-HarnessExecutionProfile') -Success 'policy module exports only the profile selector' -Failure 'policy module exported an unplanned surface'
 
     $canonical = (Get-Content -LiteralPath $canonicalPath -Raw -Encoding utf8) -replace "`r`n?","`n"
-    Assert-True -Condition ($canonical -match '`auto_resolves_to`:\s*`existing-artifact-or-runtime-default-or-v1-fallback`' -and $canonical -match '`v2_entry_activation`:\s*`explicit-or-workspace-new-or-existing-v2-or-runtime-default-new`' -and $canonical -match 'config `v1\|v2\|auto`, then a valid Runtime Default Decision or v1 fallback') -Success 'entry contract preserves artifact-first Runtime Default routing' -Failure 'entry contract protocol default widened or became ambiguous'
+    Assert-True -Condition ($canonical -match '`auto_resolves_to`:\s*`existing-v2-or-admitted-v2-new-task`' -and $canonical -match '`v2_entry_activation`:\s*`v2-only-with-new-work-admission`' -and $canonical -match 'new_work=paused') -Success 'entry contract preserves artifact-first Runtime Default routing' -Failure 'entry contract protocol default widened or became ambiguous'
     $entryRouterSkill = Get-Content -LiteralPath (Join-Path $RepoRoot 'skills\entry-router\SKILL.md') -Raw -Encoding utf8
-    Assert-True -Condition ($canonical -match 'Selected v2 Direct loads no `entry-router`, `orchestrator`, lifecycle skill, Memory, Team, or Provider' -and $canonical -match 'No task/runtime/current/lifecycle writes' -and $canonical -match 'Only a detector-selected v1 request loads `entry-router`' -and $entryRouterSkill -match 'V1 compatibility entry router' -and $entryRouterSkill -match 'Never load for selected v2 Direct') -Success 'Direct entry avoids v1 lifecycle skills and durable harness writes' -Failure 'Direct entry gained a v1 lifecycle or persistence dependency'
+    Assert-True -Condition ($canonical -match 'Selected v2 Direct loads no `entry-router`, `orchestrator`, lifecycle skill, Memory, Team, or Provider' -and $canonical -match 'No task/runtime/current/lifecycle writes' -and $canonical -match 'Legacy lifecycle and shim loading are retired' -and $entryRouterSkill -match 'V1 compatibility entry router' -and $entryRouterSkill -match 'Never load for selected v2 Direct') -Success 'Direct entry avoids v1 lifecycle skills and durable harness writes' -Failure 'Direct entry gained a v1 lifecycle or persistence dependency'
     Assert-True -Condition ($canonical -match 'actual commands/results, self-review, gaps' -and $canonical -match '`not_run`/unavailable is not pass') -Success 'Direct response requires actual commands, results, self-review, and gaps without false pass' -Failure 'Direct evidence summary permits missing or false evidence'
     $architecture = Get-Content -LiteralPath $architecturePath -Raw -Encoding utf8
-    Assert-True -Condition ($architecture -match 'Harness\.Policy\.psm1' -and $architecture -match 'Missing, malformed, unknown, or semantically weaker policy fails closed' -and $architecture -match 'no task/runtime/current state' -and $architecture -match 'HARNESS_PROTOCOL=v1') -Success 'policy engine architecture documents canonical authority, Direct zero-write, and rollback' -Failure 'policy engine architecture artifact is missing or contradicts the implementation contract'
+    Assert-True -Condition ($architecture -match 'Harness\.Policy\.psm1' -and $architecture -match 'Missing, malformed, unknown, or semantically weaker policy fails closed' -and $architecture -match 'no task/runtime/current state' -and $architecture -match 'Explicit v1 is retired') -Success 'policy engine architecture documents canonical authority, Direct zero-write, and rollback' -Failure 'policy engine architecture artifact is missing or contradicts the implementation contract'
 
     $catalog = Get-Content -LiteralPath $catalogPath -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable -ErrorAction Stop
     Assert-True -Condition ([string]$catalog.schema_version -ceq 'direct-route-scenarios/v1' -and @($catalog.cases).Count -eq 19) -Success 'Direct scenario catalog declares nineteen route cases' -Failure 'Direct scenario catalog version or case count drifted'
     foreach ($case in $catalog.cases) {
         $routeInput = Merge-Case -Base $catalog.base -Case $case
-        $result = Invoke-RouteCase -RouteInput $routeInput
         $expected = $case.expected
+        if ($expected.Contains('error')) {
+            Assert-True -Condition (Test-Throws { Invoke-RouteCase -RouteInput $routeInput }) -Success "$($case.id) is rejected" -Failure "$($case.id) was admitted"
+            continue
+        }
+        $result = Invoke-RouteCase -RouteInput $routeInput
         $matches = $true
         foreach ($key in $expected.Keys) {
             if ($key -cin @('trigger','capability')) { continue }

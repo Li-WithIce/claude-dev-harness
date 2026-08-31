@@ -57,6 +57,7 @@
     },
     "quick_tests": { "$ref": "#/definitions/testArray" },
     "full_tests": { "$ref": "#/definitions/nonEmptyTestArray" },
+    "archived_tests": { "$ref": "#/definitions/testArray" },
     "optional_routes": {
       "type": "array",
       "items": {
@@ -197,7 +198,8 @@
             "quick": { "$ref": "#/definitions/testArray" },
             "core_group": { "oneOf": [{ "type": "string", "enum": ["entry-lifecycle", "evaluation-release", "install-evidence", "governance-approval", "harness-contracts"] }, { "type": "null" }] },
             "changed": { "$ref": "#/definitions/testArray" },
-            "full": { "$ref": "#/definitions/testArray" }
+            "full": { "$ref": "#/definitions/testArray" },
+            "archived": { "$ref": "#/definitions/testArray" }
           }
         }
       }

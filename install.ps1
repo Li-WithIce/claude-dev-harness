@@ -3132,11 +3132,6 @@ try {
         hooks = @($presetDefinition.hooks)
         vault_profile = $effectiveVaultProfile
     }
-    if ($effectiveVaultProfile -eq 'minimal') {
-        [void](Assert-InstallStatePathHasNoReparsePoint `
-            -Path (Join-Path $VaultPath '运行时\tasks\.gitkeep') `
-            -Label 'Minimal vault runtime tasks target')
-    }
     if ($vaultProfileSpecified) {
         Write-Warning ("VaultProfile is deprecated; '{0}' mapped to Preset '{1}'." -f $VaultProfile,$effectivePreset)
     }

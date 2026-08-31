@@ -247,19 +247,18 @@ function Test-FullVaultProfile {
 }
 
 function Get-ExpectedPresetDefinition {
-    param(
-        [Parameter(Mandatory)][ValidateSet('core','governed','full')][string]$Name,
-        [Parameter(Mandatory)][string]$RepoSkillsPath
-    )
-
-    $coreSkills = @('.system','entry-router','orchestrator','plan','implement','review','test','spec')
-    if ($Name -eq 'core') {
-        return [ordered]@{features=@('core','v1-compatibility');skills=$coreSkills;hooks=@('pretooluse.ps1','codex-pretooluse-launcher.ps1','stop.js','workspace-resolver.js');vault_profile='minimal'}
+    param([Parameter(Mandatory)][ValidateSet('core','governed','full')][string]$Name)
+    # Current desired state comes from the same validated Profile as installation.
+    # Historical registry ownership remains the uninstall/foreign-data authority.
+    $distribution = Import-Module (Join-Path $RepoRoot 'scripts/lib/Harness.Distribution.psm1') -PassThru
+    $plan = & $distribution { param($R,$P) Get-HarnessDistributionPlan -RepoRoot $R -Preset $P } $RepoRoot $Name
+    return [ordered]@{
+        features=@($plan.features)
+        skills=@('.system') + @($plan.assets | Where-Object kind -CEQ 'skill' | ForEach-Object target)
+        hooks=@($plan.assets | Where-Object kind -CEQ 'hook' | ForEach-Object target)
+        vault_profile=$plan.vault_profile
+        vault_assets=@($plan.assets | Where-Object { $_.kind -ceq 'vault' -and $_.ownership -ceq 'managed' })
     }
-    if ($Name -eq 'governed') {
-        return [ordered]@{features=@('core','v1-compatibility','governed');skills=@($coreSkills+@('planning','audit'));hooks=@('pretooluse.ps1','codex-pretooluse-launcher.ps1','stop.js','workspace-resolver.js');vault_profile='minimal'}
-    }
-    return [ordered]@{features=@('core','v1-compatibility','governed','memory','team','md-html','adapters','provider-references');skills=@(Get-ChildItem -LiteralPath $RepoSkillsPath -Force|Sort-Object Name|Select-Object -ExpandProperty Name);hooks=@('pretooluse.ps1','codex-pretooluse-launcher.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js');vault_profile='full'}
 }
 
 function Assert-GitIgnoreManagedEntries {
@@ -522,7 +521,7 @@ if ($effectivePreset -notin @('core','governed','full')) {
     Add-Error ("Installed effective_preset is invalid: {0}" -f $effectivePreset)
     $effectivePreset = if ($VaultIsFull) { 'full' } else { 'core' }
 }
-$presetDefinition = Get-ExpectedPresetDefinition -Name $effectivePreset -RepoSkillsPath $RepoSkillsPath
+$presetDefinition = Get-ExpectedPresetDefinition -Name $effectivePreset
 $hasFeatureOwnership = $null -ne $installManifest -and
     $installManifest.Contains('feature_ownership') -and
     $null -ne $installManifest.feature_ownership
@@ -567,113 +566,15 @@ Assert-TemplateFileMatches -Path $CodexAgentsPath -TemplatePath (Join-Path $Repo
 Assert-RenderedFile -Path $WorkspaceAgentsPath -ForbiddenTokens $ForbiddenTokens
 Assert-TemplateFileMatches -Path $WorkspaceAgentsPath -TemplatePath (Join-Path $RepoRoot 'agent-configs\workspace\AGENTS.md.template') -Label 'workspace AGENTS.md' -RolloutMarker 'workspace-agents-template-drift'
 Assert-GitIgnoreManagedEntries -Path $WorkspaceGitIgnorePath
-Assert-RenderedFile -Path $WorkspaceEntryAgentsPath -ForbiddenTokens $ForbiddenTokens
-Assert-TemplateFileMatches -Path $WorkspaceEntryAgentsPath -TemplatePath (Join-Path $RepoRoot 'vault-template\entry\AGENTS.md.template') -Label 'workspace entry AGENTS.md' -RolloutMarker 'shim-template-drift'
-Assert-RenderedFile -Path $WorkspaceAdvanceStageShimPath -ForbiddenTokens $ForbiddenTokens
-Assert-TemplateFileMatches -Path $WorkspaceAdvanceStageShimPath -TemplatePath (Join-Path $RepoRoot 'vault-template\entry\advance-stage.ps1.template') -Label 'workspace advance-stage shim' -RolloutMarker 'shim-template-drift'
-Assert-RenderedFile -Path $WorkspaceTaskShimPath -ForbiddenTokens $ForbiddenTokens
-Assert-TemplateFileMatches -Path $WorkspaceTaskShimPath -TemplatePath (Join-Path $RepoRoot 'vault-template\entry\task.ps1.template') -Label 'workspace task shim' -RolloutMarker 'shim-template-drift'
-Assert-RenderedFile -Path $WorkspaceValidateArtifactsShimPath -ForbiddenTokens $ForbiddenTokens
-Assert-TemplateFileMatches -Path $WorkspaceValidateArtifactsShimPath -TemplatePath (Join-Path $RepoRoot 'vault-template\entry\validate-lite-artifacts.ps1.template') -Label 'workspace validate-lite-artifacts shim'
-try {
-    $validatorShimCommand = Get-Command -Name $WorkspaceValidateArtifactsShimPath -CommandType ExternalScript -ErrorAction Stop
-    $declaredParameters = @($validatorShimCommand.ScriptBlock.Ast.ParamBlock.Parameters)
-    $declaredNames = @($declaredParameters | ForEach-Object { $_.Name.VariablePath.UserPath })
-    $taskIdParameter = $validatorShimCommand.Parameters['TaskId']
-    $qualityParameter = $validatorShimCommand.Parameters['Quality']
-    $taskIdBindings = @($taskIdParameter.Attributes | Where-Object { $_ -is [System.Management.Automation.ParameterAttribute] })
-    $qualityBindings = @($qualityParameter.Attributes | Where-Object { $_ -is [System.Management.Automation.ParameterAttribute] })
-    if ($declaredNames.Count -eq 2 -and
-        $declaredNames -ccontains 'TaskId' -and
-        $declaredNames -ccontains 'Quality' -and
-        $taskIdBindings.Count -eq 1 -and
-        $qualityBindings.Count -eq 1 -and
-        $taskIdParameter.ParameterType -eq [string] -and
-        $taskIdBindings[0].Mandatory -and
-        -not $taskIdBindings[0].ValueFromRemainingArguments -and
-        $qualityParameter.ParameterType -eq [System.Management.Automation.SwitchParameter] -and
-        -not $qualityBindings[0].Mandatory -and
-        -not $qualityBindings[0].ValueFromRemainingArguments) {
-        Add-Check 'workspace validate-lite-artifacts shim exposes only mandatory TaskId and optional Quality'
-    } else {
-        Add-Error 'workspace validate-lite-artifacts shim parameter contract should be exactly mandatory TaskId plus optional Quality'
-    }
-
-    $expectedValidatorPath = Get-NormalizedPath -Path (Join-Path $RepoRoot 'scripts\validate-lite-artifacts.ps1')
-    $delegations = @($validatorShimCommand.ScriptBlock.Ast.FindAll({
-        param($node)
-        $node -is [System.Management.Automation.Language.CommandAst] -and
-        -not [string]::IsNullOrWhiteSpace($node.GetCommandName()) -and
-        (Get-NormalizedPath -Path $node.GetCommandName()) -eq $expectedValidatorPath
-    }, $true))
-    $qualityForwarders = @()
-    if ($delegations.Count -eq 1) {
-        $qualityForwarders = @($delegations[0].CommandElements | Where-Object {
-            $_ -is [System.Management.Automation.Language.CommandParameterAst] -and
-            $_.ParameterName -ceq 'Quality' -and
-            $_.Argument -is [System.Management.Automation.Language.VariableExpressionAst] -and
-            $_.Argument.VariablePath.UserPath -ceq 'Quality'
-        })
-    }
-    $splats = @($validatorShimCommand.ScriptBlock.Ast.FindAll({
-        param($node)
-        $node -is [System.Management.Automation.Language.VariableExpressionAst] -and $node.Splatted
-    }, $true))
-    $scriptInvocations = @($validatorShimCommand.ScriptBlock.Ast.FindAll({
-        param($node)
-        $node -is [System.Management.Automation.Language.CommandAst] -and
-        ($node.InvocationOperator -in @([System.Management.Automation.Language.TokenKind]::Ampersand,[System.Management.Automation.Language.TokenKind]::Dot) -or
-            $node.GetCommandName() -match '(?i)\.ps1$')
-    }, $true))
-    if ($delegations.Count -eq 1 -and
-        $scriptInvocations.Count -eq 1 -and
-        $scriptInvocations[0].Extent.StartOffset -eq $delegations[0].Extent.StartOffset -and
-        $qualityForwarders.Count -eq 1 -and
-        $splats.Count -eq 0) {
-        Add-Check 'workspace validate-lite-artifacts shim explicitly forwards Quality without splatting'
-    } else {
-        Add-Error 'workspace validate-lite-artifacts shim should explicitly forward -Quality:$Quality to one canonical validator without splatting'
-    }
-} catch {
-    Add-Error ("workspace validate-lite-artifacts shim contract could not be inspected: {0}" -f $_.Exception.Message)
+foreach ($asset in $presetDefinition.vault_assets) {
+    $target = Join-Path $VaultPath ([string]$asset.target)
+    $source = Join-Path $RepoRoot ([string]$asset.source)
+    Assert-RenderedFile -Path $target -ForbiddenTokens $ForbiddenTokens
+    Assert-TemplateFileMatches -Path $target -TemplatePath $source -Label ("workspace asset " + $asset.target) -RolloutMarker 'shim-template-drift'
 }
-if (Test-Path -LiteralPath $WorkspaceRuntimeTasksPath -PathType Container) {
-    Add-Check 'workspace runtime tasks directory exists'
-} else {
-    Add-Error ("缺少 workspace runtime tasks directory: {0}" -f $WorkspaceRuntimeTasksPath)
-}
-if ($VaultIsFull) {
-    Add-Check 'workspace vault profile detected: full'
-    foreach ($protocol in @(
-            [pscustomobject]@{
-                RelativePath = '工作流\共享记忆协议.md'
-                Label = 'workspace shared-memory protocol'
-            },
-            [pscustomobject]@{
-                RelativePath = '工作流\写回协议.md'
-                Label = 'workspace writeback protocol'
-            }
-            [pscustomobject]@{
-                RelativePath = '工作流\任务识别协议.md'
-                Label = 'workspace task-routing protocol'
-            }
-            [pscustomobject]@{
-                RelativePath = '工作流\恢复协议.md'
-                Label = 'workspace recovery protocol'
-            }
-            [pscustomobject]@{
-                RelativePath = '工作流\记忆管理协议.md'
-                Label = 'workspace memory-management protocol'
-            }
-        )) {
-        $protocolPath = Join-Path $VaultPath $protocol.RelativePath
-        $protocolTemplatePath = Join-Path (Join-Path $RepoRoot 'vault-template') $protocol.RelativePath
-        Assert-RenderedFile -Path $protocolPath -ForbiddenTokens $ForbiddenTokens
-        Assert-TemplateFileMatches -Path $protocolPath -TemplatePath $protocolTemplatePath -Label $protocol.Label
-    }
-} else {
-    Add-Check 'workspace vault profile detected: minimal'
-}
+# Retired v1 shims, task mirrors and lifecycle protocols are not desired assets.
+# Do not inspect or reclassify retained user/foreign history as installation drift.
+Add-Check ("workspace vault profile detected: " + $presetDefinition.vault_profile)
 
 if (Test-Path -LiteralPath $ClaudeSettingsPath -PathType Leaf) {
     try {
@@ -860,26 +761,7 @@ if ($null -eq $tomlHits) {
     Add-Error ("agent-configs/codex/*.toml 命中 forbidden prefix: {0}:{1}" -f $firstHit.Path, $firstHit.LineNumber)
 }
 
-if (-not $VaultIsFull) {
-    Add-Check 'minimal workspace vault skips shared-memory health check'
-} elseif ($Scope -eq 'WorkflowStatus') {
-    Add-Check 'WorkflowStatus scope skips shared-memory health because harness-status runs that gate separately'
-} elseif (Test-Path -LiteralPath (Join-Path $RepoRoot 'scripts\memory-health.ps1') -PathType Leaf) {
-    $healthArguments = @{
-        VaultRoot = $VaultPath
-    }
-    if (-not [string]::IsNullOrWhiteSpace($CurrentFlowPath)) {
-        $healthArguments.OrchestratorFlowPath = $CurrentFlowPath
-    }
-    $healthOutput = @(& (Join-Path $RepoRoot 'scripts\memory-health.ps1') @healthArguments 2>&1)
-    if ($LASTEXITCODE -eq 0 -and ($healthOutput -join [Environment]::NewLine) -match 'STATUS:\s+PASS') {
-        Add-Check '共享记忆健康检查返回 STATUS: PASS'
-    } else {
-        Add-Error ("共享记忆健康检查失败: exit={0}" -f $LASTEXITCODE)
-    }
-} else {
-    Add-Error ("缺少 memory-health.ps1: {0}" -f (Join-Path $RepoRoot 'scripts\memory-health.ps1'))
-}
+Write-Output 'NOT_RUN: legacy shared-memory health is explicit historical maintenance, not a v2 install gate.'
 
 $status = 'PASS'
 if ($script:Errors.Count -gt 0) {

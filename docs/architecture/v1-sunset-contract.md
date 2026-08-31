@@ -7,10 +7,14 @@ removed. TK-00 does not execute Sunset. A date, milestone name, or the fact that
 all gates pass is not deletion authority; the user must separately authorize
 the exact removal diff after every gate is current-head `met`.
 
-Statuses are `not_met`, `partial`, or `met`. The current TK-00 observations are
-deliberately conservative and must be regenerated when Sunset is proposed.
+Statuses are `not_met`, `partial`, or `met`. The table below preserves the
+TK-00 baseline, not current completion evidence. TK-03 is implementing the
+[user-confirmed v2-only replacement contract](tk03-v2-only-transition.md).
+Its one authorized workspace migration is complete, but global owner
+assertions, current-head validation and exact physical-removal approval are
+separate gates. No full Sunset completion or deletion is claimed here.
 
-## Gates
+## Gates and historical TK-00 observations
 
 | ID | Requirement | Machine evidence | Human evidence | Failure meaning | Removal unlocked | Current status |
 |---|---|---|---|---|---|---|

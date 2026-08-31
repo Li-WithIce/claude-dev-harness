@@ -48,11 +48,18 @@ a sibling skill directory does not install it. The legacy `.system` directory
 is fixed installer bookkeeping with its existing local-overlay preservation;
 it is not discoverable module authorization.
 
-The supplied profiles preserve the baseline's 8/10/14 skills including
+The TK-06 baseline profiles preserved 8/10/14 skills including
 `.system`, 4/4/5 hooks and 5/5/29 vault files for core/governed/full respectively.
-`full` authorizes four module entry assets: the md-html, obsidian-memory and
+TK-06 `full` authorized four module entry assets: the md-html, obsidian-memory and
 workflow-team skill entries, and `vault-template/MEMORY.md`. The declared Team
-documentation request is not installed because it has no Profile grant.
+documentation request was not installed because it had no Profile grant.
+
+TK-03 explicitly replaces those active selections: core/governed/full now
+install 1/3/6 skills including `.system`, 4/4/5 hooks and 1/1/16 vault files.
+The full Profile authorizes three module assets (md-html, obsidian-memory and
+`MEMORY.md`), not the v1-only workflow-team skill. No v1 shim, stage skill or
+task mirror is desired. The retained sources and historical registry records
+are not deleted; existing reconciliation still protects foreign/user-owned data.
 
 ## Construction and consumption
 

@@ -72,8 +72,8 @@ try {
 
     if ($Command -cin @('enable-v2','reset-auto','disable-v2')) {
         Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1') -Force -ErrorAction Stop
-        $protocolValue=switch($Command){'enable-v2'{'v2'}'disable-v2'{'v1'}default{'auto'}}
-        $result=Set-HarnessWorkspaceProtocolConfig -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -NewTaskProtocol $protocolValue
+        $protocolValue=if($Command -ceq 'reset-auto'){'auto'}else{'v2'}
+        $result=Set-HarnessWorkspaceProtocolConfig -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -NewTaskProtocol $protocolValue -PauseNewWork:($Command -ceq 'disable-v2')
     } elseif ($Command -ceq 'protocol') {
         Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1') -Force -ErrorAction Stop
         $result = Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId
@@ -94,7 +94,7 @@ try {
             Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1') -Force -ErrorAction Stop
             $protocol = Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId
             if ([string]$protocol.selected_protocol -cne 'v2') {
-                throw 'selected protocol is v1; new v2 task commands require HARNESS_PROTOCOL=v2 and existing v1 tasks require explicit migration'
+                throw "new-work-not-admitted: $($protocol.reason); recover existing v2 tasks or explicitly repair admission"
             }
             $env:HARNESS_PROTOCOL = 'v2'
         } else {
@@ -144,12 +144,14 @@ try {
         Write-Output ("operation: {0}" -f $result.operation)
         Write-Output ("action: {0}" -f $result.action)
         Write-Output ("new_task_protocol: {0}" -f $result.new_task_protocol)
+        Write-Output ("new_work: {0}" -f $result.new_work)
         Write-Output ("path: {0}" -f $result.path)
     } elseif ($Command -ceq 'protocol') {
         Write-Output ("task_id: {0}" -f $(if ($null -eq $result.task_id) { 'none' } else { $result.task_id }))
         Write-Output ("requested_protocol: {0}" -f $result.requested_protocol)
         Write-Output ("detected_protocol: {0}" -f $result.detected_protocol)
         Write-Output ("selected_protocol: {0}" -f $result.selected_protocol)
+        Write-Output ("new_task_admission: {0}" -f $result.new_task_admission)
         Write-Output ("preference_source: {0}" -f $result.preference_source)
         Write-Output ("default_source: {0}" -f $result.default_source)
         Write-Output ("reason: {0}" -f $result.reason)

@@ -26,7 +26,11 @@ Core ships exactly two protected-action rules: production destructive database c
 5. A known Critical trigger raises the profile to Critical. Unknown triggers are rejected rather than ignored.
 6. Protected-action matches can only raise requirements. Scope expansion or a newly discovered product blocker reroutes before write.
 
-`HARNESS_PROTOCOL=v2` and workspace `enable-v2` remain unconditional new-task opt-ins. `auto` is artifact-first and, after workspace config, consumes only a valid version-independent Runtime Default Decision; Qualification Reports are not Runtime inputs. `HARNESS_PROTOCOL=v1` remains the immediate rollback switch.
+TK-03 checks new-work admission even for `HARNESS_PROTOCOL=v2`. `disable-v2`
+pauses new work, while `enable-v2` and `reset-auto` explicitly restore v2-only
+admission. Missing Runtime Default admits v2; an invalid/unavailable Decision
+blocks. Qualification Reports are never Runtime inputs. Existing identity
+hands off to v2 recovery. Explicit v1 is retired, not a rollback switch.
 
 ## Profile contracts
 
@@ -52,6 +56,8 @@ Ask is `requirement_state=blocked`, not a fifth profile. Legacy `quick` and `wor
 
 ## Validation and rollback
 
-`tests/verify-v2-policy-contracts.ps1`, `tests/verify-v2-requirement-gate.ps1`, `tests/verify-v2-direct-no-artifacts.ps1`, `tests/verify-v2-approval.ps1`, `tests/verify-v2-install-presets.ps1`, `tests/verify-runtime-qualification-decoupling.ps1`, and the scenario evals cover the policy boundary and installed command fixtures. The install preset test verifies allow/deny JSON under cmd, PowerShell 7, and Windows PowerShell parsers; it does not mark Host trust, Hook activation, enterprise endpoint policy, Release Qualification, or production execution as passed. A missing or invalid Runtime Default Decision keeps `auto` on v1; unrelated unavailable Host facts do not block explicit v2 or Direct.
+`tests/verify-v2-policy-contracts.ps1`, `tests/verify-v2-requirement-gate.ps1`, `tests/verify-v2-direct-no-artifacts.ps1`, `tests/verify-v2-approval.ps1`, `tests/verify-v2-install-presets.ps1`, `tests/verify-runtime-qualification-decoupling.ps1`, and the scenario evals cover the policy boundary and installed command fixtures. The install preset test verifies allow/deny JSON under cmd, PowerShell 7, and Windows PowerShell parsers; it does not mark Host trust, Hook activation, enterprise endpoint policy, Release Qualification, or production execution as passed. An absent Runtime Default Decision admits new v2 work; an existing invalid or unavailable Decision blocks `auto` without fallback. Workspace pause also blocks explicit v2 and Direct; unrelated optional Host facts do not become Runtime requirements.
 
-Rollback sets `HARNESS_PROTOCOL=v1` or reverts the relevant v2 PR. Existing v1 five-stage tasks and their install, update, uninstall, recovery, and validation paths remain unchanged.
+Rollback pauses new work and uses v2 recovery or a separately approved known-good
+v2 distribution. The [TK-03 contract](tk03-v2-only-transition.md) preserves
+legacy history but retires ordinary v1 lifecycle, install and recovery paths.

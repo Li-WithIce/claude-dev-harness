@@ -350,8 +350,6 @@ function Assert-InstalledPowerShellEntriesParse {
 
     $paths = @(
         (Join-Path $Fixture.Workspace '.assistant\entry\task.ps1'),
-        (Join-Path $Fixture.Workspace '.assistant\entry\advance-stage.ps1'),
-        (Join-Path $Fixture.Workspace '.assistant\entry\validate-lite-artifacts.ps1'),
         (Join-Path $Fixture.User '.claude\hooks-memory\pretooluse.ps1'),
         (Join-Path $Fixture.User '.claude\hooks-memory\codex-pretooluse-launcher.ps1')
     )
@@ -395,10 +393,14 @@ function Assert-InstalledTaskProtocol {
     $priorProtocol = $env:HARNESS_PROTOCOL
     $priorReport = $env:HARNESS_V2_ELIGIBILITY_REPORT
     $result = $null
+    $newResult = $null
     $replayResult = $null
     try {
         $env:HARNESS_PROTOCOL = 'auto'
         Remove-Item Env:HARNESS_V2_ELIGIBILITY_REPORT -ErrorAction SilentlyContinue
+        $newResult = Invoke-ChildScript -UserProfile $Fixture.User -ScriptPath (Join-Path $Fixture.Workspace '.assistant\entry\task.ps1') -Arguments @(
+            'protocol','-AsJson'
+        )
         $result = Invoke-ChildScript -UserProfile $Fixture.User -ScriptPath (Join-Path $Fixture.Workspace '.assistant\entry\task.ps1') -Arguments @(
             'protocol','-TaskId',$taskId,'-AsJson'
         )
@@ -411,23 +413,22 @@ function Assert-InstalledTaskProtocol {
         if ($null -eq $priorReport) { Remove-Item Env:HARNESS_V2_ELIGIBILITY_REPORT -ErrorAction SilentlyContinue } else { $env:HARNESS_V2_ELIGIBILITY_REPORT = $priorReport }
     }
 
+    $newSelection = $null
+    try { if ($null -ne $newResult -and $newResult.ExitCode -eq 0) { $newSelection = $newResult.Output | ConvertFrom-Json -AsHashtable -ErrorAction Stop } } catch { }
+    if ($null -ne $newSelection -and $newSelection.selected_protocol -ceq 'v2' -and $newSelection.new_task_admission -ceq 'enabled') {
+        Add-Check "$Label installed task entry admits new work only as v2"
+    } else {
+        Add-Failure "$Label installed task entry did not admit new v2 work"
+    }
     $resultExit = if ($null -eq $result) { 'unavailable' } else { [string]$result.ExitCode }
     $resultOutput = if ($null -eq $result) { '' } else { [string]$result.Output }
     $replayExit = if ($null -eq $replayResult) { 'unavailable' } else { [string]$replayResult.ExitCode }
     $replayOutput = if ($null -eq $replayResult) { '' } else { [string]$replayResult.Output }
-    $value = $null
-    if ($resultExit -eq '0') {
-        try { $value = $resultOutput.Trim() | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop } catch {}
-    }
-    if ($null -ne $value -and
-        [string]$value.detected_protocol -ceq 'v1' -and
-        [string]$value.selected_protocol -ceq 'v1' -and
-        [string]$value.v1_plan_path -ceq "docs/tasks/$taskId/plan.md" -and
-        [int]$value.side_effects.runtime_writes -eq 0 -and
-        [int]$value.side_effects.artifact_writes -eq 0) {
-        Add-Check "$Label executes protocol through the installed workspace-bound task shim"
+    if ($resultExit -eq '2' -and $resultOutput -match 'legacy-task-requires-explicit-migration' -and
+        [IO.File]::ReadAllText($planPath) -ceq $planContent) {
+        Add-Check "$Label installed task entry rejects legacy identity without rewriting its plan"
     } else {
-        Add-Failure "$Label installed task shim protocol call failed: exit=$resultExit output=$resultOutput"
+        Add-Failure "$Label installed task entry did not retire legacy selection: exit=$resultExit output=$resultOutput"
     }
     if ($null -ne $replayResult -and $replayExit -eq '2' -and $replayOutput -match 'transaction journal not found' -and $replayOutput -notmatch 'HARNESS_PROTOCOL') {
         Add-Check "$Label installed task shim enters bounded v2 replay without caller protocol state"
@@ -564,20 +565,14 @@ $script:UninstallScript = Join-Path $script:RepoRoot 'uninstall.ps1'
 $script:Checks = [System.Collections.Generic.List[string]]::new()
 $script:Failures = [System.Collections.Generic.List[string]]::new()
 $script:ScratchRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('dev-harness-preset-test-' + [guid]::NewGuid().ToString('N'))
-$coreSkills = @('.system','entry-router','orchestrator','plan','implement','review','test','spec')
+$coreSkills = @('.system')
 $governedSkills = @($coreSkills + @('planning','audit'))
-$fullSkills = @(
-    '.system'
-    Get-ChildItem -LiteralPath (Join-Path $script:RepoRoot 'skills') -Force -Directory |
-        Where-Object { $_.Name -cne '.system' } |
-        Sort-Object Name |
-        Select-Object -ExpandProperty Name
-)
+$fullSkills = @('.system','audit','codex','md-html','obsidian-memory','planning')
 $coreHooks = @('pretooluse.ps1','codex-pretooluse-launcher.ps1','stop.js','workspace-resolver.js')
 $fullHooks = @('pretooluse.ps1','codex-pretooluse-launcher.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js')
-$coreFeatures = @('core','v1-compatibility')
-$governedFeatures = @('core','v1-compatibility','governed')
-$fullFeatures = @('core','v1-compatibility','governed','memory','team','md-html','adapters','provider-references')
+$coreFeatures = @('core')
+$governedFeatures = @('core','governed')
+$fullFeatures = @('core','governed','memory','md-html','adapters','provider-references')
 
 try {
     New-Item -ItemType Directory -Path $script:ScratchRoot -Force | Out-Null
@@ -2098,7 +2093,7 @@ try {
             Assert-ProtocolConfigPreserved $fullFixture $fullProtocolConfig $preserveManifest 'full update'
             if (([System.IO.File]::ReadAllBytes($fullRolloutSentinel)-join',') -ceq ($fullRolloutBytes-join',') -and (Test-ManifestExcludesPath $preserveManifest $fullRolloutSentinel)) { Add-Check 'full update preserves and does not claim the canonical rollout report' } else { Add-Failure 'full update changed or claimed the canonical rollout report' }
             if ((Test-Path -LiteralPath (Join-Path $fullFixture.User '.codex\skills\obsidian-memory')) -and
-                (Test-Path -LiteralPath (Join-Path $fullFixture.User '.codex\skills\workflow-team')) -and
+                (-not (Test-Path -LiteralPath (Join-Path $fullFixture.User '.codex\skills\workflow-team'))) -and
                 (Test-Path -LiteralPath (Join-Path $fullFixture.User '.claude\hooks-memory\userpromptsubmit.js'))) {
                 Add-Check 'implicit update preserves full optional capabilities'
             } else {

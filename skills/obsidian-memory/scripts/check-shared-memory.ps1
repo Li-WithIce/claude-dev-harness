@@ -11,6 +11,27 @@ $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $scriptRoot 'runtime-state-common.ps1')
 $VaultRoot = Resolve-SharedMemoryVaultRoot -VaultRoot $VaultRoot -OrchestratorFlowPath $OrchestratorFlowPath
 
+# This retained checker diagnoses v1 history only, never current v2 Runtime.
+# Fresh optional Memory does not require retired mirrors to be reconstructed.
+try {
+    $hasHistory = Test-LegacyMemoryHistoryPresent -VaultRoot $VaultRoot -OrchestratorFlowPath $OrchestratorFlowPath
+    if (-not $hasHistory) {
+        foreach ($relative in @('工作流/共享记忆协议.md', '工作流/记忆管理协议.md', '运行时/收件箱.md', '运行时/记忆候选.md', '配置/系统信息.md', '配置/用户偏好.md', '配置/工具与组件.md')) {
+            $item = Get-Item -LiteralPath (Join-Path $VaultRoot $relative) -Force -ErrorAction Stop
+            if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'memory-asset-path-invalid' }
+        }
+        Write-Output 'STATUS: NOT_APPLICABLE'
+        Write-Output 'Scope: historical-v1-only'
+        Write-Output 'Reason: no retained v1 mirrors; v2 Runtime health was not checked. Do not recreate retired mirrors.'
+        exit 0
+    }
+} catch {
+    Write-Output 'STATUS: FAIL'
+    Write-Output 'Scope: historical-v1-only'
+    Write-Output 'Reason: missing optional Memory assets or invalid/unavailable historical boundary.'
+    exit 2
+}
+
 $errors = @()
 $warnings = @()
 $checks = @()
@@ -47,7 +68,7 @@ function Get-YamlField {
     }
 
     $pattern = '^{0}:\s*(.+)$' -f [regex]::Escape($Field)
-    $match = Select-String -Path $Path -Pattern $pattern -Encoding utf8 | Select-Object -First 1
+    $match = Select-String -LiteralPath $Path -Pattern $pattern -Encoding utf8 | Select-Object -First 1
     if ($null -eq $match) {
         return $null
     }
@@ -122,7 +143,7 @@ function Get-TableValue {
     }
 
     $pattern = '^\|\s*{0}\s*\|\s*(.+?)\s*\|$' -f [regex]::Escape($Key)
-    $match = Select-String -Path $Path -Pattern $pattern -Encoding utf8 | Select-Object -First 1
+    $match = Select-String -LiteralPath $Path -Pattern $pattern -Encoding utf8 | Select-Object -First 1
     if ($null -eq $match) {
         return $null
     }
@@ -141,7 +162,7 @@ function Get-BulletValue {
     }
 
     $pattern = '^\-\s*{0}\s*:\s*(.+)$' -f [regex]::Escape($Key)
-    $match = Select-String -Path $Path -Pattern $pattern -Encoding utf8 | Select-Object -First 1
+    $match = Select-String -LiteralPath $Path -Pattern $pattern -Encoding utf8 | Select-Object -First 1
     if ($null -eq $match) {
         return $null
     }
@@ -200,7 +221,7 @@ function Get-LikelyMojibakeHits {
     }
 
     $pattern = '鍥|锛|銆|鈥|鏈€|褰撳墠|浠诲姟|鐢ㄦ埛|宸插|缁撴灉|璇锋眰|闃舵|鍐欏洖|杩涘害|琛ュ厖|杩涘睍|�|[\uE000-\uF8FF]'
-    return @(Select-String -Path $Path -Pattern $pattern -Encoding utf8 | Select-Object -First 5)
+    return @(Select-String -LiteralPath $Path -Pattern $pattern -Encoding utf8 | Select-Object -First 5)
 }
 
 function Resolve-WorkspacePath {
@@ -424,7 +445,7 @@ if ($null -ne $taskValue -and $null -ne $statusValue) {
 }
 
 if (Test-Path -LiteralPath $candidatePath) {
-    $candidateContent = Get-Content -Path $candidatePath -Encoding utf8 -Raw
+    $candidateContent = Get-Content -LiteralPath $candidatePath -Encoding utf8 -Raw
     if ($candidateContent -match '\|\s*ID\s*\|\s*日期\s*\|\s*类型\s*\|') {
         Add-Check '记忆候选.md 含标准表头'
     } else {
@@ -541,7 +562,7 @@ if (Test-Path -LiteralPath $tasksDir -PathType Container) {
 $lockPath = Join-Path $runtimeDir 'runtime.lock.json'
 if (Test-Path -LiteralPath $lockPath) {
     try {
-        $lockContent = Get-Content -Path $lockPath -Encoding utf8 -Raw | ConvertFrom-Json
+        $lockContent = Get-Content -LiteralPath $lockPath -Encoding utf8 -Raw | ConvertFrom-Json
         $lockedAt = [datetime]::Parse($lockContent.locked_at, [System.Globalization.CultureInfo]::InvariantCulture)
         $lockAge = (Get-Date) - $lockedAt
         if ($lockAge.TotalMinutes -gt 30) {
@@ -725,7 +746,9 @@ foreach ($lastSessionField in @('日期', '任务', '状态', '摘要')) {
     }
 }
 
-$agentRoots = Get-DefaultAgentRoots
+# An explicit Vault diagnostic never authorizes recursive scans of agent homes.
+# Preserve the retired loop as source history, with no active scan targets.
+$agentRoots = @()
 $forbiddenNames = @('恢复索引.md', '当前任务.md', '中断任务.md', '上次会话.md', '收件箱.md', '记忆候选.md')
 
 foreach ($root in $agentRoots) {
@@ -750,6 +773,7 @@ if ($errors.Count -gt 0) {
 }
 
 Write-Output ('STATUS: {0}' -f $status)
+Write-Output 'Scope: historical-v1-only'
 Write-Output ('VaultRoot: {0}' -f $VaultRoot)
 Write-Output ''
 Write-Output 'Info:'

@@ -116,8 +116,26 @@ For v1 Capability documents, `validation.core_groups` replaces the singular
 v0 `core_group`. It is a strict object whose only possible keys are the same
 five stable identities. A Capability may contribute an explicit ordered subset
 to more than one group, but every contributed test must be one of that module's
-`owner_tests`. TK-04 preserves the exact pre-existing 14/14/3/3/20 group
-membership and order.
+`owner_tests`. TK-04 preserved the then-current group membership and order.
+TK-03 retains these five public identities while moving retired v1 lifecycle
+fixtures out of active routes and adding v2-only admission coverage.
+
+## Explicit archived validation (TK-03)
+
+The v0 source Schema and v0/v1 catalog Schemas add an optional archival field;
+this is a narrow, explicit construction-contract extension, not a new router
+or a change to historical digest algorithms. Only an inactive v0 `legacy`
+module with no CoreGroup may declare `validation.archived`. Each archived path
+must still be its owned verifier, must exist in Git, and must be absent from
+every quick/changed/full route and every CoreGroup. Capability v1 Manifests
+cannot use this field to hide current tests.
+
+The catalog emits `archived_tests` only when nonempty; old all-v0 fixtures
+without archival declarations retain their output shape and bytes. `Suite all`
+prints each archived test as `ARCHIVED / NOT_RUN`; it is not run or counted as
+a pass. The full set is every verifier except the separately invoked installed-
+workspace check and this explicitly owned archive. Active v2 replacements are
+listed in `tk03-v2-only-transition.md`; archive removal remains separately gated.
 
 ## v1 Capability package shape
 
@@ -169,9 +187,9 @@ dependency, ownership, and catalog-drift failures.
 
 The 13 mixed-version modules cover the five CoreGroups, eight existing optional
 routes, and a separate `legacy-v1` marker. The marker has
-`default_activation: false` and names only the four active Sunset-gated
-compatibility paths. TK-02 neither deletes those paths nor executes a Sunset
-gate.
+`default_activation: false` and retains four historical script paths plus the
+isolated explicit migration reader. The stage writer rejects before reading
+legacy state. Physical removal still needs the separately approved Sunset diff.
 
 The TK-00 fixtures cover a valid capability plus unknown fields, invalid id,
 path escape, backslash path, invalid kind, legacy default activation, adapter

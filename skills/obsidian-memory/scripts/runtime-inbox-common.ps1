@@ -88,7 +88,7 @@ function Get-YamlValue {
     }
 
     $pattern = '^{0}:\s*(.+)$' -f [regex]::Escape($Key)
-    $match = Select-String -Path $Path -Pattern $pattern -Encoding utf8 | Select-Object -First 1
+    $match = Select-String -LiteralPath $Path -Pattern $pattern -Encoding utf8 | Select-Object -First 1
     if ($null -eq $match) {
         return $null
     }
@@ -131,7 +131,7 @@ function Get-TableValue {
     }
 
     $pattern = '^\|\s*{0}\s*\|\s*(.+?)\s*\|$' -f [regex]::Escape($Key)
-    $match = Select-String -Path $Path -Pattern $pattern -Encoding utf8 | Select-Object -First 1
+    $match = Select-String -LiteralPath $Path -Pattern $pattern -Encoding utf8 | Select-Object -First 1
     if ($null -eq $match) {
         return $null
     }
@@ -215,7 +215,7 @@ function Get-FlowSnapshot {
 function Resolve-EntryTaskId {
     <#
     .SYNOPSIS
-    解析当前入口任务 ID，以当前任务指针为权威来源。
+    缺省任务身份保持 unknown；调用方必须显式提供任务 ID。
 
     .PARAMETER VaultRoot
     共享记忆根目录。
@@ -228,6 +228,10 @@ function Resolve-EntryTaskId {
         [string]$VaultRoot
     )
 
+    # TK-03: business inbox capture must not infer identity from v1 history.
+    return 'unknown'
+
+    # Retained historical resolver; unreachable pending approved removal.
     $currentTaskPath = Join-Path $VaultRoot '运行时\当前任务.md'
     if (Test-Path -LiteralPath $currentTaskPath -PathType Leaf) {
         $currentTask = Get-CanonicalCurrentTaskState -Path $currentTaskPath

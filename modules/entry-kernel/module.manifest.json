@@ -6,9 +6,16 @@
   "default_activation": true,
   "dependencies": {
     "kernel_api": "v1",
-    "modules": ["thin-trust-kernel", "task-governance"]
+    "modules": [
+      "thin-trust-kernel",
+      "task-governance"
+    ]
   },
-  "requested_capabilities": ["filesystem-read", "process-execution", "task-state-read"],
+  "requested_capabilities": [
+    "filesystem-read",
+    "process-execution",
+    "task-state-read"
+  ],
   "ownership": {
     "owned_paths": [
       "modules/entry-kernel/**",
@@ -28,13 +35,16 @@
     ]
   },
   "entrypoints": {
-    "commands": ["scripts/task.ps1", "scripts/harness-status.ps1", "scripts/generate-entry-contract.ps1"],
+    "commands": [
+      "scripts/task.ps1",
+      "scripts/harness-status.ps1",
+      "scripts/generate-entry-contract.ps1"
+    ],
     "hooks": []
   },
   "validation": {
     "owner_tests": [
-      "tests/verify-adversarial-review-gate.ps1",
-      "tests/verify-entry-routing-clarification.ps1",
+      "tests/verify-v1-sunset.ps1",
       "tests/verify-v2-entry-contract.ps1",
       "tests/verify-v2-protocol-config.ps1",
       "tests/verify-runtime-qualification-decoupling.ps1",
@@ -43,7 +53,6 @@
       "tests/verify-v2-json-compat.ps1",
       "tests/verify-v2-task-state.ps1",
       "tests/verify-v2-model-neutrality.ps1",
-      "tests/verify-v1-v2-coexistence.ps1",
       "tests/verify-v1-to-v2-migration.ps1",
       "tests/verify-v2-default-flip.ps1",
       "tests/verify-v2-runtime-memory-decoupling.ps1"
@@ -52,8 +61,7 @@
     "core_group": "entry-lifecycle",
     "changed": [],
     "full": [
-      "tests/verify-adversarial-review-gate.ps1",
-      "tests/verify-entry-routing-clarification.ps1",
+      "tests/verify-v1-sunset.ps1",
       "tests/verify-v2-entry-contract.ps1",
       "tests/verify-v2-protocol-config.ps1",
       "tests/verify-runtime-qualification-decoupling.ps1",
@@ -62,7 +70,6 @@
       "tests/verify-v2-json-compat.ps1",
       "tests/verify-v2-task-state.ps1",
       "tests/verify-v2-model-neutrality.ps1",
-      "tests/verify-v1-v2-coexistence.ps1",
       "tests/verify-v1-to-v2-migration.ps1",
       "tests/verify-v2-default-flip.ps1",
       "tests/verify-v2-runtime-memory-decoupling.ps1"

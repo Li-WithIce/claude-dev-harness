@@ -217,41 +217,22 @@ if (-not (Test-Path -LiteralPath (Join-Path $workspaceRoot '.assistant') -PathTy
     Add-Check 'harness.ps1 creates .assistant during bootstrap'
 }
 
-$entryShimPath = Join-Path $workspaceRoot '.assistant\entry\AGENTS.md'
-if (-not (Test-Path -LiteralPath $entryShimPath -PathType Leaf)) {
-    Add-Failure 'harness.ps1 should install the workspace entry shim'
+$entryShimPath = Join-Path $workspaceRoot 'AGENTS.md'
+$entryShimContent = Get-Content -LiteralPath $entryShimPath -Raw -Encoding utf8
+$contractPattern = '(?ms)^<!-- BEGIN GENERATED ENTRY CONTRACT -->\r?\n<!-- source-sha256: (?<digest>[0-9a-f]{64}) -->\r?\n(?<body>.*?)\r?\n<!-- END GENERATED ENTRY CONTRACT -->$'
+$contractMatches = [regex]::Matches($entryShimContent, $contractPattern)
+if ($contractMatches.Count -eq 1 -and
+    $contractMatches[0].Groups['digest'].Value -ceq $entryContractDigest -and
+    (Normalize-ContractText $contractMatches[0].Groups['body'].Value) -ceq (Normalize-ContractText $entryContractContent)) {
+    Add-Check 'workspace AGENTS contains the one current canonical v2 admission contract'
 } else {
-    $entryShimContent = Get-Content -LiteralPath $entryShimPath -Raw -Encoding utf8
-    $contractPattern = '(?ms)^<!-- BEGIN GENERATED ENTRY CONTRACT -->\r?\n<!-- source-sha256: (?<digest>[0-9a-f]{64}) -->\r?\n(?<body>.*?)\r?\n<!-- END GENERATED ENTRY CONTRACT -->$'
-    $contractMatches = [regex]::Matches($entryShimContent, $contractPattern)
-    if ($contractMatches.Count -ne 1) {
-        Add-Failure 'workspace entry shim should contain exactly one generated entry contract block'
+    Add-Failure 'workspace AGENTS generated contract is missing, duplicated or stale'
+}
+foreach ($retired in @('entry/AGENTS.md','entry/advance-stage.ps1','entry/validate-lite-artifacts.ps1','运行时/当前任务.md')) {
+    if (Test-Path -LiteralPath (Join-Path $workspaceRoot ('.assistant/'+$retired))) {
+        Add-Failure ("fresh installation contains retired v1 asset: " + $retired)
     } else {
-        Add-Check 'workspace entry shim contains exactly one generated entry contract block'
-        $contractMatch = $contractMatches[0]
-        if ($contractMatch.Groups['digest'].Value -cne $entryContractDigest) {
-            Add-Failure 'workspace entry shim generated entry contract digest should match the canonical source'
-        } else {
-            Add-Check 'workspace entry shim generated entry contract digest matches the canonical source'
-        }
-
-        if ((Normalize-ContractText -Text $contractMatch.Groups['body'].Value) -cne (Normalize-ContractText -Text $entryContractContent)) {
-            Add-Failure 'workspace entry shim generated entry contract body should match the canonical source'
-        } else {
-            Add-Check 'workspace entry shim generated entry contract body matches the canonical source'
-        }
-    }
-
-    $vaultPath = Join-Path $workspaceRoot '.assistant'
-    if ($entryShimContent.Contains('Stage advance: `pwsh -File .assistant\entry\advance-stage.ps1') -and
-        $entryShimContent.Contains($RepoRoot) -and
-        $entryShimContent.Contains($vaultPath) -and
-        $entryShimContent.Contains('`TEST -> DONE`') -and
-        -not $entryShimContent.Contains('{REPO_ROOT}') -and
-        -not $entryShimContent.Contains('{VAULT_PATH}')) {
-        Add-Check 'workspace entry shim preserves the rendered v1 host overlay'
-    } else {
-        Add-Failure 'workspace entry shim should preserve the rendered v1 host overlay'
+        Add-Check ("fresh installation omits retired v1 asset: " + $retired)
     }
 }
 if (Test-Path -LiteralPath (Join-Path $workspaceRoot '.assistant\工作流') -PathType Container) {
@@ -275,8 +256,8 @@ $statusUserAfter = @(Get-TestTreeState -Root $userProfile | Where-Object { -not 
 $statusRepoAfter = @(& git -C $RepoRoot status --porcelain --untracked-files=all)
 $statusGitOptionalLocksAfter = [Environment]::GetEnvironmentVariable('GIT_OPTIONAL_LOCKS', [EnvironmentVariableTarget]::Process)
 $statusText = $statusResult.Output -join "`n"
-if ($statusResult.ExitCode -eq 1 -and
-    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'STATUS') -eq 'WARN' -and
+if ($statusResult.ExitCode -eq 0 -and
+    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'STATUS') -eq 'PASS' -and
     (Get-StatusLineValue -Output $statusResult.Output -Prefix 'host_product') -eq 'codex' -and
     (Get-StatusLineValue -Output $statusResult.Output -Prefix 'host_version_actual') -eq 'unknown' -and
     (Get-StatusLineValue -Output $statusResult.Output -Prefix 'host_details_probed') -eq 'false' -and

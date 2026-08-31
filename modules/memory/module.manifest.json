@@ -4,13 +4,20 @@
   "module_version": "1.0.0",
   "classification_owner": "memory",
   "kind": "capability",
-  "description": "Optional shared-memory health, maintenance, repair, inbox, and prompt-hook behavior.",
+  "description": "Optional candidate archive, inbox, prompt hooks and explicit historical diagnostics; legacy repair is retired.",
   "default_activation": false,
   "dependencies": {
     "kernel_api": "v1",
-    "modules": ["entry-kernel"]
+    "modules": [
+      "entry-kernel"
+    ]
   },
-  "requested_capabilities": ["filesystem-read", "filesystem-write", "process-execution", "task-state-read"],
+  "requested_capabilities": [
+    "filesystem-read",
+    "filesystem-write",
+    "process-execution",
+    "task-state-read"
+  ],
   "ownership": {
     "owned_paths": [
       "modules/memory/**",
@@ -29,7 +36,6 @@
       "tests/verify-memory-health-report.ps1",
       "tests/verify-memory-maintain.ps1",
       "tests/verify-memory-provider-boundary.ps1",
-      "tests/verify-repair-shared-memory.ps1",
       "tests/verify-runtime-inbox.ps1",
       "tests/verify-triage-runtime-inbox.ps1",
       "vault-template/MEMORY.md"
@@ -59,7 +65,6 @@
       "tests/verify-memory-health-report.ps1",
       "tests/verify-memory-maintain.ps1",
       "tests/verify-memory-provider-boundary.ps1",
-      "tests/verify-repair-shared-memory.ps1",
       "tests/verify-runtime-inbox.ps1",
       "tests/verify-triage-runtime-inbox.ps1"
     ],
@@ -75,7 +80,9 @@
       "scripts/repair-shared-memory.ps1",
       "scripts/triage-runtime-inbox.ps1"
     ],
-    "hooks": ["runtime-hooks/memory/userpromptsubmit.js"],
+    "hooks": [
+      "runtime-hooks/memory/userpromptsubmit.js"
+    ],
     "libraries": []
   },
   "validation": {
@@ -84,7 +91,6 @@
       "tests/verify-memory-health-report.ps1",
       "tests/verify-memory-maintain.ps1",
       "tests/verify-memory-provider-boundary.ps1",
-      "tests/verify-repair-shared-memory.ps1",
       "tests/verify-runtime-inbox.ps1",
       "tests/verify-triage-runtime-inbox.ps1"
     ],
@@ -95,9 +101,7 @@
       "tests/verify-memory-health-report.ps1",
       "tests/verify-memory-maintain.ps1",
       "tests/verify-memory-provider-boundary.ps1",
-      "tests/verify-repair-shared-memory.ps1",
       "tests/verify-runtime-inbox.ps1",
-      "tests/verify-shared-memory-layers.ps1",
       "tests/verify-triage-runtime-inbox.ps1",
       "tests/verify-v2-runtime-memory-decoupling.ps1"
     ],
@@ -106,7 +110,6 @@
       "tests/verify-memory-health-report.ps1",
       "tests/verify-memory-maintain.ps1",
       "tests/verify-memory-provider-boundary.ps1",
-      "tests/verify-repair-shared-memory.ps1",
       "tests/verify-runtime-inbox.ps1",
       "tests/verify-triage-runtime-inbox.ps1"
     ]

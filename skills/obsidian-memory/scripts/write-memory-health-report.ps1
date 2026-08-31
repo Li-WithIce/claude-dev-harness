@@ -48,6 +48,7 @@ $report = @(
     ''
     "- **vault_root**: $VaultRoot"
     "- **status**: $status"
+    '- **scope**: historical-v1-only; not current v2 Runtime health'
     "- **generated_at**: $timestamp"
     "- **source_script**: $checkScript"
     ''
@@ -65,7 +66,7 @@ $report = @(
 
 [System.IO.File]::WriteAllText($OutputPath, $report, (New-Object System.Text.UTF8Encoding($true)))
 
-Write-Output ("STATUS: {0}" -f $(if ($exitCode -eq 0) { 'PASS' } elseif ($exitCode -eq 1) { 'WARN' } else { 'FAIL' }))
+Write-Output ("STATUS: {0}" -f $(if ($exitCode -eq 0 -and $status -ceq 'NOT_APPLICABLE') { 'NOT_APPLICABLE' } elseif ($exitCode -eq 0) { 'PASS' } elseif ($exitCode -eq 1) { 'WARN' } else { 'FAIL' }))
 Write-Output "Report: $OutputPath"
 Write-Output "SourceStatus: $status"
 Write-Output "SourceExitCode: $exitCode"

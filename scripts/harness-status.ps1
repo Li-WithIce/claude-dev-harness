@@ -53,8 +53,8 @@ try {
     if ([string]$protectedPolicy.status -cne 'verified') {
         $errors.Add("Protected Action policy is $($protectedPolicy.status): $($protectedPolicy.reason)")
     }
-    if ([string]$resolution.selected_protocol -ceq 'v1') {
-        $warnings.Add("New tasks select v1: $($resolution.reason)")
+    if ($null -eq $resolution.selected_protocol) {
+        $warnings.Add("New work is stopped: $($resolution.reason)")
     }
     if ([string]$resolution.detected_protocol -ceq 'new' -and
         [string]$resolution.requested_protocol -ceq 'auto' -and
@@ -74,6 +74,7 @@ try {
         Write-Output ("capability_{0}: {1}" -f $name, ([string]$hostCapabilities.capabilities[$name]).ToLowerInvariant())
     }
     Write-Output ("selected_protocol: {0}" -f $resolution.selected_protocol)
+    Write-Output ("new_task_admission: {0}" -f $resolution.new_task_admission)
     Write-Output ("preference_source: {0}" -f $resolution.preference_source)
     Write-Output ("default_source: {0}" -f $resolution.default_source)
     Write-Output ("protocol_reason: {0}" -f $resolution.reason)

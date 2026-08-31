@@ -84,7 +84,7 @@
     },
     {
       "path": "install.ps1",
-      "sha256": "sha256:3194644c7119c6dc84c29aa8561cacaf1586cc507293ebcb294803440ac8beb6",
+      "sha256": "sha256:cc4ddce4a558bc2246ee336b4b19a5e1e45c3368e1db033746ec77147fe6a8a2",
       "layer": "d1-distribution",
       "trust_paths": [
         "distribution"
@@ -92,9 +92,9 @@
       "root_ids": [
         "workspace-bootstrap"
       ],
-      "physical_loc": 3400,
-      "nonblank_loc": 3134,
-      "executable_loc": 3105
+      "physical_loc": 3395,
+      "nonblank_loc": 3129,
+      "executable_loc": 3100
     },
     {
       "path": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",
@@ -141,7 +141,7 @@
     },
     {
       "path": "scripts/harness-status.ps1",
-      "sha256": "sha256:87f59d978a4a0032ea7fa99b58587eaf7e494361563103ca7a32106d9ad746e5",
+      "sha256": "sha256:b51eff606ababdeaa915ff2297868e9ede34018396c0c37a4b606f85453a821e",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "distribution",
@@ -151,9 +151,9 @@
         "status-cli",
         "workspace-bootstrap"
       ],
-      "physical_loc": 102,
-      "nonblank_loc": 95,
-      "executable_loc": 94
+      "physical_loc": 103,
+      "nonblank_loc": 96,
+      "executable_loc": 95
     },
     {
       "path": "scripts/harness-write-mcp.ps1",
@@ -375,7 +375,7 @@
     },
     {
       "path": "scripts/lib/Harness.Policy.psm1",
-      "sha256": "sha256:ff4bf808d1994e79c9bc99174365a2039da58fec804c455b4a6ba40446da1428",
+      "sha256": "sha256:cab907ae33a82a3d03c6f7c88e694316be962b0ad1f033d24f25bfb13e196362",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
@@ -383,9 +383,9 @@
       "root_ids": [
         "risk-policy-evaluator"
       ],
-      "physical_loc": 290,
-      "nonblank_loc": 263,
-      "executable_loc": 263
+      "physical_loc": 284,
+      "nonblank_loc": 257,
+      "executable_loc": 257
     },
     {
       "path": "scripts/lib/Harness.ProtectedAction.psm1",
@@ -408,7 +408,7 @@
     },
     {
       "path": "scripts/lib/Harness.Protocol.psm1",
-      "sha256": "sha256:5eedeebf0796590dc1d467085e32d5653dd3e99ae5666bb37658266ffbce496d",
+      "sha256": "sha256:f084462d208ea2e321a688628754a8452759ed19b404cb8cba323822882d99fd",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "distribution",
@@ -420,9 +420,9 @@
         "task-cli",
         "workspace-bootstrap"
       ],
-      "physical_loc": 301,
-      "nonblank_loc": 278,
-      "executable_loc": 278
+      "physical_loc": 217,
+      "nonblank_loc": 199,
+      "executable_loc": 197
     },
     {
       "path": "scripts/lib/Harness.Recovery.psm1",
@@ -454,7 +454,7 @@
     },
     {
       "path": "scripts/lib/Harness.RuntimeDefault.psm1",
-      "sha256": "sha256:be8e2e911edd5e1a8164e219a92b331a7f349ba7069644f012b46778054212a6",
+      "sha256": "sha256:ca54dc14b3dfdb902b2d8537ebb02e13de18139f9699533093d65d0235b0be18",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "distribution",
@@ -466,13 +466,13 @@
         "task-cli",
         "workspace-bootstrap"
       ],
-      "physical_loc": 311,
-      "nonblank_loc": 282,
-      "executable_loc": 282
+      "physical_loc": 318,
+      "nonblank_loc": 289,
+      "executable_loc": 288
     },
     {
       "path": "scripts/lib/Harness.TaskState.psm1",
-      "sha256": "sha256:cc3cef6c2861b8b0e80ab95a336102a2c4d37f6acd20c779b728f124bcac497b",
+      "sha256": "sha256:fb9f6c085a173cdfbe18ebd9a86dce322308ed3d221ad9fb24e39df8acf72274",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
@@ -480,13 +480,13 @@
       "root_ids": [
         "task-cli"
       ],
-      "physical_loc": 2241,
-      "nonblank_loc": 2138,
-      "executable_loc": 2138
+      "physical_loc": 2244,
+      "nonblank_loc": 2141,
+      "executable_loc": 2141
     },
     {
       "path": "scripts/task.ps1",
-      "sha256": "sha256:cf8f63d95b0adcd064c5de5e48051e265dd44f00e83ac103fce6fd497cbada30",
+      "sha256": "sha256:66cff69b555a6f9ea77f9a911fdabb4d876fbe57140e21c3bd9978b990d83e3c",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
@@ -494,9 +494,9 @@
       "root_ids": [
         "task-cli"
       ],
-      "physical_loc": 224,
-      "nonblank_loc": 217,
-      "executable_loc": 217
+      "physical_loc": 226,
+      "nonblank_loc": 219,
+      "executable_loc": 219
     },
     {
       "path": "scripts/update-managed-assets.ps1",
@@ -528,7 +528,7 @@
     },
     {
       "path": "tests/verify-installation.ps1",
-      "sha256": "sha256:189fe0050480e8d9cad3dc5b9d8a6c241679214383b26d53b13ef4fa6a923f4c",
+      "sha256": "sha256:673d1479333343f3beba12f92d44d389c3e5ac703ab40632ad93e097b5d23e13",
       "layer": "d1-distribution",
       "trust_paths": [
         "distribution"
@@ -536,15 +536,15 @@
       "root_ids": [
         "workspace-bootstrap"
       ],
-      "physical_loc": 929,
-      "nonblank_loc": 831,
-      "executable_loc": 831
+      "physical_loc": 811,
+      "nonblank_loc": 715,
+      "executable_loc": 711
     }
   ],
   "artifacts": [
     {
       "path": "agent-configs/claude/CLAUDE.md.template",
-      "sha256": "sha256:cef5ce2d14a13d26099e5e8e9fcbb654b651a94f62e899207e853d51afadf992",
+      "sha256": "sha256:86c6d3f3f56033e6c865ea67988b7e03d81f05954f17e04391308d469cadd8bf",
       "kind": "entry-template",
       "owner_layer": "a3-adapter",
       "trust_paths": [
@@ -552,12 +552,12 @@
         "runtime"
       ],
       "reason": "Claude installed Entry Contract template is hashed by Runtime Default and rendered by the compiler.",
-      "physical_loc": 26,
-      "bytes": 2831
+      "physical_loc": 27,
+      "bytes": 2779
     },
     {
       "path": "agent-configs/workspace/AGENTS.md.template",
-      "sha256": "sha256:b83e2dab88aaa01b0ea2b05c4f424322386c9be68b9152380a60cf1daca818fc",
+      "sha256": "sha256:fb5cda2414f14b335621ff0526528af76454c16228a5a556f5265c152dcd7fa5",
       "kind": "entry-template",
       "owner_layer": "a3-adapter",
       "trust_paths": [
@@ -565,44 +565,44 @@
         "runtime"
       ],
       "reason": "Workspace installed Entry Contract template is hashed by Runtime Default and rendered by the compiler.",
-      "physical_loc": 29,
-      "bytes": 3590
+      "physical_loc": 30,
+      "bytes": 3789
     },
     {
       "path": "modules/distribution/profiles/core.json",
-      "sha256": "sha256:baa3fa5235ae7b05d551cd83a35f46841965ba1eb44febbe1c13555eaf0faf9f",
+      "sha256": "sha256:15c81eb0993f57b5d158ab4864311933556c8255b8831e7e775e0e815930d6f1",
       "kind": "policy",
       "owner_layer": "d1-distribution",
       "trust_paths": [
         "distribution"
       ],
       "reason": "TK-06 central core installation allowlist; grants Distribution transport only, never Runtime authority.",
-      "physical_loc": 40,
-      "bytes": 7235
+      "physical_loc": 28,
+      "bytes": 3691
     },
     {
       "path": "modules/distribution/profiles/full.json",
-      "sha256": "sha256:f7c919feab139237556c9c25f657b0f155c393a65d4f519884c93e44f883c032",
+      "sha256": "sha256:46667f0460f6c03da34b4e2aa0d931a2772ce2ef131b6256994b172b344bdbff",
       "kind": "policy",
       "owner_layer": "d1-distribution",
       "trust_paths": [
         "distribution"
       ],
       "reason": "TK-06 central full installation allowlist; module requests cannot expand this grant.",
-      "physical_loc": 75,
-      "bytes": 16516
+      "physical_loc": 52,
+      "bytes": 10170
     },
     {
       "path": "modules/distribution/profiles/governed.json",
-      "sha256": "sha256:bc12a0ef1093fc33146abf837b467e3bc22731b9714f192f6d675eeb6e7f31f3",
+      "sha256": "sha256:9f748a8f7eff4c05b587dd7fcf3e07472d033c18f8c67ef45521561f5d5b1a78",
       "kind": "policy",
       "owner_layer": "d1-distribution",
       "trust_paths": [
         "distribution"
       ],
       "reason": "TK-06 central governed installation allowlist independent of Runtime execution policy.",
-      "physical_loc": 42,
-      "bytes": 7652
+      "physical_loc": 30,
+      "bytes": 4108
     },
     {
       "path": "policies/decision-rights.json",
@@ -618,7 +618,7 @@
     },
     {
       "path": "policies/entry-contract.md",
-      "sha256": "sha256:346224d62f82926a11bac09335e97766c08b813b71774a714abea924e49ff93e",
+      "sha256": "sha256:4838491707510140a0c698ac26d0faa8b45d6dde90d03427dc78006f0643396c",
       "kind": "entry-contract",
       "owner_layer": "k1-runtime-kernel",
       "trust_paths": [
@@ -626,8 +626,8 @@
         "runtime"
       ],
       "reason": "Canonical Entry Contract prose compiled into installed host and workspace templates.",
-      "physical_loc": 15,
-      "bytes": 1852
+      "physical_loc": 16,
+      "bytes": 2052
     },
     {
       "path": "policies/execution-profiles.json",
@@ -763,15 +763,15 @@
     },
     {
       "path": "schemas/module-manifest-catalog-v1.schema.json",
-      "sha256": "sha256:abe585b66f979057451243343c688dd1fb8a688e872f9a61a4f928abb3e84dfc",
+      "sha256": "sha256:bc9cb61da933af16f58c9656b7ae6d4438f284be663ece4c85dcd9e525a392c8",
       "kind": "schema",
       "owner_layer": "d1-distribution",
       "trust_paths": [
         "distribution"
       ],
       "reason": "Distribution validates the published Manifest identity set without executing the C2 constructor.",
-      "physical_loc": 320,
-      "bytes": 12942
+      "physical_loc": 322,
+      "bytes": 13062
     },
     {
       "path": "schemas/module-manifest-v1.schema.json",
@@ -787,15 +787,15 @@
     },
     {
       "path": "schemas/module-manifest.schema.json",
-      "sha256": "sha256:e1a39803bd813bc3a7f947fbec594fc381a0a86812d1a54751f479533b6d4072",
+      "sha256": "sha256:adb95bc3276d6e383826064c414a0ca6156108b120f650e390ad73f203e81a66",
       "kind": "schema",
       "owner_layer": "d1-distribution",
       "trust_paths": [
         "distribution"
       ],
       "reason": "Frozen v0 Manifest schema validates compatibility metadata without inventing install authority.",
-      "physical_loc": 199,
-      "bytes": 5656
+      "physical_loc": 200,
+      "bytes": 5715
     },
     {
       "path": "schemas/protected-actions-overlay.schema.json",
@@ -808,6 +808,18 @@
       "reason": "Workspace protected-action overlays cannot weaken core policy and are strictly validated.",
       "physical_loc": 45,
       "bytes": 1651
+    },
+    {
+      "path": "schemas/protocol-config-v2.schema.json",
+      "sha256": "sha256:0c24739aa324d9bcb3492a4759c4f37f224c8e5e9ce63599f120a8cf6dc48140",
+      "kind": "schema",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "reason": "TK-03 v2-only new-work admission and explicit pause must be strictly validated.",
+      "physical_loc": 13,
+      "bytes": 504
     },
     {
       "path": "schemas/protocol-config.schema.json",
@@ -832,6 +844,18 @@
       "reason": "Task creation and protected writes bind a clear Requirement Contract.",
       "physical_loc": 85,
       "bytes": 2614
+    },
+    {
+      "path": "schemas/runtime-default-admission.schema.json",
+      "sha256": "sha256:a7e3175ef777780e466fec13063b05089fe26590943ff900ea996908630eb5f3",
+      "kind": "schema",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "reason": "Current Runtime admits only v2 without rewriting the historical Decision Schema or digest.",
+      "physical_loc": 64,
+      "bytes": 2257
     },
     {
       "path": "schemas/runtime-default-decision.schema.json",
@@ -871,7 +895,7 @@
     },
     {
       "path": "vault-template/entry/AGENTS.md.template",
-      "sha256": "sha256:100c44acce44312fed3b8107a682e0df02edfb773956f99dec551e22b7fe46b1",
+      "sha256": "sha256:6c3c484650721a5205e544674a147347a9134869ccd1783d48a0b8e998ff0a84",
       "kind": "entry-template",
       "owner_layer": "a3-adapter",
       "trust_paths": [
@@ -879,8 +903,8 @@
         "runtime"
       ],
       "reason": "Runtime source identity binds the installed compatibility entry template until v1 Sunset gates are satisfied.",
-      "physical_loc": 28,
-      "bytes": 2702
+      "physical_loc": 25,
+      "bytes": 2478
     }
   ],
   "edges": [
@@ -1361,6 +1385,15 @@
       ]
     },
     {
+      "from": "scripts/lib/Harness.TaskState.psm1",
+      "to": "scripts/lib/Harness.Protocol.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Protocol.psm1') -Force -PassThru",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
       "from": "scripts/task.ps1",
       "to": "scripts/lib/Harness.Protocol.psm1",
       "kind": "import-module",
@@ -1416,6 +1449,15 @@
     },
     {
       "from": "tests/verify-installation.ps1",
+      "to": "scripts/lib/Harness.Distribution.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $RepoRoot 'scripts/lib/Harness.Distribution.psm1') -PassThru",
+      "trust_paths": [
+        "distribution"
+      ]
+    },
+    {
+      "from": "tests/verify-installation.ps1",
       "to": "tests/fixture-test-common.ps1",
       "kind": "dot-source",
       "resolution": "ast-static:. (Join-Path $PSScriptRoot 'fixture-test-common.ps1')",
@@ -1465,21 +1507,21 @@
   "unresolved_dependencies": [],
   "totals": {
     "file_count": 30,
-    "physical_loc": 13795,
-    "nonblank_loc": 12684,
-    "executable_loc": 12637,
+    "physical_loc": 13595,
+    "nonblank_loc": 12491,
+    "executable_loc": 12437,
     "runtime_file_count": 22,
-    "runtime_executable_loc": 6150,
+    "runtime_executable_loc": 6075,
     "distribution_file_count": 17,
-    "distribution_executable_loc": 8117,
+    "distribution_executable_loc": 7918,
     "duplicate_edge_count": 3,
-    "artifact_count": 28,
-    "artifact_bytes": 116861
+    "artifact_count": 30,
+    "artifact_bytes": 106490
   },
   "budget": {
     "baseline_executable_loc": 6151,
-    "current_executable_loc": 6150,
-    "delta": -1,
+    "current_executable_loc": 6075,
+    "delta": -76,
     "covered_growth": 0,
     "status": "within-baseline",
     "exceptions": []

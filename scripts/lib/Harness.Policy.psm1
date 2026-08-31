@@ -176,17 +176,11 @@ function Resolve-HarnessExecutionProfile {
     }
 
     $protocol = [System.Environment]::GetEnvironmentVariable('HARNESS_PROTOCOL', [System.EnvironmentVariableTarget]::Process)
-    if ([string]::IsNullOrWhiteSpace($protocol)) { $protocol = 'auto' }
-    if ($protocol -cnotin @('v1','v2','auto')) { throw "HARNESS_PROTOCOL is invalid: $protocol" }
-    $selectedProtocol = 'v1'
+    $selectedProtocol = 'v2'
     if ($Identity -ceq 'new') {
-        if ($protocol -ceq 'v2') {
-            $selectedProtocol = 'v2'
-        } elseif ($protocol -ceq 'auto') {
-            if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) { $WorkspaceRoot = $RepoRoot }
-            $protocolResolution = Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -RequestedProtocol auto
-            $selectedProtocol = [string]$protocolResolution.selected_protocol
-        }
+        if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) { $WorkspaceRoot = $RepoRoot }
+        $protocolResolution = Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -RequestedProtocol $protocol
+        if ($protocolResolution.selected_protocol -cne 'v2') { throw "new-work-not-admitted: $($protocolResolution.reason)" }
     }
 
     $triggers = [System.Collections.Generic.List[string]]::new()
@@ -200,14 +194,14 @@ function Resolve-HarnessExecutionProfile {
     if ($ProductBlockerDiscovered) { $triggers.Add('product-blocker-discovered') }
 
     $profile = $null
-    $handoff = 'v1-entry'
+    $handoff = 'v2-recovery'
     $requiredCapabilities = @()
     $artifactPolicy = 'none'
     $reviewPolicy = 'self'
     $approvalPolicy = 'none'
     $approvalTypes = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
 
-    if ($selectedProtocol -ceq 'v2' -and -not $blocked) {
+    if ($Identity -ceq 'new' -and -not $blocked) {
         if ($Intent -ceq 'read') {
             $profile = 'inspect'
             $handoff = 'read-only-response'
@@ -256,7 +250,7 @@ function Resolve-HarnessExecutionProfile {
         if ($triggers -ccontains 'dry-run-required' -and $requiredCapabilities -cnotcontains 'dry_run_required') { $requiredCapabilities += 'dry_run_required' }
         $artifactPolicy = if ($profilePolicy.writes_task_artifacts -eq $true) { 'durable' } else { 'ephemeral' }
         if ($requiredCapabilities -ccontains 'independent_review_required') { $reviewPolicy = 'independent' }
-    } elseif ($selectedProtocol -ceq 'v2') {
+    } elseif ($blocked) {
         $handoff = 'requirement-gate'
     }
 

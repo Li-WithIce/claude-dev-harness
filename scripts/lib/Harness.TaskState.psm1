@@ -1555,6 +1555,9 @@ function New-HarnessTaskState {
     )
     Assert-V2WriteProtocol
     $WorkspaceRoot=Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot;Assert-HarnessTaskId -TaskId $TaskId
+    $protocolModule = Import-Module (Join-Path $PSScriptRoot 'Harness.Protocol.psm1') -Force -PassThru
+    $admission = & $protocolModule { param($Repo,$Workspace,$Id) Get-HarnessProtocolResolution -RepoRoot $Repo -WorkspaceRoot $Workspace -TaskId $Id } $RepoRoot $WorkspaceRoot $TaskId
+    if ($admission.selected_protocol -cne 'v2') { throw "new-work-not-admitted: $($admission.reason)" }
     $contract=Get-RequirementContract -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -ContractPath $ContractPath
     $policies=Get-TaskPolicyFlags -RepoRoot $RepoRoot -Profile $Profile -Capabilities $Capabilities
     $paths=Get-TaskStatePaths -TaskId $TaskId

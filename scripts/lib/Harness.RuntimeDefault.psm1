@@ -13,6 +13,8 @@ $script:RuntimeSourcePaths = @(
     'harness.ps1',
     'policies/entry-contract.md',
     'schemas/protocol-config.schema.json',
+    'schemas/protocol-config-v2.schema.json',
+    'schemas/runtime-default-admission.schema.json',
     'schemas/runtime-default-decision.schema.json',
     'scripts/harness-status.ps1',
     'scripts/lib/Harness.AtomicWrite.psm1',
@@ -22,8 +24,7 @@ $script:RuntimeSourcePaths = @(
     'scripts/lib/Harness.Policy.psm1',
     'scripts/lib/Harness.Protocol.psm1',
     'scripts/lib/Harness.RuntimeDefault.psm1',
-    'scripts/task.ps1',
-    'vault-template/entry/AGENTS.md.template'
+    'scripts/task.ps1'
 )
 
 function Invoke-HarnessRuntimeGit {
@@ -194,7 +195,8 @@ function Assert-HarnessRuntimeDefaultDecision {
         @($required | Where-Object { $keys -cnotcontains $_ }).Count -gt 0) {
         throw 'runtime-default-invalid-document'
     }
-    $schemaPath = Join-Path $RepoRoot 'schemas\runtime-default-decision.schema.json'
+    # Preserve the historical document Schema and digest algorithm; admission is narrower.
+    $schemaPath = Join-Path $RepoRoot 'schemas\runtime-default-admission.schema.json'
     try {
         $schemaValid = Test-Json -Json ($Document | ConvertTo-Json -Depth 20 -Compress) -SchemaFile $schemaPath -ErrorAction Stop -WarningAction SilentlyContinue
     } catch {
@@ -250,11 +252,16 @@ function Get-HarnessRuntimeDefaultDecision {
     )
 
     $workspace = Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
-    $path = Resolve-HarnessContainedPath -WorkspaceRoot $workspace -Path $script:RuntimeDefaultRelativePath -Label 'runtime default decision' -AllowMissing
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-        return [ordered]@{status='missing';usable=$false;reason='runtime-default-missing';path=$script:RuntimeDefaultRelativePath;decision_digest=$null;new_task_protocol=$null;scope=$null;required_capabilities=@();missing_capabilities=@();host_capabilities=$null}
-    }
     try {
+        foreach ($parent in @('.assistant','.assistant/runtime')) {
+            [void](Resolve-HarnessContainedPath -WorkspaceRoot $workspace -Path $parent -Label 'runtime default parent' -MustExist Directory -AllowMissing)
+        }
+        $path = Resolve-HarnessContainedPath -WorkspaceRoot $workspace -Path $script:RuntimeDefaultRelativePath -Label 'runtime default decision' -AllowMissing
+        try { $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop }
+        catch [System.Management.Automation.ItemNotFoundException] {
+            return [ordered]@{status='missing';usable=$false;reason='runtime-default-missing';path=$script:RuntimeDefaultRelativePath;decision_digest=$null;new_task_protocol=$null;scope=$null;required_capabilities=@();missing_capabilities=@();host_capabilities=$null}
+        }
+        if ($item -isnot [IO.FileInfo] -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'runtime-default-not-regular-file' }
         $document = Read-HarnessRuntimeDefaultJson -Path $path
         [void](Assert-HarnessRuntimeDefaultDecision -RepoRoot $RepoRoot -WorkspaceRoot $workspace -Document $document -AsOfUtc $AsOfUtc)
         if ($null -eq $HostCapabilities) { $HostCapabilities = Get-HarnessHostCapabilities -RepoRoot $RepoRoot -RequiredCapabilities @($document.required_capabilities) }
@@ -277,7 +284,7 @@ function New-HarnessRuntimeDefaultDecisionDocument {
         [Parameter(Mandatory)][string]$RepoRoot,
         [Parameter(Mandatory)][string]$WorkspaceRoot,
         [Parameter(Mandatory)][ValidateSet('workspace-canary','release-default')][string]$Scope,
-        [ValidateSet('v1','v2')][string]$NewTaskProtocol = 'v2',
+        [ValidateSet('v2')][string]$NewTaskProtocol = 'v2',
         [string]$SourceRevision = '',
         [string]$DecisionId = '',
         [datetimeoffset]$IssuedAtUtc = [datetimeoffset]::UtcNow,

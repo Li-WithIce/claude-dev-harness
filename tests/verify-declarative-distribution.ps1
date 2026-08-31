@@ -104,9 +104,9 @@ try {
     foreach ($file in $files) { Copy-RepoPathToFixture -SourceRoot $RepoRoot -FixtureRoot $fixtureRepo -RelativePath $file }
 
     $expectedSkills=@{
-        core=@('.system','entry-router','orchestrator','plan','implement','review','test','spec')
-        governed=@('.system','entry-router','orchestrator','plan','implement','review','test','spec','planning','audit')
-        full=@('.system','audit','codex','entry-router','implement','md-html','obsidian-memory','orchestrator','plan','planning','review','spec','test','workflow-team')
+        core=@('.system')
+        governed=@('.system','planning','audit')
+        full=@('.system','audit','codex','md-html','obsidian-memory','planning')
     }
     foreach ($preset in @('core','governed','full')) {
         $plan=Get-Plan $preset
@@ -114,17 +114,17 @@ try {
         Assert-HarnessDistributionPlanCurrent -RepoRoot $fixtureRepo -Plan $plan
         Check ((ConvertTo-HarnessDistributionJson $plan) -ceq (ConvertTo-HarnessDistributionJson $repeat)) "$preset plan is deterministic and revalidates without Git or Runtime"
         $skills=@('.system')+@($plan.assets | Where-Object kind -CEQ 'skill' | ForEach-Object target)
-        Check (($skills -join '|') -ceq ($expectedSkills[$preset] -join '|')) "$preset preserves legacy skill order and selection"
+        Check (($skills -join '|') -ceq ($expectedSkills[$preset] -join '|')) "$preset installs only the authorized v2 and optional skill selection"
         $hooks=@($plan.assets | Where-Object kind -CEQ 'hook' | ForEach-Object target)
         $expectedHooks=@('pretooluse.ps1','codex-pretooluse-launcher.ps1')+$(if($preset -ceq 'full'){@('userpromptsubmit.js')}else{@()})+@('stop.js','workspace-resolver.js')
         Check (($hooks -join '|') -ceq ($expectedHooks -join '|')) "$preset preserves legacy hook selection"
-        Check (@($plan.assets | Where-Object kind -CEQ 'vault').Count -eq $(if($preset -ceq 'full'){29}else{5})) "$preset preserves the legacy vault file set"
+        Check (@($plan.assets | Where-Object kind -CEQ 'vault').Count -eq $(if($preset -ceq 'full'){16}else{1})) "$preset omits retired v1 lifecycle and mirror assets"
         $unsigned=[ordered]@{}; foreach($key in $plan.Keys){if($key -cne 'digest'){$unsigned[$key]=$plan[$key]}}
         $referenceDigest=Get-HarnessCanonicalJsonSha256 -JsonBytes $utf8.GetBytes((ConvertTo-Json -InputObject $unsigned -Depth 100 -Compress))
         Check ($plan.digest_algorithm -ceq 'canonical-json/v1' -and $plan.digest -ceq $referenceDigest) "$preset uses the independently verified canonical digest contract"
     }
     $full=Get-Plan full
-    Check (@($full.authorized_module_assets).Count -eq 4 -and @($full.authorized_module_assets | Where-Object path -CEQ 'docs/team-write-authority.md').Count -eq 0) 'Manifest requests without Profile grants do not enter the plan'
+    Check (@($full.authorized_module_assets).Count -eq 3 -and @($full.authorized_module_assets | Where-Object path -CEQ 'docs/team-write-authority.md').Count -eq 0) 'Manifest requests without Profile grants do not enter the plan'
     $snapshot=Get-Snapshot $fixtureRepo
     [void](Get-Plan)
     Check ($snapshot -ceq (Get-Snapshot $fixtureRepo)) 'planning performs zero filesystem writes'
@@ -140,7 +140,7 @@ try {
         @{Name='disabled transitive dependency';Change={param($p) $p.enabled_modules=@($p.enabled_modules | Where-Object module_id -CNE 'task-governance')}},
         @{Name='ungranted capability';Change={param($p) $p.enabled_modules[0].allowed_capabilities=@()}},
         @{Name='duplicate asset';Change={param($p) $p.asset_allowlist+=@($p.asset_allowlist[0])}},
-        @{Name='case-colliding target';Change={param($p) $p.asset_allowlist[1].target='ENTRY-ROUTER'}},
+        @{Name='case-colliding target';Change={param($p) $p.asset_allowlist[1].target=$p.asset_allowlist[0].target.ToUpperInvariant()}},
         @{Name='source escape';Change={param($p) $p.asset_allowlist[0].source='../outside.md'}},
         @{Name='absolute target';Change={param($p) $p.asset_allowlist[0].target=[IO.Path]::GetPathRoot($fixtureRepo).Replace('\','/')+'outside'}},
         @{Name='source wildcard';Change={param($p) $p.asset_allowlist[0].files=@('skills/entry-router/**')}},
@@ -172,12 +172,12 @@ try {
         $plan=Get-Plan full
         Check (@($plan.authorized_module_assets | Where-Object module_id -CEQ 'memory').Count -eq 0 -and @($plan.assets | Where-Object target -CEQ 'obsidian-memory').Count -eq 0) 'Profile allowlist alone cannot fabricate a Manifest request'
     }
-    Change-Profile {param($p) $p.enabled_modules=@($p.enabled_modules | Where-Object module_id -CNE 'team')} {
+    Change-Profile {param($p) $p.enabled_modules=@($p.enabled_modules | Where-Object module_id -CNE 'md-html')} {
         $plan=Get-Plan full
-        Check (@($plan.assets | Where-Object module_id -CEQ 'team').Count -eq 0) 'a disabled capability cannot self-enable through its Manifest'
+        Check (@($plan.assets | Where-Object module_id -CEQ 'md-html').Count -eq 0) 'a disabled capability cannot self-enable through its Manifest'
     } full
-    Change-Profile {param($p) $p.asset_allowlist=@($p.asset_allowlist | Where-Object module_id -CNE 'team')} {
-        Check (@((Get-Plan full).authorized_module_assets | Where-Object module_id -CEQ 'team').Count -eq 0) 'module requests are intersected with exact Profile asset grants'
+    Change-Profile {param($p) $p.asset_allowlist=@($p.asset_allowlist | Where-Object module_id -CNE 'md-html')} {
+        Check (@((Get-Plan full).authorized_module_assets | Where-Object module_id -CEQ 'md-html').Count -eq 0) 'module requests are intersected with exact Profile asset grants'
     } full
 
     $plan=Get-Plan
@@ -187,22 +187,23 @@ try {
     $unsigned=[ordered]@{}; foreach($key in $tampered.Keys){if($key -cne 'digest'){$unsigned[$key]=$tampered[$key]}}
     $tampered.digest=Get-HarnessCanonicalJsonSha256 -JsonBytes $utf8.GetBytes((ConvertTo-HarnessDistributionJson $unsigned))
     Expect-Rejection { Assert-HarnessDistributionPlanCurrent -RepoRoot $fixtureRepo -Plan $tampered } 'rehashed forged plan cannot override Profile authorization' 'stale|authorization'
-    $source=Join-Path $fixtureRepo 'skills/entry-router/SKILL.md'
+    $plan=Get-Plan governed
+    $source=Join-Path $fixtureRepo 'skills/planning/SKILL.md'
     $sourceBefore=[IO.File]::ReadAllBytes($source)
     try {
         [IO.File]::AppendAllText($source,"`nchanged after planning",$utf8)
-        Expect-Rejection { Read-HarnessDistributionSourceText -RepoRoot $fixtureRepo -Plan $plan -Source 'skills/entry-router/SKILL.md' } 'source consumer validates the same bytes it renders' 'changed'
+        Expect-Rejection { Read-HarnessDistributionSourceText -RepoRoot $fixtureRepo -Plan $plan -Source 'skills/planning/SKILL.md' } 'source consumer validates the same bytes it renders' 'changed'
         Expect-Rejection { Assert-HarnessDistributionSkillSourcesCurrent -RepoRoot $fixtureRepo -Plan $plan } 'skill transport revalidates source bytes immediately before linking' 'changed'
         Expect-Rejection { Assert-HarnessDistributionPlanCurrent -RepoRoot $fixtureRepo -Plan $plan } 'source drift invalidates the plan' 'stale'
     } finally { [IO.File]::WriteAllBytes($source,$sourceBefore) }
-    $extra=Join-Path $fixtureRepo 'skills/entry-router/ungranted.txt'
-    try { [IO.File]::WriteAllText($extra,'not authorized',$utf8); Expect-Rejection { Get-Plan } 'ungranted linked-directory payload fails before planning' 'file set' }
+    $extra=Join-Path $fixtureRepo 'skills/planning/ungranted.txt'
+    try { [IO.File]::WriteAllText($extra,'not authorized',$utf8); Expect-Rejection { Get-Plan governed } 'ungranted linked-directory payload fails before planning' 'file set' }
     finally { Remove-Item -LiteralPath $extra -Force }
     $outside=Join-Path $scratch 'outside'; New-Item -ItemType Directory -Path $outside | Out-Null
-    $alias=Join-Path $fixtureRepo 'skills/entry-router/alias'
+    $alias=Join-Path $fixtureRepo 'skills/planning/alias'
     try {
         New-Item -ItemType Junction -Path $alias -Target $outside | Out-Null
-        Expect-Rejection { Get-Plan } 'reparse directories are rejected before recursive descent' 'reparse'
+        Expect-Rejection { Get-Plan governed } 'reparse directories are rejected before recursive descent' 'reparse'
     } finally { if (Test-Path -LiteralPath $alias) { [IO.Directory]::Delete($alias) } }
 
     Change-Profile {param($p) $p['unknown']=$true} { Assert-ZeroWriteInstall 'invalid Profile leaves home/workspace unchanged before any install journal' }
@@ -213,9 +214,9 @@ try {
     Remove-Item -LiteralPath $pending -Force
     [IO.Directory]::Delete($stateRoot)
     $sourceBefore=[IO.File]::ReadAllBytes($source)
-    try { Remove-Item -LiteralPath $source -Force; Assert-ZeroWriteInstall 'missing source is rejected without creating install state' }
+    try { Remove-Item -LiteralPath $source -Force; Assert-ZeroWriteInstall 'missing source is rejected without creating install state' @('-Preset','governed') }
     finally { [IO.File]::WriteAllBytes($source,$sourceBefore) }
-    try { [IO.File]::WriteAllBytes($source,([byte[]]@(0xFF))); Assert-ZeroWriteInstall 'invalid UTF-8 source is rejected before installation writes' }
+    try { [IO.File]::WriteAllBytes($source,([byte[]]@(0xFF))); Assert-ZeroWriteInstall 'invalid UTF-8 source is rejected before installation writes' @('-Preset','governed') }
     finally { [IO.File]::WriteAllBytes($source,$sourceBefore) }
     $jsonTemplate=Join-Path $fixtureRepo 'agent-configs/claude/settings.local.core.json.template'
     $jsonBefore=[IO.File]::ReadAllBytes($jsonTemplate)
@@ -239,18 +240,18 @@ try {
     $compatTemplate=Join-Path $fixtureRepo 'agent-configs/codex/settings.local.shared.json.template'
     $compatJson=[IO.File]::ReadAllText($compatTemplate) -replace '^\s*\{','{"tk06_compat_integer":18446744073709551616,"tk06_compat_decimal":0.1234567890123456789012345678,'
     [IO.File]::WriteAllText($compatTemplate,$compatJson,$utf8)
-    Change-Profile {param($p) $p.asset_allowlist=@($p.asset_allowlist | Where-Object module_id -CNE 'team')} {
+    Change-Profile {param($p) $p.asset_allowlist=@($p.asset_allowlist | Where-Object module_id -CNE 'md-html')} {
         $result=Run-Install @('-Preset','full')
         Check ($result.ExitCode -eq 0) 'installer applies a valid Distribution plan'
         if ($result.ExitCode -ne 0) { throw $result.Output }
         foreach ($hostName in @('.claude','.codex','.agents')) {
-            Check (-not (Test-Path -LiteralPath (Join-Path $fixtureUser "$hostName/skills/workflow-team")) -and (Test-Path -LiteralPath (Join-Path $fixtureUser "$hostName/skills/obsidian-memory"))) "$hostName consumes the narrowed asset set, preserving allowed skills"
+            Check (-not (Test-Path -LiteralPath (Join-Path $fixtureUser "$hostName/skills/md-html")) -and -not (Test-Path -LiteralPath (Join-Path $fixtureUser "$hostName/skills/workflow-team")) -and (Test-Path -LiteralPath (Join-Path $fixtureUser "$hostName/skills/obsidian-memory"))) "$hostName consumes the narrowed asset set, preserving allowed skills"
         }
         $installedJson=[IO.File]::ReadAllText((Join-Path $fixtureUser '.codex/.claude/settings.local.json'))
         Check ($installedJson -match '"tk06_compat_integer"\s*:\s*18446744073709551616' -and $installedJson -match '"tk06_compat_decimal"\s*:\s*0\.1234567890123456789012345678') 'legacy host JSON keeps exact BigInteger and Decimal source support'
         $registry=Read-Json (Join-Path $fixtureUser '.dev-harness/install-registry.json')
         $manifest=Read-Json ([string]@($registry.global_manifest_history)[-1])
-        Check ($manifest.schema_version -ceq 'install-manifest/v1.2' -and $registry.schema_version -ceq 'install-registry/v1.1' -and @($manifest.feature_ownership.skills) -cnotcontains 'workflow-team') 'historical install schemas persist the actually applied selection without changing digest algorithms'
+        Check ($manifest.schema_version -ceq 'install-manifest/v1.2' -and $registry.schema_version -ceq 'install-registry/v1.1' -and @($manifest.feature_ownership.skills) -cnotcontains 'md-html' -and @($manifest.feature_ownership.skills) -cnotcontains 'workflow-team') 'historical install schemas persist the actually applied selection without changing digest algorithms'
     } full
     $catalogPath=Join-Path $fixtureRepo 'module-manifest-catalog.json'
     [IO.File]::WriteAllText($catalogPath,'invalid current distribution inputs',$utf8)

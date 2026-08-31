@@ -6,11 +6,15 @@ updated: 2026-04-01
 
 # Schema Versions
 
-## 目标
+## 当前边界
+
+以下版本表和字段仅记录保留的 v1 历史格式，不是当前 v2 恢复协议，也不授权自动 health/repair。当前任务遵循仓库的 v2 JSON Schemas、Entry Contract 和原生 task API；新任务不加载此表。Memory 维护不升级、修复或恢复旧生命周期。
+
+## 历史目标
 
 记录共享记忆与开发编排相关文档的 schema 版本，避免旧任务文件在恢复时被新 reader 误解析。
 
-## 当前版本表
+## 历史版本表
 
 | Schema | 当前版本 | 作用范围 | 兼容策略 |
 |------|------|------|------|
@@ -50,7 +54,7 @@ updated: 2026-04-01
 - `writer`
 - `derived_from: [运行时/当前任务.md, 运行时/tasks/]`
 
-## 升级规则
+## 历史升级规则（非当前执行入口）
 
 1. 新建任务状态文件时，必须显式写入 `schema_version`
 2. 旧文件若未声明 `schema_version`，health 必须失败；repair 只能重建派生运行态，绝不改写 `plan.md`
