@@ -752,12 +752,12 @@ $prCoreGuardIndex = $prCoreJob.IndexOf('Require all core groups to pass',[String
 $prCoreCheckoutIndex = $prCoreJob.IndexOf('Check out repository',[StringComparison]::Ordinal)
 $prCoreRollbackIndex = $prCoreJob.IndexOf('Core installation rollback',[StringComparison]::Ordinal)
 $prCoreGuardValid = @([regex]::Matches($prCoreJob,$prCoreGuardPattern)).Count -eq 1 -and $prCoreGuardIndex -ge 0 -and $prCoreCheckoutIndex -gt $prCoreGuardIndex -and $prCoreRollbackIndex -gt $prCoreCheckoutIndex
-$expectedLongRunningChecks = @('verify-capability-extraction.ps1','verify-v2-approval.ps1','verify-v2-ci-routing.ps1','verify-v2-evidence.ps1','verify-v2-governed-audit.ps1','verify-v2-install-presets.ps1')
+$expectedLongRunningChecks = @('verify-capability-extraction.ps1','verify-v2-approval.ps1','verify-v2-ci-routing.ps1','verify-v2-evidence.ps1','verify-v2-governed-audit.ps1')
 $longRunningBlock = [regex]::Match($runner,'(?ms)^\$longRunningChecks = @\(\r?\n(?<body>.*?)^\)\r?$')
 $actualLongRunningChecks = if ($longRunningBlock.Success) { @([regex]::Matches($longRunningBlock.Groups['body'].Value,"(?m)^\s*'(?<name>[^']+)',?\s*$") | ForEach-Object { $_.Groups['name'].Value }) } else { @() }
-$runnerBudgetsValid = @($actualLongRunningChecks).Count -eq 6 -and @($actualLongRunningChecks | Sort-Object -CaseSensitive -Unique).Count -eq 6 -and
+$runnerBudgetsValid = @($actualLongRunningChecks).Count -eq 5 -and @($actualLongRunningChecks | Sort-Object -CaseSensitive -Unique).Count -eq 5 -and
     (($actualLongRunningChecks -join '|') -ceq ($expectedLongRunningChecks -join '|')) -and
-    $runner -match '(?ms)if \(\$check\.Name -ceq ''verify-host-benchmark-qualification\.ps1''\) \{\s*\[math\]::Max\(\$CheckTimeoutSeconds,900\)\s*\}\s*elseif \(\$longRunningChecks -ccontains \$check\.Name\) \{\s*\[math\]::Max\(\$CheckTimeoutSeconds,600\)'
+    $runner -match '(?ms)if \(\$check\.Name -cin @\(''verify-host-benchmark-qualification\.ps1'',''verify-v2-install-presets\.ps1''\)\) \{\s*\[math\]::Max\(\$CheckTimeoutSeconds,900\)\s*\}\s*elseif \(\$longRunningChecks -ccontains \$check\.Name\) \{\s*\[math\]::Max\(\$CheckTimeoutSeconds,600\)'
 
 if ($runner -match '(?m)^\s*\[int\]\$CheckTimeoutSeconds = 360\s*$' -and
     $runner -match '(?m)^\s*\[string\]\$CoreGroup = ''all''\s*,?\s*$' -and

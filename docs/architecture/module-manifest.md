@@ -17,8 +17,15 @@ accepted by production construction.
 
 Phase 0 is a construction-input contract for discovery, ownership, watch paths,
 validation ownership, changed-path routing, dependencies, entrypoints, and
-requested capability declarations. It does not drive installation, activation,
+requested capability declarations. By itself it cannot drive installation, activation,
 default profiles, Protected Action changes, write permission, or Kernel identity.
+
+TK-06's separate D1 `install-profile/v1` and `distribution-plan/v1` contracts
+consume v1 `package.install_assets` as requests intersected with central Profile
+grants. No Manifest gains self-authorization, activation or Runtime authority;
+the frozen v0/v1 schema and code/install-asset role semantics are unchanged.
+See `declarative-distribution.md` for the existing bootstrap and exported-hook
+transport boundary and registry-based uninstall compatibility.
 
 ## v0 required shape
 

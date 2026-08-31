@@ -1701,7 +1701,7 @@ try {
     $hookRaceFixture = New-PresetFixture -Name 'codex-hook-snapshot-race'
     $hookRaceRepo = Join-Path $hookRaceFixture.Root 'repo'
     New-Item -ItemType Directory -Path $hookRaceRepo -Force | Out-Null
-    foreach ($directoryName in @('agent-configs','runtime-hooks','vault-template','skills','scripts')) {
+    foreach ($directoryName in @('agent-configs','runtime-hooks','vault-template','skills','scripts','modules','schemas','module-manifest-catalog.json')) {
         Copy-Item -LiteralPath (Join-Path $script:RepoRoot $directoryName) -Destination (Join-Path $hookRaceRepo $directoryName) -Recurse -Force
     }
     $hookRaceInstallScript = Join-Path $hookRaceRepo 'install.ps1'

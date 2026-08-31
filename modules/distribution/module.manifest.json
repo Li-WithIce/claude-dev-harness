@@ -15,8 +15,12 @@
       "harness.cmd",
       "harness.ps1",
       "install.ps1",
+      "schemas/distribution-plan.schema.json",
+      "schemas/install-profile.schema.json",
       "scripts/generate-skills-index.ps1",
+      "scripts/get-distribution-plan.ps1",
       "scripts/install-transaction-common.ps1",
+      "scripts/lib/Harness.Distribution.psm1",
       "scripts/run-isolated-install-smoke.ps1",
       "scripts/update-managed-assets.ps1",
       "tests/fixture-test-common.ps1",
@@ -29,11 +33,12 @@
     ]
   },
   "entrypoints": {
-    "commands": ["harness.ps1", "install.ps1", "uninstall.ps1", "scripts/update-managed-assets.ps1"],
+    "commands": ["harness.ps1", "install.ps1", "uninstall.ps1", "scripts/update-managed-assets.ps1", "scripts/get-distribution-plan.ps1"],
     "hooks": []
   },
   "validation": {
     "owner_tests": [
+      "tests/verify-declarative-distribution.ps1",
       "tests/verify-v2-install-presets.ps1",
       "tests/verify-preset-lifecycle-qualification.ps1",
       "tests/verify-v2-evidence.ps1"
@@ -42,6 +47,7 @@
     "core_group": "install-evidence",
     "changed": [],
     "full": [
+      "tests/verify-declarative-distribution.ps1",
       "tests/verify-v2-install-presets.ps1",
       "tests/verify-preset-lifecycle-qualification.ps1",
       "tests/verify-v2-evidence.ps1"

@@ -84,7 +84,7 @@
     },
     {
       "path": "install.ps1",
-      "sha256": "sha256:e3faeb77e3f32b01533f4b703822020a1ad4b21167df9b12b4977b5b4c66174b",
+      "sha256": "sha256:3194644c7119c6dc84c29aa8561cacaf1586cc507293ebcb294803440ac8beb6",
       "layer": "d1-distribution",
       "trust_paths": [
         "distribution"
@@ -92,9 +92,9 @@
       "root_ids": [
         "workspace-bootstrap"
       ],
-      "physical_loc": 3430,
-      "nonblank_loc": 3159,
-      "executable_loc": 3137
+      "physical_loc": 3400,
+      "nonblank_loc": 3134,
+      "executable_loc": 3105
     },
     {
       "path": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",
@@ -241,6 +241,20 @@
       "executable_loc": 152
     },
     {
+      "path": "scripts/lib/Harness.CanonicalJson.psm1",
+      "sha256": "sha256:1048ebac60a1974069a3153676425a93edcdbf2085b40654c11dc12de6e0fde2",
+      "layer": "k0-trust-primitive",
+      "trust_paths": [
+        "distribution"
+      ],
+      "root_ids": [
+        "workspace-bootstrap"
+      ],
+      "physical_loc": 222,
+      "nonblank_loc": 206,
+      "executable_loc": 206
+    },
+    {
       "path": "scripts/lib/Harness.ControlledWrite.psm1",
       "sha256": "sha256:a8f05e91304a2db8027c6b33644aea1ab15cd75224a10f0f2296b73b989846a9",
       "layer": "k1-runtime-kernel",
@@ -255,6 +269,20 @@
       "physical_loc": 145,
       "nonblank_loc": 134,
       "executable_loc": 134
+    },
+    {
+      "path": "scripts/lib/Harness.Distribution.psm1",
+      "sha256": "sha256:8b38dcae3835e00aac7c1c5575ebc53595b01953140962f80dfec85339d9b930",
+      "layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ],
+      "root_ids": [
+        "workspace-bootstrap"
+      ],
+      "physical_loc": 344,
+      "nonblank_loc": 315,
+      "executable_loc": 306
     },
     {
       "path": "scripts/lib/Harness.Evidence.psm1",
@@ -541,6 +569,42 @@
       "bytes": 3590
     },
     {
+      "path": "modules/distribution/profiles/core.json",
+      "sha256": "sha256:baa3fa5235ae7b05d551cd83a35f46841965ba1eb44febbe1c13555eaf0faf9f",
+      "kind": "policy",
+      "owner_layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ],
+      "reason": "TK-06 central core installation allowlist; grants Distribution transport only, never Runtime authority.",
+      "physical_loc": 40,
+      "bytes": 7235
+    },
+    {
+      "path": "modules/distribution/profiles/full.json",
+      "sha256": "sha256:f7c919feab139237556c9c25f657b0f155c393a65d4f519884c93e44f883c032",
+      "kind": "policy",
+      "owner_layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ],
+      "reason": "TK-06 central full installation allowlist; module requests cannot expand this grant.",
+      "physical_loc": 75,
+      "bytes": 16516
+    },
+    {
+      "path": "modules/distribution/profiles/governed.json",
+      "sha256": "sha256:bc12a0ef1093fc33146abf837b467e3bc22731b9714f192f6d675eeb6e7f31f3",
+      "kind": "policy",
+      "owner_layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ],
+      "reason": "TK-06 central governed installation allowlist independent of Runtime execution policy.",
+      "physical_loc": 42,
+      "bytes": 7652
+    },
+    {
       "path": "policies/decision-rights.json",
       "sha256": "sha256:571e4bedc35c601224ecce7c44f1a9f2b49543f091b8f4b2e7d06f74520c4c39",
       "kind": "policy",
@@ -650,6 +714,18 @@
       "bytes": 640
     },
     {
+      "path": "schemas/distribution-plan.schema.json",
+      "sha256": "sha256:5ece89c97f0d075c3d068c259d238ce0017a61e6c95e7bbad3e9968687afaa5d",
+      "kind": "schema",
+      "owner_layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ],
+      "reason": "Strict new Distribution desired-state contract validated before installation writes.",
+      "physical_loc": 234,
+      "bytes": 5537
+    },
+    {
       "path": "schemas/event.schema.json",
       "sha256": "sha256:46f5e84e20cdb5471a5f9d7971de7022518e79fffd1a6df99fc063ec7b4b2f64",
       "kind": "schema",
@@ -672,6 +748,54 @@
       "reason": "Evidence Chain completion is bound to this strict document shape.",
       "physical_loc": 182,
       "bytes": 7507
+    },
+    {
+      "path": "schemas/install-profile.schema.json",
+      "sha256": "sha256:986e8d5d6c6d47969b4b77516116584ec74ca2c5101ac21c07690f0242b1e2ab",
+      "kind": "schema",
+      "owner_layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ],
+      "reason": "Strict Profile prevents undeclared transport fields or ambiguous asset grants.",
+      "physical_loc": 183,
+      "bytes": 4372
+    },
+    {
+      "path": "schemas/module-manifest-catalog-v1.schema.json",
+      "sha256": "sha256:abe585b66f979057451243343c688dd1fb8a688e872f9a61a4f928abb3e84dfc",
+      "kind": "schema",
+      "owner_layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ],
+      "reason": "Distribution validates the published Manifest identity set without executing the C2 constructor.",
+      "physical_loc": 320,
+      "bytes": 12942
+    },
+    {
+      "path": "schemas/module-manifest-v1.schema.json",
+      "sha256": "sha256:2598935579d04899862329b3edf6ccc710fce8122a7105e29b910566b9657475",
+      "kind": "schema",
+      "owner_layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ],
+      "reason": "Frozen v1 Manifest schema validates descriptive capability requests consumed by Distribution.",
+      "physical_loc": 212,
+      "bytes": 6450
+    },
+    {
+      "path": "schemas/module-manifest.schema.json",
+      "sha256": "sha256:e1a39803bd813bc3a7f947fbec594fc381a0a86812d1a54751f479533b6d4072",
+      "kind": "schema",
+      "owner_layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ],
+      "reason": "Frozen v0 Manifest schema validates compatibility metadata without inventing install authority.",
+      "physical_loc": 199,
+      "bytes": 5656
     },
     {
       "path": "schemas/protected-actions-overlay.schema.json",
@@ -783,6 +907,15 @@
       "to": "scripts/install-transaction-common.ps1",
       "kind": "dot-source",
       "resolution": "ast-static:. (Join-Path $PSScriptRoot 'scripts\\install-transaction-common.ps1')",
+      "trust_paths": [
+        "distribution"
+      ]
+    },
+    {
+      "from": "install.ps1",
+      "to": "scripts/lib/Harness.Distribution.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'scripts\\lib\\Harness.Distribution.psm1') -Force -ErrorAction Stop",
       "trust_paths": [
         "distribution"
       ]
@@ -949,6 +1082,15 @@
       ]
     },
     {
+      "from": "scripts/lib/Harness.CanonicalJson.psm1",
+      "to": "scripts/lib/Harness.Hashing.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Hashing.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "distribution"
+      ]
+    },
+    {
       "from": "scripts/lib/Harness.ControlledWrite.psm1",
       "to": "scripts/lib/Harness.AtomicWrite.psm1",
       "kind": "import-module",
@@ -973,6 +1115,33 @@
       "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.ProtectedAction.psm1') -ErrorAction Stop",
       "trust_paths": [
         "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.Distribution.psm1",
+      "to": "scripts/lib/Harness.CanonicalJson.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.CanonicalJson.psm1') -ErrorAction Stop",
+      "trust_paths": [
+        "distribution"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.Distribution.psm1",
+      "to": "scripts/lib/Harness.Hashing.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Hashing.psm1') -ErrorAction Stop",
+      "trust_paths": [
+        "distribution"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.Distribution.psm1",
+      "to": "scripts/lib/Harness.Path.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -ErrorAction Stop",
+      "trust_paths": [
+        "distribution"
       ]
     },
     {
@@ -1295,17 +1464,17 @@
   ],
   "unresolved_dependencies": [],
   "totals": {
-    "file_count": 28,
-    "physical_loc": 13259,
-    "nonblank_loc": 12188,
-    "executable_loc": 12157,
+    "file_count": 30,
+    "physical_loc": 13795,
+    "nonblank_loc": 12684,
+    "executable_loc": 12637,
     "runtime_file_count": 22,
     "runtime_executable_loc": 6150,
-    "distribution_file_count": 15,
-    "distribution_executable_loc": 7637,
+    "distribution_file_count": 17,
+    "distribution_executable_loc": 8117,
     "duplicate_edge_count": 3,
-    "artifact_count": 20,
-    "artifact_bytes": 50501
+    "artifact_count": 28,
+    "artifact_bytes": 116861
   },
   "budget": {
     "baseline_executable_loc": 6151,

@@ -72,13 +72,13 @@ try {
     Check (($actualModules -join '|') -ceq ($expectedModules -join '|')) 'catalog contains the exact 13 mixed-version modules in ordinal order' "module discovery or ordering drifted: $($actualModules -join ', ')"
 
     $totals = $result.Catalog.totals
-    Check ($totals.manifest_count -eq 13 -and $totals.module_count -eq 13 -and $totals.v0_module_count -eq 6 -and $totals.v1_module_count -eq 7 -and $totals.capability_source_count -eq 7 -and $totals.capability_source_file_reference_count -eq 174 -and $totals.owner_test_count -eq 86 -and $totals.core_test_count -eq 55 -and $totals.quick_test_count -eq 1 -and $totals.full_test_count -eq 84 -and $totals.optional_route_count -eq 8) 'catalog totals freeze 6 v0 plus 7 v1 modules, 86 owners, 55 core checks, 84 full checks, and 8 routes' "catalog totals drifted: $($totals | ConvertTo-Json -Compress)"
+    Check ($totals.manifest_count -eq 13 -and $totals.module_count -eq 13 -and $totals.v0_module_count -eq 6 -and $totals.v1_module_count -eq 7 -and $totals.capability_source_count -eq 7 -and $totals.capability_source_file_reference_count -eq 174 -and $totals.owner_test_count -eq 87 -and $totals.core_test_count -eq 56 -and $totals.quick_test_count -eq 1 -and $totals.full_test_count -eq 85 -and $totals.optional_route_count -eq 8) 'catalog totals include the TK-06 D1 verifier: 87 owners, 56 core checks, 85 full checks, and 8 routes' "catalog totals drifted: $($totals | ConvertTo-Json -Compress)"
     Check (@($result.Catalog.unresolved_dependencies).Count -eq 0 -and @($result.Catalog.ownership_conflicts).Count -eq 0) 'constructed catalog has no unresolved dependency or ownership conflict' 'catalog contains unresolved dependencies or ownership conflicts'
 
     $expectedGroupNames = @('entry-lifecycle','evaluation-release','install-evidence','governance-approval','harness-contracts')
     $actualGroupNames = @($result.Catalog.core_groups.Keys)
     $groupCounts = @($expectedGroupNames | ForEach-Object { @($result.Catalog.core_groups[$_]).Count })
-    Check (($actualGroupNames -join '|') -ceq ($expectedGroupNames -join '|') -and ($groupCounts -join '|') -ceq '14|14|3|3|21') 'five stable CoreGroups are derived with exact 14/14/3/3/21 membership' "CoreGroup names or counts drifted: names=$($actualGroupNames -join ',') counts=$($groupCounts -join ',')"
+    Check (($actualGroupNames -join '|') -ceq ($expectedGroupNames -join '|') -and ($groupCounts -join '|') -ceq '14|14|4|3|21') 'five stable CoreGroups include TK-06 with exact 14/14/4/3/21 membership' "CoreGroup names or counts drifted: names=$($actualGroupNames -join ',') counts=$($groupCounts -join ',')"
     Check (@($result.Catalog.quick_tests).Count -eq 1 -and [string]$result.Catalog.quick_tests[0] -ceq 'tests/verify-lite-footprint.ps1') 'quick validation derives only verify-lite-footprint' 'quick validation selection drifted'
 
     $full = Get-OrdinalStrings -Values @($result.Catalog.full_tests)
@@ -87,7 +87,7 @@ try {
 
     $ownerPaths = @($result.Catalog.test_owners | ForEach-Object { [string]$_.path })
     $duplicateOwners = @($ownerPaths | Group-Object -CaseSensitive | Where-Object Count -ne 1)
-    Check ($ownerPaths.Count -eq 86 -and $duplicateOwners.Count -eq 0 -and $ownerPaths -ccontains 'tests/verify-capability-extraction.ps1' -and $ownerPaths -ccontains 'tests/verify-installation.ps1' -and $ownerPaths -ccontains 'tests/run-scenario-evals.ps1' -and $ownerPaths -ccontains 'tests/verify-thin-adapters.ps1') 'every verifier and scenario runner has exactly one owner' 'verifier ownership is incomplete, duplicated, or missing special runners'
+    Check ($ownerPaths.Count -eq 87 -and $duplicateOwners.Count -eq 0 -and $ownerPaths -ccontains 'tests/verify-capability-extraction.ps1' -and $ownerPaths -ccontains 'tests/verify-installation.ps1' -and $ownerPaths -ccontains 'tests/run-scenario-evals.ps1' -and $ownerPaths -ccontains 'tests/verify-thin-adapters.ps1' -and $ownerPaths -ccontains 'tests/verify-declarative-distribution.ps1') 'every verifier and scenario runner has exactly one owner' 'verifier ownership is incomplete, duplicated, or missing special runners'
 
     $routeModules = @($result.Catalog.optional_routes | ForEach-Object { [string]$_.module_id })
     $optionalTests = Get-OrdinalStrings -Values @($result.Catalog.optional_routes | ForEach-Object { @($_.tests) } | Select-Object -Unique)

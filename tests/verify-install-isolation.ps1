@@ -491,7 +491,9 @@ foreach ($case in $snapshotBarrierCases) {
     New-Item -ItemType Directory -Path (Split-Path -Parent $targetPath),$workspaceRoot -Force | Out-Null
     [System.IO.File]::WriteAllText($targetPath, $case.Initial, (New-Object System.Text.UTF8Encoding($false)))
     Copy-RepoPathToFixture -SourceRoot $RepoRoot -FixtureRoot $fixtureRoot -RelativePath 'scripts\install-transaction-common.ps1'
-    Copy-RepoPathToFixture -SourceRoot $RepoRoot -FixtureRoot $fixtureRoot -RelativePath 'scripts\lib\Harness.Hashing.psm1'
+    foreach ($moduleName in @('Harness.Hashing','Harness.Path','Harness.CanonicalJson','Harness.Distribution')) {
+        Copy-RepoPathToFixture -SourceRoot $RepoRoot -FixtureRoot $fixtureRoot -RelativePath "scripts\lib\$moduleName.psm1"
+    }
     $instrumentedSource = $installSource
     if (@($instrumentedSource.Split([string[]]@($case.Anchor), [System.StringSplitOptions]::None)).Count -ne 2) {
         $snapshotBarrierFailures.Add("$($case.Name): barrier anchor is not unique") | Out-Null
@@ -717,7 +719,7 @@ $legacyWorkspace = Join-Path $legacyCaseRoot 'workspace'
 $legacyForeignUserProfile = Join-Path $legacyCaseRoot 'foreign-user'
 $legacyForeignWorkspace = Join-Path $legacyCaseRoot 'foreign-workspace'
 New-Item -ItemType Directory -Path $legacyRepoRoot,$legacyUserProfile,$legacyWorkspace,$legacyForeignUserProfile,$legacyForeignWorkspace -Force | Out-Null
-foreach ($fixtureSource in @('install.ps1','uninstall.ps1','scripts','skills','vault-template','agent-configs','runtime-hooks')) {
+foreach ($fixtureSource in @('install.ps1','uninstall.ps1','scripts','skills','vault-template','agent-configs','runtime-hooks','modules','schemas','module-manifest-catalog.json')) {
     Copy-Item `
         -LiteralPath (Join-Path $RepoRoot $fixtureSource) `
         -Destination (Join-Path $legacyRepoRoot $fixtureSource) `

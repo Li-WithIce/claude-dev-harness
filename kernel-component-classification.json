@@ -14,10 +14,10 @@
     {
       "path": "install.ps1",
       "layer": "d1-distribution",
-      "current_role": "Current monolithic install and update transaction implementation.",
+      "current_role": "Distribution plan consumer retaining exact-identity install and update transactions.",
       "owner_candidate": "distribution",
       "tcb_included": true,
-      "reason": "Reached by the bootstrap distribution path; TK-00 classifies but does not split it.",
+      "reason": "TK-06 validates explicit Profile authorization before recovery or install writes, then consumes the selected plan.",
       "migration_target": "distribution-reconciler",
       "legacy_status": "not-legacy"
     },
@@ -242,6 +242,16 @@
       "legacy_status": "not-legacy"
     },
     {
+      "path": "scripts/get-distribution-plan.ps1",
+      "layer": "d1-distribution",
+      "current_role": "Read-only deterministic Distribution plan construction and validation CLI.",
+      "owner_candidate": "distribution",
+      "tcb_included": false,
+      "reason": "Standalone D1 entry; ordinary installation reaches its shared constructor directly.",
+      "migration_target": "distribution-reconciler",
+      "legacy_status": "not-legacy"
+    },
+    {
       "path": "scripts/get-kernel-tcb-inventory.ps1",
       "layer": "c2-capability",
       "current_role": "Read-only reproducible Kernel TCB inventory generator.",
@@ -386,8 +396,8 @@
       "layer": "k0-trust-primitive",
       "current_role": "Canonical JSON byte serialization and digest primitive for explicitly new trust objects.",
       "owner_candidate": "trust-kernel",
-      "tcb_included": false,
-      "reason": "The approved K0 primitive has no selected Runtime or Distribution caller until a new Schema, Envelope, or explicit digest_algorithm adopts canonical-json/v1.",
+      "tcb_included": true,
+      "reason": "TK-06 explicitly adopts this primitive on the Distribution path for new Profile and Plan contracts; Runtime still does not reach it.",
       "migration_target": null,
       "legacy_status": "not-legacy"
     },
@@ -409,6 +419,16 @@
       "tcb_included": true,
       "reason": "MCP write adapter delegates protected policy and atomic writes here.",
       "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.Distribution.psm1",
+      "layer": "d1-distribution",
+      "current_role": "Strict Profile authorization, deterministic desired-state planning and source-bound consumption.",
+      "owner_candidate": "distribution",
+      "tcb_included": true,
+      "reason": "Reached by the installer without importing C2 constructors or Runtime routing and policy modules.",
+      "migration_target": "distribution-reconciler",
       "legacy_status": "not-legacy"
     },
     {

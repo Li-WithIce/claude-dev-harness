@@ -87,6 +87,9 @@ Source Identity, Task State, installation transaction, Release, Qualification,
 rollout, benchmark, or model-evaluation byte sequence or digest is reinterpreted.
 Those historical algorithms remain with their current owners.
 
-The primitive is classified as K0. TK-02 and TK-04 import it only from C2
-engineering construction and Release sidecar code; no selected Runtime or Distribution root reaches that code.
-It therefore remains outside the generated transitive TCB.
+The primitive is classified as K0. At TK-04, no selected Runtime or Distribution
+root reached the C2 engineering construction or Release sidecar callers.
+TK-06 explicitly adopts it for the new `install-profile/v1` and
+`distribution-plan/v1` contracts. It is now reached by Distribution, but not
+by any selected Runtime root. Existing installation, transaction and history
+digests retain their algorithms; see `declarative-distribution.md`.
