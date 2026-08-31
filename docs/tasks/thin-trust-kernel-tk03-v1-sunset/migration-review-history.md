@@ -317,3 +317,113 @@ Both parse without errors. Raw SHA-256:
 
 No Preview, Commit, fixture execution or Runtime write occurred in this static
 comparison. The next task-version spec and Approval remain separate bindings.
+
+## Final candidate S2: native Approval, real Preview and Commit
+
+Native `apr_tk03_carrier_delivery_v7` was imported on
+2026-08-31T13:40:38.4480602Z, task v7/verifying, pointer unchanged. Approval
+raw digest: `3481e39ded4a73908ee52314db0f6b004b433f68081e0ed0e2e6827424f0d86d`.
+Protected operation:
+`sha256:ca2de3e92311c029f5d791ad4c52b49bef3c8db52e5d1588c7a37b1d108fc2b2`.
+Command digest:
+`sha256:cac0a488dade765e379f3939e382b61e6a6c8c4ab614db884aec32f9c41867de`.
+
+The reviewer initially stopped its own preflight with exit 1 (failure recorded
+at 13:44:24.3718397Z): importing Path before Approval made a path function
+unavailable in that caller scope. No Preview or write occurred. After the
+implementer explicitly authorized using the reviewed driver's original
+Approval-then-Path import order, the reviewer adjusted only its in-memory
+preflight. No driver, source, task, spec or Approval was changed or exempted.
+
+The successful preflight ran 13:45:11.7755340Z–13:45:15.4353634Z, exit 0.
+The unique actual Preview process ran
+13:45:39.5433087Z–13:45:45.6954038Z, exit 0; the driver's inner operation ran
+13:45:40.3721054Z–13:45:45.5630354Z. Actor/context remained
+`/root/tk03_migration_review`, exact model unavailable. Output raw digest:
+`a44d9c204d509f8792c2eb2fe2afed42e2eca5578ba3cc022a06a7f127abef55`.
+
+Postchecks during 13:46:09.7379017Z–13:46:13.3058603Z found no differences:
+source S Head, the approved tree `12e996e668fa3aaffccf07dc887f133524e5a178`,
+all three modified paths, task v7/verifying, live Approval and all migration
+preservation inputs remained exact. Index raw digest:
+`65e7deaca494874030b227e24a546cac4e1fe539f3443d6c28e49680bcdd7c76`;
+task raw digest:
+`ddec474c1f7b589c7a89578369d537b9e1c33e51841e430e5100c2bc75ac0e61`.
+K0 checked all 492 tracked paths before working-tree inspection. The linked
+Git pointer and actual Git roots were valid; hooks were 14 ordinary sample
+leaves. The only new artifact was the fixed Preview JSON.
+
+The matching implementer Commit ran 13:47:27.3870589Z–13:47:31.4387976Z,
+exit 0, producing `2c5aad95c5141b24a083f95869b19221f04697c5` (S2) as an
+ordinary single-parent child of S. Normal push succeeded; PR #12 remains an
+Open Draft on the same PR #11 base. The new exact-carrier-source checkout was
+created solely from Git objects and verified as the approved 492-file clean
+tree. Actual source validation and CI are recorded separately, not implied by
+this Preview/Commit. No Runtime pointer change or physical deletion occurred.
+
+## Ordinary CI receipt inspector review
+
+The private read-only inspector was independently reviewed during
+2026-08-31T13:54:42.3334788Z–13:57:23.1244874Z, actor/context
+`/root/tk03_migration_review`, before any execution of that inspector. Two P2
+findings were identified: the displayed workflow name and latest-jobs query
+did not fully pin workflow/attempt ownership; archive downloading and expansion
+checked sizes only after reading or from ZIP declarations. Rejected raw digest:
+`ab75e85a4867c0cb369c831a986dd07ff6375ab1a4936bc038ec4d0a66f72b8e`.
+No P0/P1 or receipt mapping/Schema issue was found. Reviewed unchanged Schema
+and workflow raw digests were respectively
+`4b0ad49f16d69f8e6f9dd6d803e33040147551f4638ad07bd0ec2498a0e0804f`
+and `988f05530aec0eeead57ce9cb1629d9d7c9a0dfd9c1f9cdc4ba6813dc7fca54d`.
+
+The revision pins the observed repository and workflow id/path, branch and
+first attempt; queries that specific attempt's jobs; checks every job's
+run/attempt/Head and each archive's run/repository/Head; and rechecks the run at
+the end. Actual metadata/download/expansion streams have 1 MiB/64 KiB/16 KiB
+hard bounds, with one 45-second deadline per network response and no unbounded
+stderr accumulation. The write statement is limited to explicit writes by
+the inspector. This change is private evidence tooling, not source S2 or a
+workflow/producer change. Its AST check passed. Independent closure and actual
+terminal CI receipt inspection are separate later evidence.
+
+One preliminary read-only attempt-specific metadata request returned EOF;
+the next read-only request succeeded. This was not a CI rerun, dispatch or
+evidence pass. No failed network response is used as verification evidence.
+
+The two P2 findings were statically closed during
+2026-08-31T14:02:12.0919352Z–14:02:58.8556678Z by the same different actor,
+with no new P0/P1/P2. Corrected inspector raw SHA-256:
+`ae7d4c78a56afab1aec0059c6c96a30f94f2fa78157e1387ae04f887cb88875d`.
+Schema and workflow bytes remained the reviewed versions above. The reviewer
+performed only K0-contained reads, hashes and AST parsing; no network, fixture,
+inspector execution, Runtime write or final audit occurred in this review.
+API constants and actual receipt authenticity still require the later live
+read-only inspection; static closure is not a CI pass.
+
+## Source evidence boundary pre-review
+
+During 2026-08-31T14:17:00.1283798Z–14:19:19.3280798Z the different actor
+performed a bounded read-only pre-review of the actual S2 CI inspection,
+preservation receipt and draft completion boundary, with no new P0/P1/P2.
+It recomputed all seven embedded receipt UTF-8 digests and checked Schema,
+duplicates, parsed objects and job/artifact/run/attempt/Head/base bindings.
+The preservation values agree with the reviewer's earlier actual Preview
+postchecks; the imported task remains native v2 paused, version 1.
+
+The report plan is deliberately conservative: version-7 actual dirty Evidence,
+AC-10 not_verified for the historical ancestor-path limitation, AC-11 blocked
+at global/deletion gates, and a subsequent native paused result. Any docs-only
+B delivery has separate Approval/Preview and does not inherit S2 Suite all.
+At this pre-review, AC-9 was still awaiting the terminal local full suite and
+the final resolved-Evidence audit. No final audit file was written.
+
+Reviewed raw SHA-256 values:
+
+- CI inspection: `9e2fd2ca98eb281e287f0cdd269758bc432825c98f1afd029b38b7a97efabe33`
+- preservation inspection: `feb0670d2d74c1694a6f90547e31011eb9393cb6620b849f64f515646ad30980`
+- draft verification summary: `3c212c1b251942870b992d7fa3fd25287cf56ca2401a538911b543d20a08baaf`
+- then-current verification history: `b361ef732620058c2b0ddfb56899f8e55839ae17a6f2eb493414999827f498cb`
+
+This review used only exact-path K0, reads/hashes and in-memory JSON/Schema
+checks. It did not repeat GitHub downloads, preservation or validation runs,
+native verification, Runtime writes or actual protected-tree access. It is
+not substituted for the final resolved-Evidence audit.

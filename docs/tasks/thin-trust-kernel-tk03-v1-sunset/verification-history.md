@@ -1,8 +1,8 @@
 # TK-03 validation history
 
 All local validation runs below used tracked-source-only isolated checkouts (`source`,
-`recheck-source`, `correction-source`, `exact-source`, or
-`exact-corrected-source`) under
+`recheck-source`, `correction-source`, `exact-source`,
+`exact-corrected-source`, or `exact-carrier-source`) under
 `D:/data/dev-harness-next/tmp/tk03-validation`. Earlier rows are local snapshot
 commits, not the final PR Head; exact PR-Head runs are explicitly labelled.
 PowerShell fixtures stayed under the fixed
@@ -216,6 +216,107 @@ model evaluation runner during 13:33:31.7386237Z–13:33:38.7775709Z. Both exite
 is `ace989d6767b87df61b1d8b1d066edab9972d9029f1073079bb57e6aeb238160`.
 This is a new source change; S's failed CI and any S Suite observation are not
 promoted to successful evidence for its later commit.
+
+## Final candidate S2
+
+Source S2 is `2c5aad95c5141b24a083f95869b19221f04697c5`, tree
+`12e996e668fa3aaffccf07dc887f133524e5a178`, an ordinary child of S with only
+the model discovery fixture and two existing history reports changed. The
+Git-object-only `exact-carrier-source` checkout contains 492 tracked files;
+K0 metadata validation preceded working-tree checks and confirmed a clean
+exact source binding. It does not replace the earlier clones or failed logs.
+
+S2 quick passed during 2026-08-31T13:48:37.1270993Z–13:49:22.4098391Z,
+exit 0, with source Head/tree intact. The outer checks were Git diff validation
+and lite footprint. Run: `suite-quick-20260831-214836`. Stdout raw SHA-256:
+`7fa89d7399657bf6e46488e5ba8c9288877459e80681ab4cf47bfb7f82f470ae`;
+stderr was empty. This remains separate from the S2 Suite all and ordinary
+CI run `33398967580` results; no terminal result is inferred from quick.
+
+A read-only source/preservation inspection during
+2026-08-31T14:09:02.7211199Z–14:09:05.7456234Z confirmed S2 Head/tree,
+492 K0-checked tracked paths, only permitted report changes, all six migration
+preservation digests, the idle legacy pointer and dp-03 paused/version-1 state.
+K0 hashing/path/CAS and the workflow are unchanged from the baseline. The only
+Schema changes are the three Manifest schemas and two new admission schemas.
+Runtime TCB remains 6075/6151 with no exception. The exact removal proposal's
+cached check returned 0 without applying it. The first read-only command text
+had a PowerShell parse error before executing any statement; the corrected
+inspection, not that failed attempt, supplies these results.
+
+## S2 exact-head ordinary CI
+
+Ordinary PR CI [33398967580](https://github.com/Li-WithIce/claude-dev-harness/actions/runs/33398967580)
+ran from 2026-08-31T13:48:12Z to 2026-08-31T14:06:52Z, attempt 1, and
+completed successfully. All seven engineering jobs passed; release-host,
+release-model and release-full were skipped by design. This is not a Release
+Qualification pass and no workflow_dispatch or CI rerun was invoked.
+
+The independently reviewed private inspector actually ran during
+2026-08-31T14:10:24.3049071Z–2026-08-31T14:11:01.6150834Z, exit 0. It pinned the
+repository, workflow id/path, PR/base, Head and attempt; matched all seven job
+and artifact identities; checked API ZIP digests, strict UTF-8/Schema and raw
+receipt digests; and rechecked the terminal run binding. No archive was
+extracted. An earlier invocation returned read-only response unavailable,
+exit 1, and produced no passing record; the later invocation used unchanged
+inspector bytes. This retried metadata/artifact reading, not the CI run.
+
+| Check | Job database id | Receipt raw SHA-256 |
+|---|---|---|
+| entry-lifecycle | 99510298209 | `903052825c45a025573b980794e255753ad7b87f1e8d844735a2efb91db8e7a4` |
+| evaluation-release | 99510298125 | `566d802be2f31ef95a7a03735ba1e921c5d93a16c05adcd43cf81fabf50124d1` |
+| install-evidence | 99510298223 | `51e6793f37899e15da662ac84ff0a1deaf4bcea56fe638fec35bc66f08eada92` |
+| governance-approval | 99510298092 | `86129ab34b5b0fbc6970623d97894dca0af052b99a6e858df0860016ab3952ad` |
+| harness-contracts | 99510298048 | `d7716cd39cbad86ce6373e1e98cc66c6a5e0997c29e170b7b7f81ad1d8cfa8a2` |
+| core-rollback | 99515850987 | `3ad45a2008be269f98509ef436098bdd856fc624e98e0f49db7887b9c5b7fc0f` |
+| changed-optional | 99510297744 | `c19c135bb421b8fd1a460045b3942cc708445761dd9c00636abca886240c2520` |
+
+All receipts bind checkout/head
+`2c5aad95c5141b24a083f95869b19221f04697c5`, base
+`2e1949d7bcedc5397404d86a5ce95b51c8dde4a0`, PR 12 and attempt 1.
+The exact archives and raw receipt text are represented in the private
+`ci-source-S2-inspection.json` output with their SHA-256 values. This CI
+observation is separate from the local Suite all aggregate recorded below.
+
+## S2 exact-source terminal Suite all
+
+The hardened tracked-source-only run `suite-all-20260831-214926` completed
+during 2026-08-31T13:49:26.4780277Z–15:07:54.9249118Z, status pass, exit 0.
+Source Head `2c5aad95c5141b24a083f95869b19221f04697c5` and tree
+`12e996e668fa3aaffccf07dc887f133524e5a178` remained intact. The command was
+`pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation.ps1 -Suite all -CheckTimeoutSeconds 600 -VerboseOutput`
+inside the exact-carrier-source checkout, not the original working tree.
+
+The closed stdout ends with `STATUS: PASS`. A strict outer-check/catalog
+comparison found exactly 73 distinct active verifier passes and one Git diff
+pass, with no missing, unexpected or duplicate verifier. Fourteen exact
+Manifest-owned fixtures remain archived/not_run. The installed-only
+`verify-installation.ps1` entry is one design skip in the no-argument loop;
+isolated installation, presets, update and uninstall checks did execute.
+Task-state reports `STATUS: PASS (142 checks, 1 unavailable)`: its dynamic
+SUBST fixture was Host-blocked and not bypassed. Runtime/Memory decoupling
+separately reports 35 checks, 0 unavailable. These counts are not conflated.
+
+Result JSON raw SHA-256:
+`b98b89295c89fc41033e4ff3bb210bb29e077920f22b0df95f663428ca2a6cff`.
+Stdout raw SHA-256:
+`df29c95bc65795a117c19629c96dd62694456a25ef53d3e4d68935a783ee498f`.
+Stderr raw SHA-256:
+`8bb15db2509d730f181d0dbb68f14ea65e6f2312fc6bc1f553ba044b8f5eb339`.
+Stderr is not empty: it contains three Git LF-to-CRLF warnings, two for the
+fixture `.gitignore` and one for `source.txt`, and no other lines.
+
+The bounded read-only aggregate inspector rechecked all raw digests, the
+closed result, final line and exact source catalog membership during
+15:13:48.7418578Z–15:13:49.1809999Z, exit 0. Its private output is
+`suite-all-source-S2-inspection.json`, raw SHA-256
+`586495eff16f554d891fb62a86b49e6fe837084c330f8769893bac81c504e10c`.
+The inspector script raw SHA-256 is
+`813ba798aafee7a66318f82c7259618d4c67c356a45116d12a4c2a728a42f9c0`.
+An earlier one-shot read-only inspection returned exit 1 without output and
+does not supply evidence. The file-backed inspection then passed; rereading
+closed logs did not rerun validation. No live Qualification, default flip,
+Promotion, Canary, Stable or physical removal was performed by this suite.
 
 ## Completion boundary
 
