@@ -569,7 +569,7 @@ exit 0
         $userProfile = Join-Path $caseRoot 'user'
         $workspaceRoot = Join-Path $caseRoot 'workspace'
         New-Item -ItemType Directory -Path $fixtureRepoRoot,$userProfile,$workspaceRoot -Force | Out-Null
-        foreach ($fixtureSource in @('install.ps1','uninstall.ps1','scripts','skills','vault-template','agent-configs','runtime-hooks')) {
+        foreach ($fixtureSource in @('install.ps1','uninstall.ps1','scripts','skills','vault-template','agent-configs','runtime-hooks','modules','schemas','module-manifest-catalog.json')) {
             Copy-Item `
                 -LiteralPath (Join-Path $RepoRoot $fixtureSource) `
                 -Destination (Join-Path $fixtureRepoRoot $fixtureSource) `

@@ -1,0 +1,183 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/install-profile.schema.json",
+  "title": "Install Profile v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "digest_algorithm",
+    "profile_id",
+    "vault_profile",
+    "features",
+    "system_skill",
+    "enabled_modules",
+    "asset_allowlist"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "install-profile/v1"
+    },
+    "digest_algorithm": {
+      "type": "string",
+      "const": "canonical-json/v1"
+    },
+    "profile_id": {
+      "type": "string",
+      "enum": [
+        "core",
+        "governed",
+        "full"
+      ]
+    },
+    "vault_profile": {
+      "type": "string",
+      "enum": [
+        "minimal",
+        "full"
+      ]
+    },
+    "features": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "core",
+          "v1-compatibility",
+          "governed",
+          "memory",
+          "team",
+          "md-html",
+          "adapters",
+          "provider-references"
+        ]
+      }
+    },
+    "system_skill": {
+      "type": "boolean",
+      "const": true
+    },
+    "enabled_modules": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "module_id",
+          "allowed_capabilities"
+        ],
+        "properties": {
+          "module_id": {
+            "type": "string",
+            "pattern": "^(?!(?:kernel|core|runtime|legacy|none)$)[a-z][a-z0-9-]{1,62}$"
+          },
+          "allowed_capabilities": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 512,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "filesystem-read",
+                "filesystem-write",
+                "network",
+                "process-execution",
+                "task-state-read",
+                "task-state-write",
+                "capability-read",
+                "capability-write",
+                "kernel-policy-read",
+                "kernel-policy-write"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "asset_allowlist": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind",
+          "origin",
+          "module_id",
+          "source",
+          "target",
+          "ownership",
+          "files"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,79}$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "skill",
+              "hook",
+              "vault",
+              "template"
+            ]
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "bootstrap",
+              "module-request"
+            ]
+          },
+          "module_id": {
+            "type": "string",
+            "pattern": "^(?!(?:kernel|core|runtime|legacy|none)$)[a-z][a-z0-9-]{1,62}$"
+          },
+          "source": {
+            "$ref": "#/definitions/path"
+          },
+          "target": {
+            "$ref": "#/definitions/path"
+          },
+          "ownership": {
+            "type": "string",
+            "enum": [
+              "managed",
+              "create-if-missing",
+              "user-owned"
+            ]
+          },
+          "files": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 512,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/definitions/path"
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!.*\\\\)(?!.*//)(?!\\.\\.?(?:/|$))(?!.*\\/\\.\\.?(?:/|$))(?!.*[<>:\"|?*\\u0000-\\u001f])[A-Za-z0-9._\\-\\u0080-\\uFFFF]+(?:/[A-Za-z0-9._\\-\\u0080-\\uFFFF]+)*$"
+    }
+  }
+}

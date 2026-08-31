@@ -51,6 +51,12 @@ function Test-OrdinalSorted {
 }
 
 $requiredFiles = @(
+    'docs/architecture/declarative-distribution.md',
+    'schemas/install-profile.schema.json',
+    'schemas/distribution-plan.schema.json',
+    'scripts/get-distribution-plan.ps1',
+    'scripts/lib/Harness.Distribution.psm1',
+    'tests/verify-declarative-distribution.ps1',
     'docs/architecture/thin-trust-kernel.md',
     'docs/architecture/hashing-contract.md',
     'docs/architecture/canonical-json-contract.md',
@@ -99,6 +105,9 @@ foreach ($path in $requiredFiles) {
 }
 
 $powerShellPaths = @(
+    'scripts/get-distribution-plan.ps1',
+    'scripts/lib/Harness.Distribution.psm1',
+    'tests/verify-declarative-distribution.ps1',
     'scripts/get-adapter-inventory.ps1',
     'scripts/get-kernel-tcb-inventory.ps1',
     'scripts/get-module-manifest-catalog.ps1',
@@ -129,6 +138,11 @@ Check ($parseFailures.Count -eq 0) 'all architecture PowerShell files parse' "Po
 Check ($bomFailures.Count -eq 0) 'all architecture PowerShell files follow the UTF-8 BOM convention' "PowerShell BOM failures: $($bomFailures -join ', ')"
 
 $jsonPaths = @(
+    'schemas/install-profile.schema.json',
+    'schemas/distribution-plan.schema.json',
+    'modules/distribution/profiles/core.json',
+    'modules/distribution/profiles/governed.json',
+    'modules/distribution/profiles/full.json',
     'adapter-inventory.json',
     'kernel-tcb-roots.json',
     'kernel-tcb-inventory.json',
@@ -266,7 +280,7 @@ $staleComponents = @($componentPaths | Where-Object { -not (Test-Path -LiteralPa
 Check ($missingComponents.Count -eq 0 -and $extraComponents.Count -eq 0 -and $duplicateComponents.Count -eq 0 -and $staleComponents.Count -eq 0 -and (Test-OrdinalSorted -Values $componentPaths)) 'classification dynamically covers every target exactly once with no stale path' "classification coverage drifted: missing=$($missingComponents -join ',') extra=$($extraComponents -join ',') duplicate=$($duplicateComponents -join ',') stale=$($staleComponents -join ',')"
 Check (@($classification.components | Where-Object { [string]$_.layer -ceq 'k0-trust-primitive' -and [string]$_.path -cin @('scripts/lib/Harness.Path.psm1','scripts/lib/Harness.AtomicWrite.psm1','scripts/lib/Harness.CanonicalJson.psm1','scripts/lib/Harness.Hashing.psm1') }).Count -eq 4) 'Path, AtomicWrite, CanonicalJson, and Hashing are the four canonical K0 components' 'canonical K0 component ownership drifted'
 $canonicalClassification = @($classification.components | Where-Object { [string]$_.path -ceq 'scripts/lib/Harness.CanonicalJson.psm1' })
-Check ($canonicalClassification.Count -eq 1 -and [string]$canonicalClassification[0].layer -ceq 'k0-trust-primitive' -and -not [bool]$canonicalClassification[0].tcb_included) 'CanonicalJson is K0 but remains outside current trust-path reachability until explicit adoption' 'CanonicalJson classification or current TCB reachability drifted'
+Check ($canonicalClassification.Count -eq 1 -and [string]$canonicalClassification[0].layer -ceq 'k0-trust-primitive' -and [bool]$canonicalClassification[0].tcb_included) 'TK-06 explicitly adopts CanonicalJson on the Distribution trust path' 'CanonicalJson classification or current TCB reachability drifted'
 $rolloutClassification = @($classification.components | Where-Object { [string]$_.path -ceq 'scripts/lib/Harness.RolloutEvidence.psm1' })
 Check ($rolloutClassification.Count -eq 1 -and [string]$rolloutClassification[0].layer -ceq 'c2-capability' -and -not [bool]$rolloutClassification[0].tcb_included) 'RolloutEvidence is honestly classified as C2 and outside Runtime TCB' 'RolloutEvidence classification drifted into Runtime Kernel'
 $manifestConstructionPaths = @('scripts/get-module-manifest-catalog.ps1','scripts/lib/Harness.CapabilitySource.psm1','scripts/lib/Harness.ModuleManifest.psm1')
@@ -284,7 +298,7 @@ Check ((Get-LfNormalizedSha256 -Path (Join-Path $RepoRoot 'scripts\lib\Harness.P
 $atomicWriteText = Read-Text -Path 'scripts/lib/Harness.AtomicWrite.psm1'
 Check ($atomicWriteText.Contains("Harness.Hashing.psm1",[StringComparison]::Ordinal) -and $thinText.Contains('scripts/lib/Harness.Hashing.psm1',[StringComparison]::Ordinal)) 'TK-01A installs Hashing as the canonical K0 dependency of AtomicWrite' 'canonical Hashing ownership or AtomicWrite dependency is missing'
 $canonicalText = Read-Text -Path 'docs/architecture/canonical-json-contract.md'
-Check ($canonicalText.Contains('canonical-json/v1',[StringComparison]::Ordinal) -and $canonicalText.Contains('-9007199254740991',[StringComparison]::Ordinal) -and $canonicalText.Contains('UTF-8 without a BOM',[StringComparison]::Ordinal) -and $canonicalText.Contains('TK-02 is', [StringComparison]::Ordinal) -and $canonicalText.Contains('no selected Runtime or Distribution root', [StringComparison]::Ordinal)) 'canonical-json/v1 freezes its algorithm and records the C2-only TK-02 adoption boundary' 'canonical-json/v1 architecture or adoption boundary is incomplete'
+Check ($canonicalText.Contains('canonical-json/v1',[StringComparison]::Ordinal) -and $canonicalText.Contains('-9007199254740991',[StringComparison]::Ordinal) -and $canonicalText.Contains('UTF-8 without a BOM',[StringComparison]::Ordinal) -and $canonicalText.Contains('TK-02 is', [StringComparison]::Ordinal) -and $canonicalText.Contains('TK-06 explicitly adopts', [StringComparison]::Ordinal) -and $canonicalText.Contains('distribution-plan/v1',[StringComparison]::Ordinal)) 'canonical-json/v1 retains its algorithm and records explicit D1 adoption without historical migration' 'canonical-json/v1 architecture or adoption boundary is incomplete'
 $trackedRealManifests = @(& git -C $RepoRoot ls-files -- 'modules/*/module.manifest.json')
 $expectedRealManifests = @($productionManifests | ForEach-Object { [IO.Path]::GetRelativePath($RepoRoot,$_.FullName).Replace([char]92,[char]47) } | Sort-Object -CaseSensitive)
 Check ($trackedRealManifests.Count -eq 13 -and (($trackedRealManifests | Sort-Object -CaseSensitive) -join '|') -ceq ($expectedRealManifests -join '|')) 'TK-04 tracks exactly the 13 real mixed-version module.manifest.json inputs' 'real tracked Manifest discovery set drifted'

@@ -78,8 +78,9 @@ its current owner.
 primitive defined by `canonical-json-contract.md`. TK-02 and TK-04 explicitly
 adopt it for new Manifest, source-closure, and binding objects through C2
 engineering construction code.
-No selected Runtime or Distribution root imports that code, so CanonicalJson
-remains outside the measured TCB and no historical digest is migrated.
+No selected Runtime root imports that code. TK-06 explicitly adopts CanonicalJson
+on the Distribution trust path for new Profile and Plan contracts. It enters
+only that measured trust path; no historical digest is migrated.
 
 ## K1 — Runtime Trust Kernel
 
@@ -118,6 +119,14 @@ D1 is the target owner for installation desired state. Its terminal contract is:
 TK-00 classifies the existing bootstrap, installer, uninstall, transaction, and
 verification entries but does not rewrite or split them. D1 may depend on K0.
 D1 must not implement Runtime protocol or risk routing.
+
+TK-06 introduces strict `install-profile/v1` and `distribution-plan/v1` data and
+`Harness.Distribution`. The installer now consumes the explicit plan for skill,
+hook, vault-file and host-template selection before using its existing atomic
+transaction reconciler. Profile admission is not Runtime permission. See
+`declarative-distribution.md` for the exact bootstrap/Manifest intersection,
+directory-link transport, invalid-input preflight and historical-uninstall
+boundaries.
 
 ## C2 — Capability Modules
 

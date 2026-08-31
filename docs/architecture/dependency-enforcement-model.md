@@ -45,7 +45,13 @@ dependency cycle, owner conflict, or capability request outside the allowlist
 produces no plan and executes zero tests or install steps. `git grep` is not an
 authorization mechanism.
 
-TK-00 defines this boundary but leaves existing installer behavior unchanged.
+TK-00 defined this boundary without changing the installer. TK-06 implements
+explicit Profile admission and deterministic desired-state selection in D1;
+`install.ps1` consumes that plan through its existing exact-identity reconciler.
+The frozen v0/bootstrap and v1 exported-hook transport records are centrally
+enumerated, while module install assets require the explicit request/Profile
+intersection. Neither transport grant is Runtime authorization. See
+`declarative-distribution.md` for the precise compatibility boundary.
 
 ## Runtime enforcement
 

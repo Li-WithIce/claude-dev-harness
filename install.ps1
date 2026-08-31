@@ -23,6 +23,7 @@ if ($presetSpecified -and $vaultProfileSpecified -and $VaultProfile -ne 'auto') 
     }
 }
 
+Import-Module (Join-Path $PSScriptRoot 'scripts\lib\Harness.Distribution.psm1') -Force -ErrorAction Stop
 . (Join-Path $PSScriptRoot 'scripts\install-transaction-common.ps1')
 
 function Get-RelativePath {
@@ -1496,7 +1497,8 @@ function Import-LegacyActiveInstall {
         $Registry,
         [string]$PointerPath,
         [string]$ExpectedUserProfile,
-        [string]$ExpectedRepoRoot
+        [string]$ExpectedRepoRoot,
+        [switch]$ReadOnly
     )
 
     if (Test-LegacyPointerMigrationMarked -UserProfile $ExpectedUserProfile -PointerPath $PointerPath) {
@@ -1513,7 +1515,7 @@ function Import-LegacyActiveInstall {
     if ($null -ne $receipt) {
         if ((Get-NormalizedPath -Path $receipt['legacy_pointer_path']) -eq (Get-NormalizedPath -Path $PointerPath) -and
             [string]$receipt['legacy_pointer_sha256'] -eq $pointerDigest) {
-            if ($pointerDigest -match '^[0-9a-f]{64}$' -and
+            if ($pointerDigest -match '^[0-9a-f]{64}$' -and -not $ReadOnly -and
                 -not (Test-LegacyPointerMigrationMarked -UserProfile $ExpectedUserProfile -PointerPath $PointerPath)) {
                 Assert-LegacyPointerMigrationMarkerWritable -UserProfile $ExpectedUserProfile -PointerPath $PointerPath
                 Set-LegacyPointerMigrationMarked `
@@ -1952,7 +1954,8 @@ function Install-RenderedFile {
     if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
         throw "Missing template source: $SourcePath"
     }
-    $raw = Read-FileUtf8 -Path $SourcePath
+    $relativeSource = [IO.Path]::GetRelativePath($RepoRoot,$SourcePath).Replace('\','/')
+    $raw = Read-HarnessDistributionSourceText -RepoRoot $RepoRoot -Plan $script:DistributionPlan -Source $relativeSource
     if ($null -eq $raw) { $raw = '' }
 
     $rendered = Render-Content -Content $raw -TargetPath $TargetPath
@@ -1965,7 +1968,8 @@ function Render-JsonTemplateText {
         [string]$TargetPath
     )
 
-    $raw = Read-FileUtf8 -Path $TemplatePath
+    $relativeSource = [IO.Path]::GetRelativePath($RepoRoot,$TemplatePath).Replace('\','/')
+    $raw = Read-HarnessDistributionSourceText -RepoRoot $RepoRoot -Plan $script:DistributionPlan -Source $relativeSource
     if ([string]::IsNullOrWhiteSpace($raw)) {
         return '{}'
     }
@@ -2669,35 +2673,15 @@ function Sync-SkillsDirectory {
 
 function Install-VaultTemplate {
     param(
-        [string]$TemplateRoot,
+        [System.Collections.IDictionary]$Plan,
         [string]$TargetRoot
     )
 
-    function Get-VaultOwnership {
-        param([string]$RelativePath)
-
-        if ($RelativePath -in @('工作流\项目约定.md', '配置\用户偏好.md')) {
-            return 'user-owned'
-        }
-
-        if ($RelativePath -like '运行时\*' -or
-            $RelativePath -like '.obsidian\*' -or
-            $RelativePath -in @('首页.md', 'MEMORY.md', '配置\系统信息.md', '配置\工具与组件.md', '配置\引导状态.md')) {
-            return 'create-if-missing'
-        }
-
-        return 'managed'
-    }
-
-    foreach ($source in Get-ChildItem -LiteralPath $TemplateRoot -Recurse -File) {
-        $relative = $source.FullName.Substring($TemplateRoot.Length).TrimStart('\')
-        $targetRelative = if ($relative.EndsWith('.template')) {
-            $relative.Substring(0, $relative.Length - '.template'.Length)
-        } else {
-            $relative
-        }
-        $targetPath = Join-Path $TargetRoot $targetRelative
-        $ownership = Get-VaultOwnership -RelativePath $targetRelative
+    foreach ($asset in @($Plan.assets | Where-Object kind -CEQ 'vault')) {
+        $source = Get-Item -LiteralPath (Join-Path $RepoRoot $asset.source) -Force
+        $relative = [string]$asset.source
+        $targetPath = Join-Path $TargetRoot $asset.target
+        $ownership = [string]$asset.ownership
         $shouldOverwrite = $ownership -eq 'managed'
 
         if ((Test-Path -LiteralPath $targetPath) -and -not $shouldOverwrite) {
@@ -2705,7 +2689,7 @@ function Install-VaultTemplate {
         }
 
         $extension = [System.IO.Path]::GetExtension($source.FullName).ToLowerInvariant()
-        if ($extension -in @('.template', '.md', '.json', '.js', '.mjs', '.toml', '.txt') -or $relative.EndsWith('.template')) {
+        if ($Plan.vault_profile -eq 'minimal' -or $extension -in @('.template', '.md', '.json', '.js', '.mjs', '.toml', '.txt') -or $relative.EndsWith('.template')) {
             Install-RenderedFile `
                 -SourcePath $source.FullName `
                 -TargetPath $targetPath `
@@ -2715,6 +2699,9 @@ function Install-VaultTemplate {
             continue
         }
 
+        if (('sha256:' + (Get-InstallStateFileDigest -Path $source.FullName)) -cne [string]$asset.files[0].sha256) {
+            throw 'Distribution binary source bytes changed after planning'
+        }
         if ($shouldOverwrite) {
             $binaryExpectedPostimage = [ordered]@{
                 mode = 'exact'
@@ -2759,42 +2746,15 @@ function Test-ExistingFullVault {
 
 function Get-InstallPresetDefinition {
     param(
-        [Parameter(Mandatory)][ValidateSet('core','governed','full')][string]$Name,
-        [Parameter(Mandatory)][string]$RepoSkillsPath
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Plan
     )
 
-    $coreSkills = @('.system','entry-router','orchestrator','plan','implement','review','test','spec')
-    if ($Name -eq 'core') {
-        return [ordered]@{
-            name = 'core'
-            features = @('core','v1-compatibility')
-            skills = $coreSkills
-            hooks = @('pretooluse.ps1','codex-pretooluse-launcher.ps1','stop.js','workspace-resolver.js')
-            vault_profile = 'minimal'
-        }
-    }
-    if ($Name -eq 'governed') {
-        return [ordered]@{
-            name = 'governed'
-            features = @('core','v1-compatibility','governed')
-            skills = @($coreSkills + @('planning','audit'))
-            hooks = @('pretooluse.ps1','codex-pretooluse-launcher.ps1','stop.js','workspace-resolver.js')
-            vault_profile = 'minimal'
-        }
-    }
-    $fullSkills = @(
-        '.system'
-        Get-ChildItem -LiteralPath $RepoSkillsPath -Force -Directory |
-            Where-Object { $_.Name -cne '.system' } |
-            Sort-Object Name |
-            Select-Object -ExpandProperty Name
-    )
     return [ordered]@{
-        name = 'full'
-        features = @('core','v1-compatibility','governed','memory','team','md-html','adapters','provider-references')
-        skills = $fullSkills
-        hooks = @('pretooluse.ps1','codex-pretooluse-launcher.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js')
-        vault_profile = 'full'
+        name = [string]$Plan.profile_id
+        features = @($Plan.features)
+        skills = @('.system') + @($Plan.assets | Where-Object kind -CEQ 'skill' | ForEach-Object target)
+        hooks = @($Plan.assets | Where-Object kind -CEQ 'hook' | ForEach-Object target)
+        vault_profile = [string]$Plan.vault_profile
     }
 }
 
@@ -2855,42 +2815,6 @@ function Resolve-InstallPreset {
         return [ordered]@{ preset=$vaultMappedPreset;source="vault-profile:$RequestedVaultProfile" }
     }
     return $preserved
-}
-
-function Get-PresetHookSourcePath {
-    param(
-        [Parameter(Mandatory)][string]$RepoRoot,
-        [Parameter(Mandatory)][string]$HookName
-    )
-
-    if ($HookName -eq 'userpromptsubmit.js') {
-        return Join-Path $RepoRoot 'runtime-hooks\memory\userpromptsubmit.js'
-    }
-    return Join-Path $RepoRoot ("runtime-hooks\claude\{0}" -f $HookName)
-}
-
-function Install-MinimalVaultTemplate {
-    param(
-        [string]$TemplateRoot,
-        [string]$TargetRoot
-    )
-
-    $entryRoot = Join-Path $TemplateRoot 'entry'
-    foreach ($file in @(
-            @{ Source = 'AGENTS.md.template'; Target = 'AGENTS.md' },
-            @{ Source = 'advance-stage.ps1.template'; Target = 'advance-stage.ps1' },
-            @{ Source = 'task.ps1.template'; Target = 'task.ps1' },
-            @{ Source = 'validate-lite-artifacts.ps1.template'; Target = 'validate-lite-artifacts.ps1' }
-        )) {
-        $targetPath = Join-Path $TargetRoot (Join-Path 'entry' $file.Target)
-        Install-RenderedFile -SourcePath (Join-Path $entryRoot $file.Source) -TargetPath $targetPath -RecordBackup
-    }
-
-    $runtimeTasksRoot = Join-Path $TargetRoot '运行时\tasks'
-    $gitkeepSource = Join-Path $TemplateRoot '运行时\tasks\.gitkeep'
-    if (Test-Path -LiteralPath $gitkeepSource -PathType Leaf) {
-        Install-RenderedFile -SourcePath $gitkeepSource -TargetPath (Join-Path $runtimeTasksRoot '.gitkeep') -RecordBackup -Ownership managed
-    }
 }
 
 if ([string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
@@ -2960,9 +2884,9 @@ foreach ($managedUserGlobalRoot in @($ClaudeHome, $CodexHome, $AgentsHome)) {
     }
 }
 
-$installTransactionMutex = Enter-InstallTransactionMutex -UserProfile $env:USERPROFILE
-try {
 $pendingUninstallJournalPath = Join-Path $env:USERPROFILE '.dev-harness\uninstall-transaction.json'
+$script:WorkspaceRoot = $WorkspaceRoot
+$readDistributionPreflight = {
 foreach ($installStatePath in @(
     $InstallStateRoot,
     $InstallRegistryPath,
@@ -2982,6 +2906,50 @@ if (Test-Path -LiteralPath $pendingUninstallJournalPath -PathType Leaf) {
     }
     throw "A pending uninstall transaction must be resumed before install: $pendingUninstallJournalPath"
 }
+
+# Plan before *any* installation or recovery persistence. Legacy pointer preview
+# updates only an in-memory registry; marker publication remains in the old path.
+$preflightRegistry = Read-JsonObject -Path $InstallRegistryPath
+if ($RebaselineLegacyInstallState -and [string]$preflightRegistry['schema_version'] -eq 'install-registry/v1.0') {
+    # Validate the legacy identities before reading any preserved preset from them.
+    [void](New-LegacyRebaselinePlan -RegistryPath $InstallRegistryPath -PointerPath $LegacyActiveInstallPath -WorkspaceRoot $WorkspaceRoot -RepoRoot $RepoRoot -UserProfile $env:USERPROFILE)
+} else {
+    $preflightRegistry = Read-InstallRegistry -Path $InstallRegistryPath
+    [void](Get-RegisteredManifestStatusUpgradePlan -Registry $preflightRegistry -RegistryPath $InstallRegistryPath -ExpectedUserProfile $env:USERPROFILE -RequireManifestIntegrity $true)
+    [void](Import-LegacyActiveInstall -Registry $preflightRegistry -PointerPath $LegacyActiveInstallPath -ExpectedUserProfile $env:USERPROFILE -ExpectedRepoRoot $RepoRoot -ReadOnly)
+    [void](Get-RegisteredManifestStatusUpgradePlan -Registry $preflightRegistry -RegistryPath $InstallRegistryPath -ExpectedUserProfile $env:USERPROFILE -RequireManifestIntegrity $true)
+}
+Resolve-InstallPreset `
+    -RequestedPreset $Preset `
+    -PresetSpecified $presetSpecified `
+    -RequestedVaultProfile $VaultProfile `
+    -VaultProfileSpecified $vaultProfileSpecified `
+    -Registry $preflightRegistry `
+    -WorkspaceKey (Get-WorkspaceRegistryKey -Path $WorkspaceRoot) `
+    -TargetRoot $VaultPath
+}
+
+# Prepare source-only data outside the write-critical section. Both state reads
+# use the same existing mutex, and its original timeout remains unchanged.
+$installTransactionMutex = Enter-InstallTransactionMutex -UserProfile $env:USERPROFILE
+try { $preflightResolution = & $readDistributionPreflight }
+finally { Exit-InstallTransactionMutex -Mutex $installTransactionMutex }
+$script:DistributionPlan = Get-HarnessDistributionPlan -RepoRoot $RepoRoot -Preset $preflightResolution.preset
+foreach ($asset in @($script:DistributionPlan.assets | Where-Object { $_.kind -ceq 'template' -and $_.target -cin @('claude-settings','codex-settings','codex-hooks') })) {
+    # Historical host JSON keeps its existing exact-number parser. Capability
+    # support files and verbatim vault JSON are transport bytes, not new objects.
+    $raw = Read-HarnessDistributionSourceText -RepoRoot $RepoRoot -Plan $script:DistributionPlan -Source $asset.source
+    try { $sourceJson = ConvertFrom-JsonDocument -Json $raw }
+    catch { throw "Distribution host JSON template is invalid: $($asset.source)" }
+    if ($sourceJson -isnot [System.Collections.IDictionary]) { throw 'Distribution host JSON template must be an object' }
+}
+
+$installTransactionMutex = Enter-InstallTransactionMutex -UserProfile $env:USERPROFILE
+try {
+$lockedPreflightResolution = & $readDistributionPreflight
+if ($lockedPreflightResolution.preset -cne $script:DistributionPlan.profile_id) { throw 'Install preset changed during Distribution preparation; retry against current state' }
+Assert-HarnessDistributionPlanCurrent -RepoRoot $RepoRoot -Plan $script:DistributionPlan
+
 if ($RebaselineLegacyInstallState) {
     $registryShape = Read-JsonObject -Path $InstallRegistryPath
     if ([string]$registryShape['schema_version'] -eq 'install-registry/v1.1') {
@@ -3147,7 +3115,12 @@ try {
         -WorkspaceKey $currentWorkspaceKey `
         -TargetRoot $VaultPath
     $effectivePreset = [string]$presetResolution.preset
-    $presetDefinition = Get-InstallPresetDefinition -Name $effectivePreset -RepoSkillsPath $RepoSkillsPath
+    if ($effectivePreset -cne [string]$script:DistributionPlan.profile_id) { throw 'Install preset changed after Distribution preflight' }
+    $presetDefinition = Get-InstallPresetDefinition -Plan $script:DistributionPlan
+    $templateSources = [ordered]@{}
+    foreach ($asset in @($script:DistributionPlan.assets | Where-Object kind -CEQ 'template')) {
+        $templateSources[$asset.target] = Join-Path $RepoRoot $asset.source
+    }
     $effectiveVaultProfile = [string]$presetDefinition.vault_profile
     $script:Manifest.effective_preset = $effectivePreset
     $script:Manifest.preset_source = [string]$presetResolution.source
@@ -3293,24 +3266,21 @@ try {
                     -DesiredIdentity $retiredDecisionTemplateMissingIdentity)
             }
         }
-        Install-VaultTemplate -TemplateRoot (Join-Path $RepoRoot 'vault-template') -TargetRoot $VaultPath
-    } else {
-        Install-MinimalVaultTemplate -TemplateRoot (Join-Path $RepoRoot 'vault-template') -TargetRoot $VaultPath
     }
+    Install-VaultTemplate -Plan $script:DistributionPlan -TargetRoot $VaultPath
 
-    Install-RenderedFile -SourcePath (Join-Path $RepoRoot 'agent-configs\claude\CLAUDE.md.template') -TargetPath $claudeGlobalPath -RecordBackup
+    Install-RenderedFile -SourcePath $templateSources['claude-global'] -TargetPath $claudeGlobalPath -RecordBackup
 
-    Install-RenderedFile -SourcePath (Join-Path $RepoRoot 'agent-configs\codex\AGENTS.md.template') -TargetPath $codexGlobalPath -RecordBackup
+    Install-RenderedFile -SourcePath $templateSources['codex-global'] -TargetPath $codexGlobalPath -RecordBackup
 
-    Install-RenderedFile -SourcePath (Join-Path $RepoRoot 'agent-configs\workspace\AGENTS.md.template') -TargetPath $workspaceAgentsPath -RecordBackup
+    Install-RenderedFile -SourcePath $templateSources['workspace-global'] -TargetPath $workspaceAgentsPath -RecordBackup
 
     $claudeHooksStagingPath = Join-Path $BackupRoot '_claude-hooks-postimage'
     Remove-PathIfExists -Path $claudeHooksStagingPath
     Ensure-Directory -Path $claudeHooksStagingPath
     try {
-        foreach ($hookName in @($presetDefinition.hooks)) {
-            $hookSource = Get-PresetHookSourcePath -RepoRoot $RepoRoot -HookName $hookName
-            Install-RenderedFile -SourcePath $hookSource -TargetPath (Join-Path $claudeHooksStagingPath $hookName)
+        foreach ($asset in @($script:DistributionPlan.assets | Where-Object kind -CEQ 'hook')) {
+            Install-RenderedFile -SourcePath (Join-Path $RepoRoot $asset.source) -TargetPath (Join-Path $claudeHooksStagingPath $asset.target)
         }
         $claudeHooksExpectedPostimage = New-InstallExactDirectoryIdentity -Path $claudeHooksStagingPath
         $claudeHooksSourceIdentity = Get-InstallManagedPathIdentity -Path $claudeHooksPath
@@ -3324,8 +3294,7 @@ try {
         Remove-PathIfExists -Path $claudeHooksStagingPath
     }
 
-    $claudeSettingsTemplate = if ($effectivePreset -eq 'full') { 'settings.local.shared.json.template' } else { 'settings.local.core.json.template' }
-    $claudeSharedSettingsJson = Render-JsonTemplateText -TemplatePath (Join-Path $RepoRoot ("agent-configs\claude\{0}" -f $claudeSettingsTemplate)) -TargetPath $claudeSettingsPath
+    $claudeSharedSettingsJson = Render-JsonTemplateText -TemplatePath $templateSources['claude-settings'] -TargetPath $claudeSettingsPath
     $claudeSettingsMerge = Merge-ClaudeSettingsJsonText -RenderedHooksJson $claudeSharedSettingsJson -ExistingPath $claudeSettingsPath -HookHome $ClaudeHome -ExpectedSourcePostimage $registeredClaudeSettingsPostimage
     $claudeSettingsExpectedPostimage = New-ClaudeSettingsPostimageIdentity -ManagedSettings (ConvertFrom-JsonDocument -Json $claudeSharedSettingsJson) -PreimageIdentity $registeredClaudeSettingsPostimage
     Backup-IfNeeded -Path $claudeSettingsPath -ExpectedPostimage $claudeSettingsExpectedPostimage
@@ -3334,11 +3303,11 @@ try {
         -Content $claudeSettingsMerge.Content `
         -ExpectedCurrentDigest $(if ([string]$claudeSettingsMerge.Identity['item_type'] -eq 'missing') { 'missing' } else { [string]$claudeSettingsMerge.Identity['sha256'] })
 
-    $codexSharedSettingsJson = Render-JsonTemplateText -TemplatePath (Join-Path $RepoRoot 'agent-configs\codex\settings.local.shared.json.template') -TargetPath $codexSettingsPath
+    $codexSharedSettingsJson = Render-JsonTemplateText -TemplatePath $templateSources['codex-settings'] -TargetPath $codexSettingsPath
     $codexSettingsMerge = Merge-SettingsLocalJsonText -RenderedSharedJson $codexSharedSettingsJson -ExistingPath $codexSettingsPath -OverlayPath $codexOverlayPath
     Write-ManagedInstallText -Path $codexSettingsPath -Content $codexSettingsMerge.Content -RecordBackup -ExpectedCurrentIdentity $codexSettingsMerge.Identity
 
-    $codexHooksJson = Render-JsonTemplateText -TemplatePath (Join-Path $RepoRoot 'agent-configs\codex\hooks.shared.json.template') -TargetPath $codexHooksPath
+    $codexHooksJson = Render-JsonTemplateText -TemplatePath $templateSources['codex-hooks'] -TargetPath $codexHooksPath
     $codexHooksMerge = Merge-ClaudeSettingsJsonText `
         -RenderedHooksJson $codexHooksJson `
         -ExistingPath $codexHooksPath `
@@ -3354,6 +3323,7 @@ try {
         -Content $codexHooksMerge.Content `
         -ExpectedCurrentDigest $(if ([string]$codexHooksMerge.Identity['item_type'] -eq 'missing') { 'missing' } else { [string]$codexHooksMerge.Identity['sha256'] })
 
+    Assert-HarnessDistributionSkillSourcesCurrent -RepoRoot $RepoRoot -Plan $script:DistributionPlan
     Sync-SkillsDirectory -HostSkillsPath $claudeSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
     Sync-SkillsDirectory -HostSkillsPath $codexSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
     Sync-SkillsDirectory -HostSkillsPath $agentsSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)

@@ -1,0 +1,234 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/distribution-plan.schema.json",
+  "title": "Distribution Plan v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "digest_algorithm",
+    "profile_id",
+    "profile_digest",
+    "catalog_digest",
+    "manifest_inputs",
+    "enabled_modules",
+    "features",
+    "vault_profile",
+    "system_skill",
+    "authorized_module_assets",
+    "assets",
+    "digest"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "distribution-plan/v1"
+    },
+    "digest_algorithm": {
+      "type": "string",
+      "const": "canonical-json/v1"
+    },
+    "profile_id": {
+      "type": "string",
+      "enum": [
+        "core",
+        "governed",
+        "full"
+      ]
+    },
+    "profile_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "catalog_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "manifest_inputs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "module_id",
+          "path",
+          "digest"
+        ],
+        "properties": {
+          "module_id": {
+            "type": "string",
+            "pattern": "^(?!(?:kernel|core|runtime|legacy|none)$)[a-z][a-z0-9-]{1,62}$"
+          },
+          "path": {
+            "$ref": "#/definitions/path"
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "enabled_modules": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^(?!(?:kernel|core|runtime|legacy|none)$)[a-z][a-z0-9-]{1,62}$"
+      }
+    },
+    "features": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "core",
+          "v1-compatibility",
+          "governed",
+          "memory",
+          "team",
+          "md-html",
+          "adapters",
+          "provider-references"
+        ]
+      }
+    },
+    "vault_profile": {
+      "type": "string",
+      "enum": [
+        "minimal",
+        "full"
+      ]
+    },
+    "system_skill": {
+      "type": "boolean",
+      "const": true
+    },
+    "authorized_module_assets": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 512,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "module_id",
+          "path"
+        ],
+        "properties": {
+          "module_id": {
+            "type": "string",
+            "pattern": "^(?!(?:kernel|core|runtime|legacy|none)$)[a-z][a-z0-9-]{1,62}$"
+          },
+          "path": {
+            "$ref": "#/definitions/path"
+          }
+        }
+      }
+    },
+    "assets": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind",
+          "origin",
+          "module_id",
+          "source",
+          "target",
+          "ownership",
+          "files"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,79}$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "skill",
+              "hook",
+              "vault",
+              "template"
+            ]
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "bootstrap",
+              "module-request"
+            ]
+          },
+          "module_id": {
+            "type": "string",
+            "pattern": "^(?!(?:kernel|core|runtime|legacy|none)$)[a-z][a-z0-9-]{1,62}$"
+          },
+          "source": {
+            "$ref": "#/definitions/path"
+          },
+          "target": {
+            "$ref": "#/definitions/path"
+          },
+          "ownership": {
+            "type": "string",
+            "enum": [
+              "managed",
+              "create-if-missing",
+              "user-owned"
+            ]
+          },
+          "files": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 512,
+            "uniqueItems": true,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "sha256"
+              ],
+              "properties": {
+                "path": {
+                  "$ref": "#/definitions/path"
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  },
+  "definitions": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!.*\\\\)(?!.*//)(?!\\.\\.?(?:/|$))(?!.*\\/\\.\\.?(?:/|$))(?!.*[<>:\"|?*\\u0000-\\u001f])[A-Za-z0-9._\\-\\u0080-\\uFFFF]+(?:/[A-Za-z0-9._\\-\\u0080-\\uFFFF]+)*$"
+    }
+  }
+}

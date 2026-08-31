@@ -168,6 +168,9 @@ try {
             'runtime-hooks'
             'vault-template'
             'scripts'
+            'modules'
+            'schemas'
+            'module-manifest-catalog.json'
             'skills\entry-router'
             'skills\orchestrator'
             'skills\plan'
@@ -907,7 +910,7 @@ try {
 
     $RepoRoot = $sourceRoot
     foreach ($ownerRepo in @($ownerRepoA,$ownerRepoB)) {
-        foreach ($directoryName in @('agent-configs','runtime-hooks','vault-template','skills','scripts')) {
+        foreach ($directoryName in @('agent-configs','runtime-hooks','vault-template','skills','scripts','modules','schemas','module-manifest-catalog.json')) {
             Copy-Item -LiteralPath (Join-Path $RepoRoot $directoryName) -Destination $ownerRepo -Recurse -Force
         }
         Copy-Item -LiteralPath (Join-Path $RepoRoot 'install.ps1') -Destination (Join-Path $ownerRepo 'install.ps1') -Force

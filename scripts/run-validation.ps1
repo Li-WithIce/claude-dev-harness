@@ -175,12 +175,13 @@ $longRunningChecks = @(
     'verify-v2-approval.ps1',
     'verify-v2-ci-routing.ps1',
     'verify-v2-evidence.ps1',
-    'verify-v2-governed-audit.ps1',
-    'verify-v2-install-presets.ps1'
+    'verify-v2-governed-audit.ps1'
 )
 foreach ($check in $checks) {
     Write-Output ("[RUN ] {0}" -f $check.Name)
-    $effectiveTimeoutSeconds = if ($check.Name -ceq 'verify-host-benchmark-qualification.ps1') {
+    # TK-06 adds source-bound preflight to every preset install; the full preset
+    # compatibility verifier measured 873s locally. Keep this allowance bounded.
+    $effectiveTimeoutSeconds = if ($check.Name -cin @('verify-host-benchmark-qualification.ps1','verify-v2-install-presets.ps1')) {
         [math]::Max($CheckTimeoutSeconds,900)
     } elseif ($longRunningChecks -ccontains $check.Name) {
         [math]::Max($CheckTimeoutSeconds,600)
