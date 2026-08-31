@@ -841,17 +841,16 @@ exit 0
             Assert-ManagedTextNotContains -Path $codexAgentsPath -Needle 'using-superpowers'
 
             $claudeInstructionsPath = Join-Path (Join-Path $UserProfile '.claude') 'CLAUDE.md'
-            Assert-ManagedTextContains -Path $claudeInstructionsPath -Needle '/entry-router'
+            Assert-ManagedTextContains -Path $claudeInstructionsPath -Needle 'v2-only-with-new-work-admission'
             Assert-ManagedTextContains -Path $claudeInstructionsPath -Needle '`protocol_default`: `auto`'
             Assert-ManagedTextNotContains -Path $claudeInstructionsPath -Needle '/using-superpowers'
 
             $workspaceAgentsPath = Join-Path $WorkspaceRoot 'AGENTS.md'
-            Assert-ManagedTextContains -Path $workspaceAgentsPath -Needle 'entry-router'
+            Assert-ManagedTextContains -Path $workspaceAgentsPath -Needle 'v2-only-with-new-work-admission'
             Assert-ManagedTextNotContains -Path $workspaceAgentsPath -Needle 'using-superpowers'
 
             $vaultAgentsPath = Join-Path $WorkspaceRoot '.assistant\entry\AGENTS.md'
-            Assert-ManagedTextContains -Path $vaultAgentsPath -Needle 'entry-router'
-            Assert-ManagedTextNotContains -Path $vaultAgentsPath -Needle 'using-superpowers'
+            if (Test-Path -LiteralPath $vaultAgentsPath) { throw 'current installation must not materialize the retired lifecycle shim' }
         }
 
     Invoke-ManagedAssetsCase `
@@ -937,21 +936,21 @@ exit 0
         }
 
     Invoke-ManagedAssetsCase `
-        -Name 'entry-router-managed-assets-are-refreshed' `
+        -Name 'v2-admission-managed-assets-are-refreshed' `
         -Scope 'All' `
         -ExpectedStatus 'PASS' `
         -Mutator {
             param($CaseRoot, $UserProfile, $WorkspaceRoot)
 
-            $managedRouterTextFiles = @(
+            $managedAdmissionTextFiles = @(
                 (Join-Path (Join-Path $UserProfile '.claude') 'CLAUDE.md'),
-                (Join-Path $WorkspaceRoot 'AGENTS.md'),
-                (Join-Path (Join-Path (Join-Path $WorkspaceRoot '.assistant') 'entry') 'AGENTS.md')
+                (Join-Path $WorkspaceRoot 'AGENTS.md')
             )
 
-            foreach ($path in $managedRouterTextFiles) {
+            foreach ($path in $managedAdmissionTextFiles) {
                 $content = Get-Content -LiteralPath $path -Raw -Encoding utf8
-                [System.IO.File]::WriteAllText($path, ($content -replace 'entry-router', 'using-superpowers'), (New-Object System.Text.UTF8Encoding($false)))
+                if (-not $content.Contains('v2-only-with-new-work-admission')) { throw 'managed fixture is missing its current v2 admission contract' }
+                [System.IO.File]::WriteAllText($path, ($content -replace 'v2-only-with-new-work-admission', 'stale-v1-admission'), (New-Object System.Text.UTF8Encoding($false)))
             }
 
             $codexAgentsPath = Join-Path (Join-Path $UserProfile '.codex') 'AGENTS.md'
@@ -978,23 +977,21 @@ enabled = true
         -PostAssert {
             param($CaseRoot, $UserProfile, $WorkspaceRoot, $Result)
 
-            $managedRouterTextFiles = @(
+            $managedAdmissionTextFiles = @(
                 (Join-Path (Join-Path $UserProfile '.claude') 'CLAUDE.md'),
-                (Join-Path $WorkspaceRoot 'AGENTS.md'),
-                (Join-Path (Join-Path (Join-Path $WorkspaceRoot '.assistant') 'entry') 'AGENTS.md')
+                (Join-Path $WorkspaceRoot 'AGENTS.md')
             )
 
-            foreach ($path in $managedRouterTextFiles) {
+            foreach ($path in $managedAdmissionTextFiles) {
                 $content = Get-Content -LiteralPath $path -Raw -Encoding utf8
-                if (-not $content.Contains('entry-router')) {
-                    throw ("managed entry file should be refreshed to entry-router: {0}" -f $path)
+                if (-not $content.Contains('v2-only-with-new-work-admission')) {
+                    throw ("managed entry file should be refreshed to the current v2 admission contract: {0}" -f $path)
                 }
-                if ($content.Contains('workflow` loads `using-superpowers') -or
-                    $content.Contains('workflow`: load `using-superpowers') -or
-                    $content.Contains('/using-superpowers')) {
-                    throw ("managed entry file should not retain default using-superpowers routing: {0}" -f $path)
+                if ($content.Contains('stale-v1-admission')) {
+                    throw ("managed entry file should not retain stale admission routing: {0}" -f $path)
                 }
             }
+            if (Test-Path -LiteralPath (Join-Path $WorkspaceRoot '.assistant\entry\AGENTS.md')) { throw 'v2 admission refresh must not recreate the retired lifecycle shim' }
 
             $codexAgentsPath = Join-Path (Join-Path $UserProfile '.codex') 'AGENTS.md'
             $codexAgents = Get-Content -LiteralPath $codexAgentsPath -Raw -Encoding utf8
@@ -1006,7 +1003,7 @@ enabled = true
 
             $codexManagedConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'managed_config.toml'
             if (Test-Path -LiteralPath $codexManagedConfigPath) {
-                throw 'entry-router update should not create Codex administrator policy'
+                throw 'v2 admission update should not create Codex administrator policy'
             }
 
             $codexConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'config.toml'

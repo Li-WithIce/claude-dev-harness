@@ -1,8 +1,10 @@
 # TK-03 validation history
 
-All runs below used a tracked-source-only isolated checkout under
-`D:/data/dev-harness-next/tmp/tk03-validation/source`. These are local snapshot
-commits, not the final PR Head. PowerShell fixtures stayed under the fixed
+All runs below used tracked-source-only isolated checkouts (`source`,
+`recheck-source`, `correction-source`, or `exact-source`) under
+`D:/data/dev-harness-next/tmp/tk03-validation`. Earlier rows are local snapshot
+commits, not the final PR Head; exact PR-Head runs are explicitly labelled.
+PowerShell fixtures stayed under the fixed
 project root. Rollout input/output fixtures used the separately authorized
 non-PowerShell evidence root. None is real Qualification or Release execution.
 
@@ -17,6 +19,14 @@ non-PowerShell evidence root. None is real Qualification or Release execution.
 | 10:57:00–11:08:15, `suite-all-20260831-185700` | `09a64b5bdee7d6c139237718be0e5644f4026dc0` | Interrupted before Memory health, exit -1; not a Suite all pass. Archive candidate fixture failed because default core no longer installs optional Memory. Capability, Distribution, transport and exact-head structural checks passed before interruption. |
 | 11:16:25–11:25:02, `tk03-memory-retirement-20260831-191625` | `b87d84dfd1fa69def4a41f93c5efc4334173da97` | All 8 checks passed: Sunset, candidate archive, archive-only maintenance, historical report, provider boundary, inbox, triage and CI routing. |
 | 11:20:54–11:25:08, `tk03-memory-paths-20260831-192054` | `3e48f5ab44ac54081d55546f9427aaf29a3d78ff` | Historical-path/report and catalog checks passed. TCB check failed two stale exact-value assertions (6150 versus the generated 6075); the unchanged 6151 ceiling and generator parity passed. Expectations were corrected, not the budget. |
+| 11:30:50–11:32:01, `tk03-final-focused-20260831-193049` | `b7e13825d95fa9eb7f6a87fac8d77dd70b6ee678` | All 5 checks passed: historical report, inbox, TCB, kernel contracts and 40-check Sunset. Its complete 492-file tree `9e7896e1489c2a124edf6bad99d73b03a5c49602` is identical to source commit `97e220a`. |
+| 11:49:36–11:50:20, `suite-quick-20260831-194936` | exact PR Head `97e220adc813f1e7aa7b01172cad193c7f45d5ff` | Quick passed, exit 0: diff check and lite footprint. This does not stand in for terminal Suite all. |
+| 11:50:20–11:58:00, `suite-all-20260831-195020` | exact PR Head `97e220adc813f1e7aa7b01172cad193c7f45d5ff` | Interrupted, exit -1, during declarative Distribution. Stopped before the old stop-loss producer and Memory health checks to close inherited USERPROFILE/config paths. No terminal Suite all pass. |
+| 11:50:21–12:09:03, ordinary CI `33388837508` | exact PR Head `97e220adc813f1e7aa7b01172cad193c7f45d5ff` | Terminal failure. Governance-approval and install-evidence groups passed; harness-contracts, entry-lifecycle, evaluation-release, changed-optional and the aggregate failed. Release jobs were skipped by design, not qualified. |
+| 12:16:23–12:23:48, `tk03-ci-contract-recheck-20260831-201623` | `58a2c12d2a85c98405a1d64bff49d56e7d57eb82` | Four pass, two fail. Retirement/historical compatibility, deterministic scenarios, entry and Rollout Schema/reader passed. Model mock lacked explicit exit 0; task-state retained one late ancestor-v1 success expectation. Both fixtures were corrected afterward. |
+| 12:16:26–12:21:56, `tk03-ci-install-recheck-20260831-201625` | `322afde122a3cc9293b8edf2aa660edfea6926ed` | Update passed. Install reached a later retired entry-AGENTS drift fixture and failed; uninstall exposed the incorrect assumption that core installs spec. Corrections use the current task shim and explicitly governed planning-link fixtures. |
+| 12:18:06–12:18:10, `tk03-model-carrier-diagnostic-20260831-201806` | `69bf30587e6fa4952f84a830d711d472a9d77b90` | Failed with the real diagnostic: the pure-PowerShell fake Host returned without setting LASTEXITCODE. Explicit exit 0 was added to the fake Host only; production wrapper unchanged. |
+| 12:19:06–12:19:16, `tk03-model-carrier-recheck-20260831-201906` | `b6709151821363a6597cf0625baec857685016bc` | Both model-neutrality and model-eval-runner checks passed. The standalone production wrapper used a local fake Host, never a real model or the retired Stage ABI. |
 
 Per-check start/end UTC, exact exit codes and full stdout/stderr remain in each
 run's `results.json` and sibling log files under the private validation root.
@@ -58,6 +68,77 @@ were copied but not included by its former `git add --all`, so it is not a
 complete source-index binding. The refresh helper now stages every exact
 authorized source path, including those five files, before snapshot commits.
 Future final validation must use that corrected complete snapshot.
+
+## Source A CI and private validation boundary corrections
+
+The first exact-head ordinary CI also exposed stale successful-v1 fixtures:
+default writes were expected to reject without an explicit protocol override;
+ordinary status was expected to warn merely because no Release Decision
+existed; Stage delegation and retired install assets were still assumed to be
+active. These are corrected as current v2 admission, explicit legacy refusal,
+standalone carrier isolation, and current desired-asset tests. Original CAS,
+transaction recovery, ownership, rollback and drift-marker assertions remain.
+
+The old stop-loss verifier attempted its diagnostic-smoke producer in CI and
+failed to produce a report; this was not formal Qualification. Its active
+local/CI branch now checks retirement and preserved historical Schema/reader
+semantics, and exits before all three retained historical producer calls.
+The five nullable-digest negative cases remain Schema-plus-Adapter rejection
+tests on complete valid synthetic reports, with recomputed digests. Historical
+producer code, Schema and digest algorithms were not changed.
+
+Independent review at 12:20:04–12:23:31 found that the private refresh/runner
+paths only enforced lexical roots and source-leaf checks, and that focused
+results did not enforce a clean tree binding. No actual protected-path access
+was observed. A later K0 metadata-only check accepted all 492 tracked source
+paths and the named clone/run roots, but is not retrospective proof of those
+earlier executions. The scripts now reject ancestor reparse paths through K0,
+require their own contained Git root, reject Git path overrides, copy only
+git-tracked inputs, isolate each run's homes, and bind clean source Head/tree
+before execution and check source preservation afterward. Final validation
+must be repeated through these hardened entries. Earlier results are retained
+as historical observations with this limitation, not upgraded to final proof.
+
+The former bounded untracked input scan returned additional_source_count=0 in
+every recorded refresh; it has nevertheless been removed so that tracked-only
+is enforced. A separate scenario finding was also fixed: any normal return for
+the retired-v1 fixture now fails, rather than accepting a nullable completion
+value as a false/block result.
+
+The hardened contract run `tk03-hardened-contract-20260831-204107` completed
+six focused checks with exit 0 and unchanged source bindings. Its snapshot is
+`a73ab4862c48b255c9f406b395e1802786c191bc`, tree
+`adf16f07d7e768cb86f1ee8a4ff0ef6839ade599`. The task-state dynamic SUBST case
+remains a separately reported Host unavailability, not an executed pass.
+
+The same-tree hardened install check ran 12:41:07.8421100Z–12:45:10.6696365Z,
+exit 1 with its source binding intact. After the earlier entry-shim fix let
+the file reach its final report, it exposed two more retired assumptions:
+the nested-reparse victim was under an obsolete v1 runtime asset, and a full
+Memory protocol drift expected the removed special-case verifier label. The
+fixture now targets the current core entry/task.ps1 junction while preserving
+victim bytes/count and zero partial-state checks. The full protocol remains
+managed and must produce exactly the existing single shim-template-drift
+marker; restoring its original bytes must return verification to PASS.
+No installer/verifier production behavior was altered for these corrections.
+
+The next exact installation run (12:51:08.8811835Z–12:54:45.7904644Z,
+snapshot `e32d65076276414887c8951582b4eb0a5329c439`) failed only the nested
+current-entry zero-residual-state check; full protocol drift and restored-byte
+checks passed. A separate contained probe during
+12:57:02.7503714Z–12:57:07.4004816Z established a real installer preflight gap:
+the child rejected the reparse target and preserved the sole victim file, but
+only after creating a recovery manifest and user-global state directories.
+It was not a false test failure and was not relabelled as pass.
+
+The installer now checks ancestors of declared managed vault targets under
+the existing transaction mutex, before transaction or legacy-marker writes.
+It reuses the existing path guard, allows only the already-supported final
+leaf replacement, and does not read preserved user-owned/create-if-missing
+assets. Per-write identity/CAS/rollback behavior is retained. This is a bounded
+production correction to restore the confirmed invalid-input zero-write
+boundary; the earlier tests-only candidate and its unimported Approval draft
+are superseded. No candidate Preview, Commit or native Approval ran for it.
 
 ## Completion boundary
 

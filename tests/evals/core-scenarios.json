@@ -147,13 +147,13 @@
       "expected": { "ask_required": false, "action": "block", "write_authorized_now": false, "completion_allowed": false, "max_write_count": 0 }
     },
     {
-      "id": "existing-v1-remains-v1",
+      "id": "existing-v1-requires-explicit-migration",
       "critical": true,
-      "semantic_intent": "existing-v1-task-continues-legacy-protocol",
-      "model_context": "An unfinished legacy task has a valid v1 plan artifact and no v2 task-state artifact. The user explicitly asks to continue that existing task. Automatic migration is forbidden.",
+      "semantic_intent": "existing-v1-task-stops-for-explicit-migration",
+      "model_context": "An unfinished legacy task has a valid v1 plan artifact and no v2 task-state artifact. The current Runtime supports only v2. The user asks to continue that existing task, but has not authorized migration; automatic migration and legacy lifecycle execution are forbidden.",
       "paraphrases": ["Continue the existing v1 task.", "Resume this legacy task on its current workflow."],
-      "evaluator": { "kind": "protocol-case", "fixture": "v1" },
-      "expected": { "ask_required": false, "action": "execute", "write_authorized_now": true, "selected_protocol": "v1", "max_write_count": 0 }
+      "evaluator": { "kind": "protocol-case", "fixture": "v1-retired" },
+      "expected": { "ask_required": false, "action": "block", "write_authorized_now": false, "completion_allowed": false, "selected_protocol": "none", "max_write_count": 0 }
     },
     {
       "id": "governed-v2-does-not-direct",

@@ -896,6 +896,26 @@ try {
     $g14UnavailableResult=Invoke-V1StopLossReport -Module $module -Expected $cleanSource -Root $temp -Report $g14Unavailable -Name 'formal-unavailable'
     Check ($g14UnavailableResult.Success -and [string]$g14UnavailableResult.Gates['DP-G14-V1-STOP-LOSS'].status-ceq'unavailable' -and [string]$g14UnavailableResult.Gates['DP-G14-V1-STOP-LOSS'].producer_identity-ceq'v1-stop-loss-qualification/v1') 'G14 formal unavailability overrides a forged caller pass' 'G14 formal unavailable evidence was rejected or promoted'
 
+    # TK-03 keeps the old producer/lifecycle verifier body inactive. Preserve
+    # its five nullable digest boundary cases here using synthetic reports;
+    # this never invokes a Qualification producer or a retired lifecycle.
+    $g14SchemaPath=Join-Path $RepoRoot 'schemas/v1-stop-loss-report.schema.json'
+    Check ((Test-Json -Json ($g14Formal|ConvertTo-Json -Depth 100 -Compress) -SchemaFile $g14SchemaPath) -and $g14FormalResult.Success -and (Test-Json -Json ($g14Unavailable|ConvertTo-Json -Depth 100 -Compress) -SchemaFile $g14SchemaPath) -and $g14UnavailableResult.Success) 'G14 null and valid SHA-256 nullable fields pass both historical Schema and Adapter' 'G14 valid nullable digest forms regressed'
+    $g14NullableCases=@(
+        [ordered]@{name='lifecycle.plan_digest_before';mutate={param($r)$r.lifecycle.plan_digest_before='not-a-digest'}},
+        [ordered]@{name='lifecycle.plan_digest_after';mutate={param($r)$r.lifecycle.plan_digest_after='not-a-digest'}},
+        [ordered]@{name='lifecycle.test_report_digest';mutate={param($r)$r.lifecycle.test_report_digest='not-a-digest'}},
+        [ordered]@{name='route.artifact_digest_before';mutate={param($r)$r.route_probes[2].artifact_digest_before='not-a-digest'}},
+        [ordered]@{name='route.artifact_digest_after';mutate={param($r)$r.route_probes[2].artifact_digest_after='not-a-digest'}}
+    )
+    foreach($case in $g14NullableCases){
+        $report=New-V1StopLossReport -Source $cleanSource -Seed ('Contract Fixture TK-03 nullable '+$case.name)
+        & $case.mutate $report;Set-ReportDigest $report
+        $schemaRejected=-not (Test-Json -Json ($report|ConvertTo-Json -Depth 100 -Compress) -SchemaFile $g14SchemaPath -ErrorAction SilentlyContinue -WarningAction SilentlyContinue)
+        $result=Invoke-V1StopLossReport -Module $module -Expected $cleanSource -Root $temp -Report $report -Name ('nullable-'+$case.name.Replace('.','-'))
+        Check ($schemaRejected -and -not $result.Success) ("G14 {0} rejects not-a-digest in both Schema and Adapter" -f $case.name) ("G14 {0} accepted an invalid nullable digest" -f $case.name)
+    }
+
     foreach($mode in @('test-only','diagnostic-smoke')){
         $report=New-V1StopLossReport -Source $cleanSource -Seed "Contract Fixture $mode" -ProducerMode $mode
         $result=Invoke-V1StopLossReport -Module $module -Expected $cleanSource -Root $temp -Report $report -Name $mode

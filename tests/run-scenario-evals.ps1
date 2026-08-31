@@ -110,14 +110,29 @@ function Invoke-ScenarioEvaluator {
                 $now = [DateTimeOffset]::UtcNow.ToString('o')
                 $task = [ordered]@{schema_version='task-state/v2';task_id=$taskId;version=1;status='ready';identity='existing';intent='write';requirement_state='clear';execution_profile='direct';persistence='ephemeral';policies=[ordered]@{plan_required=$false;approval_required=$false;rollback_required=$false;independent_review_required=$false;verification_required=$true};created_at=$now;updated_at=$now}
                 [System.IO.File]::WriteAllText($taskPath,($task | ConvertTo-Json -Depth 20 -Compress),[System.Text.UTF8Encoding]::new($false))
-            } elseif ([string]$evaluator.fixture -ceq 'v1') {
+            } elseif ([string]$evaluator.fixture -cin @('v1','v1-retired')) {
                 $taskId = 'resume-v1'
                 $planPath = Join-Path $workspace "docs\tasks\$taskId\plan.md"
                 [void][System.IO.Directory]::CreateDirectory((Split-Path -Parent $planPath))
                 $plan = "---`ntask_id: resume-v1`nstage: TEST`ntool: codex`nupdated: 2026-07-14`n---`n"
                 [System.IO.File]::WriteAllText($planPath,$plan,[System.Text.UTF8Encoding]::new($false))
             } else { throw "unknown protocol fixture: $($evaluator.fixture)" }
-            $result = Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $workspace -TaskId $taskId -RequestedProtocol auto
+            $snapshot = {
+                (@(Get-ChildItem -LiteralPath $workspace -Recurse -Force | ForEach-Object {
+                    $value = if ($_.PSIsContainer) { 'directory' } else { (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
+                    [IO.Path]::GetRelativePath($workspace,$_.FullName) + '|' + $value
+                } | Sort-Object) -join "`n")
+            }
+            $before = & $snapshot
+            try {
+                $result = Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $workspace -TaskId $taskId -RequestedProtocol auto
+            } catch {
+                if ([string]$evaluator.fixture -cne 'v1-retired' -or $_.Exception.Message -cnotmatch '^legacy-task-requires-explicit-migration:') { throw }
+                if (($before) -cne (& $snapshot)) { throw 'legacy migration diagnostic changed the protocol fixture' }
+                return New-ObservedResult -AskRequired $false -Profile $null -WriteCount 0 -CompletionAllowed $false -SelectedProtocol 'none' -Source 'Harness.Protocol:legacy-task-requires-explicit-migration'
+            }
+            if ([string]$evaluator.fixture -ceq 'v1-retired') { throw 'retired legacy protocol unexpectedly returned instead of requiring explicit migration' }
+            if ($before -cne (& $snapshot)) { throw 'protocol resolution changed the protocol fixture' }
             return New-ObservedResult -AskRequired $false -Profile $null -WriteCount (Get-WriteCount $result.side_effects) -CompletionAllowed $null -SelectedProtocol $result.selected_protocol -Source 'Harness.Protocol'
         }
         'evidence-case' {

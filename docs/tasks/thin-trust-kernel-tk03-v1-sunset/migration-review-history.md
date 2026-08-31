@@ -119,3 +119,113 @@ read-only native v2 status call. No pointer writes or actual `.qoder` access
 were performed. The fixture now sets an explicit invalid workspace root to
 prevent ascent; the corrected runtime-hook verifier passed. This is recorded
 separately from the retained earlier TK-06 `.qoder` execution deviation.
+
+## Source-delivery preflight and independent dry-run
+
+The 2026-08-31T11:31:33.4762492Z–11:36:10.1972293Z review rejected the first
+private commit driver before any Approval import or execution: P1, a live
+index/Head race could commit an unapproved tree before a post-check failed;
+P2, its hook denylist omitted reference-transaction/post-index-change; P2,
+lexical containment and supplied snapshot paths could escape the allowed
+private/preserved paths. The rejected driver raw digest was
+`sha256:b4b4b6b84fbaa994acd21354be729cf9a68959ebf58f5086bde3fdbb0fad7a6c`.
+
+The corrected driver creates an ordinary single-parent object from the exact
+approved tree/base, then CAS-updates only the named branch, without changing
+the index/working files or retrying a failed CAS. It fixes the Git Application,
+rejects non-sample hook metadata, uses K0 containment for exact private paths,
+fixes the six preservation inputs and legacy pointer, and binds the migration
+snapshot raw digest. Output is CreateNew, never an overwrite. A preliminary
+function-name collision was also corrected before execution.
+
+The same independent reviewer statically closed all three findings during
+11:43:29.3679230Z–11:46:27.1158588Z. Corrected driver raw digest:
+`sha256:b04f3221d2f6ab6eb0fc6819b858b165d1c94de84526d29f758227089bfb55d0`.
+The deletion proposal was separately checked as a one-file/one-hunk candidate
+leaving the 34-line reject stub; no patch was applied by the reviewer.
+
+The native source Approval was then imported as
+`apr_tk03_source_delivery_v5` at task version 5; shared pointer unchanged.
+The reviewer genuinely executed the Preview once in its different actor/context
+(`/root/tk03_migration_review`, exact model unavailable). Process time:
+11:48:17.4136251Z–11:48:19.8627391Z; exit 0. The driver's inner Git operation
+ran 11:48:18.0792954Z–11:48:19.7585460Z. Head, approved index tree, task/live
+Approval raw bytes and prescribed preserved state remained unchanged.
+
+- Preview output raw digest:
+  `sha256:4ec48669b36c1d84fdb62f7d80bb3ba4dc5ff8a274849d143882ee6f1bc43347`.
+- Protected operation:
+  `sha256:945c6c571436d2330805b4781efa3fa769108235373c7351ec82c546b0e8b582`.
+- Approved tree: `9e7896e1489c2a124edf6bad99d73b03a5c49602`, 111 changed paths.
+- The implementer's matching Commit ran 11:49:11.7715817Z–11:49:13.9091325Z,
+  exit 0, publishing `97e220adc813f1e7aa7b01172cad193c7f45d5ff` as the ordinary
+  child of the exact PR #11 baseline. Shared state remained preserved.
+
+This is an actual operation-bound independent dry-run, not the final audit of
+resolved Evidence. Physical removal and Qualification remain `not_run`.
+
+## Current-test retirement and validation-host review
+
+The same independent actor reviewed the retained stop-loss test front branch
+and Rollout nullable-fixture migration during 12:05:59.9798446Z–12:06:53.7315330Z.
+Its P2 finding was an extra-empty-directory blind spot after pause; this was
+fixed with the exact directory-and-file allowlist before subsequent tests.
+The old successful-v1 body remains retained and unreachable; historical full
+report Schema and Adapter rejection cases remain active synthetic checks.
+
+The subsequent bounded actual-diff review ran
+12:20:04.9961770Z–12:23:31.9860125Z. It found no P0, but one P1 and three P2:
+
+- Private refresh/runner roots lacked complete ancestor-reparse rejection.
+- The refresh helper still permitted bounded untracked inputs.
+- Focused results could label dirty source bytes with an old Head.
+- A retired-v1 scenario could accept an unexpected normal return as a block.
+
+These were corrected using the existing K0 path functions, strictly tracked
+copy inputs, explicit Head/tree/clean preflight and post-execution source
+checks, and unconditional rejection of a retired-v1 normal return. No K0 or
+Qualification production implementation was changed. Closure review and final
+source-bound dry-run/audit remain separate actual operations; this intermediate
+review is not final resolved-Evidence approval.
+
+The next review (12:30:44.7174782Z–12:34:35.5401148Z) kept that P1 open:
+some Git status calls preceded metadata validation, or reused the source copy
+list instead of the target clone's current tracked list. The helpers now read
+each relevant index first, reject protected paths and K0-invalid leaves or
+ancestors, then inspect the worktree. Focused/full runners repeat those checks
+after execution; refresh checks the target clone before its snapshot commit
+and again before final status. These checks do not retroactively establish the
+safety or source binding of the earlier attempts.
+
+The independent actor statically closed that P1 with no new P0/P1/P2 during
+12:39:17.2107368Z–12:40:11.1652917Z. Four immutable reviewed helper digests:
+
+- refresh: `sha256:b1dac94bcf591aa8a9290f9b0d047c6544d3762e25c37e802a3067d5ab79bede`
+- focused: `sha256:d693e41bc46d093d1c493c29bfe2d0c877bbebd240684096875847759d9550e6`
+- suite: `sha256:f7db808b9e569a242bc7354b0da8a6ca728c1c186edef0a7df1b9710e80b9c3e`
+- correction delivery: `sha256:fa63920b6eb4f040ac783752c742d4ae05961bb53b3aad1925f5c76fbd62fef7`
+
+The correction driver retains the reviewed exact-tree/single-parent/CAS and
+preservation checks, with new mode-specific evidence paths and K0 worktree
+preflight. This review did not run tests, Preview, Commit, or Runtime writes;
+the concrete correction Approval/operation and final Evidence audit still
+require their own actual bindings and execution.
+
+The final two installation fixture corrections were independently reviewed
+during 12:48:32.3002221Z–12:49:12.6110433Z with no new P0/P1/P2. The core
+reparse fixture now targets the actual managed task entry without weakening
+victim/no-residual-state checks; the full Memory protocol uses the verifier's
+existing single managed-asset drift marker and an added restored-byte PASS
+check. Reviewed verifier raw digest:
+`sha256:680246d9b5d235e53bcf64cbc5a25549bc032f229ce648fda943f999a7b48996`.
+This was exact-file read-only static review, not a dynamic pass.
+
+The next isolated run established an actual late-rejection gap, as recorded
+in verification-history.md. The seven-line installer preflight correction was
+then independently reviewed during 12:59:55.4033473Z–13:01:02.0430764Z with no
+new P0/P1/P2. It runs under the existing mutex before all installation/legacy
+marker/recovery persistence, outside the recovery-manifest-writing catch. It
+checks only managed vault target ancestors and retains final-leaf exact/CAS
+handling. Reviewed installer raw digest:
+`sha256:36f58b164ee1001a930bda48a1663c6bdb0af9064142d42066ed0b3aadf5c432`.
+The old tests-only tree's unimported bindings do not cover this source change.

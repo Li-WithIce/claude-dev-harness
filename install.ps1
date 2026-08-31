@@ -2950,6 +2950,13 @@ $lockedPreflightResolution = & $readDistributionPreflight
 if ($lockedPreflightResolution.preset -cne $script:DistributionPlan.profile_id) { throw 'Install preset changed during Distribution preparation; retry against current state' }
 Assert-HarnessDistributionPlanCurrent -RepoRoot $RepoRoot -Plan $script:DistributionPlan
 
+# Reject existing aliases in targets we will overwrite before transaction or
+# legacy-marker persistence. Leaf links still use the existing exact/CAS
+# replacement rules; preserved user-owned/create-if-missing assets are not read.
+foreach ($asset in @($script:DistributionPlan.assets | Where-Object { $_.kind -ceq 'vault' -and $_.ownership -ceq 'managed' })) {
+    [void](Assert-InstallStatePathHasNoReparsePoint -Path (Join-Path $VaultPath $asset.target) -Label 'Distribution managed vault target' -AllowFinalReparsePoint)
+}
+
 if ($RebaselineLegacyInstallState) {
     $registryShape = Read-JsonObject -Path $InstallRegistryPath
     if ([string]$registryShape['schema_version'] -eq 'install-registry/v1.1') {
