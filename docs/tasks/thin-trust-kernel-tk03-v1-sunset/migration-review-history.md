@@ -229,3 +229,91 @@ checks only managed vault target ancestors and retains final-leaf exact/CAS
 handling. Reviewed installer raw digest:
 `sha256:36f58b164ee1001a930bda48a1663c6bdb0af9064142d42066ed0b3aadf5c432`.
 The old tests-only tree's unimported bindings do not cover this source change.
+
+## Corrected source S: independent Preview and ordinary Commit
+
+Native Approval `apr_tk03_correction_delivery_v6` was imported at task version
+6 during 2026-08-31T13:06:10.2814116Z, without a shared-pointer change.
+The final binding includes the actual installer correction, exact tree
+`15d5641b2c3a8232f4bb57f7beaf7ba339f69d95`, driver raw SHA-256
+`fa63920b6eb4f040ac783752c742d4ae05961bb53b3aad1925f5c76fbd62fef7`,
+and operation
+`sha256:38477d356a5dc0e010270b865ad4d46eeadf5ec2f8f77197492f63fb9b1a1e54`.
+
+The first reviewer preflight, 13:06:48.2366061Z–13:08:31.5614187Z, exited 1
+before Preview because it incorrectly required the original worktree's `.git`
+entry to be a directory. This is a linked worktree with an ordinary `.git`
+pointer file. No Preview was executed by that failed attempt, and no source,
+index, task, Approval or preservation input changed. Subsequent preflight
+validated the actual absolute Git directory/common directory and the ordinary
+pointer file instead; this did not change Git/source/runtime bytes.
+
+The different actor/context `/root/tk03_migration_review` then executed exactly
+one genuine Preview, during 13:10:51.0682911Z–13:10:56.8961425Z, exit 0.
+The driver ran during 13:10:51.7620048Z–13:10:56.7870184Z. Exact model identity
+is unavailable, not inferred. All 17 staged paths were modifications. The
+actual command was `git commit --dry-run --porcelain --untracked-files=no`.
+Its output raw SHA-256 is
+`14a08bb0c428f7c6016e73cec2953b0080565e5034aa9ad118171ffedd214f96`.
+
+The postchecks at 13:11:56.5036832Z confirmed source A Head, the approved S
+tree, index raw SHA-256
+`95ba405acd395d2dd2cecf0e558e982880f5a5ac663b6188cd6474b8556d88d1`,
+task v6, live Approval, all six preserved files, the idle legacy pointer and
+the imported dp-03 paused/version-1 state remained unchanged. All 492 tracked
+worktree paths were K0 metadata-checked before working-tree inspection.
+
+The implementer executed the matching Commit during
+13:13:45.2190469Z–13:13:49.0473838Z, exit 0. It created S
+`2827e1822d5580f9696e8e889ba754b7ac2f194b` as the exact single-parent child
+of source A, using the approved tree plus an atomic old-value ref update.
+The normal push succeeded. No index/workfile rewrite, forced update, physical
+deletion or task execution occurred. This is operation-bound execution proof,
+not yet the final audit of resolved Evidence.
+
+## Bounded docs-only delivery driver review
+
+The separate docs-only driver was reviewed during
+2026-08-31T13:16:55.7234207Z–13:18:39.3152899Z. One P1 was found before any
+docs spec, Approval or execution: Git rename detection could hide an old
+outside-allowlist path when reporting only the new filename, and a deletion
+filter did not include rename status. Rejected driver raw SHA-256:
+`32c3e6d423fc3cd4258a2960a16c99fe3a6112aed6dd3900b5a2bd4378f91a59`.
+
+Both staged-path and deletion checks now explicitly use `--no-renames`, so a
+rename becomes delete-plus-add and cannot bypass the six exact report paths.
+The corrected driver parses successfully; raw SHA-256:
+`bda30cb98ecd8711013493dc920ddb61e51467125700c541779c09dd42fd8745`.
+The different actor's exact two-line closure review ran during
+2026-08-31T13:22:28.1675368Z–13:22:28.4700576Z, exit 0, and closed this P1
+with no new P0/P1/P2. Removing those two arguments in memory reproduced the
+prior rejected driver's raw digest. No Preview/Commit, Runtime write, test,
+running fixture or actual protected tree was involved. Any actual docs
+Preview/Commit and final resolved-Evidence audit remain separate later events.
+This finding does not relabel the earlier S operation, whose 17 changes were
+all modifications. Neither immutable historical source driver was rewritten.
+
+## Carrier command-discovery follow-up
+
+The model-neutrality fixture-only increment was independently reviewed during
+2026-08-31T13:34:13.7551152Z–13:35:07.9586664Z with no new P0/P1/P2.
+The three exact owned-command assertions and original model/session/read-only
+and raw-byte preservation assertions remain active. Reviewed test raw SHA-256:
+`ace989d6767b87df61b1d8b1d066edab9972d9029f1073079bb57e6aeb238160`.
+The production carrier remained unchanged at
+`39a81f2b4235cadddc67a0fa5f32b0f6bfa045ae710c9ae33b9afbc21f2ddb92`.
+This is static review; the separately recorded focused test results are actual
+executions, not executions performed by the reviewer.
+
+The separate carrier-delivery driver and full-suite launcher were compared by
+the same independent actor during 13:37:50.9751770Z–13:38:51.6098112Z, with
+no new P0/P1/P2. The driver differs from the immutable S driver only in four
+fixed file-name substitutions and the two explicit no-rename checks; the
+launcher differs only by admitting the new exact-carrier-source clone name.
+Both parse without errors. Raw SHA-256:
+
+- carrier delivery: `f5c9d305ad667b564877d70907fcb327af45baed8251f14966aac77263a299da`
+- carrier suite: `9654ccd62bde1eed3b396443c1a20d314622726fbcbda31946145b684ef11d55`
+
+No Preview, Commit, fixture execution or Runtime write occurred in this static
+comparison. The next task-version spec and Approval remain separate bindings.

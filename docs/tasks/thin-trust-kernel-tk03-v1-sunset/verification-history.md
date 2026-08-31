@@ -1,7 +1,8 @@
 # TK-03 validation history
 
-All runs below used tracked-source-only isolated checkouts (`source`,
-`recheck-source`, `correction-source`, or `exact-source`) under
+All local validation runs below used tracked-source-only isolated checkouts (`source`,
+`recheck-source`, `correction-source`, `exact-source`, or
+`exact-corrected-source`) under
 `D:/data/dev-harness-next/tmp/tk03-validation`. Earlier rows are local snapshot
 commits, not the final PR Head; exact PR-Head runs are explicitly labelled.
 PowerShell fixtures stayed under the fixed
@@ -139,6 +140,82 @@ assets. Per-write identity/CAS/rollback behavior is retained. This is a bounded
 production correction to restore the confirmed invalid-input zero-write
 boundary; the earlier tests-only candidate and its unimported Approval draft
 are superseded. No candidate Preview, Commit or native Approval ran for it.
+
+## Corrected source S and hardened checks
+
+The hardened same-tree catalog run completed four checks with exit 0 and
+unchanged source binding: Rollout Evidence, Module catalog, TCB inventory and
+Capability extraction. The run is `tk03-hardened-catalog-20260831-204107`,
+snapshot `790408867137345771757e22f04fcdb6f9640945`, tree
+`adf16f07d7e768cb86f1ee8a4ff0ef6839ade599`; its last check ended
+2026-08-31T12:54:05.1067259Z. Results raw SHA-256:
+`d1733b6de7d27c1a96e711361a730dfbbfafab2f308b65f6f750a9baaedc80f8`.
+The six-check hardened contract results raw SHA-256 is
+`319ea7590eed8bb12106049673c1ce1bdec273727b333426c5288ad4ffbcc637`.
+
+In the first hardened install run, uninstall passed during
+12:45:10.6864854Z–12:47:09.2662294Z, and managed update passed during
+12:47:09.2745066Z–12:48:46.1119799Z. These passes do not erase that run's
+installation failure. Combined results raw SHA-256:
+`c80083fdbc3ae9463a80194a87420c4f188653d467ca569fe70b72883df9e2bb`.
+
+After the actual installer preflight fix, the hardened run
+`tk03-hardened-install-preflight-20260831-210147` passed installation isolation
+during 13:01:47.4514022Z–13:05:08.6988113Z and TCB inventory during
+13:05:08.7136329Z–13:05:34.0319876Z, both exit 0 with clean source binding
+unchanged. Snapshot: `058662619ff00c67fdbc8b336c49a61cf45a7ce7`;
+tree: `f422480b069b2be6a140ab51b4959c8efa518ff5`. Results raw SHA-256:
+`5e3024d671b6a50de73114a8f06e8c0d69787f40dbd03e6eb7ec3c7bd9f2d744`.
+Its source differs from S only by the subsequently appended review history.
+The current nested-entry alias test therefore passed its original victim,
+no-partial-state and rollback boundary assertions; no test was weakened.
+
+Corrected source S is the ordinary child of source A:
+`2827e1822d5580f9696e8e889ba754b7ac2f194b`, tree
+`15d5641b2c3a8232f4bb57f7beaf7ba339f69d95`, 17 changed paths, no deletion.
+The new `exact-corrected-source` checkout contains only its 492 tracked files.
+The exact S quick run passed, exit 0, during
+13:15:13.0705918Z–13:15:59.1501265Z; source Head/tree remained clean and
+unchanged. Stdout raw SHA-256:
+`cfaf578e18a3063e532d2f9535e65a729533e07b837ca1b57cfc1de4268ef59e`.
+Exact S Suite all ran 13:16:03.0068279Z–13:38:42.1911595Z and was deliberately
+interrupted after CI established the missing-tool fixture failure, to switch
+to the corrected source. The exact owned inner validation process was checked
+by PID, parent PID, full command line and creation time before stopping its
+tree; its parent runner completed normal postchecks and recorded exit -1,
+status fail, source binding intact. This is not a terminal Suite all pass.
+Stdout raw SHA-256:
+`a9d2910f6955790a0a90fa7b0b67c5e2526e6d41b8638071933a7020f5023506`.
+The old clone, launcher and logs remain retained without source replacement.
+
+## Source S CI and model carrier discovery correction
+
+Ordinary S CI `33395891144` completed during
+2026-08-31T13:14:41Z–13:32:13Z with conclusion failure. Four core groups and
+changed-optional passed; entry-lifecycle and its aggregate failed. Three Release
+jobs were skipped. The sole failing entry-lifecycle verifier was model
+neutrality: the unchanged production carrier performs `Get-Command codex`
+before consulting `CODEX_EXECUTABLE`. The fake test backend supplied only the
+override, leaving command discovery dependent on an installed Codex. That
+dependency existed locally but not on the clean CI runner. The earlier local
+passes were real results but did not prove this missing-tool environment.
+
+The fixture now launches PowerShell by its captured absolute path and gives
+the carrier a PATH containing only that workspace's owned fake Host directory.
+PATH and the executable override are restored in finally. Each fake response
+reports the discovered command path, and all three calls must resolve exactly
+their own fixture. All model, session, read-only and original-byte preservation
+assertions remain; no production carrier or historical Schema was changed.
+
+The hardened `tk03-model-path-isolation-20260831-213321` run passed model
+neutrality (15 checks), during 13:33:22.0884008Z–13:33:31.7192342Z, and the
+model evaluation runner during 13:33:31.7386237Z–13:33:38.7775709Z. Both exited
+0 with unchanged clean source bindings: snapshot
+`ed5b9d476dc5e0e7cee77f918bd855e0ae3f7428`, tree
+`2501653cef9cd383f706936887a39bc517227245`. The corrected verifier raw SHA-256
+is `ace989d6767b87df61b1d8b1d066edab9972d9029f1073079bb57e6aeb238160`.
+This is a new source change; S's failed CI and any S Suite observation are not
+promoted to successful evidence for its later commit.
 
 ## Completion boundary
 

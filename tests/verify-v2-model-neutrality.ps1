@@ -47,6 +47,7 @@ $record = [ordered]@{
     session = $(if ($argv -ccontains 'resume' -and $sessionIndex -ge 0) { $argv[$sessionIndex + 1] } else { '' })
     model = $argv[$modelIndex + 1]
     readonly = ($argv -ccontains 'read-only' -or $argv -ccontains 'sandbox_mode="read-only"')
+    discovered_host = [string](Get-Command codex -ErrorAction Stop).Path
 }
 [Console]::Out.WriteLine((@{type='thread.started';thread_id='fixture-session'} | ConvertTo-Json -Compress))
 [Console]::Out.WriteLine((@{type='item.completed';item=@{type='agent_message';text=($record | ConvertTo-Json -Compress)}} | ConvertTo-Json -Depth 5 -Compress))
@@ -67,12 +68,17 @@ function Invoke-Carrier([object]$Fixture, [string]$Model, [string]$Session = '')
     $arguments = @('-Task',"model=$Model",'-Workspace',$Fixture.Root,'-Model',$Model,'-ReadOnly','-Isolated','-Quiet','-AgentOutputOnly','-Output',$outputPath,'-TimeoutSeconds','15')
     if (-not [string]::IsNullOrWhiteSpace($Session)) { $arguments += @('-Session',$Session) }
     $previousExecutable = $env:CODEX_EXECUTABLE
+    $previousPath = $env:PATH
+    $powerShellPath = (Get-Process -Id $PID).Path
     try {
+        # Exercise discovery without any installed Codex or inherited PATH entry.
+        $env:PATH = Split-Path -Parent $Fixture.MockHost
         $env:CODEX_EXECUTABLE = $Fixture.MockHost
-        $output = @(& pwsh -NoProfile -NonInteractive -File $script:CarrierPath @arguments 2>&1 | ForEach-Object { [string]$_ })
+        $output = @(& $powerShellPath -NoProfile -NonInteractive -File $script:CarrierPath @arguments 2>&1 | ForEach-Object { [string]$_ })
         $exitCode = $LASTEXITCODE
     } finally {
         if ($null -eq $previousExecutable) { Remove-Item Env:CODEX_EXECUTABLE -ErrorAction Ignore } else { $env:CODEX_EXECUTABLE = $previousExecutable }
+        if ($null -eq $previousPath) { Remove-Item Env:PATH -ErrorAction Ignore } else { $env:PATH = $previousPath }
     }
     if ($exitCode -ne 0) { throw ('model-neutrality carrier fixture failed: ' + ($output -join ' | ')) }
     $record = if ($exitCode -eq 0 -and (Test-Path -LiteralPath $outputPath -PathType Leaf)) {
@@ -137,6 +143,10 @@ try {
     $aFirst = Invoke-Carrier -Fixture $fixtureA -Model 'host-model/one' -Session 'workspace-a-session'
     $aSecond = Invoke-Carrier -Fixture $fixtureA -Model 'host-model/two' -Session 'workspace-a-session'
     $bFirst = Invoke-Carrier -Fixture $fixtureB -Model 'host-model/three'
+    Check ($aFirst.Record.discovered_host -ceq $fixtureA.MockHost -and
+        $aSecond.Record.discovered_host -ceq $fixtureA.MockHost -and
+        $bFirst.Record.discovered_host -ceq $fixtureB.MockHost) `
+        'carrier command discovery uses only each owned fake Host without installed Codex' 'carrier command discovery escaped the fake Host fixture'
     $aFirstSessionProperty = if ($null -eq $aFirst.Record) { $null } else { $aFirst.Record.PSObject.Properties['session'] }
     $aSecondSessionProperty = if ($null -eq $aSecond.Record) { $null } else { $aSecond.Record.PSObject.Properties['session'] }
     $aFirstSession = if ($null -eq $aFirstSessionProperty) { '' } else { [string]$aFirstSessionProperty.Value }
