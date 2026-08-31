@@ -581,7 +581,7 @@ exit 0
         $fixtureClaudeSettingsPath = Join-Path $fixtureClaudeHome 'settings.json'
         $fixtureHookTemplatePath = Join-Path $fixtureRepoRoot 'agent-configs\claude\settings.local.shared.json.template'
         $fixturePostToolSourcePath = Join-Path $fixtureRepoRoot 'runtime-hooks\claude\posttooluse.js'
-        $fixtureInstallPath = Join-Path $fixtureRepoRoot 'install.ps1'
+        $fixtureProfilePath = Join-Path $fixtureRepoRoot 'modules\distribution\profiles\full.json'
         $livePostToolPath = Join-Path $fixtureClaudeHome 'hooks-memory\posttooluse.js'
         $legacyPostToolCommand = 'node "{0}"' -f $livePostToolPath
         $thirdPartyPostToolCommand = 'third-party-posttool.cmd'
@@ -603,14 +603,19 @@ exit 0
             'process.stdin.resume(); process.stdout.write("{}\n");',
             (New-Object System.Text.UTF8Encoding($false))
         )
-        $currentInstallRaw = Get-Content -LiteralPath $fixtureInstallPath -Raw -Encoding utf8
-        $currentFullHooks = "hooks = @('pretooluse.ps1','codex-pretooluse-launcher.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js')"
-        $legacyFullHooks = "hooks = @('pretooluse.ps1','codex-pretooluse-launcher.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js','posttooluse.js')"
-        $legacyInstallRaw = $currentInstallRaw.Replace($currentFullHooks,$legacyFullHooks)
-        if ($legacyInstallRaw -ceq $currentInstallRaw) {
-            throw 'fixture could not enable the formerly managed PostToolUse hook'
+        # Seed an older centrally authorized inventory for the retirement transition.
+        $currentProfileRaw = Get-Content -LiteralPath $fixtureProfilePath -Raw -Encoding utf8
+        $legacyProfile = $currentProfileRaw | ConvertFrom-Json -AsHashtable
+        $legacyProfile.asset_allowlist += [ordered]@{
+            id = 'fixture-retired-posttooluse'
+            kind = 'hook'
+            origin = 'bootstrap'
+            module_id = 'distribution'
+            source = 'runtime-hooks/claude/posttooluse.js'
+            target = 'posttooluse.js'
+            ownership = 'managed'
+            files = @('runtime-hooks/claude/posttooluse.js')
         }
-        [System.IO.File]::WriteAllText($fixtureInstallPath,$legacyInstallRaw,(New-Object System.Text.UTF8Encoding($true)))
         New-Item -ItemType Directory -Path $fixtureClaudeHome -Force | Out-Null
         $thirdPartyBaseline = [ordered]@{
             hooks = [ordered]@{
@@ -642,6 +647,19 @@ exit 0
         $fixtureTemplatePath = Join-Path (Join-Path $fixtureRepoRoot 'vault-template') $templateRelativePath
         $retiredContent = "obsolete managed decision template`n"
         [System.IO.File]::WriteAllText($fixtureTemplatePath, $retiredContent, (New-Object System.Text.UTF8Encoding($false)))
+        $retiredTarget = $templateRelativePath.Replace('\','/')
+        $retiredSource = 'vault-template/' + $retiredTarget
+        $legacyProfile.asset_allowlist += [ordered]@{
+            id = 'fixture-retired-decision-template'
+            kind = 'vault'
+            origin = 'bootstrap'
+            module_id = 'distribution'
+            source = $retiredSource
+            target = $retiredTarget
+            ownership = 'managed'
+            files = @($retiredSource)
+        }
+        [System.IO.File]::WriteAllText($fixtureProfilePath,($legacyProfile | ConvertTo-Json -Depth 30),(New-Object System.Text.UTF8Encoding($false)))
 
         $initialInstall = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $fixtureRepoRoot 'install.ps1') -Arguments @{
             WorkspaceRoot = $workspaceRoot
@@ -662,7 +680,7 @@ exit 0
 
         Remove-Item -LiteralPath $fixtureTemplatePath -Force
         Remove-Item -LiteralPath $fixturePostToolSourcePath -Force
-        [System.IO.File]::WriteAllText($fixtureInstallPath,$currentInstallRaw,(New-Object System.Text.UTF8Encoding($true)))
+        [System.IO.File]::WriteAllText($fixtureProfilePath,$currentProfileRaw,(New-Object System.Text.UTF8Encoding($false)))
         [System.IO.File]::WriteAllText(
             $fixtureHookTemplatePath,
             $currentHookTemplateRaw,
