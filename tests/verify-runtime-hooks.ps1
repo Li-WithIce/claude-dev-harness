@@ -3,11 +3,16 @@ param([string]$RepoRoot = (Split-Path -Parent $PSScriptRoot))
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
+. (Join-Path $PSScriptRoot 'fixture-test-common.ps1')
 $failures = [Collections.Generic.List[string]]::new()
 $checks = 0
 function Check([bool]$Condition,[string]$Label) {
     $script:checks++
     if($Condition) { "[PASS] $Label" } else { $script:failures.Add($Label); "[FAIL] $Label" }
+}
+function Add-Failure([string]$Message) {
+    $script:failures.Add($Message)
+    "[FAIL] $Message"
 }
 function Write-Text([string]$Path,[string]$Text) {
     [void][IO.Directory]::CreateDirectory((Split-Path -Parent $Path))
@@ -19,7 +24,7 @@ function Snapshot([string]$Root) {
         if($_.PSIsContainer) { 'D|'+$relative } else { 'F|'+$relative+'|'+(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
     } | Sort-Object) -join [Environment]::NewLine
 }
-function Invoke-Hook([string]$Hook,[string]$WorkingDirectory,[string]$InputText='',[hashtable]$Environment=@{}) {
+function Invoke-Hook([string]$Hook,[string]$WorkingDirectory,[string]$InputText='',[hashtable]$Environment=@{},[ValidateRange(100,60000)][int]$TimeoutMilliseconds=20000) {
     $info=[Diagnostics.ProcessStartInfo]::new()
     $info.FileName=(Get-Command node -CommandType Application -ErrorAction Stop).Source
     $info.ArgumentList.Add($Hook);$info.WorkingDirectory=$WorkingDirectory
@@ -35,7 +40,15 @@ function Invoke-Hook([string]$Hook,[string]$WorkingDirectory,[string]$InputText=
         [void]$process.Start()
         $stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync()
         $process.StandardInput.Write($InputText);$process.StandardInput.Close()
-        if(-not $process.WaitForExit(20000)) { $process.Kill($true); throw 'hook fixture timed out' }
+        if(-not $process.WaitForExit($TimeoutMilliseconds)) {
+            try {
+                $process.Kill($true)
+                if(-not $process.WaitForExit(5000)) { throw 'process tree did not exit within 5 seconds after kill' }
+            } catch {
+                throw ('hook fixture timed out; process-tree termination failed: '+$_.Exception.Message)
+            }
+            throw 'hook fixture timed out'
+        }
         $output=$stdout.GetAwaiter().GetResult()
         $json=$null;try{$json=$output|ConvertFrom-Json -AsHashtable}catch{}
         return @{code=$process.ExitCode;output=$output;error=$stderr.GetAwaiter().GetResult();json=$json}
@@ -64,6 +77,25 @@ try {
     New-ProjectionFixture $idle $false
     [void][IO.Directory]::CreateDirectory((Join-Path $missing '.assistant'))
     [void][IO.Directory]::CreateDirectory($unresolved)
+    $timeoutRoot=Join-Path $scratch 'timeout-process-tree'
+    [void][IO.Directory]::CreateDirectory($timeoutRoot)
+    $timeoutHook=Join-Path $timeoutRoot 'timeout.js'
+    Write-Text $timeoutHook @'
+const { spawn } = require("child_process");
+spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], {
+  cwd: process.cwd(), stdio: "ignore",
+});
+setTimeout(() => {}, 60000);
+'@
+    $timeoutObserved=$false
+    try {
+        $null=Invoke-Hook $timeoutHook $timeoutRoot '' @{} 250
+    } catch {
+        $timeoutObserved=$_.Exception.Message -ceq 'hook fixture timed out'
+    } finally {
+        Remove-DirectoryWithRetry -Path $timeoutRoot
+    }
+    Check ($timeoutObserved -and -not (Test-Path -LiteralPath $timeoutRoot)) 'timed-out hook process trees exit before owned fixture cleanup'
     $before=Snapshot $scratch
     $result=Invoke-Hook $hook $idle
     Check ($result.code -eq 0 -and $result.output -ceq '{}' -and $result.error -ceq '') 'idle v2 recovery projection emits empty JSON'
@@ -118,7 +150,7 @@ try {
     $resolved=[IO.Path]::GetFullPath($scratch)
     $prefix=[IO.Path]::GetFullPath((Join-Path $RepoRoot 'tmp')).TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
     if(-not $resolved.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)){throw 'fixture cleanup escaped its root'}
-    if(Test-Path -LiteralPath $resolved){Remove-Item -LiteralPath $resolved -Recurse -Force}
+    if(Test-Path -LiteralPath $resolved){Remove-DirectoryWithRetry -Path $resolved}
 }
 if($failures.Count){ "STATUS: FAIL ($($failures.Count)/$checks)";exit 1 }
 "STATUS: PASS ($checks checks; adapter fixtures are not Host qualification)"
