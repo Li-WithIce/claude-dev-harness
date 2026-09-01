@@ -2,28 +2,29 @@
 
 - Harness runtime lives under `{VAULT_PATH}`; optional Memory features are used only when installed and explicitly needed or authorized.
 - Default to Simplified Chinese for explanations and summaries; keep code identifiers in their native language and never expose secrets or private data.
-- Use `.assistant\entry\task.ps1 status` only for an explicit recovery/status request after protocol selection; a new selected v2 request never calls it, and v1 recovery files remain compatibility inputs only for existing v1 tasks.
+- Use `.assistant\entry\task.ps1 status` only for an explicit v2 recovery/status request; new requests resolve admission without reading task/current state. Legacy history is explicit maintenance input only.
 - Use `rg`, file reading, and manual inspection only when directly relevant. Optional providers are never required for core routing.
 - Current requirements and business correctness take precedence over stale tests or snapshots unless historical compatibility is explicitly required.
 - When the user explicitly authorizes and names a Workspace configuration file, database credentials and external-service keys may be persisted there, including production configuration files. This ordinary Runtime capability does not require Vault, KMS, a Secret Provider, Release Qualification, or an exact Host/model version. Persistence is not disclosure: never echo sensitive values into replies, logs, task artifacts, Evidence, reviews, PRs, CI artifacts, or unrelated files.
 - Report such business changes as: `已更新指定生产配置文件；数据库和外部服务敏感字段未在报告中回显。`
-- Only a detector-selected v1 workflow reads the executable `.assistant\entry\AGENTS.md` shim; selected v2 never reads it.
+- Never read an old `.assistant\entry\AGENTS.md` lifecycle shim or route into v1. Use explicit migration maintenance for retained legacy history.
 
 <!-- BEGIN GENERATED ENTRY CONTRACT -->
-<!-- source-sha256: 346224d62f82926a11bac09335e97766c08b813b71774a714abea924e49ff93e -->
+<!-- source-sha256: 4838491707510140a0c698ac26d0faa8b45d6dde90d03427dc78006f0643396c -->
 # Entry Contract Bootstrap
 
 Bootstrap only; routes/lifecycle stay lazy.
 
 - `protocol_default`: `auto`
-- `auto_resolves_to`: `existing-artifact-or-runtime-default-or-v1-fallback`
-- `v2_entry_activation`: `explicit-or-workspace-new-or-existing-v2-or-runtime-default-new`
+- `auto_resolves_to`: `existing-v2-or-admitted-v2-new-task`
+- `v2_entry_activation`: `v2-only-with-new-work-admission`
 
-- New identity/artifact-free: use host/user-surfaced `HARNESS_PROTOCOL`; else read its process value once; never guess. `v2` is the first complete routing hop: classify inline; no task `status`/`protocol`, nested shim, or task/runtime/current inspection. Selected v2 Direct loads no `entry-router`, `orchestrator`, lifecycle skill, Memory, Team, or Provider; hand off now.
-- Otherwise resolve once. Known: `.assistant\entry\task.ps1 protocol -TaskId {task_id}`; v2 state, else v1 plan, wins. New: `.assistant\entry\task.ps1 protocol`; config `v1|v2|auto`, then a valid Runtime Default Decision or v1 fallback. No status/runtime/lifecycle fan-out. Existing v2 may status/resume; v1 may load its shim. Invalid input fails closed.
+- New identity/artifact-free: use host/user-surfaced `HARNESS_PROTOCOL`; else read its process value once; never guess. Resolve admission once with `.assistant\entry\task.ps1 protocol`: only `auto|v2` are supported. Workspace `new_work=paused` stops new work even with explicit v2; missing Runtime Default admits v2, invalid/unavailable decisions block. No task `status`, nested shim, or task/runtime/current inspection.
+- Known identity: `.assistant\entry\task.ps1 protocol -TaskId {task_id}`; valid v2 state wins and may status/resume. Legacy artifact presence stops with an explicit-migration diagnostic, without reading its contents. Explicit v1 and invalid input fail closed. Never create, resume, or migrate a legacy task implicitly.
+- After admission classify inline. Selected v2 Direct loads no `entry-router`, `orchestrator`, lifecycle skill, Memory, Team, or Provider; hand off now. No status/runtime/lifecycle fan-out.
 - An unresolved Requirement or product decision blocks every write and enters Ask. Protected/expanded/non-Direct reroute before writes.
 - A public-contract change found outside confirmed scope stays unresolved until the user explicitly confirms this change; continuation alone enters Ask and authorizes no write.
 - Clear Direct: relevant targets -> minimum edit -> minimum focused checks covering all confirmed acceptance criteria -> one bounded diff/self-review -> report. Stop only when all required checks pass. Expand only after failure/ambiguity. No task/runtime/current/lifecycle writes.
 - Read-only work performs zero writes. Report actual commands/results, self-review, gaps; `not_run`/unavailable is not pass.
-- Only a detector-selected v1 request loads `entry-router`; missing compatibility fails closed; then `orchestrator` + one stage skill.
+- Legacy lifecycle and shim loading are retired. Stop-loss pauses new work; recovery uses v2. Explicit migration/history maintenance is isolated and requires its own authorization.
 <!-- END GENERATED ENTRY CONTRACT -->

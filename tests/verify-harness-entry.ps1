@@ -193,10 +193,10 @@ $bootstrapResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath $harn
 } -WorkingDirectory $workingDirectory
 
 if ((Get-StatusLineValue -Output $bootstrapResult.Output -Prefix 'STATUS') -ne 'PASS' -or
-    ($bootstrapResult.Output -join "`n") -notmatch '(?m)^- harness-status\.ps1: WARN$') {
-    Add-Failure 'harness.ps1 should bootstrap a fresh workspace while surfacing advisory Desktop health WARN'
+    ($bootstrapResult.Output -join "`n") -notmatch '(?m)^- harness-status\.ps1: PASS$') {
+    Add-Failure 'harness.ps1 should bootstrap a fresh workspace with admitted v2 runtime status'
 } else {
-    Add-Check 'harness.ps1 preserves successful bootstrap while exposing advisory Desktop health WARN'
+    Add-Check 'harness.ps1 bootstraps with v2 admission without requiring release qualification'
 }
 
 if ((Get-StatusLineValue -Output $bootstrapResult.Output -Prefix 'Mode') -ne 'bootstrap-workspace') {
@@ -217,41 +217,22 @@ if (-not (Test-Path -LiteralPath (Join-Path $workspaceRoot '.assistant') -PathTy
     Add-Check 'harness.ps1 creates .assistant during bootstrap'
 }
 
-$entryShimPath = Join-Path $workspaceRoot '.assistant\entry\AGENTS.md'
-if (-not (Test-Path -LiteralPath $entryShimPath -PathType Leaf)) {
-    Add-Failure 'harness.ps1 should install the workspace entry shim'
+$entryShimPath = Join-Path $workspaceRoot 'AGENTS.md'
+$entryShimContent = Get-Content -LiteralPath $entryShimPath -Raw -Encoding utf8
+$contractPattern = '(?ms)^<!-- BEGIN GENERATED ENTRY CONTRACT -->\r?\n<!-- source-sha256: (?<digest>[0-9a-f]{64}) -->\r?\n(?<body>.*?)\r?\n<!-- END GENERATED ENTRY CONTRACT -->$'
+$contractMatches = [regex]::Matches($entryShimContent, $contractPattern)
+if ($contractMatches.Count -eq 1 -and
+    $contractMatches[0].Groups['digest'].Value -ceq $entryContractDigest -and
+    (Normalize-ContractText $contractMatches[0].Groups['body'].Value) -ceq (Normalize-ContractText $entryContractContent)) {
+    Add-Check 'workspace AGENTS contains the one current canonical v2 admission contract'
 } else {
-    $entryShimContent = Get-Content -LiteralPath $entryShimPath -Raw -Encoding utf8
-    $contractPattern = '(?ms)^<!-- BEGIN GENERATED ENTRY CONTRACT -->\r?\n<!-- source-sha256: (?<digest>[0-9a-f]{64}) -->\r?\n(?<body>.*?)\r?\n<!-- END GENERATED ENTRY CONTRACT -->$'
-    $contractMatches = [regex]::Matches($entryShimContent, $contractPattern)
-    if ($contractMatches.Count -ne 1) {
-        Add-Failure 'workspace entry shim should contain exactly one generated entry contract block'
+    Add-Failure 'workspace AGENTS generated contract is missing, duplicated or stale'
+}
+foreach ($retired in @('entry/AGENTS.md','entry/advance-stage.ps1','entry/validate-lite-artifacts.ps1','运行时/当前任务.md')) {
+    if (Test-Path -LiteralPath (Join-Path $workspaceRoot ('.assistant/'+$retired))) {
+        Add-Failure ("fresh installation contains retired v1 asset: " + $retired)
     } else {
-        Add-Check 'workspace entry shim contains exactly one generated entry contract block'
-        $contractMatch = $contractMatches[0]
-        if ($contractMatch.Groups['digest'].Value -cne $entryContractDigest) {
-            Add-Failure 'workspace entry shim generated entry contract digest should match the canonical source'
-        } else {
-            Add-Check 'workspace entry shim generated entry contract digest matches the canonical source'
-        }
-
-        if ((Normalize-ContractText -Text $contractMatch.Groups['body'].Value) -cne (Normalize-ContractText -Text $entryContractContent)) {
-            Add-Failure 'workspace entry shim generated entry contract body should match the canonical source'
-        } else {
-            Add-Check 'workspace entry shim generated entry contract body matches the canonical source'
-        }
-    }
-
-    $vaultPath = Join-Path $workspaceRoot '.assistant'
-    if ($entryShimContent.Contains('Stage advance: `pwsh -File .assistant\entry\advance-stage.ps1') -and
-        $entryShimContent.Contains($RepoRoot) -and
-        $entryShimContent.Contains($vaultPath) -and
-        $entryShimContent.Contains('`TEST -> DONE`') -and
-        -not $entryShimContent.Contains('{REPO_ROOT}') -and
-        -not $entryShimContent.Contains('{VAULT_PATH}')) {
-        Add-Check 'workspace entry shim preserves the rendered v1 host overlay'
-    } else {
-        Add-Failure 'workspace entry shim should preserve the rendered v1 host overlay'
+        Add-Check ("fresh installation omits retired v1 asset: " + $retired)
     }
 }
 if (Test-Path -LiteralPath (Join-Path $workspaceRoot '.assistant\工作流') -PathType Container) {
@@ -275,8 +256,8 @@ $statusUserAfter = @(Get-TestTreeState -Root $userProfile | Where-Object { -not 
 $statusRepoAfter = @(& git -C $RepoRoot status --porcelain --untracked-files=all)
 $statusGitOptionalLocksAfter = [Environment]::GetEnvironmentVariable('GIT_OPTIONAL_LOCKS', [EnvironmentVariableTarget]::Process)
 $statusText = $statusResult.Output -join "`n"
-if ($statusResult.ExitCode -eq 1 -and
-    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'STATUS') -eq 'WARN' -and
+if ($statusResult.ExitCode -eq 0 -and
+    (Get-StatusLineValue -Output $statusResult.Output -Prefix 'STATUS') -eq 'PASS' -and
     (Get-StatusLineValue -Output $statusResult.Output -Prefix 'host_product') -eq 'codex' -and
     (Get-StatusLineValue -Output $statusResult.Output -Prefix 'host_version_actual') -eq 'unknown' -and
     (Get-StatusLineValue -Output $statusResult.Output -Prefix 'host_details_probed') -eq 'false' -and
@@ -318,8 +299,8 @@ try {
 } finally {
     [System.IO.File]::WriteAllBytes($hookPath, $hookBytes)
 }
-if ($oversizedHookProbe.ExitCode -eq 1 -and
-    (Get-StatusLineValue -Output $oversizedHookProbe.Output -Prefix 'STATUS') -eq 'WARN' -and
+if ($oversizedHookProbe.ExitCode -eq 0 -and
+    (Get-StatusLineValue -Output $oversizedHookProbe.Output -Prefix 'STATUS') -eq 'PASS' -and
     (Get-StatusLineValue -Output $oversizedHookProbe.Output -Prefix 'capability_hook_status_query') -eq 'unavailable' -and
     ($oversizedHookProbe.Output -join "`n") -notmatch '(?m)^hook_installed:') {
     Add-Check 'ordinary harness-status does not read user Hook qualification state'
@@ -343,7 +324,7 @@ if (-not (Test-Path -LiteralPath $defaultProbeSentinel) -and
     Add-Failure 'default harness-status should not execute the Codex version probe'
 }
 $exactVersionProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -ProbeHostDetails
-if ($exactVersionProbe.Result.ExitCode -eq 1 -and
+if ($exactVersionProbe.Result.ExitCode -eq 0 -and
     (Get-StatusLineValue -Output $exactVersionProbe.Result.Output -Prefix 'host_version_actual') -eq '0.144.4' -and
     (Get-StatusLineValue -Output $exactVersionProbe.Result.Output -Prefix 'host_details_probed') -eq 'true' -and
     ($exactVersionProbe.Result.Output -join "`n") -notmatch '(?m)^host_version_expected:') {
@@ -359,7 +340,7 @@ $fakeCodexBin = Join-Path $caseRoot 'fake-codex-mismatched-version'
     "[Console]::Out.WriteLine('codex-cli 9.9.9')`r`n",
     [System.Text.UTF8Encoding]::new($false))
 $mismatchedVersionProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -ProbeHostDetails
-if ($mismatchedVersionProbe.Result.ExitCode -eq 1 -and
+if ($mismatchedVersionProbe.Result.ExitCode -eq 0 -and
     (Get-StatusLineValue -Output $mismatchedVersionProbe.Result.Output -Prefix 'host_version_actual') -eq '9.9.9' -and
     ($mismatchedVersionProbe.Result.Output -join "`n") -notmatch '(?i)version.mismatch|host_version_expected') {
     Add-Check 'harness-status accepts a well-formed newer Host version without a mismatch conclusion'
@@ -374,7 +355,7 @@ $fakeCodexBin = Join-Path $caseRoot 'fake-codex-malformed-version'
     "[Console]::Out.WriteLine('not-a-codex-version')`r`n",
     [System.Text.UTF8Encoding]::new($false))
 $malformedVersionProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -ProbeHostDetails
-if ($malformedVersionProbe.Result.ExitCode -eq 1 -and
+if ($malformedVersionProbe.Result.ExitCode -eq 0 -and
     (Get-StatusLineValue -Output $malformedVersionProbe.Result.Output -Prefix 'host_version_actual') -eq 'unknown' -and
     ($malformedVersionProbe.Result.Output -join "`n") -notmatch '(?i)version.mismatch|host_version_expected') {
     Add-Check 'harness-status rejects malformed Codex Host version output as unavailable'
@@ -389,9 +370,9 @@ $fakeCodexBin = Join-Path $caseRoot 'fake-codex-hang'
     "Start-Sleep -Seconds 120`r`n",
     [System.Text.UTF8Encoding]::new($false))
 $hangProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -ProbeHostDetails
-if ($hangProbe.Result.ExitCode -eq 1 -and
+if ($hangProbe.Result.ExitCode -eq 0 -and
     $hangProbe.Elapsed.TotalSeconds -lt 10 -and
-    (Get-StatusLineValue -Output $hangProbe.Result.Output -Prefix 'STATUS') -eq 'WARN' -and
+    (Get-StatusLineValue -Output $hangProbe.Result.Output -Prefix 'STATUS') -eq 'PASS' -and
     (Get-StatusLineValue -Output $hangProbe.Result.Output -Prefix 'host_version_actual') -eq 'unknown') {
     Add-Check 'harness-status bounds a hanging Codex version probe and reports unavailable'
 } else {
@@ -415,7 +396,7 @@ foreach ($argument in @('-NoLogo', '-NoProfile', '-NonInteractive', '-Command', 
     $inheritedPipeScript,
     [System.Text.UTF8Encoding]::new($false))
 $inheritedPipeProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -ProbeHostDetails
-if ($inheritedPipeProbe.Result.ExitCode -eq 1 -and
+if ($inheritedPipeProbe.Result.ExitCode -eq 0 -and
     $inheritedPipeProbe.Elapsed.TotalSeconds -lt 10 -and
     (Get-StatusLineValue -Output $inheritedPipeProbe.Result.Output -Prefix 'host_version_actual') -eq 'unknown') {
     Add-Check 'harness-status bounds inherited output pipes after the Codex probe root exits'
@@ -430,7 +411,7 @@ $fakeCodexBin = Join-Path $caseRoot 'fake-codex-output-flood'
     "[Console]::Out.Write(('x' * 131072))`r`n",
     [System.Text.UTF8Encoding]::new($false))
 $floodProbe = Invoke-FakeCodexStatus -BinPath $fakeCodexBin -UserProfile $userProfile -StatusPath $statusPath -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -ProbeHostDetails
-if ($floodProbe.Result.ExitCode -eq 1 -and
+if ($floodProbe.Result.ExitCode -eq 0 -and
     $floodProbe.Elapsed.TotalSeconds -lt 10 -and
     (Get-StatusLineValue -Output $floodProbe.Result.Output -Prefix 'host_version_actual') -eq 'unknown') {
     Add-Check 'harness-status drains but rejects truncated Codex version output'
@@ -488,8 +469,8 @@ if ($installResult.ExitCode -ne 0) {
         } -WorkingDirectory $workingDirectory
 
         if ((Get-StatusLineValue -Output $updateResult.Output -Prefix 'STATUS') -ne 'PASS' -or
-            ($updateResult.Output -join "`n") -notmatch '(?m)^- harness-status\.ps1: WARN$') {
-            Add-Failure 'harness.ps1 should update an existing workspace while surfacing advisory Desktop health WARN'
+            ($updateResult.Output -join "`n") -notmatch '(?m)^- harness-status\.ps1: PASS$') {
+            Add-Failure 'harness.ps1 should update an existing workspace with admitted v2 runtime status'
         } else {
             Add-Check 'harness.ps1 preserves successful update and runs truthful advisory Desktop health status'
         }
@@ -637,7 +618,7 @@ if ($worktreeInstall.ExitCode -ne 0) {
     if ((Get-StatusLineValue -Output $worktreeResult.Output -Prefix 'STATUS') -ne 'PASS' -or
         (Get-StatusLineValue -Output $worktreeResult.Output -Prefix 'WorkspaceRoot') -ne $linkedWorktree -or
         (Get-StatusLineValue -Output $worktreeResult.Output -Prefix 'Mode') -ne 'bootstrap-workspace' -or
-        ($worktreeResult.Output -join "`n") -notmatch '(?m)^- harness-status\.ps1: WARN$' -or
+        ($worktreeResult.Output -join "`n") -notmatch '(?m)^- harness-status\.ps1: PASS$' -or
         ($worktreeResult.Output -join "`n") -match '(?m)^- harness-status\.ps1: SKIP$') {
         Add-Failure 'harness.ps1 should bootstrap the linked worktree and run advisory status without inheriting parent state'
     } else {

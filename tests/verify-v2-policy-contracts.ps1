@@ -126,6 +126,7 @@ $expectedSchemaFiles = @(
     'protected-actions-overlay.schema.json',
     'model-eval-observation.schema.json',
     'preset-lifecycle-report.schema.json',
+    'protocol-config-v2.schema.json',
     'protocol-config.schema.json',
     'release-full-receipt.schema.json',
     'release-host-receipt.schema.json',
@@ -139,6 +140,7 @@ $expectedSchemaFiles = @(
     'rollout-observed-host-context.schema.json',
     'rollout-review-payload.schema.json',
     'rollout-review-receipt.schema.json',
+    'runtime-default-admission.schema.json',
     'runtime-default-decision.schema.json',
     'task-state.schema.json',
     'v1-stop-loss-report.schema.json'

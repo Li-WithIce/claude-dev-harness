@@ -32,19 +32,19 @@
       "expected": { "selected_protocol": "v2", "requirement_state": "clear", "profile": "direct", "handoff": "main-agent", "review_policy": "self", "artifact_policy": "ephemeral" }
     },
     {
-      "id": "auto-stays-v1",
+      "id": "auto-admits-v2",
       "protocol": "auto",
-      "expected": { "selected_protocol": "v1", "profile": null, "handoff": "v1-entry" }
+      "expected": { "selected_protocol": "v2", "profile": "direct", "handoff": "main-agent" }
     },
     {
-      "id": "explicit-v1-stays-v1",
+      "id": "explicit-v1-rejected",
       "protocol": "v1",
-      "expected": { "selected_protocol": "v1", "profile": null, "handoff": "v1-entry" }
+      "expected": { "error": "v1-protocol-retired" }
     },
     {
-      "id": "existing-task-preserves-v1",
+      "id": "existing-task-v2-recovery",
       "identity": "existing",
-      "expected": { "selected_protocol": "v1", "profile": null, "handoff": "v1-entry" }
+      "expected": { "selected_protocol": "v2", "profile": null, "handoff": "v2-recovery" }
     },
     {
       "id": "quick-alias-direct",

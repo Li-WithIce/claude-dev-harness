@@ -1,5 +1,7 @@
 # Shared Memory Layers
 
+> Historical v1 maintenance specification. TK-03 retires this ladder from ordinary routing, installation and recovery. Current v2 truth and explicit Memory boundaries are defined by `docs/architecture/tk03-v2-only-transition.md` and `vault-template/工作流/共享记忆协议.md`. Retained files do not authorize stage writes, mirror repair or v1 fallback; the sections below describe the former protocol only.
+
 ## Layers
 
 | Layer | Path Prefix | Truth Level | Primary Writer | Allowed Readers |

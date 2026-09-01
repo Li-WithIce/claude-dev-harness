@@ -400,8 +400,8 @@ function Get-HarnessModuleManifestCatalog {
     $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
     $manifestRootRelative = $ManifestRoot.Replace('\','/').Trim('/')
     $productionMode = $manifestRootRelative -ceq 'modules'
-    $fixtureMode = $manifestRootRelative -match '^tests/fixtures/tk0[24](?:/|$)'
-    if (-not $productionMode -and -not $fixtureMode) { throw 'ManifestRoot must be modules or a tracked tests/fixtures/tk02 or tk04 case' }
+    $fixtureMode = $manifestRootRelative -match '^tests/fixtures/tk0[234](?:/|$)'
+    if (-not $productionMode -and -not $fixtureMode) { throw 'ManifestRoot must be modules or a tracked tests/fixtures/tk02, tk03 or tk04 case' }
     $manifestRootPath = Resolve-HarnessContainedPath -WorkspaceRoot $RepoRoot -Path $manifestRootRelative -Label 'Manifest root' -MustExist Directory
     $trackedResult = Invoke-HarnessManifestGit -RepoRoot $RepoRoot -Arguments @('ls-files')
     if ($trackedResult.ExitCode -ne 0) { throw 'Unable to enumerate tracked repository files' }
@@ -436,6 +436,7 @@ function Get-HarnessModuleManifestCatalog {
 
     $ownership = [System.Collections.Generic.List[object]]::new()
     $testOwners = [System.Collections.Generic.Dictionary[string,string]]::new($script:OrdinalIgnoreCase)
+    $archivedTests = [System.Collections.Generic.HashSet[string]]::new($script:Ordinal)
     $capabilityPackages = [ordered]@{}
     $classificationOwners = [System.Collections.Generic.HashSet[string]]::new($script:Ordinal)
     foreach ($moduleId in (Get-HarnessOrdinalStrings -Values @($byId.Keys))) {
@@ -470,6 +471,13 @@ function Get-HarnessModuleManifestCatalog {
             if ($testPath -cnotmatch '^tests/(?:verify-[A-Za-z0-9._-]+|run-scenario-evals)\.ps1$') { throw "owner_tests contains a non-verifier path: $moduleId -> $testPath" }
             if ($testOwners.ContainsKey($testPath)) { throw "Verifier has multiple owners: $testPath -> $($testOwners[$testPath]),$moduleId" }
             $testOwners[$testPath] = $moduleId
+        }
+        if ($manifest.validation.Contains('archived')) {
+            if ($manifest.kind -cne 'legacy' -or $isV1 -or $manifest.default_activation -or $null -ne $manifest.validation.core_group) { throw 'Only an inactive legacy module without a CoreGroup may archive its owned tests' }
+            foreach ($testPath in @($manifest.validation.archived)) {
+                if (@($manifest.validation.owner_tests) -cnotcontains $testPath) { throw "Archived test is not owned by its declaring module: $testPath" }
+                [void]$archivedTests.Add([string]$testPath)
+            }
         }
         $coreValidationTests = [System.Collections.Generic.List[string]]::new()
         if ($isV1) {
@@ -539,6 +547,7 @@ function Get-HarnessModuleManifestCatalog {
         $manifest = $byId[$moduleId].Document
         foreach ($testPath in @($manifest.validation.quick) + @($manifest.validation.changed) + @($manifest.validation.full)) {
             if (-not $testOwners.ContainsKey([string]$testPath)) { throw "Validation test has no manifest owner: $moduleId -> $testPath" }
+            if ($archivedTests.Contains([string]$testPath)) { throw "Archived compatibility test cannot appear in an active validation route: $testPath" }
         }
     }
 
@@ -666,6 +675,7 @@ function Get-HarnessModuleManifestCatalog {
                 }
             }
         }
+        if ($manifest.validation.Contains('archived')) { $normalizedModule.validation.archived = @(Get-HarnessOrdinalStrings -Values @($manifest.validation.archived)) }
         $moduleOutput.Add($normalizedModule)
         if (@($manifest.validation.changed).Count -gt 0) {
             $matchPaths = Get-HarnessOrdinalStrings -Values (@($manifest.ownership.owned_paths) + @($manifest.ownership.watch_paths) + @($manifest.validation.owner_tests) + @($record.Path))
@@ -674,12 +684,15 @@ function Get-HarnessModuleManifestCatalog {
     }
     foreach ($group in $script:CoreGroups) {
         if ($productionMode -and $coreGroups[$group].Count -eq 0) { throw "CoreGroup has no constructed tests: $group" }
+        foreach ($testPath in $coreGroups[$group]) {
+            if ($archivedTests.Contains([string]$testPath)) { throw "Archived compatibility test cannot appear in a CoreGroup: $group -> $testPath" }
+        }
         $coreGroups[$group] = @($coreGroups[$group])
     }
     $quickOutput = @(Get-HarnessOrdinalStrings -Values @($quickTests))
     $fullOutput = @(Get-HarnessOrdinalStrings -Values @($fullTests))
     if ($productionMode) {
-        $expectedFull = Get-HarnessOrdinalStrings -Values @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'tests') -Filter 'verify-*.ps1' -File | Where-Object Name -cne 'verify-installation.ps1' | ForEach-Object { Get-HarnessRelativePath -WorkspaceRoot $RepoRoot -Path $_.FullName })
+        $expectedFull = Get-HarnessOrdinalStrings -Values @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'tests') -Filter 'verify-*.ps1' -File | Where-Object { $_.Name -cne 'verify-installation.ps1' -and -not $archivedTests.Contains(('tests/' + $_.Name)) } | ForEach-Object { Get-HarnessRelativePath -WorkspaceRoot $RepoRoot -Path $_.FullName })
         if (($fullOutput -join '|') -cne ($expectedFull -join '|')) { throw 'Manifest full validation set does not equal every default full-suite verifier' }
     }
     $ownerOutput = [System.Collections.Generic.List[object]]::new()
@@ -745,6 +758,7 @@ function Get-HarnessModuleManifestCatalog {
             }
         }
     }
+    if ($archivedTests.Count -gt 0) { $catalog.archived_tests = @(Get-HarnessOrdinalStrings -Values @($archivedTests)) }
     $catalogOutput = ConvertTo-HarnessManifestCanonicalOutput -Document $catalog
     $canonicalText = $catalogOutput.CanonicalText
     if ($productionMode) {

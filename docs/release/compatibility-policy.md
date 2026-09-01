@@ -1,5 +1,21 @@
 # Thin Harness v2 compatibility and retirement policy
 
+## TK-03 current Runtime amendment
+
+[TK-03 Architecture Change Contract](../architecture/tk03-v2-only-transition.md)
+supersedes the v1 Runtime fallback, v1 rollback and Stable-before-retirement
+statements below. New/auto work is v2-only; invalid admission stops new work;
+`disable-v2` records `new_work=paused`. Existing v2 recovery remains available.
+Explicit v1/lifecycle execution is retired; legacy plans are read only by
+separately authorized migration/history maintenance. Physical source removal
+still requires all ten current Sunset gates and separate exact-diff approval.
+
+The following Release contracts and outcomes are historical context for their
+original route. Their Schemas, digest algorithms and recorded results are not
+rewritten or converted into authorization for TK-03. In particular, the old
+G14 v1 stop-loss producer cannot establish the new v2-only recovery contract.
+No Qualification, Promotion, Auto Flip, Canary or Stable run is asserted here.
+
 ## Canonical Default Promotion contract
 
 The current DP-02 through DP-05 qualification dependencies and completion criteria are defined in [default-promotion-gates.md](default-promotion-gates.md). The tracked DP-01 task files are a historical pre-archive snapshot. This policy continues to describe implemented compatibility behavior; any narrower implementation called out below is a DP-02 gap and does not weaken the Canonical Gate contract.

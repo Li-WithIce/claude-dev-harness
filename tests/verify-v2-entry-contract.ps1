@@ -96,31 +96,19 @@ function Test-MinimumEntryReduction {
 
 function Test-ExplicitNewV2FastPath {
     param([AllowEmptyString()][string]$Text)
-
-    $fastMarker = '- New identity/artifact-free:'
-    $otherwiseMarker = '- Otherwise resolve once.'
-    $fastStart = $Text.IndexOf($fastMarker, [System.StringComparison]::Ordinal)
-    $otherwiseStart = $Text.IndexOf($otherwiseMarker, [System.StringComparison]::Ordinal)
-    if ($fastStart -lt 0 -or $otherwiseStart -le $fastStart) { return $false }
-    $fastBlock = $Text.Substring($fastStart, $otherwiseStart - $fastStart)
+    $first = $Text.IndexOf('- New identity/artifact-free:',[StringComparison]::Ordinal)
+    $known = $Text.IndexOf('- Known identity:',[StringComparison]::Ordinal)
+    if ($first -lt 0 -or $known -le $first) { return $false }
     foreach ($fragment in @(
-            'host/user-surfaced `HARNESS_PROTOCOL`',
-            'else read its process value once',
-            'never guess',
-            'first complete routing hop',
-            'no task `status`/`protocol`, nested shim, or task/runtime/current inspection',
-            'Selected v2 Direct loads no `entry-router`, `orchestrator`, lifecycle skill',
-            'hand off now'
-        )) {
-        if (-not $fastBlock.Contains($fragment, [System.StringComparison]::Ordinal)) { return $false }
-    }
-    return $Text.Contains('Known: `.assistant\entry\task.ps1 protocol -TaskId {task_id}`; v2 state, else v1 plan, wins.', [System.StringComparison]::Ordinal) -and
-        $Text.Contains('New: `.assistant\entry\task.ps1 protocol`; config `v1|v2|auto`, then a valid Runtime Default Decision or v1 fallback.', [System.StringComparison]::Ordinal) -and
-        $Text.Contains('No status/runtime/lifecycle fan-out.', [System.StringComparison]::Ordinal) -and
-        $Text.Contains('Existing v2 may status/resume; v1 may load its shim.', [System.StringComparison]::Ordinal) -and
-        $Text.Contains('minimum focused checks covering all confirmed acceptance criteria', [System.StringComparison]::Ordinal) -and
-        $Text.Contains('Stop only when all required checks pass', [System.StringComparison]::Ordinal) -and
-        $Text.Contains('Expand only after failure/ambiguity.', [System.StringComparison]::Ordinal)
+        'host/user-surfaced `HARNESS_PROTOCOL`','else read its process value once','never guess',
+        'Resolve admission once','No task `status`, nested shim, or task/runtime/current inspection',
+        'No status/runtime/lifecycle fan-out.','valid v2 state wins and may status/resume.',
+        'Selected v2 Direct loads no `entry-router`, `orchestrator`, lifecycle skill','hand off now',
+        'minimum focused checks covering all confirmed acceptance criteria','Stop only when all required checks pass',
+        'An unresolved Requirement or product decision blocks every write and enters Ask',
+        'continuation alone enters Ask and authorizes no write','Expand only after failure/ambiguity.'
+    )) { if (-not $Text.Contains($fragment,[StringComparison]::Ordinal)) { return $false } }
+    return $Text.Contains('Legacy lifecycle and shim loading are retired.',[StringComparison]::Ordinal)
 }
 
 function Get-ManagedBlock {
@@ -212,16 +200,16 @@ try {
     $canonicalDigest = Get-FileDigest -Path $canonicalPath
     $canonicalHasBom = $canonicalBytes.Length -ge 3 -and $canonicalBytes[0] -eq 0xEF -and $canonicalBytes[1] -eq 0xBB -and $canonicalBytes[2] -eq 0xBF
     Assert-True -Condition (-not $canonicalHasBom -and -not $canonicalText.Contains("`r")) -Success 'canonical entry contract is deterministic LF UTF-8 without BOM' -Failure 'canonical entry contract encoding is not deterministic'
-    Assert-True -Condition ($canonicalText -match '`protocol_default`:\s*`auto`' -and $canonicalText -match '`auto_resolves_to`:\s*`existing-artifact-or-runtime-default-or-v1-fallback`' -and $canonicalText -match '`v2_entry_activation`:\s*`explicit-or-workspace-new-or-existing-v2-or-runtime-default-new`') -Success 'auto is artifact-first and consumes only a Runtime Default Decision' -Failure 'entry contract protocol detector default is invalid'
-    Assert-True -Condition (Test-ExplicitNewV2FastPath -Text $canonicalText) -Success 'explicit new v2 Direct is the first complete hop with one-shot fallback and a bounded stop condition' -Failure 'entry contract leaves explicit new v2 Direct vulnerable to discovery fan-out or unbounded post-action work'
+    Assert-True -Condition ($canonicalText -match '`protocol_default`:\s*`auto`' -and $canonicalText -match '`auto_resolves_to`:\s*`existing-v2-or-admitted-v2-new-task`' -and $canonicalText -match '`v2_entry_activation`:\s*`v2-only-with-new-work-admission`') -Success 'auto is artifact-first and consumes only a Runtime Default Decision' -Failure 'entry contract protocol detector default is invalid'
+    Assert-True -Condition (Test-ExplicitNewV2FastPath -Text $canonicalText) -Success 'new v2 Direct resolves admission once and has a bounded stop condition' -Failure 'entry contract leaves new v2 Direct vulnerable to admission bypass or unbounded discovery'
     foreach ($fragment in @(
             'host/user-surfaced `HARNESS_PROTOCOL`',
             'else read its process value once',
             'never guess',
-            'first complete routing hop',
-            'no task `status`/`protocol`, nested shim, or task/runtime/current inspection',
+            'Resolve admission once',
+            'No task `status`, nested shim, or task/runtime/current inspection',
             'No status/runtime/lifecycle fan-out.',
-            'Existing v2 may status/resume; v1 may load its shim.',
+            'valid v2 state wins and may status/resume.',
             'minimum focused checks covering all confirmed acceptance criteria',
             'Stop only when all required checks pass'
         )) {
@@ -229,66 +217,15 @@ try {
         Assert-True -Condition (-not (Test-ExplicitNewV2FastPath -Text $mutation)) -Success ("fast-path mutation is rejected when removing: {0}" -f $fragment) -Failure ("fast-path verifier survived removal of: {0}" -f $fragment)
     }
     $fastLine = @($canonicalText -split "`n" | Where-Object { $_.StartsWith('- New identity/artifact-free', [System.StringComparison]::Ordinal) })
-    $otherwiseLine = @($canonicalText -split "`n" | Where-Object { $_.StartsWith('- Otherwise resolve once', [System.StringComparison]::Ordinal) })
+    $otherwiseLine = @($canonicalText -split "`n" | Where-Object { $_.StartsWith('- Known identity:', [System.StringComparison]::Ordinal) })
     $reorderedMutation = if ($fastLine.Count -eq 1 -and $otherwiseLine.Count -eq 1) {
         $canonicalText.Replace($fastLine[0], '__FAST_PATH__').Replace($otherwiseLine[0], $fastLine[0]).Replace('__FAST_PATH__', $otherwiseLine[0])
     } else { $canonicalText }
     Assert-True -Condition (-not (Test-ExplicitNewV2FastPath -Text $reorderedMutation)) -Success 'fast-path verifier rejects moving Otherwise before explicit new v2' -Failure 'fast-path verifier accepts reordered slow-path precedence'
-    Assert-True -Condition ($canonicalText -match 'Only a detector-selected v1 request loads `entry-router`' -and $canonicalText -notmatch '\|\s*`new-readonly`\s*\|' -and $canonicalText -notmatch 'Ask exit criteria|Clarification ledger|resume-current/readonly|inbox-first') -Success 'default bootstrap delegates full v1 routing, Ask, Inbox, and Recovery rules to the lazy v1 path' -Failure 'default bootstrap still preloads detailed v1 routing or does not fail closed to the v1 router'
+    Assert-True -Condition ($canonicalText -match 'Legacy lifecycle and shim loading are retired' -and $canonicalText -notmatch '\|\s*`new-readonly`\s*\|' -and $canonicalText -notmatch 'Ask exit criteria|Clarification ledger|resume-current/readonly|inbox-first') -Success 'bootstrap retires legacy routing and preserves explicit Requirement and recovery boundaries' -Failure 'default bootstrap still preloads detailed v1 routing or exposes a retired v1 router'
     Assert-True -Condition ($canonicalText -notmatch '\{(?:REPO_ROOT|VAULT_PATH|CODEX_HOME)\}' -and $canonicalText -notmatch '`auto_resolves_to`:\s*`v2`') -Success 'canonical body is host-neutral and never enables unconditional auto=v2' -Failure 'canonical body contains a host token or unconditional v2 default'
 
-    $fixture = Get-Content -LiteralPath $fixturePath -Raw -Encoding utf8 | ConvertFrom-Json -ErrorAction Stop
-    Assert-True -Condition ([string]$fixture.schema_version -ceq 'thin-harness-entry-routing/v1' -and [string]$fixture.protocol.default -ceq 'auto' -and [string]$fixture.protocol.auto_resolves_to -ceq 'existing-artifact-or-runtime-default-or-v1-fallback' -and [string]$fixture.protocol.v2_entry_activation -ceq 'explicit-or-workspace-new-or-existing-v2-or-runtime-default-new') -Success 'route fixture preserves artifact-first Runtime Default auto' -Failure 'route fixture protocol metadata is invalid'
-    $invariants = @($fixture.baseline.invariants)
-    $invariantIds = @($invariants | ForEach-Object { [string]$_.id })
-    Assert-True -Condition ([string]$fixture.baseline.commit -ceq $baselineCommit -and $invariants.Count -eq 9 -and @($invariantIds | Select-Object -Unique).Count -eq 9) -Success 'v1 fixture pins nine unique behavior invariants to the immutable base commit' -Failure 'v1 baseline invariant catalog is incomplete or points at the wrong commit'
-    foreach ($invariant in $invariants) {
-        $baselineResult = Invoke-GitCapture -Arguments @('-C',$RepoRoot,'show',("{0}:{1}" -f $baselineCommit, [string]$invariant.source_path))
-        $baselineText = $baselineResult.StdOut
-        $baselineRead = $baselineResult.ExitCode -eq 0
-        Assert-True -Condition ($baselineRead -and $baselineText.Contains([string]$invariant.baseline_contains, [System.StringComparison]::Ordinal)) -Success ("base contains v1 behavior invariant {0}" -f $invariant.id) -Failure ("v1 invariant {0} is not independently anchored in the base commit" -f $invariant.id)
-        $lazyPath = Join-Path $RepoRoot ([string]$invariant.lazy_source_path)
-        $lazyText = if (Test-Path -LiteralPath $lazyPath -PathType Leaf) { Get-Content -LiteralPath $lazyPath -Raw -Encoding utf8 } else { '' }
-        $requiredFragments = @($invariant.lazy_required_contains | ForEach-Object { [string]$_ })
-        $requiredFragmentsValid = $requiredFragments.Count -gt 0 -and @($requiredFragments | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -eq 0
-        $allRequiredFragmentsPresent = $requiredFragmentsValid -and @($requiredFragments | Where-Object { -not $lazyText.Contains($_, [System.StringComparison]::Ordinal) }).Count -eq 0
-        Assert-True -Condition $allRequiredFragmentsPresent -Success ("lazy v1 surface preserves every required clause for {0}" -f $invariant.id) -Failure ("lazy v1 surface dropped a required clause for {0}" -f $invariant.id)
-
-        $numberedItemsProperty = $invariant.PSObject.Properties['lazy_expected_numbered_items']
-        $expectedNumberedItems = @(
-            if ($null -ne $numberedItemsProperty) {
-                $numberedItemsProperty.Value | ForEach-Object { [string]$_ }
-            }
-        )
-        if ($expectedNumberedItems.Count -gt 0) {
-            $sectionHeadingProperty = $invariant.PSObject.Properties['lazy_numbered_section_heading']
-            $sectionHeading = if ($null -ne $sectionHeadingProperty) { [string]$sectionHeadingProperty.Value } else { '' }
-            $sectionPattern = '(?ms)^###\s+' + [regex]::Escape($sectionHeading) + '\s*\r?\n(?<body>.*?)(?=^###\s+|\z)'
-            $sectionMatch = [regex]::Match($lazyText, $sectionPattern)
-            $numberedMatches = if ($sectionMatch.Success) { @([regex]::Matches($sectionMatch.Groups['body'].Value, '(?m)^\s*(?<number>\d+)\.\s+(?<item>.+?)\s*$')) } else { @() }
-            $numberedItemsMatch = $numberedMatches.Count -eq $expectedNumberedItems.Count
-            if ($numberedItemsMatch) {
-                for ($itemIndex = 0; $itemIndex -lt $expectedNumberedItems.Count; $itemIndex++) {
-                    if ([int]$numberedMatches[$itemIndex].Groups['number'].Value -ne ($itemIndex + 1) -or
-                        $numberedMatches[$itemIndex].Groups['item'].Value -cne $expectedNumberedItems[$itemIndex]) {
-                        $numberedItemsMatch = $false
-                        break
-                    }
-                }
-            }
-            Assert-True -Condition $numberedItemsMatch -Success ("lazy v1 numbered contract for {0} matches exactly" -f $invariant.id) -Failure ("lazy v1 numbered contract for {0} is incomplete or reordered" -f $invariant.id)
-        }
-    }
-    $entryRouterText = (Get-Content -LiteralPath $entryRouterPath -Raw -Encoding utf8) -replace "`r`n?", "`n"
-    $tableRows = [System.Collections.Generic.List[string]]::new()
-    foreach ($line in ($entryRouterText -split "`n")) {
-        $match = [regex]::Match($line, '^\|\s*`(?<case>[^`]+)`\s*\|\s*(?<condition>.*?)\s*\|\s*`(?<route>[^`]+)`\s*\|\s*`(?<writes>[^`]+)`\s*\|\s*`(?<stage>[^`]+)`\s*\|$')
-        if ($match.Success) {
-            $tableRows.Add(("{0}|{1}|{2}|{3}|{4}" -f $match.Groups['case'].Value, $match.Groups['condition'].Value.Trim(), $match.Groups['route'].Value, $match.Groups['writes'].Value, $match.Groups['stage'].Value))
-        }
-    }
-    $fixtureRows = @($fixture.cases | ForEach-Object { "{0}|{1}|{2}|{3}|{4}" -f $_.case_id,$_.condition,$_.route,$_.writes,$_.stage_skill })
-    Assert-True -Condition ($tableRows.Count -eq 10 -and @(Compare-Object @($tableRows) $fixtureRows).Count -eq 0) -Success 'lazy entry-router table and ten-case v1 fixture match exactly' -Failure 'lazy entry-router table drifted from the v1 fixture'
+    # Historical v1 routing fixtures remain in the archive boundary, not active Runtime acceptance.
 
     $realCheck = Invoke-GeneratorProcess -Root $RepoRoot -Check
     Assert-True -Condition ($realCheck.Exited -and $realCheck.ExitCode -eq 0 -and $realCheck.Output -match 'STATUS: PASS') -Success 'generator -Check passes without writing real targets' -Failure ("generator -Check failed: {0}" -f $realCheck.Output)
@@ -329,14 +266,14 @@ try {
             Add-Failure ("cannot read PR-00 baseline target {0}" -f $relativePath)
         }
     }
-    Assert-True -Condition ($managedBlocks.Count -eq 3 -and @($managedBlocks | Select-Object -Unique).Count -eq 1) -Success 'workspace, Claude, and lazy v1 shim carry one byte-identical managed bootstrap' -Failure 'allowlisted generated bootstraps are not identical'
+    Assert-True -Condition ($managedBlocks.Count -eq 3 -and @($managedBlocks | Select-Object -Unique).Count -eq 1) -Success 'workspace, Claude, and retained historical shim carry one byte-identical managed bootstrap' -Failure 'allowlisted generated bootstraps are not identical'
     $codexOverlay = Get-Content -LiteralPath (Join-Path $RepoRoot 'agent-configs\codex\AGENTS.md.template') -Raw -Encoding utf8
     Assert-True -Condition ($codexOverlay -notmatch 'BEGIN GENERATED ENTRY CONTRACT|`protocol_default`|\|\s*`new-readonly`\s*\|') -Success 'Codex global entry contains only a host overlay' -Failure 'Codex global entry still preloads shared or v1 routing rules'
     $workspaceOverlay = (Get-ManagedBlock -Path (Join-Path $RepoRoot 'agent-configs\workspace\AGENTS.md.template')).Overlay
-    Assert-True -Condition ($workspaceOverlay -match 'task\.ps1 status` only for an explicit recovery/status request' -and $workspaceOverlay -match 'Only a detector-selected v1 workflow reads the executable' -and $workspaceOverlay -notmatch 'Use `\.assistant\\entry\\task\.ps1 status` for a read-only v2 recovery view|The executable workspace entry shim remains') -Success 'workspace overlay keeps status and nested entry lazy outside selected v2 Direct' -Failure 'workspace overlay still invites selected v2 Direct into status or nested entry discovery'
+    Assert-True -Condition ($workspaceOverlay -match 'task\.ps1 status` only for an explicit v2 recovery/status request' -and $workspaceOverlay -match 'Never read an old' -and $workspaceOverlay -notmatch 'Use `\.assistant\\entry\\task\.ps1 status` for a read-only v2 recovery view|The executable workspace entry shim remains') -Success 'workspace overlay keeps status and nested entry lazy outside selected v2 Direct' -Failure 'workspace overlay still invites selected v2 Direct into status or nested entry discovery'
     $claudeOverlay = (Get-ManagedBlock -Path (Join-Path $RepoRoot 'agent-configs\claude\CLAUDE.md.template')).Overlay
     Assert-True -Condition ($claudeOverlay -notmatch '(?m)^- Call `/entry-router` at the start of each conversation\.$') -Success 'Claude overlay has no unconditional entry-router first-hop rule' -Failure 'Claude overlay still forces entry-router before v2 Direct classification'
-    Assert-True -Condition ($claudeOverlay -match '(?m)^- `/entry-router`: selected v1 only; never v2 Direct\.$') -Success 'Claude overlay limits entry-router to selected v1 requests' -Failure 'Claude overlay does not preserve the v1-only entry-router boundary'
+    Assert-True -Condition ($claudeOverlay -match 'Legacy `/entry-router` is retired') -Success 'Claude overlay retires legacy entry-router' -Failure 'Claude overlay does not preserve the retired entry-router boundary'
     Assert-True -Condition ($baselineBytes -eq 22194 -and $baselineLines -eq 206) -Success 'fixed PR-00 entry baseline is reproducible at 22194 bytes and 206 lines' -Failure ("fixed entry baseline drifted: {0} bytes, {1} lines" -f $baselineBytes,$baselineLines)
     Assert-True -Condition (Test-MinimumEntryReduction -CurrentBytes $currentBytes -BaselineBytes $baselineBytes -CurrentLines $currentLines -BaselineLines $baselineLines) -Success ("default entry surfaces shrink by at least 25 percent to {0} bytes and {1} lines" -f $currentBytes,$currentLines) -Failure ("default entry surfaces missed the 25 percent reduction gate: {0} bytes and {1} lines" -f $currentBytes,$currentLines)
 

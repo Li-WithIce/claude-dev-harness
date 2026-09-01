@@ -178,6 +178,8 @@ try {
             'skills\review'
             'skills\test'
             'skills\spec'
+            'skills\planning'
+            'skills\audit'
             'tests\verify-installation.ps1'
             'tests\fixture-test-common.ps1'
             'tests\forbidden-path-prefixes.txt'
@@ -554,6 +556,7 @@ try {
     $postimageInstall = Invoke-RepoScript -UserProfile $postimageUser -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @{
         WorkspaceRoot = $postimageWorkspace
         RepoRoot = $RepoRoot
+        Preset = 'governed'
     }
     $postimageRegistryPath = Join-Path $postimageUser '.dev-harness\install-registry.json'
     $postimageRegistry = Read-JsonFile -Path $postimageRegistryPath
@@ -586,7 +589,7 @@ try {
     }
     $semanticDuplicateWriteFree = Test-SameSnapshot -Left $duplicateSettingsSnapshot -Right (Get-FileSnapshot -Path $postimageSettingsPath)
     [System.IO.File]::WriteAllText($postimageSettingsPath, $installedSettingsRaw, (New-Object System.Text.UTF8Encoding($false)))
-    $managedLinkPath = Join-Path $postimageUser '.claude\skills\entry-router'
+    $managedLinkPath = Join-Path $postimageUser '.claude\skills\planning'
     Remove-Item -LiteralPath $managedLinkPath -Force
     New-Item -ItemType Directory -Path $managedLinkPath -Force | Out-Null
     [System.IO.File]::WriteAllText((Join-Path $managedLinkPath 'user-sentinel.txt'), 'keep-me', (New-Object System.Text.UTF8Encoding($false)))
@@ -920,18 +923,20 @@ try {
     $ownerInstallA = Invoke-RepoScript -UserProfile $ownerUserProfile -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @{
         WorkspaceRoot = $ownerWorkspaceA
         RepoRoot = $ownerRepoA
+        Preset = 'governed'
     }
     $ownerInstallB = Invoke-RepoScript -UserProfile $ownerUserProfile -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @{
         WorkspaceRoot = $ownerWorkspaceB
         RepoRoot = $ownerRepoB
+        Preset = 'governed'
     }
-    $ownerClaudeLink = Join-Path $ownerUserProfile '.claude\skills\entry-router'
+    $ownerClaudeLink = Join-Path $ownerUserProfile '.claude\skills\planning'
     $ownerBeforeUninstall = Get-TestJunctionTarget -Path $ownerClaudeLink
     $ownerRegistryPath = Join-Path $ownerUserProfile '.dev-harness\install-registry.json'
     $ownerRegistryBeforeBlockedHandoff = Get-FileSnapshot -Path $ownerRegistryPath
     $ownerWorkspaceBBeforeBlockedHandoff = Get-FileSnapshot -Path (Join-Path $ownerWorkspaceB 'AGENTS.md')
-    $ownerUnavailableTarget = Join-Path $ownerRepoA 'skills\entry-router'
-    $ownerUnavailableHoldingPath = Join-Path $ownerRepoA 'skills\entry-router.unavailable'
+    $ownerUnavailableTarget = Join-Path $ownerRepoA 'skills\planning'
+    $ownerUnavailableHoldingPath = Join-Path $ownerRepoA 'skills\planning.unavailable'
     Move-Item -LiteralPath $ownerUnavailableTarget -Destination $ownerUnavailableHoldingPath
     try {
         $ownerBlockedUninstall = Invoke-RepoScript -UserProfile $ownerUserProfile -ScriptPath (Join-Path $RepoRoot 'uninstall.ps1') -Arguments @{
@@ -964,7 +969,7 @@ try {
     if ($ownerInterruptedUninstall.ExitCode -ne 0 -and
         (Test-SameSnapshot -Left $ownerRegistryBeforeBlockedHandoff -Right (Get-FileSnapshot -Path $ownerRegistryPath)) -and
         (Test-Path -LiteralPath $ownerUninstallJournalPath -PathType Leaf) -and
-        (Get-TestJunctionTarget -Path $ownerClaudeLink) -eq (Get-NormalizedPath -Path (Join-Path $ownerRepoA 'skills\entry-router'))) {
+        (Get-TestJunctionTarget -Path $ownerClaudeLink) -eq (Get-NormalizedPath -Path (Join-Path $ownerRepoA 'skills\planning'))) {
         Add-Check 'failed registry commit leaves a durable uninstall intent after restoring owner links'
     } else {
         Add-Failure 'an interrupted owner handoff should preserve a resumable intent with the pre-commit registry'
@@ -1109,14 +1114,14 @@ try {
         $ownerEntries = @($ownerRegistry.workspaces.PSObject.Properties)
     }
     $ownerExpectedTargets = @(
-        Join-Path $ownerRepoA 'skills\entry-router'
-        Join-Path $ownerRepoA 'skills\entry-router'
-        Join-Path $ownerRepoA 'skills\entry-router'
+        Join-Path $ownerRepoA 'skills\planning'
+        Join-Path $ownerRepoA 'skills\planning'
+        Join-Path $ownerRepoA 'skills\planning'
     )
     $ownerActualTargets = @(
-        Get-TestJunctionTarget -Path (Join-Path $ownerUserProfile '.claude\skills\entry-router')
-        Get-TestJunctionTarget -Path (Join-Path $ownerUserProfile '.codex\skills\entry-router')
-        Get-TestJunctionTarget -Path (Join-Path $ownerUserProfile '.agents\skills\entry-router')
+        Get-TestJunctionTarget -Path (Join-Path $ownerUserProfile '.claude\skills\planning')
+        Get-TestJunctionTarget -Path (Join-Path $ownerUserProfile '.codex\skills\planning')
+        Get-TestJunctionTarget -Path (Join-Path $ownerUserProfile '.agents\skills\planning')
     )
     $ownerVerifyA = Invoke-RepoScript -UserProfile $ownerUserProfile -ScriptPath (Join-Path $RepoRoot 'tests\verify-installation.ps1') -Arguments @{
         WorkspaceRoot = $ownerWorkspaceA
@@ -1132,7 +1137,7 @@ try {
     $results.Add($ownerUninstallB) | Out-Null
     if ($ownerInstallA.ExitCode -eq 0 -and
         $ownerInstallB.ExitCode -eq 0 -and
-        $ownerBeforeUninstall -eq (Get-NormalizedPath -Path (Join-Path $ownerRepoB 'skills\entry-router')) -and
+        $ownerBeforeUninstall -eq (Get-NormalizedPath -Path (Join-Path $ownerRepoB 'skills\planning')) -and
         $ownerUninstallB.ExitCode -eq 0 -and
         $ownerCommittedJournalCleanup.ExitCode -eq 0 -and
         -not (Test-Path -LiteralPath $ownerUninstallJournalPath) -and
@@ -1175,10 +1180,12 @@ try {
     $receiptInstallA = Invoke-RepoScript -UserProfile $receiptUserProfile -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @{
         WorkspaceRoot = $receiptWorkspaceA
         RepoRoot = $receiptRepoA
+        Preset = 'governed'
     }
     $receiptInstallB = Invoke-RepoScript -UserProfile $receiptUserProfile -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @{
         WorkspaceRoot = $receiptWorkspaceB
         RepoRoot = $receiptRepoB
+        Preset = 'governed'
     }
     $receiptRegistryPath = Join-Path $receiptUserProfile '.dev-harness\install-registry.json'
     $receiptRegistry = Read-JsonFile -Path $receiptRegistryPath
@@ -1232,7 +1239,7 @@ try {
     New-Item -ItemType Directory -Path $receiptMarkerPathB -Force | Out-Null
     $receiptRegistryBeforeBlockedFinal = Get-FileSnapshot -Path $receiptRegistryPath
     $receiptWorkspaceBeforeBlockedFinal = Get-FileSnapshot -Path (Join-Path $receiptWorkspaceB 'AGENTS.md')
-    $receiptOwnerLinkBeforeBlockedFinal = Get-TestJunctionTarget -Path (Join-Path $receiptUserProfile '.claude\skills\entry-router')
+    $receiptOwnerLinkBeforeBlockedFinal = Get-TestJunctionTarget -Path (Join-Path $receiptUserProfile '.claude\skills\planning')
     try {
         $receiptBlockedFinalUninstall = Invoke-RepoScript -UserProfile $receiptUserProfile -ScriptPath (Join-Path $RepoRoot 'uninstall.ps1') -Arguments @{
             WorkspaceRoot = $receiptWorkspaceB
@@ -1247,7 +1254,7 @@ try {
         $receiptBlockedFinalUninstall.ExitCode -ne 0 -and
         (Test-SameSnapshot -Left $receiptRegistryBeforeBlockedFinal -Right (Get-FileSnapshot -Path $receiptRegistryPath)) -and
         (Test-SameSnapshot -Left $receiptWorkspaceBeforeBlockedFinal -Right (Get-FileSnapshot -Path (Join-Path $receiptWorkspaceB 'AGENTS.md'))) -and
-        (Get-TestJunctionTarget -Path (Join-Path $receiptUserProfile '.claude\skills\entry-router')) -eq $receiptOwnerLinkBeforeBlockedFinal -and
+        (Get-TestJunctionTarget -Path (Join-Path $receiptUserProfile '.claude\skills\planning')) -eq $receiptOwnerLinkBeforeBlockedFinal -and
         (Test-Path -LiteralPath $receiptUninstallJournalPath -PathType Leaf) -and
         $receiptBlockedFinalKeptMarkerDirectory -and
         -not (Test-Path -LiteralPath $receiptMarkerPathA)

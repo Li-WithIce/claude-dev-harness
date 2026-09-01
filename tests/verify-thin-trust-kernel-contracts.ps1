@@ -270,6 +270,7 @@ $expectedPaths = @(
     'tests/verify-installation.ps1'
 ) + @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'scripts') -Filter '*.ps1' -File | ForEach-Object { 'scripts/' + $_.Name }) +
     @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'scripts\lib') -Filter '*.psm1' -File | ForEach-Object { 'scripts/lib/' + $_.Name }) +
+    @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'modules') -Filter '*.psm1' -File -Recurse | ForEach-Object { [IO.Path]::GetRelativePath($RepoRoot, $_.FullName).Replace([char]92, [char]47) }) +
     @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'runtime-hooks') -File -Recurse | ForEach-Object { [IO.Path]::GetRelativePath($RepoRoot, $_.FullName).Replace([char]92, [char]47) })
 $expectedPaths = Get-OrdinalStrings -Values @($expectedPaths | Select-Object -Unique)
 $componentSorted = Get-OrdinalStrings -Values $componentPaths
@@ -293,7 +294,7 @@ $entryContractPath = Join-Path $RepoRoot 'policies\entry-contract.md'
 $entryContractDigest = Get-LfNormalizedSha256 -Path $entryContractPath
 $entryContractLines = @(Get-Content -LiteralPath $entryContractPath).Count
 $entryContractBytes = [Text.Encoding]::UTF8.GetByteCount([IO.File]::ReadAllText($entryContractPath))
-Check ($entryContractDigest -ceq '346224d62f82926a11bac09335e97766c08b813b71774a714abea924e49ff93e' -and $entryContractLines -eq 15 -and $entryContractBytes -eq 1852) 'TK-00 leaves the canonical Entry Contract byte-for-byte unchanged' 'Entry Contract content, lines, or bytes changed during TK-00'
+Check ($entryContractDigest -ceq '4838491707510140a0c698ac26d0faa8b45d6dde90d03427dc78006f0643396c' -and $entryContractLines -eq 16 -and $entryContractBytes -eq 2052) 'TK-03 freezes the explicitly confirmed v2-only Entry Contract' 'Entry Contract differs from the confirmed TK-03 admission boundary'
 Check ((Get-LfNormalizedSha256 -Path (Join-Path $RepoRoot 'scripts\lib\Harness.Path.psm1')) -ceq '774b55f8095b65f289a78adda04e6ee8752ead48a36653384119a393423e27de') 'TK-00 leaves canonical Harness.Path unchanged across checkout line endings' 'Harness.Path changed during TK-00'
 $atomicWriteText = Read-Text -Path 'scripts/lib/Harness.AtomicWrite.psm1'
 Check ($atomicWriteText.Contains("Harness.Hashing.psm1",[StringComparison]::Ordinal) -and $thinText.Contains('scripts/lib/Harness.Hashing.psm1',[StringComparison]::Ordinal)) 'TK-01A installs Hashing as the canonical K0 dependency of AtomicWrite' 'canonical Hashing ownership or AtomicWrite dependency is missing'

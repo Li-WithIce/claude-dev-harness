@@ -14,6 +14,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Retain the historical implementation, but never infer v1 stage or launch a team.
+[Console]::Out.WriteLine(([ordered]@{ok=$false;reason='v1-team-retired';task_id=$TaskId;workflow=$WorkflowName;stage='';spawned_roles=@();failed_role='';errors=@('Stage-based Team execution is retired; no backend was started.')} | ConvertTo-Json -Compress))
+exit 2
+
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
 } else {

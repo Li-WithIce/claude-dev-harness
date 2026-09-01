@@ -61,7 +61,7 @@ $repoBefore=@(&git -C $RepoRoot status --porcelain --untracked-files=all)
 $temp=Join-Path ([IO.Path]::GetTempPath()) ('v1-v2-migration-'+[guid]::NewGuid().ToString('N'));$workspace=Join-Path $temp 'workspace';$activeWorkspace=Join-Path $temp 'active'
 foreach($path in @($workspace,$activeWorkspace)){[void][IO.Directory]::CreateDirectory($path)}
 try{
-    foreach($file in @('scripts/lib/Harness.Protocol.psm1','scripts/lib/Harness.TaskState.psm1','scripts/migrate-task-v1-to-v2.ps1','tests/verify-v1-to-v2-migration.ps1')){$tokens=$null;$errors=$null;[Management.Automation.Language.Parser]::ParseFile((Join-Path $RepoRoot $file),[ref]$tokens,[ref]$errors)|Out-Null;Check (@($errors).Count-eq0) "$file parses" "$file parse failed"}
+    foreach($file in @('modules/legacy-v1/Harness.LegacyMigration.psm1','scripts/lib/Harness.Protocol.psm1','scripts/lib/Harness.TaskState.psm1','scripts/migrate-task-v1-to-v2.ps1','tests/verify-v1-to-v2-migration.ps1')){$tokens=$null;$errors=$null;[Management.Automation.Language.Parser]::ParseFile((Join-Path $RepoRoot $file),[ref]$tokens,[ref]$errors)|Out-Null;Check (@($errors).Count-eq0) "$file parses" "$file parse failed"}
     Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.TaskState.psm1') -Force
     $exports=@(Get-Command -Module Harness.TaskState|Select-Object -ExpandProperty Name|Sort-Object)
     Check (@(Compare-Object @('Get-HarnessTaskStatus','New-HarnessTaskState','Repair-HarnessTaskTransaction','Resume-HarnessTaskExecution','Set-HarnessTaskApproval','Set-HarnessTaskEvidence','Set-HarnessTaskTransition') $exports).Count-eq0) 'TaskState keeps migration publication internal to the confirmed command' 'TaskState exports drifted'

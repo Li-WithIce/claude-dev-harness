@@ -22,6 +22,16 @@
       "legacy_status": "not-legacy"
     },
     {
+      "path": "modules/legacy-v1/Harness.LegacyMigration.psm1",
+      "layer": "legacy-v1",
+      "current_role": "Strict legacy plan reader used only by explicit paused migration maintenance.",
+      "owner_candidate": "legacy-v1",
+      "tcb_included": false,
+      "reason": "Ordinary Protocol, status and recovery never import this isolated history reader.",
+      "migration_target": "v1-sunset/V1S-10",
+      "legacy_status": "sunset-gated"
+    },
+    {
       "path": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",
       "layer": "a3-adapter",
       "current_role": "Codex-compatible launcher for the installed PreToolUse adapter.",
@@ -44,7 +54,7 @@
     {
       "path": "runtime-hooks/claude/stop.js",
       "layer": "a3-adapter",
-      "current_role": "Claude Stop event adapter.",
+      "current_role": "Read-only Claude Stop projection of native v2 recovery.",
       "owner_candidate": "host-adapters",
       "tcb_included": false,
       "reason": "Host lifecycle adapter is outside the ordinary protected-write Runtime TCB closure.",
@@ -94,10 +104,10 @@
     {
       "path": "scripts/advance-stage.ps1",
       "layer": "legacy-v1",
-      "current_role": "Compatibility entry for the v1 five-stage lifecycle.",
+      "current_role": "Retired v1 lifecycle entry; rejects before any legacy read or write.",
       "owner_candidate": "legacy-v1",
       "tcb_included": false,
-      "reason": "Only detector-selected v1 may load this lifecycle path.",
+      "reason": "Historical source is retained for separately approved removal, not active Runtime execution.",
       "migration_target": "v1-sunset/V1S-08",
       "legacy_status": "sunset-gated"
     },
@@ -164,7 +174,7 @@
     {
       "path": "scripts/check-shared-memory-layers.ps1",
       "layer": "c2-capability",
-      "current_role": "Shared-memory layer checker.",
+      "current_role": "Explicit historical-v1-only layer diagnostic; not a v2 Runtime health gate.",
       "owner_candidate": "memory",
       "tcb_included": false,
       "reason": "Memory validation remains capability-owned.",
@@ -334,10 +344,10 @@
     {
       "path": "scripts/invoke-harness-skill.ps1",
       "layer": "a3-adapter",
-      "current_role": "Thin host-facing skill delegation and process bridge.",
+      "current_role": "Retained Stage-based delegation CLI; K1 rejects execution before backend entry.",
       "owner_candidate": "host-adapters",
       "tcb_included": false,
-      "reason": "The Adapter calls prepare_delegation and commit_delegation while K1 owns plan CAS, artifact publication, and trace commit.",
+      "reason": "The Adapter still delegates its existing envelopes to K1; TK-03 closes both Stage-based operations with a zero-read/write retired diagnostic. Historical code remains for separate removal approval.",
       "migration_target": "host-skill-adapter",
       "legacy_status": "not-legacy"
     },
@@ -364,10 +374,10 @@
     {
       "path": "scripts/lib/Harness.AdapterDelegation.psm1",
       "layer": "k1-runtime-kernel",
-      "current_role": "K1 prepare_delegation and commit_delegation implementation.",
+      "current_role": "K1 retired Stage-based prepare_delegation and commit_delegation boundary.",
       "owner_candidate": "trust-kernel",
       "tcb_included": false,
-      "reason": "Skill delegation uses this K1 API outside the selected ordinary Runtime roots; it owns plan generation CAS, artifact publication, and trace commit.",
+      "reason": "TK-03 rejects both exports before legacy plan reads or writes. The retained implementation remains classified and counted outside selected ordinary Runtime roots pending separate physical-removal approval.",
       "migration_target": null,
       "legacy_status": "not-legacy"
     },
@@ -524,12 +534,12 @@
     {
       "path": "scripts/lib/Harness.Protocol.psm1",
       "layer": "k1-runtime-kernel",
-      "current_role": "v1/v2 protocol resolution and workspace configuration.",
+      "current_role": "v2-only new-work admission, artifact-first recovery and workspace pause configuration.",
       "owner_candidate": "trust-kernel",
       "tcb_included": true,
       "reason": "Runtime task and status roots require artifact-first protocol selection.",
-      "migration_target": "v1-sunset/V1S-04",
-      "legacy_status": "transitional"
+      "migration_target": null,
+      "legacy_status": "not-legacy"
     },
     {
       "path": "scripts/lib/Harness.Qualification.psm1",
@@ -548,8 +558,8 @@
       "owner_candidate": "trust-kernel",
       "tcb_included": true,
       "reason": "Task status and resume paths require recovery indexing.",
-      "migration_target": "v1-sunset/V1S-08",
-      "legacy_status": "transitional"
+      "migration_target": null,
+      "legacy_status": "not-legacy"
     },
     {
       "path": "scripts/lib/Harness.Requirement.psm1",
@@ -614,7 +624,7 @@
     {
       "path": "scripts/memory-health.ps1",
       "layer": "c2-capability",
-      "current_role": "Optional Memory health entry used by capability-aware installed verification.",
+      "current_role": "Explicit historical Memory health maintenance; not an automatic v2 installation or recovery gate.",
       "owner_candidate": "memory",
       "tcb_included": false,
       "reason": "The conditional Memory check is C2-owned and is not a core Runtime or Distribution trust prerequisite.",
@@ -684,10 +694,10 @@
     {
       "path": "scripts/repair-shared-memory.ps1",
       "layer": "c2-capability",
-      "current_role": "Shared-memory repair command.",
+      "current_role": "Retired v1 mirror repair and retirement entry; rejects before imports, reads, locks or writes.",
       "owner_candidate": "memory",
       "tcb_included": false,
-      "reason": "Optional memory repair is outside Runtime Kernel.",
+      "reason": "Retained rejected entry stays fully counted in Memory Capability source; not active Runtime.",
       "migration_target": "memory-module",
       "legacy_status": "not-legacy"
     },

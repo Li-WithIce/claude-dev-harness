@@ -64,12 +64,17 @@ if ($maintainOutput -notmatch '(?im)^STATUS:\s+PASS\s*$') {
     $checks.Add('memory-maintain.ps1 reports STATUS: PASS for a fresh installed workspace') | Out-Null
 }
 
-foreach ($stepName in @('repair', 'archive', 'report', 'health')) {
+foreach ($stepName in @('archive')) {
     if ($maintainOutput -notmatch ("(?im)^- {0}:\s+PASS\s+\(exit=0\)\s*$" -f [regex]::Escape($stepName))) {
         $failures.Add(("memory-maintain.ps1 should report step {0}=PASS on a fresh installed workspace" -f $stepName)) | Out-Null
     } else {
         $checks.Add(("memory-maintain.ps1 reports step {0}=PASS on a fresh installed workspace" -f $stepName)) | Out-Null
     }
+}
+foreach ($stepName in @('repair','report','health')) {
+    if ($maintainOutput -match ("(?im)^- {0}:\s+NOT_RUN\s+\(" -f $stepName)) {
+        $checks.Add("memory-maintain reports $stepName as NOT_RUN, not a health/repair pass") | Out-Null
+    } else { $failures.Add("memory-maintain must not run $stepName implicitly") | Out-Null }
 }
 
 $archivePath = Join-Path (Join-Path (Join-Path $workspaceRoot '.assistant') $runtimeDirName) $archiveFileName
@@ -120,6 +125,32 @@ if ($upgradedArchiveContent -notmatch [regex]::Escape($expectedArchiveHeader)) {
 } else {
     $checks.Add('memory-maintain.ps1 upgrades the legacy archive placeholder format to the standard archive table') | Out-Null
 }
+
+$vaultRoot = Join-Path $workspaceRoot '.assistant'
+$historyPaths = @(
+    '.assistant/运行时/当前任务.md', '.assistant/运行时/恢复索引.md',
+    '.assistant/运行时/中断任务.md', '.assistant/运行时/上次会话.md',
+    '.assistant/运行时/tasks/legacy-memory-history.md',
+    '.assistant/orchestration/current-flow.md', 'docs/tasks/legacy-memory-history/plan.md'
+) | ForEach-Object { Join-Path $workspaceRoot $_ }
+foreach ($path in $historyPaths) {
+    [void][IO.Directory]::CreateDirectory((Split-Path -Parent $path))
+    [IO.File]::WriteAllText($path,'immutable legacy history sentinel',[Text.UTF8Encoding]::new($false))
+}
+$beforeHistory = @($historyPaths | ForEach-Object { (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash }) -join '|'
+$historyLocks = @($historyPaths | ForEach-Object { [IO.File]::Open($_,'Open','ReadWrite','None') })
+try {
+    foreach ($scriptPath in @('scripts/memory-maintain.ps1','skills/obsidian-memory/scripts/maintain-shared-memory.ps1')) {
+        $lockedResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $RepoRoot $scriptPath) -Arguments @{VaultRoot=$vaultRoot} -WorkingDirectory $workspaceRoot
+        if ($lockedResult.ExitCode -eq 0 -and ($lockedResult.Output -join "`n") -match 'Scope: optional-memory-archive') {
+            $checks.Add("$scriptPath archives without reading locked history or invoking historical health") | Out-Null
+        } else { $failures.Add("$scriptPath must succeed without reading locked history") | Out-Null }
+    }
+} finally { foreach ($handle in $historyLocks) { $handle.Dispose() } }
+$afterHistory = @($historyPaths | ForEach-Object { (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash }) -join '|'
+if ($beforeHistory -ceq $afterHistory -and -not (Test-Path -LiteralPath (Join-Path $vaultRoot '运行时/记忆体检报告.md'))) {
+    $checks.Add('maintenance preserves all historical bytes and does not implicitly create a history report') | Out-Null
+} else { $failures.Add('maintenance wrote history or an implicit report') | Out-Null }
 } finally {
     try {
         Remove-Item -LiteralPath $scratchRoot -Recurse -Force -ErrorAction Stop

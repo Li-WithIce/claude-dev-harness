@@ -563,17 +563,17 @@ if ($stateReparseProcess.Process.HasExited -and
 $stateReparseProcess.Process.Dispose()
 Remove-Item -LiteralPath $stateReparsePath -Force -ErrorAction SilentlyContinue
 
-$nestedVaultReparseRoot = Join-Path $scratchRoot 'minimal-vault-nested-reparse-is-write-free'
+$nestedVaultReparseRoot = Join-Path $scratchRoot 'core-entry-nested-reparse-is-write-free'
 $nestedVaultReparseUser = Join-Path $nestedVaultReparseRoot 'user'
 $nestedVaultReparseWorkspace = Join-Path $nestedVaultReparseRoot 'workspace'
 $nestedVaultReparseVictim = Join-Path $nestedVaultReparseRoot 'victim'
-$nestedVaultTasksParent = Join-Path $nestedVaultReparseWorkspace '.assistant\运行时'
-$nestedVaultTasksPath = Join-Path $nestedVaultTasksParent 'tasks'
-New-Item -ItemType Directory -Path $nestedVaultReparseUser,$nestedVaultTasksParent,$nestedVaultReparseVictim -Force | Out-Null
-$nestedVaultVictimFile = Join-Path $nestedVaultReparseVictim '.gitkeep'
+$nestedVaultEntryParent = Join-Path $nestedVaultReparseWorkspace '.assistant'
+$nestedVaultEntryPath = Join-Path $nestedVaultEntryParent 'entry'
+New-Item -ItemType Directory -Path $nestedVaultReparseUser,$nestedVaultEntryParent,$nestedVaultReparseVictim -Force | Out-Null
+$nestedVaultVictimFile = Join-Path $nestedVaultReparseVictim 'task.ps1'
 [System.IO.File]::WriteAllText($nestedVaultVictimFile,"victim sentinel`n",(New-Object System.Text.UTF8Encoding($false)))
 $nestedVaultVictimHash = (Get-FileHash -LiteralPath $nestedVaultVictimFile -Algorithm SHA256).Hash
-New-Item -ItemType Junction -Path $nestedVaultTasksPath -Target $nestedVaultReparseVictim | Out-Null
+New-Item -ItemType Junction -Path $nestedVaultEntryPath -Target $nestedVaultReparseVictim | Out-Null
 $nestedVaultReparseProcess = Start-RepoProcess -UserProfile $nestedVaultReparseUser -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @('-WorkspaceRoot',$nestedVaultReparseWorkspace,'-RepoRoot',$RepoRoot,'-Preset','core')
 [void]$nestedVaultReparseProcess.Process.WaitForExit(30000)
 $nestedVaultVictimItems = @(Get-ChildItem -LiteralPath $nestedVaultReparseVictim -Force)
@@ -585,12 +585,12 @@ if ($nestedVaultReparseProcess.Process.HasExited -and
     -not (Test-Path -LiteralPath (Join-Path $nestedVaultReparseWorkspace 'AGENTS.md')) -and
     -not (Test-Path -LiteralPath (Join-Path $nestedVaultReparseUser '.dev-harness')) -and
     -not (Test-Path -LiteralPath (Join-Path $nestedVaultReparseUser '.claude'))) {
-    $checks.Add('core install rejects a nested runtime tasks junction without changing the external victim or retaining partial state') | Out-Null
+    $checks.Add('core install rejects a nested current entry junction without changing the external victim or retaining partial state') | Out-Null
 } else {
-    $failures.Add('minimal vault .gitkeep must use the managed reparse-safe transaction path') | Out-Null
+    $failures.Add('current core task entry must use the managed reparse-safe transaction path') | Out-Null
 }
 $nestedVaultReparseProcess.Process.Dispose()
-Remove-Item -LiteralPath $nestedVaultTasksPath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $nestedVaultEntryPath -Force -ErrorAction SilentlyContinue
 
 $vanishedPointerUser = Join-Path $scratchRoot 'vanished-pointer-user'
 $vanishedPointerPath = Join-Path $scratchRoot 'vanished-pointer\active-install.json'
@@ -838,7 +838,7 @@ $legacyWarmupResult = Invoke-RepoScript -UserProfile $legacyUserProfile -ScriptP
 $legacyEarliestExactPath = Join-Path $legacyWorkspace 'AGENTS.md'
 $legacyEarliestExactContent = 'legacy earliest exact sentinel'
 [System.IO.File]::WriteAllText($legacyEarliestExactPath, $legacyEarliestExactContent, (New-Object System.Text.UTF8Encoding($false)))
-$legacyEarliestMissingPath = Join-Path $legacyWorkspace '.assistant\entry\advance-stage.ps1'
+$legacyEarliestMissingPath = Join-Path $legacyWorkspace '.assistant\entry\task.ps1'
 if (-not (Test-Path -LiteralPath $legacyEarliestMissingPath -PathType Leaf)) {
     throw 'legacy rebaseline fixture warm-up did not create its missing-state target'
 }
@@ -1575,26 +1575,28 @@ if ($workspaceAgentsRestoreResult.ExitCode -eq 0 -and $workspaceAgentsRestoreOut
     $failures.Add('verify-installation should return to PASS after restoring installed workspace root AGENTS') | Out-Null
 }
 
-$workspaceEntryAgentsPath = Join-Path $workspaceRoot '.assistant\entry\AGENTS.md'
-$workspaceEntryAgentsRaw = Get-Content -LiteralPath $workspaceEntryAgentsPath -Raw -Encoding utf8
+$retiredEntryAgentsPath = Join-Path $workspaceRoot '.assistant\entry\AGENTS.md'
+if (Test-Path -LiteralPath $retiredEntryAgentsPath) { throw 'current installation recreated the retired lifecycle shim' }
+$workspaceTaskShimPath = Join-Path $workspaceRoot '.assistant\entry\task.ps1'
+$workspaceTaskShimRaw = Get-Content -LiteralPath $workspaceTaskShimPath -Raw -Encoding utf8
 try {
-    [System.IO.File]::WriteAllText($workspaceEntryAgentsPath, ($workspaceEntryAgentsRaw + "`n# drift"), (New-Object System.Text.UTF8Encoding($false)))
+    [System.IO.File]::WriteAllText($workspaceTaskShimPath, ($workspaceTaskShimRaw + "`n# drift"), (New-Object System.Text.UTF8Encoding($false)))
     $entryAgentsAuditResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $RepoRoot 'tests\verify-installation.ps1') -Arguments @{
         WorkspaceRoot = $workspaceRoot
         RepoRoot      = $RepoRoot
     }
     $entryAgentsAuditOutput = $entryAgentsAuditResult.Output -join [Environment]::NewLine
 } finally {
-    [System.IO.File]::WriteAllText($workspaceEntryAgentsPath, $workspaceEntryAgentsRaw, (New-Object System.Text.UTF8Encoding($false)))
+    [System.IO.File]::WriteAllText($workspaceTaskShimPath, $workspaceTaskShimRaw, (New-Object System.Text.UTF8Encoding($false)))
 }
 $entryAgentsMarkerCount = [regex]::Matches($entryAgentsAuditOutput, '(?im)^- LIVE_UPDATE_REQUIRED:').Count
 if ($entryAgentsAuditResult.ExitCode -eq 1 -and
     $entryAgentsAuditOutput -match '(?im)^STATUS:\s+LIVE_UPDATE_REQUIRED\s*$' -and
     $entryAgentsAuditOutput -match '(?ms)^Warnings:\r?\n- LIVE_UPDATE_REQUIRED: shim-template-drift\r?\n\r?\nErrors:\r?\n- none(?:\r?\n|$)' -and
     $entryAgentsMarkerCount -eq 1) {
-    $checks.Add('verify-installation reports only the existing shim template drift marker when workspace entry AGENTS alone drifts') | Out-Null
+    $checks.Add('verify-installation reports only the existing shim template drift marker when the current task entry alone drifts') | Out-Null
 } else {
-    $failures.Add('workspace entry AGENTS-only drift should emit only LIVE_UPDATE_REQUIRED: shim-template-drift') | Out-Null
+    $failures.Add('current task entry-only drift should emit only LIVE_UPDATE_REQUIRED: shim-template-drift') | Out-Null
 }
 
 $entryAgentsRestoreResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $RepoRoot 'tests\verify-installation.ps1') -Arguments @{
@@ -1603,9 +1605,9 @@ $entryAgentsRestoreResult = Invoke-RepoScript -UserProfile $userProfile -ScriptP
 }
 $entryAgentsRestoreOutput = $entryAgentsRestoreResult.Output -join [Environment]::NewLine
 if ($entryAgentsRestoreResult.ExitCode -eq 0 -and $entryAgentsRestoreOutput -match '(?im)^STATUS:\s+PASS\s*$') {
-    $checks.Add('verify-installation returns to PASS after restoring workspace entry AGENTS') | Out-Null
+    $checks.Add('verify-installation returns to PASS after restoring the current task entry') | Out-Null
 } else {
-    $failures.Add('verify-installation should return to PASS after restoring workspace entry AGENTS') | Out-Null
+    $failures.Add('verify-installation should return to PASS after restoring the current task entry') | Out-Null
 }
 
 $freshRegistryRaw = Get-Content -LiteralPath $freshRegistryPath -Raw -Encoding utf8
@@ -1690,12 +1692,23 @@ try {
 } finally {
     [System.IO.File]::WriteAllBytes($workspaceSharedMemoryProtocolPath, $workspaceSharedMemoryProtocolBytes)
 }
-if ($protocolAuditResult.ExitCode -eq 2 -and
-    $protocolAuditOutput -match '(?im)^STATUS:\s+FAIL\s*$' -and
-    $protocolAuditOutput -match '(?im)^- workspace shared-memory protocol .*模板不一致') {
-    $checks.Add('verify-installation rejects rendered full-vault workflow protocol drift') | Out-Null
+$protocolMarkerCount = [regex]::Matches($protocolAuditOutput, '(?im)^- LIVE_UPDATE_REQUIRED:').Count
+if ($protocolAuditResult.ExitCode -eq 1 -and
+    $protocolAuditOutput -match '(?im)^STATUS:\s+LIVE_UPDATE_REQUIRED\s*$' -and
+    $protocolAuditOutput -match '(?ms)^Warnings:\r?\n- LIVE_UPDATE_REQUIRED: shim-template-drift\r?\n\r?\nErrors:\r?\n- none(?:\r?\n|$)' -and
+    $protocolMarkerCount -eq 1) {
+    $checks.Add('verify-installation reports current full-vault protocol drift with the existing single managed-asset marker') | Out-Null
 } else {
-    $failures.Add('full-vault workflow protocol drift should fail exact installation verification') | Out-Null
+    $failures.Add('current full-vault protocol drift should emit only LIVE_UPDATE_REQUIRED: shim-template-drift') | Out-Null
+}
+$protocolRestoreResult = Invoke-RepoScript -UserProfile $userProfile -ScriptPath (Join-Path $RepoRoot 'tests\verify-installation.ps1') -Arguments @{
+    WorkspaceRoot = $workspaceRoot
+    RepoRoot = $RepoRoot
+}
+if ($protocolRestoreResult.ExitCode -eq 0 -and ($protocolRestoreResult.Output -join [Environment]::NewLine) -match '(?im)^STATUS:\s+PASS\s*$') {
+    $checks.Add('verify-installation returns to PASS after restoring the full-vault protocol bytes') | Out-Null
+} else {
+    $failures.Add('restored full-vault protocol should return exact installation verification to PASS') | Out-Null
 }
 } finally {
     if (Test-Path -LiteralPath $scratchRoot) {

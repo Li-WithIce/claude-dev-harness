@@ -40,7 +40,7 @@ function Get-YamlField {
     }
 
     $pattern = '^{0}:\s*(.+)$' -f [regex]::Escape($Field)
-    $match = Select-String -Path $Path -Pattern $pattern -Encoding utf8 | Select-Object -First 1
+    $match = Select-String -LiteralPath $Path -Pattern $pattern -Encoding utf8 | Select-Object -First 1
     if ($null -eq $match) {
         return $null
     }
@@ -114,6 +114,28 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 }
 
 $VaultRoot = Resolve-SharedMemoryVaultRoot -VaultRoot $VaultRoot
+try {
+    $hasHistory = Test-LegacyMemoryHistoryPresent -VaultRoot $VaultRoot
+} catch {
+    if ($Json) {
+        [ordered]@{status='FAIL';scope='historical-v1-only';checks=@();warnings=@();errors=@('invalid or unavailable historical boundary')} | ConvertTo-Json -Compress
+    } else {
+        Write-Output 'STATUS: FAIL'
+        Write-Output 'Scope: historical-v1-only'
+        Write-Output 'Reason: invalid or unavailable historical boundary.'
+    }
+    exit 1
+}
+if (-not $hasHistory) {
+    if ($Json) {
+        [ordered]@{status='NOT_APPLICABLE';scope='historical-v1-only';checks=@();warnings=@();errors=@()} | ConvertTo-Json -Compress
+    } else {
+        Write-Output 'STATUS: NOT_APPLICABLE'
+        Write-Output 'Scope: historical-v1-only'
+        Write-Output 'Reason: no retained v1 mirrors; v2 Runtime health was not checked.'
+    }
+    exit 0
+}
 try {
     $null = Assert-ProjectLocalVault -VaultRoot $VaultRoot
 } catch {
@@ -201,6 +223,7 @@ $status = if ($script:Errors.Count -gt 0) {
 if ($Json) {
     $payload = [ordered]@{
         status   = $status
+        scope    = 'historical-v1-only'
         repoRoot = $RepoRoot
         vaultRoot = $VaultRoot
         checks   = @($script:Checks)
@@ -211,6 +234,7 @@ if ($Json) {
     Write-Output ($payload | ConvertTo-Json -Depth 4 -Compress)
 } else {
     Write-Output ('STATUS: {0}' -f $status)
+    Write-Output 'Scope: historical-v1-only'
     Write-Output ('RepoRoot: {0}' -f $RepoRoot)
     Write-Output ('VaultRoot: {0}' -f $VaultRoot)
     Write-Output ''

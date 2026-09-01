@@ -1,5 +1,11 @@
 # Thin Harness v2 Default Promotion Gates
 
+TK-03 amendment: this document retains the original Release route. Its v1
+rollback/Stable-before-retirement prerequisite is superseded for the current
+Runtime by [the user-confirmed v2-only contract](../architecture/tk03-v2-only-transition.md).
+Ten current Sunset gates plus separate exact-removal-diff approval now govern
+physical v1 source retirement. No historical Gate status is promoted or rerun.
+
 ## Authority and snapshot boundary
 
 - contract_status: canonical-current

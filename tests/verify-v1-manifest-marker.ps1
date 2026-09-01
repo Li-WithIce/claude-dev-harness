@@ -47,16 +47,18 @@ $expectedPaths = @(
     'scripts/validate-lite-artifacts.ps1'
 )
 $manifestLegacyPaths = Get-OrdinalStrings -Values @($manifest.ownership.owned_paths | Where-Object { [string]$_ -clike 'scripts/*' })
-Check (($manifestLegacyPaths -join '|') -ceq ($expectedPaths -join '|')) 'Manifest names exactly the four active v1 compatibility paths' "legacy-v1 owned path set drifted: $($manifestLegacyPaths -join ', ')"
+Check (($manifestLegacyPaths -join '|') -ceq ($expectedPaths -join '|')) 'Manifest retains the four historical v1 script paths without enabling their lifecycle' "legacy-v1 owned path set drifted: $($manifestLegacyPaths -join ', ')"
 $missingFiles = @($expectedPaths | Where-Object { -not (Test-Path -LiteralPath (Join-Path $RepoRoot $_) -PathType Leaf) })
 Check ($missingFiles.Count -eq 0) 'all four Sunset-gated compatibility files remain present' "TK-02 removed active v1 files: $($missingFiles -join ', ')"
 
 $classification = Read-StrictJson -RelativePath 'kernel-component-classification.json'
 $legacyEntries = @($classification.components | Where-Object { [string]$_.layer -ceq 'legacy-v1' })
 $classifiedPaths = Get-OrdinalStrings -Values @($legacyEntries | ForEach-Object { $_.path })
-Check (($classifiedPaths -join '|') -ceq ($expectedPaths -join '|')) 'classification and Manifest agree on the exact legacy-v1 set' "legacy-v1 classification set drifted: $($classifiedPaths -join ', ')"
+$expectedClassifiedPaths = @('modules/legacy-v1/Harness.LegacyMigration.psm1') + $expectedPaths
+Check (($classifiedPaths -join '|') -ceq ($expectedClassifiedPaths -join '|')) 'classification includes retained scripts and the isolated explicit migration reader' "legacy-v1 classification set drifted: $($classifiedPaths -join ', ')"
 
 $expectedTargets = [ordered]@{
+    'modules/legacy-v1/Harness.LegacyMigration.psm1' = 'v1-sunset/V1S-10'
     'scripts/advance-stage.ps1' = 'v1-sunset/V1S-08'
     'scripts/lite-artifact-parser.ps1' = 'v1-sunset/V1S-09'
     'scripts/migrate-task-v1-to-v2.ps1' = 'v1-sunset/V1S-10'
@@ -80,5 +82,5 @@ if ($failures.Count -gt 0) {
 }
 
 Write-Output 'STATUS: PASS'
-Write-Output 'TK-02 legacy-v1 Manifest marker checks passed; no Sunset action was performed.'
+Write-Output 'Retained legacy-v1 ownership and isolation markers passed; no physical removal was performed.'
 exit 0

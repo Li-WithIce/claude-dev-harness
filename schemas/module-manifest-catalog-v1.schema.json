@@ -65,6 +65,7 @@
     },
     "quick_tests": { "$ref": "#/definitions/testArray" },
     "full_tests": { "$ref": "#/definitions/nonEmptyTestArray" },
+    "archived_tests": { "$ref": "#/definitions/testArray" },
     "optional_routes": {
       "type": "array",
       "items": {
@@ -250,7 +251,8 @@
           ]
         },
         "changed": { "$ref": "#/definitions/testArray" },
-        "full": { "$ref": "#/definitions/testArray" }
+        "full": { "$ref": "#/definitions/testArray" },
+        "archived": { "$ref": "#/definitions/testArray" }
       }
     },
     "validationV1": {

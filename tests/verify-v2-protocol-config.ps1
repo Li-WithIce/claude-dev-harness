@@ -76,7 +76,7 @@ try {
     $missingBefore = Snapshot $workspace
     $missingResult = Invoke-Cli $workspace @('protocol') $null
     $missing = Read-Json $missingResult
-    Check ($missingResult.ExitCode -eq 0 -and $missing.selected_protocol -ceq 'v1' -and $missing.preference_source -ceq 'default-auto' -and $missing.workspace_config.status -ceq 'missing' -and $missing.side_effects.runtime_writes -eq 0) 'protocol status defaults a new task to v1 without a local selection or Runtime Default' 'protocol status did not preserve the v1 fallback'
+    Check ($missingResult.ExitCode -eq 0 -and $missing.selected_protocol -ceq 'v2' -and $missing.preference_source -ceq 'default-auto' -and $missing.workspace_config.status -ceq 'missing' -and $missing.side_effects.runtime_writes -eq 0) 'missing config and Runtime Default admit only v2 with zero writes' 'new-task default is not v2'
     Same $missingBefore (Snapshot $workspace) 'protocol status is read-only' 'protocol status wrote workspace state'
 
     $enableResult = Invoke-Cli $workspace @('enable-v2') $null
@@ -87,19 +87,22 @@ try {
     $configDocument = $configText | ConvertFrom-Json -AsHashtable -DateKind String
     $debris = @(Get-ChildItem -LiteralPath (Split-Path -Parent $configPath) -Force | Where-Object { $_.Name -like '.protocol.json.*.tmp*' })
     Check ($enableResult.ExitCode -eq 0 -and $enable.new_task_protocol -ceq 'v2' -and $enable.side_effects.config_writes -eq 1 -and $enable.side_effects.runtime_writes -eq 0) 'enable-v2 reports one contained config write and no runtime write' 'enable-v2 reported the wrong write surface'
-    Check ($configBytes.Length -gt 0 -and -not ($configBytes.Length -ge 3 -and $configBytes[0] -eq 0xEF -and $configBytes[1] -eq 0xBB -and $configBytes[2] -eq 0xBF) -and [string]$configDocument.schema_version -ceq 'harness-protocol-config/v1' -and [string]$configDocument.new_task_protocol -ceq 'v2' -and $debris.Count -eq 0) 'enable-v2 writes strict BOM-less UTF-8 atomically without debris' 'enable-v2 encoding or atomicity is invalid'
+    Check ($configBytes.Length -gt 0 -and -not ($configBytes.Length -ge 3 -and $configBytes[0] -eq 0xEF -and $configBytes[1] -eq 0xBB -and $configBytes[2] -eq 0xBF) -and [string]$configDocument.schema_version -ceq 'harness-protocol-config/v2' -and [string]$configDocument.new_task_protocol -ceq 'v2' -and $configDocument.new_work -ceq 'enabled' -and $debris.Count -eq 0) 'enable-v2 writes explicit enabled v2 config without BOM or debris' 'enable-v2 encoding or atomicity is invalid'
 
     $reopenResult = Invoke-Cli $workspace @('protocol') $null
     $reopen = Read-Json $reopenResult
     Check ($reopenResult.ExitCode -eq 0 -and $reopen.selected_protocol -ceq 'v2' -and $reopen.preference_source -ceq 'workspace-config' -and $reopen.reason -ceq 'workspace-v2-new-task') 'a fresh process with no protocol environment variable honors workspace enable-v2' 'workspace enable-v2 did not survive a fresh process without environment state'
-    $envRollback = Read-Json (Invoke-Cli $workspace @('protocol') 'v1')
-    Check ($envRollback.selected_protocol -ceq 'v1' -and $envRollback.preference_source -ceq 'HARNESS_PROTOCOL' -and $envRollback.workspace_config.status -ceq 'not-read') 'HARNESS_PROTOCOL=v1 immediately overrides workspace enable-v2 for a new task' 'environment rollback did not outrank workspace config'
+    $beforeRejectedV1 = Snapshot $workspace
+    $envRollback = Invoke-Cli $workspace @('protocol') 'v1'
+    Check ($envRollback.ExitCode -eq 2 -and $envRollback.StdErr -match 'v1-protocol-retired') 'explicit v1 fails closed instead of being a rollback route' 'retired v1 was admitted'
+    Same $beforeRejectedV1 (Snapshot $workspace) 'explicit v1 rejection is zero-write' 'v1 rejection changed state'
 
     $v1Id = 'artifact-v1'; $v1Path = Join-Path $workspace "docs\tasks\$v1Id\plan.md"
     [void][System.IO.Directory]::CreateDirectory((Split-Path -Parent $v1Path))
     [System.IO.File]::WriteAllText($v1Path,"---`ntask_id: $v1Id`nstage: PLAN`ntool: codex`nupdated: 2026-07-22`n---`n",[System.Text.UTF8Encoding]::new($false))
-    $v1Artifact = Read-Json (Invoke-Cli $workspace @('protocol','-TaskId',$v1Id) 'v2')
-    Check ($v1Artifact.detected_protocol -ceq 'v1' -and $v1Artifact.selected_protocol -ceq 'v1' -and $v1Artifact.preference_source -ceq 'existing-artifact' -and $v1Artifact.workspace_config.status -ceq 'not-read') 'existing v1 artifact outranks environment and workspace v2 selections' 'existing v1 artifact was overridden by a new-task preference'
+    $lockedPlan = [IO.File]::Open($v1Path,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+    try { $v1Artifact = Invoke-Cli $workspace @('protocol','-TaskId',$v1Id) 'v2' } finally { $lockedPlan.Dispose() }
+    Check ($v1Artifact.ExitCode -eq 2 -and $v1Artifact.StdErr -match 'legacy-task-requires-explicit-migration') 'legacy presence is rejected without reading the exclusively locked plan' 'ordinary Runtime read or resumed a legacy plan'
 
     $disableResult = Invoke-Cli $workspace @('disable-v2') $null
     $disable = Read-Json $disableResult
@@ -107,13 +110,29 @@ try {
     [void][System.IO.Directory]::CreateDirectory((Split-Path -Parent $v2Path))
     [System.IO.File]::WriteAllText($v2Path,((New-V2TaskDocument $v2Id) | ConvertTo-Json -Depth 20 -Compress),[System.Text.UTF8Encoding]::new($false))
     $v2Artifact = Read-Json (Invoke-Cli $workspace @('protocol','-TaskId',$v2Id) 'v1')
-    Check ($disableResult.ExitCode -eq 0 -and $disable.new_task_protocol -ceq 'v1') 'disable-v2 records the workspace v1 stop-loss' 'disable-v2 did not record v1'
+    Check ($disableResult.ExitCode -eq 0 -and $disable.new_task_protocol -ceq 'v2' -and $disable.new_work -ceq 'paused') 'disable-v2 records paused new work, never v1' 'stop-loss did not pause new work'
+    $pausedBefore = Snapshot $workspace
+    foreach ($preference in @('auto','v2')) {
+        $paused = Read-Json (Invoke-Cli $workspace @('protocol') $preference)
+        Check ($null -eq $paused.selected_protocol -and $paused.new_task_admission -ceq 'paused' -and $paused.reason -ceq 'new-work-paused') "paused config blocks $preference new work" "$preference bypassed paused admission"
+        $rejectedCreate = Invoke-Cli $workspace @('create','-TaskId','paused-create','-Contract','absent.json') $preference
+        Check ($rejectedCreate.ExitCode -eq 2 -and $rejectedCreate.StdErr -match 'new-work-not-admitted') 'paused task creation rejects before Contract/task writes' 'paused create reached task mutation'
+    }
+    Same $pausedBefore (Snapshot $workspace) 'paused admission and rejected creation leave every byte unchanged' 'paused admission changed state'
     Check ($v2Artifact.detected_protocol -ceq 'v2' -and $v2Artifact.selected_protocol -ceq 'v2' -and $v2Artifact.preference_source -ceq 'existing-artifact' -and $v2Artifact.workspace_config.status -ceq 'not-read') 'existing v2 artifact outranks environment and workspace v1 selections' 'existing v2 artifact was downgraded by a new-task preference'
 
     $resetResult = Invoke-Cli $workspace @('reset-auto') $null
     $reset = Read-Json $resetResult
     $resetStatus = Read-Json (Invoke-Cli $workspace @('protocol') $null)
-    Check ($resetResult.ExitCode -eq 0 -and $reset.new_task_protocol -ceq 'auto' -and $resetStatus.selected_protocol -ceq 'v1' -and $resetStatus.preference_source -ceq 'workspace-config' -and $resetStatus.reason -ceq 'runtime-default-missing') 'reset-auto restores Runtime Default lookup and therefore the current v1 fallback' 'reset-auto silently promoted new tasks to v2'
+    Check ($resetResult.ExitCode -eq 0 -and $reset.new_task_protocol -ceq 'auto' -and $reset.new_work -ceq 'enabled' -and $resetStatus.selected_protocol -ceq 'v2' -and $resetStatus.preference_source -ceq 'workspace-config' -and $resetStatus.reason -ceq 'v2-default-new-task') 'reset-auto explicitly restores v2-only admission' 'reset-auto did not restore v2 admission'
+    foreach ($legacyPreference in @('auto','v2','v1')) {
+        $legacyJson = '{"schema_version":"harness-protocol-config/v1","new_task_protocol":"' + $legacyPreference + '"}'
+        [IO.File]::WriteAllText($configPath,$legacyJson,[Text.UTF8Encoding]::new($false))
+        $before = Snapshot $workspace
+        $legacy = Invoke-Cli $workspace @('protocol') $null
+        Check ($(if($legacyPreference -ceq 'v1'){$legacy.ExitCode -eq 2 -and $legacy.StdErr -match 'v1-protocol-retired'}else{$legacy.ExitCode -eq 0 -and (Read-Json $legacy).selected_protocol -ceq 'v2'})) "historical $legacyPreference config has explicit v2-only semantics" 'legacy config was silently reinterpreted'
+        Same $before (Snapshot $workspace) 'historical config is not rewritten' 'historical config bytes changed'
+    }
 
     $invalidCases = @(
         [pscustomobject]@{Name='BOM';Bytes=[byte[]](0xEF,0xBB,0xBF)+[System.Text.UTF8Encoding]::new($false).GetBytes($validJson)},

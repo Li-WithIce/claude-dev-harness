@@ -28,17 +28,17 @@ Write-Output ""
 switch ($exitCode) {
     0 {
         Write-Output "Next:"
-        Write-Output "- Shared memory is healthy. No action needed."
+        Write-Output '- Historical diagnostic completed; preserve its STATUS above. This is not v2 Runtime health.'
     }
     1 {
         Write-Output "Next:"
         Write-Output "- Review warnings above."
-        Write-Output "- Check runtime files under $VaultRoot\运行时."
+        Write-Output '- Inspect retained history only if explicitly needed; do not use it for task recovery.'
     }
     2 {
         Write-Output "Next:"
-        Write-Output "- Fix missing or invalid files first."
-        Write-Output "- Re-run run-memory-health.ps1 after repair."
+        Write-Output '- Check the explicitly selected historical input or optional Memory installation.'
+        Write-Output '- Do not repair or reconstruct retired lifecycle mirrors.'
     }
     default {
         Write-Output "Next:"

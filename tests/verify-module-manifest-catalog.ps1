@@ -72,28 +72,31 @@ try {
     Check (($actualModules -join '|') -ceq ($expectedModules -join '|')) 'catalog contains the exact 13 mixed-version modules in ordinal order' "module discovery or ordering drifted: $($actualModules -join ', ')"
 
     $totals = $result.Catalog.totals
-    Check ($totals.manifest_count -eq 13 -and $totals.module_count -eq 13 -and $totals.v0_module_count -eq 6 -and $totals.v1_module_count -eq 7 -and $totals.capability_source_count -eq 7 -and $totals.capability_source_file_reference_count -eq 174 -and $totals.owner_test_count -eq 87 -and $totals.core_test_count -eq 56 -and $totals.quick_test_count -eq 1 -and $totals.full_test_count -eq 85 -and $totals.optional_route_count -eq 8) 'catalog totals include the TK-06 D1 verifier: 87 owners, 56 core checks, 85 full checks, and 8 routes' "catalog totals drifted: $($totals | ConvertTo-Json -Compress)"
+    Check ($totals.manifest_count -eq 13 -and $totals.module_count -eq 13 -and $totals.v0_module_count -eq 6 -and $totals.v1_module_count -eq 7 -and $totals.capability_source_count -eq 7 -and $totals.capability_source_file_reference_count -eq 177 -and $totals.owner_test_count -eq 89 -and $totals.core_test_count -eq 46 -and $totals.quick_test_count -eq 1 -and $totals.full_test_count -eq 73 -and $totals.optional_route_count -eq 8) 'TK-03 catalog distinguishes 89 owners, 46 active core checks, 73 active full checks, and 8 routes' "catalog totals drifted: $($totals | ConvertTo-Json -Compress)"
     Check (@($result.Catalog.unresolved_dependencies).Count -eq 0 -and @($result.Catalog.ownership_conflicts).Count -eq 0) 'constructed catalog has no unresolved dependency or ownership conflict' 'catalog contains unresolved dependencies or ownership conflicts'
 
     $expectedGroupNames = @('entry-lifecycle','evaluation-release','install-evidence','governance-approval','harness-contracts')
     $actualGroupNames = @($result.Catalog.core_groups.Keys)
     $groupCounts = @($expectedGroupNames | ForEach-Object { @($result.Catalog.core_groups[$_]).Count })
-    Check (($actualGroupNames -join '|') -ceq ($expectedGroupNames -join '|') -and ($groupCounts -join '|') -ceq '14|14|4|3|21') 'five stable CoreGroups include TK-06 with exact 14/14/4/3/21 membership' "CoreGroup names or counts drifted: names=$($actualGroupNames -join ',') counts=$($groupCounts -join ',')"
+    Check (($actualGroupNames -join '|') -ceq ($expectedGroupNames -join '|') -and ($groupCounts -join '|') -ceq '12|14|4|3|13') 'five CoreGroup identities are unchanged with explicit TK-03 active membership' "CoreGroup names or counts drifted: names=$($actualGroupNames -join ',') counts=$($groupCounts -join ',')"
     Check (@($result.Catalog.quick_tests).Count -eq 1 -and [string]$result.Catalog.quick_tests[0] -ceq 'tests/verify-lite-footprint.ps1') 'quick validation derives only verify-lite-footprint' 'quick validation selection drifted'
 
     $full = Get-OrdinalStrings -Values @($result.Catalog.full_tests)
-    $expectedFull = Get-OrdinalStrings -Values @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'tests') -Filter 'verify-*.ps1' -File | Where-Object Name -cne 'verify-installation.ps1' | ForEach-Object { 'tests/' + $_.Name })
-    Check (($full -join '|') -ceq ($expectedFull -join '|')) 'full validation derives every default verifier and excludes only installed-workspace verification' 'full validation set differs from repository verifier inventory'
+    $archived = @($result.Catalog.archived_tests)
+    $expectedFull = Get-OrdinalStrings -Values @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'tests') -Filter 'verify-*.ps1' -File | Where-Object { $_.Name -cne 'verify-installation.ps1' -and $archived -cnotcontains ('tests/'+$_.Name) } | ForEach-Object { 'tests/' + $_.Name })
+    Check (($full -join '|') -ceq ($expectedFull -join '|')) 'full validation includes every verifier except the installed-only entry and explicitly archived history' 'full validation set differs from repository verifier inventory'
+    $archiveOwners = @($result.Catalog.test_owners | Where-Object { $archived -ccontains $_.path })
+    Check ($archived.Count -eq 14 -and $archiveOwners.Count -eq 14 -and @($archiveOwners | Where-Object module_id -CNE 'legacy-v1').Count -eq 0 -and @($archived | Where-Object { $full -ccontains $_ }).Count -eq 0) 'fourteen retained legacy fixtures are owned, excluded from execution, and never counted as pass' 'archival ownership or full-route separation is invalid'
 
     $ownerPaths = @($result.Catalog.test_owners | ForEach-Object { [string]$_.path })
     $duplicateOwners = @($ownerPaths | Group-Object -CaseSensitive | Where-Object Count -ne 1)
-    Check ($ownerPaths.Count -eq 87 -and $duplicateOwners.Count -eq 0 -and $ownerPaths -ccontains 'tests/verify-capability-extraction.ps1' -and $ownerPaths -ccontains 'tests/verify-installation.ps1' -and $ownerPaths -ccontains 'tests/run-scenario-evals.ps1' -and $ownerPaths -ccontains 'tests/verify-thin-adapters.ps1' -and $ownerPaths -ccontains 'tests/verify-declarative-distribution.ps1') 'every verifier and scenario runner has exactly one owner' 'verifier ownership is incomplete, duplicated, or missing special runners'
+    Check ($ownerPaths.Count -eq 89 -and $duplicateOwners.Count -eq 0 -and $ownerPaths -ccontains 'tests/verify-capability-extraction.ps1' -and $ownerPaths -ccontains 'tests/verify-installation.ps1' -and $ownerPaths -ccontains 'tests/run-scenario-evals.ps1' -and $ownerPaths -ccontains 'tests/verify-thin-adapters.ps1' -and $ownerPaths -ccontains 'tests/verify-declarative-distribution.ps1' -and $ownerPaths -ccontains 'tests/verify-v1-sunset.ps1' -and $ownerPaths -ccontains 'tests/verify-adapter-transport.ps1') 'every active or archived verifier and scenario runner has exactly one owner' 'verifier ownership is incomplete, duplicated, or missing special runners'
 
     $routeModules = @($result.Catalog.optional_routes | ForEach-Object { [string]$_.module_id })
     $optionalTests = Get-OrdinalStrings -Values @($result.Catalog.optional_routes | ForEach-Object { @($_.tests) } | Select-Object -Unique)
     $coreTests = Get-OrdinalStrings -Values @($expectedGroupNames | ForEach-Object { @($result.Catalog.core_groups[$_]) } | Select-Object -Unique)
     $coreOverlap = @($optionalTests | Where-Object { $coreTests -ccontains $_ })
-    Check (($routeModules -join '|') -ceq 'codex-adapter|harness-maintenance|legacy-v1|md-html|memory|providers|team|thin-trust-kernel' -and $optionalTests.Count -eq 38 -and $coreOverlap.Count -eq 8) 'optional routing derives 8 domains, 38 unique checks, and 8 intentional core overlaps' "optional route topology drifted: modules=$($routeModules -join ',') tests=$($optionalTests.Count) overlap=$($coreOverlap.Count)"
+    Check (($routeModules -join '|') -ceq 'codex-adapter|harness-maintenance|legacy-v1|md-html|memory|providers|team|thin-trust-kernel' -and $optionalTests.Count -eq 35 -and $coreOverlap.Count -eq 7 -and @($archived | Where-Object { $optionalTests -ccontains $_ -or $coreTests -ccontains $_ }).Count -eq 0) 'optional and core routing exclude all archived history without changing domain identities' "optional route topology drifted: modules=$($routeModules -join ',') tests=$($optionalTests.Count) overlap=$($coreOverlap.Count)"
 
     $validFixture = Harness.ModuleManifest\Get-HarnessModuleManifestCatalog -RepoRoot $RepoRoot -ManifestRoot 'tests/fixtures/tk02/valid'
     Check ($validFixture.Catalog.schema_version -ceq 'module-manifest-catalog/v0' -and $null -eq $validFixture.CapabilitySourceCatalog -and $validFixture.Catalog.totals.module_count -eq 2 -and @($validFixture.Catalog.unresolved_dependencies).Count -eq 0) 'all-v0 fixture remains byte-contract compatible without a source catalog' 'valid v0 Manifest dependency fixture changed contract or failed construction'
@@ -104,6 +107,12 @@ try {
     Check (Test-ConstructionFailure -ManifestRoot 'tests/fixtures/tk02/cycle' -Pattern 'cycle') 'dependency cycle fails construction' 'dependency cycle fixture did not fail closed'
     Check (Test-ConstructionFailure -ManifestRoot 'tests/fixtures/tk02/overlap' -Pattern 'Owned paths overlap') 'multiple primary path owners fail construction' 'owned-path overlap fixture did not fail closed'
     Check (Test-ConstructionFailure -ManifestRoot 'tests/fixtures/tk02/multi-owner' -Pattern 'multiple owners') 'multiple verifier owners fail construction' 'verifier ownership fixture did not fail closed'
+    $archiveFixture = Harness.ModuleManifest\Get-HarnessModuleManifestCatalog -RepoRoot $RepoRoot -ManifestRoot 'tests/fixtures/tk03/valid-archive'
+    Check (@($archiveFixture.Catalog.archived_tests).Count -eq 1 -and @($archiveFixture.Catalog.full_tests).Count -eq 0 -and @($archiveFixture.Catalog.test_owners).Count -eq 1) 'inactive legacy module may retain an owned archived fixture without executing it' 'valid archival fixture was not separated'
+    Check (Test-ConstructionFailure -ManifestRoot 'tests/fixtures/tk03/archive-active-route' -Pattern 'Archived compatibility test') 'archived test in an active route fails construction' 'archived active-route fixture was accepted'
+    Check (Test-ConstructionFailure -ManifestRoot 'tests/fixtures/tk03/archive-core-group' -Pattern 'without a CoreGroup') 'archiving a CoreGroup fails construction' 'archived CoreGroup fixture was accepted'
+    Check (Test-ConstructionFailure -ManifestRoot 'tests/fixtures/tk03/archive-unowned-test' -Pattern 'not owned') 'archiving another module test fails construction' 'unowned archive fixture was accepted'
+    Check (Test-ConstructionFailure -ManifestRoot 'tests/fixtures/tk03/archive-nonlegacy' -Pattern 'inactive legacy') 'active capability domains cannot hide tests as archived' 'nonlegacy archival fixture was accepted'
 
     $canonicalModule = @(Import-Module (Join-Path $RepoRoot 'scripts/lib/Harness.CanonicalJson.psm1') -Force -PassThru -ErrorAction Stop)[-1]
     $sourceDigestsValid = $true

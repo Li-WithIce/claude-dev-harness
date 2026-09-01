@@ -1,30 +1,48 @@
 # v1 to v2 task migration
 
-The v1 and v2 task protocols coexist. Existing task artifacts select the protocol before routing:
+TK-03 makes the active Runtime v2-only. This is an explicit architecture
+change, not evidence that Qualification, Promotion or Stable passed. See the
+[transition contract](../architecture/tk03-v2-only-transition.md).
 
-1. `.assistant/runtime/tasks/{task_id}/task.json` selects v2.
-2. Otherwise, a legal `docs/tasks/{task_id}/plan.md` selects v1.
-3. With neither artifact, an explicit maintenance override or `HARNESS_PROTOCOL` selects `v1|v2|auto`; `v1` is the immediate stop-loss.
-4. Without that override, strict workspace-local `.assistant/config/protocol.json` selects `auto|v1|v2`. `pwsh -File .assistant/entry/task.ps1 enable-v2` is the public project opt-in; `reset-auto` and `disable-v2` undo it without touching task artifacts.
-5. Only a new task still resolved as `auto` reads `.assistant/runtime/protocol-default.json`. A valid `harness-runtime-default/v1` decision selects its `new_task_protocol` after strict schema/digest/source checks plus any workspace, expiry, and required-capability checks. Missing or invalid decisions select v1 with a precise runtime reason. Full Qualification Reports, Review Receipts, Host Context, and Canary Authorization do not participate in ordinary routing.
+## Active admission and recovery
 
-Use `pwsh -File scripts/task.ps1 protocol -TaskId {task_id} -WorkspaceRoot {workspace}` for a read-only resolution. An existing artifact wins even when a new-task environment/config/default preference conflicts; preferences never convert or downgrade a task. Release Qualification and Promotion are explicit and separate from task migration. `disable-v2` and `HARNESS_PROTOCOL=v1` remain rollback switches for new tasks and never convert or delete a task. See `docs/release/compatibility-policy.md` for qualification, promotion, deprecation, and retirement conditions.
+1. A valid `.assistant/runtime/tasks/{task_id}/task.json` retains v2
+   precedence, including while new work is paused. Invalid v2 state fails closed.
+2. A legacy `docs/tasks/{task_id}/plan.md` without v2 state is detected by
+   existence alone and rejected with `legacy-task-requires-explicit-migration`.
+   Ordinary Runtime does not parse or execute the plan.
+3. New work accepts only `auto|v2`. Explicit `v1` is retired. New
+   `harness-protocol-config/v2` config adds `new_work=enabled|paused`;
+   even explicit v2 must respect a pause.
+4. Valid historical config v1 bytes with `auto|v2` remain readable without
+   rewriting. Historical `v1` configuration is rejected.
+5. New `auto` with no Runtime Decision admits v2. An existing invalid,
+   unavailable or non-v2 Decision blocks new work. The historical Decision
+   Schema and digest remain unchanged; a separate admission Schema restricts
+   current acceptance. Release Reports and Review Receipts do not route tasks.
 
-## Frozen v1 path
+Use `pwsh -File scripts/task.ps1 protocol -TaskId {task_id} -WorkspaceRoot {workspace}`
+for read-only resolution. Existing v2 identity wins over new-task preferences;
+preferences do not convert, downgrade or delete tasks.
 
-The v1 compatibility path remains:
+## Retained history, not an executable v1 path
 
-- source of stage truth: `docs/tasks/{task_id}/plan.md` frontmatter;
-- validation: `scripts/validate-lite-artifacts.ps1`;
-- stage transition: `scripts/advance-stage.ps1`;
-- stages: `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST -> DONE`;
-- recovery mirrors: `.assistant/运行时/*.md` when the installed v1 workspace uses them.
+The old plan frontmatter, stage definitions, validators and recovery mirrors
+are retained for explicit migration/history maintenance and the separate
+Sunset removal gates. `scripts/advance-stage.ps1` now returns a zero-write
+`v1-lifecycle-retired` diagnostic before loading its historical implementation.
 
-The v1 scripts reject a task once its v2 `task.json` exists. They are not moved, deleted, or recursively forwarded to v2.
+The strict legacy plan parser lives in `modules/legacy-v1` and is loaded only
+by explicit migration. Core/governed/full do not install the old lifecycle
+skills, shim, stage wrappers or task mirrors. Old workspace files are not
+automatically reclassified as disposable user data.
 
 ## Explicit migration
 
-Active v1 tasks and `DONE` tasks are not migrated. Switch away from the v1 task first, then generate a zero-write report:
+A v1 task selected by the old current pointer and a `DONE` task cannot be
+migrated. Releasing a current pointer is a separate, explicitly authorized
+operation, not a reason to run a retired stage command. Preserve all old plan
+and history bytes, then request a zero-write native report:
 
 ```powershell
 pwsh -NoProfile -NonInteractive -File .\scripts\migrate-task-v1-to-v2.ps1 `
@@ -34,7 +52,9 @@ pwsh -NoProfile -NonInteractive -File .\scripts\migrate-task-v1-to-v2.ps1 `
   -DryRun
 ```
 
-Review the source plan digest, target Contract digest, imported history references, and `dry_run_digest`. Formal migration requires both the reviewed digest and an explicit confirmation:
+Review the source plan digest, target Contract digest, imported history
+references and `dry_run_digest`. Formal migration requires the reviewed digest
+and explicit confirmation:
 
 ```powershell
 pwsh -NoProfile -NonInteractive -File .\scripts\migrate-task-v1-to-v2.ps1 `
@@ -45,12 +65,26 @@ pwsh -NoProfile -NonInteractive -File .\scripts\migrate-task-v1-to-v2.ps1 `
   -ConfirmMigration
 ```
 
-The command revalidates the complete v1 artifact, reacquires the v1 task lock, and verifies the digest again. It then atomically publishes one complete v2 task directory containing `contract.json`, `task.json`, and `events.jsonl`. The imported task starts as `paused`; the event records the v1 plan and history by digest/reference only and does not infer that a v2 capability has run.
+The command revalidates the complete v1 artifact, reacquires the v1 task lock,
+and verifies the digest again. It atomically publishes one complete v2 task
+directory containing `contract.json`, `task.json` and `events.jsonl`. The
+import starts as `paused`; history references and digests do not imply that
+any v2 capability or Qualification executed.
 
-The original v1 `plan.md` is never rewritten, moved, or deleted. After successful publication it is an immutable migration reference: the v2 artifact wins detection and the v1 stage command refuses further writes. A controlled pre-publish failure removes staging content and any empty migration-created parent directories, leaving the v1 workspace snapshot unchanged.
+The original `plan.md` is never rewritten, moved or deleted. Successful
+publication makes it an immutable migration reference; v2 artifact precedence
+then applies. A controlled pre-publish failure removes only migration staging
+and any empty migration-created parent directories, leaving the source
+workspace snapshot unchanged.
 
-## Rollback
+## Stop-loss
 
-- Before successful publication: fix the reported issue and rerun the dry-run; no v1 artifact needs restoration.
-- After successful publication: preserve the v2 task as read-only evidence. Do not delete it to reactivate v1 implicitly.
-- For unrelated or unmigrated new work, run `disable-v2` or set `HARNESS_PROTOCOL=v1` to force the v1 path. An existing v2 task still selects v2 by artifact and cannot be opened by v1 tooling.
+- Before publication: correct the reported issue and obtain a fresh dry-run.
+- After publication: preserve v2 state and history; never delete state to
+  reactivate v1.
+- `disable-v2` pauses new work and preserves existing v2 recovery.
+  `enable-v2` or `reset-auto` explicitly re-enables new work.
+- A known-good v2 distribution can be restored only with explicit approval.
+  `HARNESS_PROTOCOL=v1` is not a rollback path.
+- Physical legacy source removal still requires all ten current Sunset gates
+  and separate approval of the exact removal diff.

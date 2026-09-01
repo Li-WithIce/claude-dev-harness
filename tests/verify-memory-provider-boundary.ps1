@@ -19,6 +19,7 @@ Need 'docs/工具/agentmemory-sidecar.md' 'not a replacement for `.assistant` or
 Need 'skills/orchestrator/references/memory-provider-boundary.md' 'agentmemory is read-only historical recall'
 Need 'skills/orchestrator/references/memory-provider-boundary.md' 'WSL2 as the practical fast path'
 Need 'skills/obsidian-memory/SKILL.md' 'agentmemory Compatibility'
-Need 'skills/obsidian-memory/SKILL.md' 'harness install/update 不运行 `agentmemory connect`'
+Need 'skills/obsidian-memory/SKILL.md' 'or runs connect during Harness installation.'
+Need 'skills/obsidian-memory/SKILL.md' 'Never update lifecycle pointers or task state through Memory.'
 if ($failures.Count -gt 0) { $failures | ForEach-Object { Write-Output "- $_" }; exit 1 }
 Write-Output 'Memory provider boundary verified.'

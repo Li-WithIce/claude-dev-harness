@@ -36,6 +36,7 @@
       "scripts/run-validation.ps1",
       "scripts/write-ordinary-ci-receipt.ps1",
       "tests/fixtures/tk02/**",
+      "tests/fixtures/tk03/**",
       "tests/fixtures/tk04/**",
       "tests/fixtures/v2/**",
       "tests/verify-change-contract.ps1",
@@ -99,6 +100,7 @@
     ],
     "tests": [
       "tests/fixtures/tk02/**",
+      "tests/fixtures/tk03/**",
       "tests/fixtures/tk04/**",
       "tests/fixtures/v2/**",
       "tests/verify-capability-extraction.ps1",

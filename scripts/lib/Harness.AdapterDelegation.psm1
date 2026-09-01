@@ -337,6 +337,8 @@ function Invoke-HarnessAdapterPrepareDelegation {
     param([Parameter(Mandatory)][Collections.IDictionary]$Request)
 
     $body = Assert-HarnessDelegationEnvelope -Envelope $Request -MessageType request -Operation prepare_delegation
+    # TK-03 retires the Stage-based ABI; retained implementation below is historical only.
+    Throw-HarnessAdapterRejection -Message 'v1-delegation-retired: use v2 governance; no legacy plan or backend is accessed'
     foreach ($name in @('repo_root','workspace_root','task_id','stage','skill','tool','tool_profile_id','mode','payload_json')) {
         if ($body[$name] -isnot [string]) { throw "prepare_delegation.$name must be a string" }
     }
@@ -412,6 +414,7 @@ function Invoke-HarnessAdapterCommitDelegation {
     param([Parameter(Mandatory)][Collections.IDictionary]$Request)
 
     $body = Assert-HarnessDelegationEnvelope -Envelope $Request -MessageType request -Operation commit_delegation
+    Throw-HarnessAdapterRejection -Message 'v1-delegation-retired: legacy delegation results cannot modify preserved history'
     foreach ($name in @('delegation_id','artifact_base64','session_id')) {
         if ($body[$name] -isnot [string]) { throw "commit_delegation.$name must be a string" }
     }

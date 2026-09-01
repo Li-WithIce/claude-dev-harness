@@ -165,6 +165,11 @@ Write-Output ("RepoRoot: {0}" -f $repoRootResolved)
 Write-Output ("PowerShell host: {0}" -f (Get-Process -Id $PID -ErrorAction Stop).Path)
 Write-Output ''
 
+if ($Suite -eq 'all' -and $manifestCatalog.Catalog.Contains('archived_tests')) {
+    foreach ($archived in @($manifestCatalog.Catalog.archived_tests)) {
+        Write-Output "[ARCHIVED / NOT_RUN] $archived (explicit legacy Manifest ownership; not a pass)"
+    }
+}
 foreach ($skip in $skips) {
     Write-Output ("[SKIP] {0}" -f $skip)
 }

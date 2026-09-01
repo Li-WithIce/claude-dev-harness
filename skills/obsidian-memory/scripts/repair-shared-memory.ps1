@@ -11,6 +11,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Reject before resolver imports, legacy reads, locks, or derived-state writes.
+[Console]::Error.WriteLine('v1-memory-repair-retired: preserve legacy history; use explicit paused migration maintenance.')
+exit 2
+
 . (Join-Path $PSScriptRoot 'resolve-shared-memory-paths.ps1')
 . (Join-Path $PSScriptRoot 'runtime-inbox-common.ps1')
 . (Join-Path $PSScriptRoot 'runtime-state-common.ps1')

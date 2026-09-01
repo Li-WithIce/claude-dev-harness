@@ -1,5 +1,58 @@
 ﻿# Canonical serializers and readers for shared runtime state.
-# `advance-stage.ps1` is the normal writer; repair only rebuilds missing or invalid derived state.
+# Retained v1 history only. Ordinary stage and repair entries are retired.
+
+function Assert-LegacyMemoryFlowPath {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $full = [IO.Path]::GetFullPath($Path)
+    $item = Get-Item -LiteralPath $full -Force -ErrorAction Stop
+    if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'legacy-history-path-invalid: explicit flow must be a regular file.'
+    }
+    $parent = [IO.Path]::GetDirectoryName($full)
+    while (-not [string]::IsNullOrWhiteSpace($parent)) {
+        $directory = Get-Item -LiteralPath $parent -Force -ErrorAction Stop
+        if (-not $directory.PSIsContainer -or ($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'legacy-history-path-invalid: explicit flow ancestor is not a regular directory.'
+        }
+        $next = [IO.Path]::GetDirectoryName($parent)
+        if ($next -ceq $parent) { break }
+        $parent = $next
+    }
+    return $full
+}
+
+function Test-LegacyMemoryHistoryPresent {
+    param([Parameter(Mandatory)][string]$VaultRoot, [string]$OrchestratorFlowPath = '')
+
+    # Metadata only. Invalid, inaccessible, or reparse paths are not absence.
+    function Get-HistoryBoundaryItem([string]$Path, [bool]$Container, [bool]$AllowMissing) {
+        try { $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop }
+        catch [System.Management.Automation.ItemNotFoundException] {
+            if ($AllowMissing) { return $null }
+            throw
+        }
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.PSIsContainer -ne $Container) {
+            throw 'legacy-history-path-invalid: historical boundary has a reparse or wrong-type path.'
+        }
+        return $item
+    }
+
+    $null = Get-HistoryBoundaryItem $VaultRoot $true $false
+    foreach ($parent in @('运行时', 'orchestration', '工作流', '配置')) {
+        $null = Get-HistoryBoundaryItem (Join-Path $VaultRoot $parent) $true $true
+    }
+    $present = $false
+    foreach ($relative in @('运行时/当前任务.md', '运行时/恢复索引.md', '运行时/中断任务.md', '运行时/上次会话.md', 'orchestration/current-flow.md')) {
+        if ($null -ne (Get-HistoryBoundaryItem (Join-Path $VaultRoot $relative) $false $true)) { $present = $true }
+    }
+    if ($null -ne (Get-HistoryBoundaryItem (Join-Path $VaultRoot '运行时/tasks') $true $true)) { $present = $true }
+    if (-not [string]::IsNullOrWhiteSpace($OrchestratorFlowPath)) {
+        $null = Assert-LegacyMemoryFlowPath -Path $OrchestratorFlowPath
+        $present = $true
+    }
+    return $present
+}
 
 $script:CanonicalRuntimeStages = @('PLAN', 'PLAN_REVIEW', 'IMPLEMENT', 'CODE_REVIEW', 'TEST', 'DONE')
 

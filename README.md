@@ -1,11 +1,11 @@
 # Requirement-Safe Thin Harness v2
 
-Windows 优先的轻量工程 harness。新任务先经过 Requirement Gate，再按风险选择 Ask、Direct、Governed 或 Critical；清晰低风险工作直接修改并验证，高风险工作才按需增加持久状态、Evidence、Approval、回滚和独立审查。既有 v1 `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST` 任务继续按 artifact 自动识别、恢复和完成，不会被隐式迁移或删除。
+Windows 优先的轻量工程 harness。新任务先经过 Requirement Gate，再按风险选择 Ask、Direct、Governed 或 Critical。当前 TK-03 源码仅接受 v2 新任务与恢复；旧 v1 task 只作为显式迁移/历史维护输入，不会被隐式迁移或删除。
 
 ## 当前交付状态
 
-- **v2 public opt-in implementation complete**：Requirement Gate、执行 profile、v2 Task State / Evidence / Approval / Audit、v1/v2 共存与迁移，以及工作区级 `enable-v2` 和 `core` / `governed` / `full` 生命周期已进入公共工程交付范围。
-- 普通工作区的默认 `auto` 仍继续 fail-closed 到 v1；需要主动试用的新任务可执行一次工作区级 `enable-v2`，之后正常打开 Codex Desktop，不需要保留环境变量。Default Promotion、零配置 Auto 默认 v2 和 v1 retirement 均是后续里程碑。已有任务始终按现有 v2 `task.json` 或 v1 `plan.md` artifact 继续原协议，不会被偏好配置隐式迁移。
+- TK-03 当前源码契约是 v2-only：新任务缺省进入 v2；无效/不可用的 Runtime Default Decision 阻断 `auto`；`disable-v2` 暂停新工作，不回退 v1。
+- 这是用户确认的架构变更，不代表已部署到真实工作区或通过 Release Gate。Qualification、Promotion、Canary、Stable 未由 TK-03 执行；物理删除旧源码仍须十项 Sunset gate 和 exact removal diff 的独立授权。详见 [TK-03 契约](docs/architecture/tk03-v2-only-transition.md)。
 - 入口和架构已经瘦身；本页不声明性能已接近 Bare。
 
 ## 快速开始
@@ -19,25 +19,25 @@ pwsh -File .\install.ps1 `
   -Preset core
 ```
 
-`core` 是新工作区的最小推荐安装；`governed` 增加规划与审计能力，`full` 再加入共享记忆和 team 等可选能力。安装和更新只要求 PowerShell 与 Git，不要求 Node.js。
+`core` 只安装 v2 入口与保护 Hook；`governed` 增加规划与审计，`full` 再提供 Memory、md-html、adapter 等可选能力。三者均不安装 v1 shim、阶段技能或旧任务镜像。历史 v1-only `workflow-team` 不在 full 的当前清单内。安装和更新只要求 PowerShell 与 Git；JavaScript Hook 执行仍需要 Node.js。
 
 ### 2. 用 Codex 桌面打开项目
 
-默认兼容用法可直接用 Codex 桌面打开 `D:\my-project`，无需设置 `HARNESS_PROTOCOL` 或手工选择 execution profile；当前没有 Runtime Default Decision 时，普通 `auto` 路径进入 v1。要让这个项目的新任务显式使用 v2，只需执行一次：
+用 Codex 桌面打开 `D:\my-project`，直接描述需求。新工作不要求设置 `HARNESS_PROTOCOL`；缺省 `auto` 仅可进入 v2。协议与止损命令如下：
 
 ```powershell
 # 只读查看当前新任务协议选择
 pwsh -File .assistant\entry\task.ps1 protocol
 
-# 项目级公共 opt-in；随后可正常打开 Codex Desktop，无需环境变量
+# 显式启用 v2 新工作（也可解除暂停）
 pwsh -File .assistant\entry\task.ps1 enable-v2
 
-# 恢复 Runtime Default 驱动的 auto，或立即让新任务止损到 v1
+# reset 恢复 v2-only auto 准入；disable 暂停新工作
 pwsh -File .assistant\entry\task.ps1 reset-auto
 pwsh -File .assistant\entry\task.ps1 disable-v2
 ```
 
-选择保存在默认不入 Git 的 `.assistant/config/protocol.json`，install、update 和 uninstall 都保留它。优先级固定为：已有 v1/v2 artifact；显式维护覆盖或 `HARNESS_PROTOCOL`；工作区配置；有效的 `.assistant/runtime/protocol-default.json`；v1 fallback。`enable-v2` 是独立可用的项目级 opt-in。
+选择保存在用户持有的 `.assistant/config/protocol.json`，install/update/uninstall 均保留它。新配置 `harness-protocol-config/v2` 使用 `new_task_protocol=auto|v2` 与 `new_work=enabled|paused`。合法旧 auto/v2 配置保持原 bytes；旧 v1 配置被拒绝，不能被重新解释为 v2 授权。已有有效 v2 artifact 始终优先；无效 v2 或仅有旧 plan 时 fail closed。
 
 ### 3. 直接描述需求
 
@@ -52,7 +52,7 @@ pwsh -File .assistant\entry\task.ps1 disable-v2
 
 只读请求使用 Inspect，保持零写入。`quick` / `workflow` 仅是 Direct / Governed 的兼容别名，不是第二套规则。
 
-默认加载面只包含宿主级 Overlay 和短协议 Bootstrap；完整 v1 路由表、Ask 十项退出条件、Inbox、Recovery 与阶段规则只有在 artifact/protocol detector 选择 v1 后才从 `entry-router` / `orchestrator` 懒加载。Codex 会读取 workspace `AGENTS.md`，所以全局文件保持纯 Overlay；Claude 不消费该文件，因此其全局 `CLAUDE.md` 携带同一短 Bootstrap，但不再注入完整 v1 合同。
+默认加载面只有 Host Overlay 和短 Bootstrap。新请求先解析一次准入（显式 v2 也受 pause 控制），再就地分类；不扫描 task/current，也不加载旧 entry-router/orchestrator。Codex 从 workspace `AGENTS.md` 读取契约，Claude global `CLAUDE.md` 携带相同 Bootstrap。
 
 恢复语义保持兼容：明确“继续”或“恢复并执行”才推进；只问状态时保持只读；裸“恢复一下”/`resume` 若意图不明则 ask。
 
@@ -71,7 +71,7 @@ Windows 启动链使用绝对 System32 Windows PowerShell 与安装时固化的 
 - 每个 linked worktree 都要以自己的路径单独安装，例如 `-WorkspaceRoot D:\repo-worktrees\feature-a`；不要复制父工作区的 `.assistant/runtime/current.json` 或 live runtime。
 - 真正的 Git submodule 继续使用父 workspace；独立嵌套仓库即使通过 `git init --separate-git-dir` 保存 metadata，也会按自己的 worktree root 隔离安装，不继承父 current、task 或 Approval。
 - v2 持久任务状态当前只在 Windows 上提供物理工作区锁身份；非 Windows、junction/symlink/folder-mount 祖先与其他 reparse 路径会明确 fail closed，不会退化为词法路径锁。
-- 新任务需要立即回到 v1 路由时，运行 `.assistant\entry\task.ps1 disable-v2`；一次性维护止损也可设置 `HARNESS_PROTOCOL=v1`。两者都不会删除或降级已有 v2 task；卸载安装器托管资产请单独运行 `uninstall.ps1`，它会保留用户的协议选择。
+- 止损时运行 `.assistant\entry\task.ps1 disable-v2`，暂停新工作；已有 v2 task 的只读状态和恢复不受影响。`enable-v2` 或 `reset-auto` 显式重新准入。`HARNESS_PROTOCOL=v1` 已退休，不再是回滚开关。分发回滚只能使用另行授权的已知良好 v2 版本。
 - 快速上手、Requirement Gate 和持久治理分别见 [`docs/quick-start.md`](docs/quick-start.md)、[`docs/requirement-gate.md`](docs/requirement-gate.md)、[`docs/governed-work.md`](docs/governed-work.md)。
 
 ## Optional Context Providers
@@ -81,32 +81,20 @@ Context providers 是可选辅助输入，不是 workflow 真相源。内置权�
 ## 维护者与显式持久任务命令
 
 ```powershell
-# 只读查看 v2 恢复状态或协议判定
-pwsh -File .assistant\entry\task.ps1 status
+# 只读 v2 协议/状态
 pwsh -File .assistant\entry\task.ps1 protocol -TaskId {task_id}
+pwsh -File .assistant\entry\task.ps1 status -TaskId {task_id}
 
-# Codex-only 默认路径：ExpectedStage 是调用方刚读取的 frontmatter stage
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage>
-
-# 显式指定 profile，backend 从 profile.backend 解析
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Profile harness-default-codex
-
-# 仍可显式切到其他合法 backend
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Tool claudecode
-
-# TEST 按 Conclusion 进入 DONE / IMPLEMENT，可省略 -Tool
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage TEST
-
-# 新建/切换 workflow task：不推进 stage，只同步并显式激活 current
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -SyncOnly -ActivateCurrent
-
-# 单独校验任务产物
-pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId {task_id}
+# 仅在用户明确授权继续执行时恢复已存在的 v2 task
+pwsh -File .assistant\entry\task.ps1 resume-and-execute -TaskId {task_id}
 ```
 
-## v1 兼容工作流
+旧 plan 必须通过显式 migration dry-run、审核其 digest、再确认导入 `paused`；
+不能用退休的阶段命令释放或恢复旧指针。任务级状态写入仍受 v2 Policy/Approval/Evidence 约束。
 
-以下内容仅适用于 artifact detector 识别为 v1 的 workflow task。v2 的唯一生命周期真相源是 `.assistant/runtime/tasks/<task-id>/task.json`；`Direct` 路径不创建持久任务状态。
+## 历史 v1 工作流（不再执行）
+
+以下至“当前仓库清单”之前的 v1 阶段/镜像说明保留作历史阅读，不再是当前执行指令。普通 Runtime 不选择 v1，安装不分发这些 shim，`advance-stage.ps1` 在读旧 plan 或写镜像之前即拒绝。v2 生命周期真相源是 `.assistant/runtime/tasks/<task-id>/task.json`；显式迁移另见 [迁移指南](docs/migration/v1-to-v2.md)。
 
 ### 新任务入口模式路由
 
@@ -213,7 +201,7 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 - mirror 始终同步实际 stage；active advance 更新 current，background advance 不抢 current；active `DONE` 将 current 重置为 canonical idle，background `DONE` 不改 current
 - runtime ladder 任一步失败都返回非零并追加 `[writeback-fallback]`；只有明确继续 / 切换并执行 workflow 时，resume/switch 才处理 fallback 并用相同 `TaskId/ExpectedStage -SyncOnly` 幂等重放
 
-## v1 的 `.assistant`、`docs/tasks`、validator、git 职责
+## 历史 v1 的 `.assistant`、`docs/tasks`、validator、git 职责
 
 ### `docs/tasks/{task_id}/`
 
@@ -279,15 +267,15 @@ artifact drift 属于 advisory-first 检查，不是硬 gate：
 - `.assistant/` 里的通用协议若需要进入仓库，应先提升到 `docs/工作流/`、`skills/` 或 `vault-template/`，再由安装/更新路径渲染到目标工作区
 - 仓库历史里可能曾保留 shared-memory migration 相关 `.assistant` 文件；当前索引不再跟踪 `.assistant/` 内容
 
-## v1 历史 Phase 能力（兼容保留）
+## v1 历史 Phase 能力（仅保留维护源码）
 
-当前仓库仍保留 Phase 1-7 与 shared-memory v2 能力，供已有 v1 任务兼容使用。这些约束不再按 phase 单独罗列，而是并入对应的 v1 真相源：
+仓库保留 Phase 1-7 与 shared-memory v2 的历史说明和维护源码；不再用于普通任务执行，下面的链接仅用于理解既有产物：
 
 - plan metadata（`read_first` / `convergence` / `artifacts`）与 review `-Quality` 4-dim score（`completeness` / `consistency` / `accuracy` / `depth`）：见 [`skills/orchestrator/references/lite-writing-guide.md`](skills/orchestrator/references/lite-writing-guide.md) 与 [`docs/工作流/quality-rubric.md`](docs/工作流/quality-rubric.md)
 - `PreCompact` 自检与 single-writer 写回（append 走 `append-runtime-inbox.ps1`，非 append 写回只委托 `advance-stage.ps1`）：见 [`skills/orchestrator/SKILL.md`](skills/orchestrator/SKILL.md)、[`skills/workflow-team/SKILL.md`](skills/workflow-team/SKILL.md) 与 [`docs/工作流/single-writer-precompact.md`](docs/工作流/single-writer-precompact.md)
 - team auto mode 环境变量固定为 `HARNESS_AUTO`；长会话恢复优先看已存在 runtime 指针，full vault 项目再读 `.assistant/工作流/长会话恢复.md`；`spec.md` 可选 `front_keywords`
 
-## v1 持久工作流与维护入口
+## 历史 v1 命令说明（普通生命周期已退休）
 
 ### 安装、状态与 v1 阶段维护
 
@@ -392,14 +380,14 @@ pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite core -
 三档口径：
 
 - `quick`：只跑 `git diff --check` 和 `tests/verify-lite-footprint.ps1`，适合 README / 文档小修后的快速回归。
-- `core`：跑 `git diff --check`、v1/v2 核心协议、Requirement/route/TaskState/Evidence/Approval/兼容迁移、行为 eval、CI 路由、artifact/runtime/install 合同与基础 workflow/skill/tool checks；Memory、Team、md-html、Codex adapter 和 Provider 重型验证由 changed optional 或 `all` 执行。
+- `core`：跑 `git diff --check`、v2 准入/止损/恢复、Requirement/Policy/TaskState/Evidence/Approval、显式兼容迁移、行为 eval、CI 路由与安装合同；被 Manifest 标记的历史 v1 生命周期测试为 archived/not_run，不计入通过数。
 - `all`：跑 `git diff --check` 加除 `verify-installation.ps1` 外所有 `tests/verify-*.ps1`；需要安装验证时额外传 `-WorkspaceRoot`。
 
 `-CoreGroup` 只允许与 `-Suite core` 一起使用，默认值 `all` 从 tracked Manifest catalog 保持 54 个 core 脚本及其顺序；五个可单独执行的分组依次为 `entry-lifecycle`（14）、`evaluation-release`（14）、`install-evidence`（3）、`governance-approval`（3）和 `harness-contracts`（20）。从 Windows PowerShell 5.1 进入时，该参数也会透明转交给 PowerShell 7 runner。
 
 GitHub Actions 的普通 PR 路径由五路 `pr-core-checks` matrix、`changed-optional` 和最终 core 安装回滚组成。所有普通 PR job 都 checkout 精确 PR HEAD，并分别上传一个 `thin-harness-ordinary-ci-receipt/v1` 单文件 artifact；receipt 只含 PR/run、base/head/checkout SHA、固定 check identity、outcome 与 UTC 时间，不含 prompt、credential、raw trace/log 或私人绝对路径。最终 `pr-core` 只有在五个分组精确为 `success` 时才继续；`pr-core-checks` 的每个 matrix leg 与最终 `pr-core` job 上限均为 45 分钟，`changed-optional` 上限为 30 分钟。其他 CI 维护合同见 [`docs/release/default-promotion-gates.md`](docs/release/default-promotion-gates.md)。
 
-协议解析先认已有 v2 `task.json` / 合法 v1 `plan.md` artifact，再看显式维护覆盖或 `HARNESS_PROTOCOL`，随后读取严格的工作区 `.assistant/config/protocol.json`。只有新任务最终仍为 `auto` 时才读取版本无关、Evidence 无关的 `.assistant/runtime/protocol-default.json`；它严格验证 schema、digest、绑定固定 Runtime 路径集的 Source Identity、可选 workspace/expiry 绑定和实际 required capabilities，并且只观察当前 Decision 要求的能力。Decision 缺失或无效时回退 v1；`disable-v2` / `HARNESS_PROTOCOL=v1` 永久保留为止损开关。
+协议解析先认已有有效 v2 `task.json`；仅有旧 plan 则提示显式迁移，不读取内容。新任务先验证工作区准入，再使用 `auto|v2` 偏好。`auto` 下缺少 Decision 使用 v2 缺省；存在但无效/不可用的 Decision 必须阻断。Runtime 仍不消费完整 Qualification report，源码默认不等于 Release 或 Sunset Gate 通过。
 
 ### 跑完整 verify 套件
 

@@ -7,6 +7,105 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Split-Path -Parent $P
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 . (Join-Path $PSScriptRoot 'fixture-test-common.ps1')
 
+# TK-03 active contract: historical G14 data remains readable, but current
+# Runtime must never restore the retired v1 route/lifecycle. The original
+# producer/lifecycle verifier below is retained verbatim and is not executed.
+$retirementChecks = 0
+function Assert-Retirement([bool]$Condition,[string]$Label) {
+    if (-not $Condition) { throw "TK-03 stop-loss retirement check failed: $Label" }
+    $script:retirementChecks++
+    Write-Output "[PASS] $Label"
+}
+function Complete-RetirementProcess($Handle) {
+    try {
+        if (-not $Handle.Process.WaitForExit(30000)) { $Handle.Process.Kill($true); throw 'retirement fixture process timed out' }
+        return [ordered]@{code=$Handle.Process.ExitCode;output=$Handle.StdOut.GetAwaiter().GetResult().Trim();error=$Handle.StdErr.GetAwaiter().GetResult().Trim()}
+    } finally { $Handle.Process.Dispose() }
+}
+function Invoke-RetirementTask([string[]]$Arguments) {
+    return Complete-RetirementProcess (Start-RepoProcess -UserProfile $retirementProfile -WorkingDirectory $retirementWorkspace -ScriptPath (Join-Path $RepoRoot 'scripts/task.ps1') -Arguments ($Arguments + @('-RepoRoot',$RepoRoot,'-WorkspaceRoot',$retirementWorkspace,'-AsJson')))
+}
+function Get-RetirementSnapshot {
+    return (@(Get-ChildItem -LiteralPath $retirementWorkspace -Force -Recurse | ForEach-Object {
+        $value=if($_.PSIsContainer){'directory'}else{(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash}
+        [IO.Path]::GetRelativePath($retirementWorkspace,$_.FullName)+'|'+$value
+    } | Sort-Object) -join "`n")
+}
+$retirementParent=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\','/')
+$retirementName='tk03-stop-loss-retirement-'+[guid]::NewGuid().ToString('N')
+$retirementRoot=Join-Path $retirementParent $retirementName
+$retirementWorkspace=Join-Path $retirementRoot 'workspace'
+$retirementProfile=Join-Path $retirementRoot 'profile'
+$retirementProtocol=$env:HARNESS_PROTOCOL
+try {
+    [void][IO.Directory]::CreateDirectory($retirementWorkspace)
+    [void][IO.Directory]::CreateDirectory($retirementProfile)
+    $compatSchema=Get-Content -LiteralPath (Join-Path $RepoRoot 'schemas/v1-stop-loss-report.schema.json') -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable
+    $fixedObjects=@($compatSchema,$compatSchema.properties.source,$compatSchema.properties.source.properties.input_digests,$compatSchema.properties.execution,$compatSchema.properties.lifecycle,$compatSchema.properties.results,$compatSchema.definitions.sourceState,$compatSchema.definitions.routeProbe)
+    Assert-Retirement ([string]$compatSchema['$schema'] -ceq 'http://json-schema.org/draft-07/schema#' -and @($fixedObjects | Where-Object {$_.additionalProperties -ne $false}).Count -eq 0) 'historical G14 Schema remains strict Draft 7'
+    Assert-Retirement (@($compatSchema.definitions.nullableDigest.oneOf).Count -eq 2 -and [string]$compatSchema.definitions.nullableDigest.oneOf[0]['$ref'] -ceq '#/definitions/digest' -and [string]$compatSchema.definitions.nullableDigest.oneOf[1].type -ceq 'null') 'historical nullableDigest remains exactly digest-or-null'
+    $nullableSchema=[ordered]@{'$schema'='http://json-schema.org/draft-07/schema#';definitions=$compatSchema.definitions;'$ref'='#/definitions/nullableDigest'} | ConvertTo-Json -Depth 100 -Compress
+    foreach($scalar in @('null',('"sha256:'+('0'*64)+'"'))) {
+        Assert-Retirement (Test-Json -Json $scalar -Schema $nullableSchema -ErrorAction Stop) 'historical null and SHA-256 scalar bytes remain accepted'
+    }
+    Assert-Retirement (-not (Test-Json -Json '"not-a-digest"' -Schema $nullableSchema -ErrorAction SilentlyContinue)) 'historical nullableDigest still rejects arbitrary strings'
+    $compatModule=Import-Module (Join-Path $RepoRoot 'scripts/lib/Harness.RolloutEvidence.psm1') -Force -PassThru
+    $expected=[ordered]@{probe='existing-v1-artifact';requested_protocol='v2';detected_protocol='v1';selected_protocol='v1';preference_source='existing-artifact';reason_code='existing-v1-plan';expected_write_kind='none';existing_artifact=$true}
+    $digest='sha256:'+('0'*64)
+    $probe=[ordered]@{probe='existing-v1-artifact';status='pass';exit_code=0L;requested_protocol='v2';detected_protocol='v1';selected_protocol='v1';preference_source='existing-artifact';reason_code='existing-v1-plan';expected_write_kind='none';unexpected_writes=0L;artifact_digest_before=$digest;artifact_digest_after=$digest;command_digest=$digest;output_digest=$digest}
+    & $compatModule {param($P,$E) Assert-V1StopLossRouteProbe -Probe $P -Expected $E} $probe $expected
+    Assert-Retirement $true 'historical portable probe reader still interprets its v1 contract as historical v1'
+    foreach($field in @('artifact_digest_before','artifact_digest_after')) {
+        $probe[$field]='not-a-digest';$rejected=$false
+        try { & $compatModule {param($P,$E) Assert-V1StopLossRouteProbe -Probe $P -Expected $E} $probe $expected } catch { $rejected=$true }
+        $probe[$field]=$digest
+        Assert-Retirement $rejected "portable historical reader rejects invalid $field"
+    }
+    $probe.selected_protocol='v2';$rejected=$false
+    try { & $compatModule {param($P,$E) Assert-V1StopLossRouteProbe -Probe $P -Expected $E} $probe $expected } catch { $rejected=$true }
+    Assert-Retirement $rejected 'historical v1 probe is not silently reinterpreted as a v2 pass'
+
+    $env:HARNESS_PROTOCOL='v1';$before=Get-RetirementSnapshot
+    $retired=Invoke-RetirementTask @('protocol')
+    Assert-Retirement ($retired.code -eq 2 -and $retired.error -match 'v1-protocol-retired' -and (Get-RetirementSnapshot) -ceq $before) 'current explicit v1 new-task route rejects without writes'
+    $env:HARNESS_PROTOCOL='auto'
+    $current=Invoke-RetirementTask @('protocol')
+    Assert-Retirement ($current.code -eq 0 -and ($current.output|ConvertFrom-Json).selected_protocol -ceq 'v2' -and (Get-RetirementSnapshot) -ceq $before) 'current auto selects v2 without creating a task or mirror'
+    $paused=Invoke-RetirementTask @('disable-v2')
+    Assert-Retirement ($paused.code -eq 0) 'disable-v2 pauses new work successfully'
+    $configPath=Join-Path $retirementWorkspace '.assistant/config/protocol.json'
+    $configText=Get-Content -LiteralPath $configPath -Raw -Encoding utf8
+    $config=$configText|ConvertFrom-Json
+    $pausePaths=@(Get-ChildItem -LiteralPath $retirementWorkspace -Recurse -Force | ForEach-Object {[IO.Path]::GetRelativePath($retirementWorkspace,$_.FullName).Replace('\','/')} | Sort-Object)
+    Assert-Retirement ($config.new_work -ceq 'paused' -and (Test-Json -Json $configText -SchemaFile (Join-Path $RepoRoot 'schemas/protocol-config-v2.schema.json')) -and ($pausePaths -join "`n") -ceq (@('.assistant','.assistant/config','.assistant/config/protocol.json') -join "`n")) 'stop-loss writes only v2 pause config, not a v1 fallback or runtime mirror'
+    $before=Get-RetirementSnapshot;$env:HARNESS_PROTOCOL='v2'
+    $blocked=Invoke-RetirementTask @('create','-TaskId','blocked-stop-loss','-Contract','absent.json')
+    Assert-Retirement ($blocked.code -ne 0 -and $blocked.error -match 'new-work-not-admitted' -and (Get-RetirementSnapshot) -ceq $before) 'explicit v2 cannot bypass pause and creates no new task'
+    $plan=Join-Path $retirementWorkspace 'docs/tasks/retired-stop-loss/plan.md'
+    [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($plan))
+    [IO.File]::WriteAllText($plan,'locked historical plan sentinel',[Text.UTF8Encoding]::new($false))
+    $before=Get-RetirementSnapshot
+    $lock=[IO.File]::Open($plan,'Open','ReadWrite','None')
+    try {
+        $legacy=Invoke-RetirementTask @('protocol','-TaskId','retired-stop-loss')
+        Assert-Retirement ($legacy.code -eq 2 -and $legacy.error -match 'legacy-task-requires-explicit-migration') 'existing locked v1 history requests explicit migration without being read'
+        $stage=Complete-RetirementProcess (Start-RepoProcess -UserProfile $retirementProfile -WorkingDirectory $retirementWorkspace -ScriptPath (Join-Path $RepoRoot 'scripts/advance-stage.ps1') -Arguments @('-RepoRoot',$RepoRoot,'-WorkspaceRoot',$retirementWorkspace,'-TaskId','retired-stop-loss','-ExpectedStage','PLAN'))
+        Assert-Retirement ($stage.code -eq 2 -and $stage.error -match 'v1-lifecycle-retired') 'the first retired lifecycle transition rejects before reading the locked plan'
+    } finally { $lock.Dispose() }
+    Assert-Retirement ((Get-RetirementSnapshot) -ceq $before) 'legacy route and lifecycle rejection preserve every fixture byte and directory'
+    Write-Output "STATUS: PASS ($retirementChecks current retirement/historical compatibility checks; G14 producer and successful v1 lifecycle not_run)"
+} finally {
+    if($null -eq $retirementProtocol){Remove-Item Env:HARNESS_PROTOCOL -ErrorAction Ignore}else{$env:HARNESS_PROTOCOL=$retirementProtocol}
+    Remove-Module Harness.RolloutEvidence -ErrorAction Ignore
+    $contained=[IO.Path]::GetFullPath($retirementRoot)
+    if(-not $contained.StartsWith($retirementParent+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($contained) -cne $retirementName){throw 'retirement fixture cleanup escaped its root'}
+    if(Test-Path -LiteralPath $contained){Remove-Item -LiteralPath $contained -Recurse -Force}
+}
+exit 0
+
+# Retained historical implementation below. Successful v1 qualification is
+# not part of TK-03 active validation; full report/digest compatibility remains
+# covered independently by verify-rollout-evidence.ps1.
 $script:checks = [Collections.Generic.List[string]]::new(); $script:failures = [Collections.Generic.List[string]]::new()
 function Check([bool]$Condition,[string]$Pass,[string]$Fail) { if ($Condition) { $script:checks.Add($Pass) } else { $script:failures.Add($Fail) } }
 function Get-BytesDigest([byte[]]$Bytes) { return 'sha256:' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant() }

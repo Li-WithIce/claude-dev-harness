@@ -4,7 +4,7 @@
   "source_basis": "git-index-blob/v1",
   "classification": {
     "path": "kernel-component-classification.json",
-    "sha256": "sha256:ae37d16fb04190ed5ae7afb9e21e194d618c789011f8bcc0dd63ac05716235cd"
+    "sha256": "sha256:476af67707949bbaae504353d44a44f0fd7057853d105f70daacc7b20d7cd754"
   },
   "metric_contract": {
     "powershell": "powershell-token-lines/v1",
@@ -43,11 +43,11 @@
       "path": "runtime-hooks/claude/stop.js",
       "layer": "a3-adapter",
       "language": "javascript",
-      "raw_sha256": "sha256:d689414e01de7feb2be26a69d7ac794a76a687274e43e4d1d18beabefac2516d",
-      "physical_loc": 173,
-      "nonblank_loc": 155,
-      "executable_loc": 93,
-      "maximum_line_length": 272,
+      "raw_sha256": "sha256:05475d49549e6deefbf8aa36ed28ddf2e13b952405283b5b305ad796a2ff1a31",
+      "physical_loc": 33,
+      "nonblank_loc": 31,
+      "executable_loc": 30,
+      "maximum_line_length": 184,
       "tcb_included": false,
       "kernel_api_operations": []
     },
@@ -55,11 +55,11 @@
       "path": "runtime-hooks/claude/userpromptsubmit.js",
       "layer": "a3-adapter",
       "language": "javascript",
-      "raw_sha256": "sha256:3cc8e7ff1da0e139c074ce9d513badd1af436746ed4a5fc3602d41ef677ca19f",
+      "raw_sha256": "sha256:441a796b2e4b6c4531492be05deebd84f6cc48e97fc4c66b9bd429a09babcd37",
       "physical_loc": 57,
       "nonblank_loc": 49,
       "executable_loc": 49,
-      "maximum_line_length": 208,
+      "maximum_line_length": 227,
       "tcb_included": false,
       "kernel_api_operations": []
     },
@@ -133,10 +133,10 @@
     "adapter_count": 9,
     "powershell_count": 6,
     "javascript_count": 3,
-    "executable_loc": 1078,
+    "executable_loc": 1015,
     "maximum_adapter_executable_loc": 196,
     "threshold_breaches": 0
   },
   "digest_algorithm": "canonical-json/v1",
-  "inventory_digest": "sha256:db4eeff608d1c93fcfd31e28cf5f07da8bab598a9c69a608b77a5e70c259b2b8"
+  "inventory_digest": "sha256:2620a9004b848e50d5b9facc83d247ebc64032a48f93e08b47a02bd2cbac3218"
 }

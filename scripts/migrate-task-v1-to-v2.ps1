@@ -82,7 +82,7 @@ function New-MigrationContract {
 
 function Get-MigrationMaterial {
     param([string]$RepoRoot,[string]$WorkspaceRoot,[string]$TaskId,[string]$ExpectedStage)
-    $resolution=Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -RequestedProtocol auto
+    $resolution=Get-HarnessLegacyMigrationSource -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId
     if ([string]$resolution.detected_protocol -cne 'v1') { throw "migration requires an existing v1 task; detected=$($resolution.detected_protocol)" }
     if ([string]$resolution.v1_stage -cne $ExpectedStage) { throw "ExpectedV1Stage mismatch: expected=$ExpectedStage actual=$($resolution.v1_stage)" }
     if ((Get-V1CurrentTaskId -WorkspaceRoot $WorkspaceRoot) -ceq $TaskId) { throw 'active v1 task cannot be migrated; pause or switch away first' }
@@ -124,7 +124,7 @@ try {
     $WorkspaceRoot=(Resolve-Path -LiteralPath $WorkspaceRoot).Path
     Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Path.psm1') -Force -ErrorAction Stop
     Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.AtomicWrite.psm1') -Force -ErrorAction Stop
-    Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1') -Force -ErrorAction Stop
+    Import-Module (Join-Path $RepoRoot 'modules\legacy-v1\Harness.LegacyMigration.psm1') -Force -ErrorAction Stop
     Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.AtomicWrite.psm1') -Force -ErrorAction Stop
     . (Join-Path $RepoRoot 'scripts\lite-artifact-parser.ps1')
     if ($TaskId -cnotmatch '^(?!(?:none|idle|unknown)$)[a-z0-9][a-z0-9-]{0,63}$') { throw "invalid task id: $TaskId" }
