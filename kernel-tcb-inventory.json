@@ -201,7 +201,7 @@
     },
     {
       "path": "scripts/lib/Harness.AtomicWrite.psm1",
-      "sha256": "sha256:75ecd19863a1bb73af3943acc58908a1739481448189091ee9330b64d65a93ed",
+      "sha256": "sha256:9053cd3ccb5d5600beae402362f808258fcf97780ec7a0e23357962c98dbcdd2",
       "layer": "k0-trust-primitive",
       "trust_paths": [
         "distribution",
@@ -217,9 +217,9 @@
         "task-cli",
         "workspace-bootstrap"
       ],
-      "physical_loc": 133,
-      "nonblank_loc": 122,
-      "executable_loc": 122
+      "physical_loc": 134,
+      "nonblank_loc": 123,
+      "executable_loc": 123
     },
     {
       "path": "scripts/lib/Harness.CanonicalJson.psm1",
@@ -406,7 +406,7 @@
     },
     {
       "path": "scripts/lib/Harness.Recovery.psm1",
-      "sha256": "sha256:758d93538895d657e68330b51f45419d536bbf22d0f6b2b90cec82ed478fcc21",
+      "sha256": "sha256:c38d94ffc337333badb7d27668b14805ae269b9275a5dd92b2098da17c103e34",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
@@ -414,9 +414,9 @@
       "root_ids": [
         "task-cli"
       ],
-      "physical_loc": 66,
-      "nonblank_loc": 61,
-      "executable_loc": 61
+      "physical_loc": 70,
+      "nonblank_loc": 64,
+      "executable_loc": 64
     },
     {
       "path": "scripts/lib/Harness.Requirement.psm1",
@@ -1547,20 +1547,20 @@
   "unresolved_dependencies": [],
   "totals": {
     "file_count": 29,
-    "physical_loc": 10333,
-    "nonblank_loc": 9409,
-    "executable_loc": 9352,
+    "physical_loc": 10338,
+    "nonblank_loc": 9413,
+    "executable_loc": 9356,
     "runtime_file_count": 21,
-    "runtime_executable_loc": 2987,
+    "runtime_executable_loc": 2991,
     "distribution_file_count": 18,
-    "distribution_executable_loc": 7691,
+    "distribution_executable_loc": 7692,
     "duplicate_edge_count": 0,
     "artifact_count": 39,
     "artifact_bytes": 143030
   },
   "budget": {
-    "baseline_executable_loc": 2987,
-    "current_executable_loc": 2987,
+    "baseline_executable_loc": 2991,
+    "current_executable_loc": 2991,
     "delta": 0,
     "covered_growth": 0,
     "status": "within-baseline",

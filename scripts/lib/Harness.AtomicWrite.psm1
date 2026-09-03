@@ -22,7 +22,8 @@ function Write-HarnessAtomicText {
         [Parameter(Mandatory)][AllowEmptyString()][string]$Content
     )
 
-    $currentDigest = (Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $Path) ?? 'missing'
+    $currentDigest = Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $Path
+    if ($null -eq $currentDigest) { $currentDigest = 'missing' }
     return Write-HarnessAtomicBytes -WorkspaceRoot $WorkspaceRoot -SourceBytes ([System.Text.UTF8Encoding]::new($false).GetBytes($Content)) -Path $Path `
         -ExpectedSourceDigest (Get-HarnessSha256Text -Content $Content) -ExpectedCurrentDigest $currentDigest
 }

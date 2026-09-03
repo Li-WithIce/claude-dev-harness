@@ -82,7 +82,7 @@ function Assert-AuthorizationReason([Collections.IDictionary]$Report,[Collection
 function New-StructuralDecision([string]$Workspace,[string]$Phase) {
     $scope=if($Phase-ceq'canary-candidate'){'workspace-canary'}else{'release-default'}
     $expires=if($Phase-ceq'canary-candidate'){[Nullable[datetimeoffset]]([datetimeoffset]::UtcNow.AddHours(1))}else{[Nullable[datetimeoffset]]$null}
-    return & $script:runtimeDefaultModule {param($Root,$Work,$Mode,$Revision,$Expiry)New-HarnessRuntimeDefaultDecisionDocument -RepoRoot $Root -WorkspaceRoot $Work -Scope $Mode -SourceRevision $Revision -ExpiresAtUtc $Expiry} $RepoRoot $Workspace $scope ([string]$script:sourceState.revision) $expires
+    return & $script:runtimeDefaultModule {param($Root,$Work,$Mode,$Expiry)New-HarnessRuntimeDefaultDecisionDocument -RepoRoot $Root -WorkspaceRoot $Work -Scope $Mode -ExpiresAtUtc $Expiry} $RepoRoot $Workspace $scope $expires
 }
 function Invoke-StructuralTransaction([string]$Workspace,[string]$InputPath,[string]$Phase,[byte[]]$ReportBytes,[byte[]]$AuthorizationBytes,[int]$FaultAfter=0) {
     $reportDocument=[Text.UTF8Encoding]::new($false,$true).GetString($ReportBytes)|ConvertFrom-Json -AsHashtable -Depth 100
