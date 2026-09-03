@@ -12,7 +12,7 @@ historical receipt bytes. TK-05 adds the strict four-operation Adapter Kernel
 API, makes the exact nine current A3 paths thin, and binds their raw source and
 executable LOC through `adapter-inventory/v1`. TK-07 removes duplicated Runtime
 validation, projection, and task-state machinery while keeping the same public
-contracts. Its honestly reached Runtime closure is 2991 executable LOC, below
+contracts. Its honestly reached Runtime closure is 2995 executable LOC, below
 the terminal 3000-line target, with no budget exception. A later
 boundary change requires an explicit Architecture Decision or Change Contract
 that states the reason, TCB impact, new trust assumptions, alternatives,
@@ -269,7 +269,7 @@ does not depend on a formatter version.
 The terminal target is **Runtime transitive executable LOC < 3000**. TK-00 did
 not claim that target; its generated baseline was 6151 executable LOC. TK-07
 now satisfies the target and ratchets the generated current-tree baseline to
-**2991** executable LOC. It remains a ratchet:
+**2995** executable LOC. It remains a ratchet:
 
 - default growth is rejected by `-Check`;
 - an exception must identify added lines, reason, new trust assumption,
@@ -294,14 +294,14 @@ remains a compatibility CLI outside selected ordinary reachability. TK-03 then
 reduces selected v2 Runtime reachability to 6075 without physically deleting
 the retained migration bridge. TK-06 changes only the Distribution trust path.
 TK-07 deletes duplicated implementation inside the honestly measured Runtime
-closure, reaches 2991 executable LOC, and lowers the baseline to that exact
+closure, reaches 2995 executable LOC, and lowers the baseline to that exact
 generated value with delta zero and no exception. The baseline is a generated
 observation bound by verifier checks, not a permanent architectural constant.
 
 The bounded TK-07 Base-to-Head review uses the unchanged inventory algorithm.
 PR #12 Head measured 6075 executable lines across 22 Runtime files, with a
 976-character maximum physical line, 51 lines over 300 characters, 656
-semicolon characters, and 140 multi-semicolon lines. TK-07 measures 2991 lines
+semicolon characters, and 140 multi-semicolon lines. TK-07 measures 2995 lines
 across 21 Runtime files, with corresponding source-density values of 500, 37,
 418, and 103. The verifier ratchets those Head density values so the reduction
 cannot be recreated later by packing more statements onto physical lines.

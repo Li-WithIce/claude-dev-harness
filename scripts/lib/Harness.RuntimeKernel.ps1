@@ -220,7 +220,6 @@ function Invoke-HarnessKernelProcess {
     $info.RedirectStandardInput = $null -ne $StandardInput
     $info.StandardOutputEncoding = [Text.UTF8Encoding]::new($false,$true)
     $info.StandardErrorEncoding = [Text.UTF8Encoding]::new($false,$true)
-    if ($null -ne $StandardInput) { $info.StandardInputEncoding = [Text.UTF8Encoding]::new($false) }
     if ($CleanGitEnvironment) {
         foreach ($name in @($info.Environment.Keys)) {
             if ([string]$name -like 'GIT_*') { [void]$info.Environment.Remove([string]$name) }
@@ -231,14 +230,19 @@ function Invoke-HarnessKernelProcess {
         $info.Environment['GIT_CONFIG_GLOBAL'] = if ($IsWindows) { 'NUL' } else { '/dev/null' }
         $info.Environment['GIT_ATTR_NOSYSTEM'] = '1'
     }
-    foreach ($argument in $Arguments) { $info.ArgumentList.Add([string]$argument) }
+    if ($null -ne $info.PSObject.Properties['ArgumentList']) { foreach ($argument in $Arguments) { $info.ArgumentList.Add([string]$argument) } }
+    else {
+        Assert-HarnessKernelCondition (-not @($Arguments | Where-Object { ([string]$_).Contains('"') -or ([string]$_).EndsWith('\') }).Count) 'legacy process arguments contain an unsupported quote or trailing separator'
+        $info.Arguments = (@($Arguments | ForEach-Object { '"' + [string]$_ + '"' }) -join ' ')
+    }
     $process = $null
     try {
         $process = [Diagnostics.Process]::Start($info)
         $stdout = $process.StandardOutput.ReadToEndAsync()
         $stderr = $process.StandardError.ReadToEndAsync()
         if ($null -ne $StandardInput) {
-            $process.StandardInput.Write($StandardInput)
+            $inputBytes = [Text.UTF8Encoding]::new($false).GetBytes($StandardInput)
+            $process.StandardInput.BaseStream.Write($inputBytes,0,$inputBytes.Length)
             $process.StandardInput.Close()
         }
         if (-not $process.WaitForExit($TimeoutMilliseconds)) {

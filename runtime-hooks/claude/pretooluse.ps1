@@ -33,11 +33,11 @@ try {
         $actionKind = if ($toolName -ceq 'Bash') { 'shell' } else { 'apply_patch' }
     } else {
         $actionKind = 'file_mutation'
-        $changedPaths = @(@('file_path','path','notebook_path') | ForEach-Object {
-            if (-not $toolInput.Contains($_)) { continue }
-            if ($toolInput[$_] -isnot [string]) { throw "$toolName PreToolUse target path must be a string" }
-            if (-not [string]::IsNullOrWhiteSpace([string]$toolInput[$_])) { [string]$toolInput[$_] }
-        })
+        foreach ($key in @('file_path','path','notebook_path')) {
+            if (-not $toolInput.Contains($key)) { continue }
+            if ($toolInput[$key] -isnot [string]) { throw "$toolName PreToolUse target path must be a string" }
+            if (-not [string]::IsNullOrWhiteSpace([string]$toolInput[$key])) { $changedPaths += [string]$toolInput[$key] }
+        }
         if ($changedPaths.Count -eq 0) { throw "$toolName PreToolUse input is missing target path" }
     }
 

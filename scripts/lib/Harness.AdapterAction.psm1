@@ -5,12 +5,12 @@ Import-Module (Join-Path $PSScriptRoot 'Harness.ControlledWrite.psm1') -Force -E
 function Assert-HarnessApplyPatchRelativePath {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Path)
 
-    Assert-HarnessKernelCondition (-not [string]::IsNullOrEmpty($Path) -and $Path -ceq $Path.Trim() -and $Path.IndexOfAny([char[]]@(0,10,13)) -lt 0) 'direct apply_patch input contains an invalid target path'
-    Assert-HarnessKernelCondition (-not $Path.StartsWith('/',[StringComparison]::Ordinal) -and -not $Path.StartsWith('\',[StringComparison]::Ordinal) -and $Path -cnotmatch '^[A-Za-z]:' -and -not $Path.Contains(':')) 'direct apply_patch input requires a relative target path'
+    if ([string]::IsNullOrEmpty($Path) -or $Path -cne $Path.Trim() -or $Path.IndexOfAny([char[]]@(0,10,13)) -ge 0) { throw 'direct apply_patch input contains an invalid target path' }
+    if ($Path.StartsWith('/',[StringComparison]::Ordinal) -or $Path.StartsWith('\',[StringComparison]::Ordinal) -or $Path -cmatch '^[A-Za-z]:' -or $Path.Contains(':')) { throw 'direct apply_patch input requires a relative target path' }
     $invalid = @([regex]::Split($Path,'[\\/]') | Where-Object {
         [string]::IsNullOrEmpty($_) -or $_ -cin @('.','..') -or $_.IndexOfAny([char[]](0..31 + @(60,62,34,124,63,42))) -ge 0 -or $_.EndsWith('.',[StringComparison]::Ordinal) -or $_.EndsWith(' ',[StringComparison]::Ordinal)
     } | Select-Object -First 1)
-    Assert-HarnessKernelCondition (-not $invalid.Count) 'direct apply_patch input contains an invalid target path'
+    if ($invalid.Count) { throw 'direct apply_patch input contains an invalid target path' }
 }
 
 function Get-HarnessApplyPatchChangedPaths {
@@ -20,7 +20,7 @@ function Get-HarnessApplyPatchChangedPaths {
     if ($text.Contains([char]13)) { throw 'direct apply_patch input has an invalid patch envelope' }
     if ($text.EndsWith("`n`n",[StringComparison]::Ordinal)) { throw 'direct apply_patch input has an invalid patch envelope' }
     $lines = $text.TrimEnd([char]10).Split([char]10)
-    Assert-HarnessKernelCondition ($lines.Count -ge 2 -and $lines[0].Trim() -ceq '*** Begin Patch' -and $lines[-1].Trim() -ceq '*** End Patch') 'direct apply_patch input has an invalid patch envelope'
+    if ($lines.Count -lt 2 -or $lines[0].Trim() -cne '*** Begin Patch' -or $lines[-1].Trim() -cne '*** End Patch') { throw 'direct apply_patch input has an invalid patch envelope' }
 
     $paths,$keys,$mode,$state,$environmentSeen = [Collections.Generic.List[string]]::new(),[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase),'','none',$false
 
@@ -28,7 +28,7 @@ function Get-HarnessApplyPatchChangedPaths {
         $line = [string]$lines[$index]
         $trimmed = $line.Trim()
         if (-not $mode -and $trimmed.StartsWith('*** Environment ID:',[StringComparison]::Ordinal)) {
-            Assert-HarnessKernelCondition (-not $environmentSeen -and -not [string]::IsNullOrWhiteSpace($trimmed.Substring(19))) 'direct apply_patch input contains an invalid Environment ID directive'
+            if ($environmentSeen -or [string]::IsNullOrWhiteSpace($trimmed.Substring(19))) { throw 'direct apply_patch input contains an invalid Environment ID directive' }
             $environmentSeen = $true
             continue
         }
@@ -36,7 +36,7 @@ function Get-HarnessApplyPatchChangedPaths {
         $header = if ($mode -ceq 'Update File') { $line.TrimEnd() } else { $trimmed }
         $match = [regex]::Match($header,'^\*\*\* (?<mode>Add File|Update File|Delete File): (?<path>.*)$')
         if ($match.Success) {
-            Assert-HarnessKernelCondition ($mode -cne 'Update File' -or $state -cin @('have','eof')) 'direct apply_patch input contains an empty Update File hunk'
+            if ($mode -ceq 'Update File' -and $state -cnotin @('have','eof')) { throw 'direct apply_patch input contains an empty Update File hunk' }
             $mode = $match.Groups['mode'].Value
             $path = $match.Groups['path'].Value
             Assert-HarnessApplyPatchRelativePath -Path $path
@@ -46,18 +46,18 @@ function Get-HarnessApplyPatchChangedPaths {
         }
 
         if ($mode -ceq 'Add File' -and $line.StartsWith('+',[StringComparison]::Ordinal)) { continue }
-        Assert-HarnessKernelCondition ($mode -ceq 'Update File') 'direct apply_patch input contains an invalid patch hunk'
+        if ($mode -cne 'Update File') { throw 'direct apply_patch input contains an invalid patch hunk' }
         if ($state -ceq 'eof' -and [string]::IsNullOrWhiteSpace($line)) { continue }
         if ($state -ceq 'eof') { throw 'direct apply_patch input contains content after End of File' }
         if ($header -ceq '*** End of File') {
-            Assert-HarnessKernelCondition ($state -ceq 'have') 'direct apply_patch input contains an invalid End of File directive'
+            if ($state -cne 'have') { throw 'direct apply_patch input contains an invalid End of File directive' }
             $state = 'eof'
             continue
         }
 
         $move = [regex]::Match($header,'^\*\*\* Move to: (?<path>.*)$')
         if ($move.Success) {
-            Assert-HarnessKernelCondition ($state -ceq 'none') 'direct apply_patch input contains an invalid Move to directive'
+            if ($state -cne 'none') { throw 'direct apply_patch input contains an invalid Move to directive' }
             $path = $move.Groups['path'].Value
             Assert-HarnessApplyPatchRelativePath -Path $path
             if ($keys.Add($path.Replace('/','\'))) { $paths.Add($path) }
@@ -65,18 +65,18 @@ function Get-HarnessApplyPatchChangedPaths {
             continue
         }
         if ($header -ceq '@@' -or $header.StartsWith('@@ ',[StringComparison]::Ordinal)) {
-            Assert-HarnessKernelCondition ($state -cne 'need') 'direct apply_patch input contains an empty Update File chunk'
+            if ($state -ceq 'need') { throw 'direct apply_patch input contains an empty Update File chunk' }
             $state = 'need'
             continue
         }
-        Assert-HarnessKernelCondition (-not $header.StartsWith('*** ',[StringComparison]::Ordinal)) 'direct apply_patch input contains an unsupported patch directive'
+        if ($header.StartsWith('*** ',[StringComparison]::Ordinal)) { throw 'direct apply_patch input contains an unsupported patch directive' }
         if ($line.Length -eq 0 -or $line[0] -in @(' ','+','-')) {
             $state = 'have'
             continue
         }
         throw 'direct apply_patch input contains an invalid Update File hunk'
     }
-    Assert-HarnessKernelCondition ($mode -cne 'Update File' -or $state -cin @('have','eof')) 'direct apply_patch input contains an empty Update File hunk'
+    if ($mode -ceq 'Update File' -and $state -cnotin @('have','eof')) { throw 'direct apply_patch input contains an empty Update File hunk' }
     if (-not $paths.Count) { throw 'direct apply_patch input is missing a file operation' }
     return $paths.ToArray()
 }
