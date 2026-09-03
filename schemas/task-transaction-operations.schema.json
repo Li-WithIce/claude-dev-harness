@@ -1,0 +1,81 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/task-transaction-operations.schema.json",
+  "type": "object",
+  "required": ["operation", "steps"],
+  "properties": {
+    "operation": { "enum": ["create", "transition", "resume", "approve", "verify"] },
+    "steps": { "type": "array" }
+  },
+  "allOf": [
+    { "if": { "properties": { "operation": { "const": "create" } } }, "then": { "properties": { "steps": { "$ref": "#/definitions/create" }, "operation_context": { "properties": { "pointer_action": { "enum": ["unchanged", "activated"] } } } } } },
+    { "if": { "properties": { "operation": { "const": "transition" } } }, "then": { "properties": { "steps": { "$ref": "#/definitions/transition" }, "operation_context": { "properties": { "pointer_action": { "enum": ["unchanged", "updated", "cleared"] } } } } } },
+    { "if": { "properties": { "operation": { "const": "resume" } } }, "then": { "properties": { "steps": { "$ref": "#/definitions/resume" }, "operation_context": { "properties": { "pointer_action": { "enum": ["activated", "updated"] } } } } } },
+    { "if": { "properties": { "operation": { "const": "approve" } } }, "then": { "properties": { "steps": { "$ref": "#/definitions/approve" }, "operation_context": { "properties": { "pointer_action": { "enum": ["unchanged", "updated"] } } } } } },
+    { "if": { "properties": { "operation": { "const": "verify" } } }, "then": { "properties": { "steps": { "$ref": "#/definitions/verify" }, "operation_context": { "properties": { "pointer_action": { "enum": ["unchanged", "updated", "cleared"] } } } } } },
+    {
+      "if": { "required": ["operation_context"] },
+      "then": {
+        "oneOf": [
+          { "$ref": "#/definitions/pointerUnchanged" },
+          { "$ref": "#/definitions/pointerActivated" },
+          { "$ref": "#/definitions/pointerUpdated" },
+          { "$ref": "#/definitions/pointerCleared" }
+        ]
+      }
+    }
+  ],
+  "definitions": {
+    "task": { "type": "object", "required": ["id", "action"], "properties": { "id": { "const": "task-state" }, "action": { "const": "write" } } },
+    "events": { "type": "object", "required": ["id", "action"], "properties": { "id": { "const": "event-log" }, "action": { "const": "write" } } },
+    "plan": { "type": "object", "required": ["id", "action"], "properties": { "id": { "const": "governed-plan" }, "action": { "const": "write" } } },
+    "approvalStep": { "type": "object", "required": ["id", "action"], "properties": { "id": { "const": "approval" }, "action": { "const": "write" } } },
+    "evidenceStep": { "type": "object", "required": ["id", "action"], "properties": { "id": { "const": "evidence" }, "action": { "const": "write" } } },
+    "pointerWrite": { "type": "object", "required": ["id", "action"], "properties": { "id": { "const": "current-pointer" }, "action": { "const": "write" } } },
+    "pointerMutation": { "type": "object", "required": ["id", "action"], "properties": { "id": { "const": "current-pointer" }, "action": { "enum": ["write", "delete"] } } },
+    "pointerUnchanged": {
+      "properties": {
+        "operation_context": { "properties": { "pointer_action": { "const": "unchanged" } } },
+        "steps": { "not": { "contains": { "properties": { "id": { "const": "current-pointer" } } } } }
+      }
+    },
+    "pointerActivated": {
+      "properties": {
+        "operation_context": { "properties": { "pointer_action": { "const": "activated" } } },
+        "steps": { "contains": { "properties": { "id": { "const": "current-pointer" }, "action": { "const": "write" }, "before_digest": { "type": "null" }, "before_content_base64": { "type": "null" } } } }
+      }
+    },
+    "pointerUpdated": {
+      "properties": {
+        "operation_context": { "properties": { "pointer_action": { "const": "updated" } } },
+        "steps": { "contains": { "properties": { "id": { "const": "current-pointer" }, "action": { "const": "write" }, "before_digest": { "$ref": "#/definitions/sha256" }, "before_content_base64": { "type": "string" } } } }
+      }
+    },
+    "pointerCleared": {
+      "properties": {
+        "operation_context": { "properties": { "pointer_action": { "const": "cleared" } } },
+        "steps": { "contains": { "properties": { "id": { "const": "current-pointer" }, "action": { "const": "delete" }, "before_digest": { "$ref": "#/definitions/sha256" }, "before_content_base64": { "type": "string" } } } }
+      }
+    },
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "create": { "oneOf": [
+      { "items": [{ "$ref": "#/definitions/task" }, { "$ref": "#/definitions/events" }], "minItems": 2, "maxItems": 2 },
+      { "items": [{ "$ref": "#/definitions/task" }, { "$ref": "#/definitions/events" }, { "$ref": "#/definitions/plan" }], "minItems": 3, "maxItems": 3 },
+      { "items": [{ "$ref": "#/definitions/task" }, { "$ref": "#/definitions/events" }, { "$ref": "#/definitions/pointerWrite" }], "minItems": 3, "maxItems": 3 },
+      { "items": [{ "$ref": "#/definitions/task" }, { "$ref": "#/definitions/events" }, { "$ref": "#/definitions/plan" }, { "$ref": "#/definitions/pointerWrite" }], "minItems": 4, "maxItems": 4 }
+    ] },
+    "transition": { "oneOf": [
+      { "items": [{ "$ref": "#/definitions/task" }, { "$ref": "#/definitions/events" }], "minItems": 2, "maxItems": 2 },
+      { "items": [{ "$ref": "#/definitions/task" }, { "$ref": "#/definitions/events" }, { "$ref": "#/definitions/pointerMutation" }], "minItems": 3, "maxItems": 3 }
+    ] },
+    "resume": { "items": [{ "$ref": "#/definitions/task" }, { "$ref": "#/definitions/events" }, { "$ref": "#/definitions/pointerWrite" }], "minItems": 3, "maxItems": 3 },
+    "approve": { "oneOf": [
+      { "items": [{ "$ref": "#/definitions/approvalStep" }, { "$ref": "#/definitions/task" }, { "$ref": "#/definitions/events" }], "minItems": 3, "maxItems": 3 },
+      { "items": [{ "$ref": "#/definitions/approvalStep" }, { "$ref": "#/definitions/task" }, { "$ref": "#/definitions/events" }, { "$ref": "#/definitions/pointerWrite" }], "minItems": 4, "maxItems": 4 }
+    ] },
+    "verify": { "oneOf": [
+      { "items": [{ "$ref": "#/definitions/evidenceStep" }, { "$ref": "#/definitions/task" }, { "$ref": "#/definitions/events" }], "minItems": 3, "maxItems": 3 },
+      { "items": [{ "$ref": "#/definitions/evidenceStep" }, { "$ref": "#/definitions/task" }, { "$ref": "#/definitions/events" }, { "$ref": "#/definitions/pointerMutation" }], "minItems": 4, "maxItems": 4 }
+    ] }
+  }
+}

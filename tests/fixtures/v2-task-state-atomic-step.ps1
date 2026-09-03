@@ -17,10 +17,9 @@ try {
     $step = Get-Content -LiteralPath $StepPath -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable -DateKind String -ErrorAction Stop
     $result = & $module {
         param($Root,$Id,$TransactionStep,$IsReplay)
-        $taskId = 'atomic-step-fixture'
-        $intentDigest = 'sha256:' + ('0' * 64)
-        $applied = Invoke-TransactionStep -WorkspaceRoot $Root -TransactionId $Id -TaskId $taskId -IntentDigest $intentDigest -Step $TransactionStep -AllowExistingClaim:$IsReplay
-        Remove-TransactionStepClaim -WorkspaceRoot $Root -TransactionId $Id -TaskId $taskId -IntentDigest $intentDigest -Step $TransactionStep -Claim $applied.Claim
+        $record = [pscustomobject]@{Journal=[ordered]@{transaction_id=$Id;task_id='atomic-step-fixture'};IntentDigest=('sha256:' + ('0' * 64))}
+        $applied = Invoke-TransactionStep -WorkspaceRoot $Root -Record $record -Step $TransactionStep -AllowExistingClaim:$IsReplay
+        Remove-TransactionStepClaim -WorkspaceRoot $Root -Record $record -Step $TransactionStep -Claim $applied.Claim
         return $applied.Result
     } $WorkspaceRoot $TransactionId $step ([bool]$Replay)
     Write-Output ([string]$result)

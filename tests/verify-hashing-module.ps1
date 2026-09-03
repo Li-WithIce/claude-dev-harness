@@ -30,6 +30,7 @@ $hashingRelative = 'scripts/lib/Harness.Hashing.psm1'
 $atomicRelative = 'scripts/lib/Harness.AtomicWrite.psm1'
 $requirementRelative = 'scripts/lib/Harness.Requirement.psm1'
 $runtimeDefaultRelative = 'scripts/lib/Harness.RuntimeDefault.psm1'
+$runtimeDefaultReaderRelative = 'scripts/lib/Harness.RuntimeDefaultReader.ps1'
 $compatMigrationRelatives = @(
     'scripts/assert-release-runner-boundary.ps1',
     'scripts/generate-entry-contract.ps1',
@@ -124,17 +125,20 @@ try {
     $hashingSource = [IO.File]::ReadAllText($hashingPath)
     $atomicSource = [IO.File]::ReadAllText($atomicPath)
     $requirementSource = [IO.File]::ReadAllText((Join-Path $RepoRoot $requirementRelative))
-    $runtimeDefaultSource = [IO.File]::ReadAllText((Join-Path $RepoRoot $runtimeDefaultRelative))
+    $runtimeDefaultSource = [IO.File]::ReadAllText((Join-Path $RepoRoot $runtimeDefaultRelative)) + [IO.File]::ReadAllText((Join-Path $RepoRoot $runtimeDefaultReaderRelative))
+    $runtimeKernelSource = [IO.File]::ReadAllText((Join-Path $RepoRoot 'scripts/lib/Harness.RuntimeKernel.ps1'))
     Check ($hashingSource -notmatch '(?i)canonical.?json|ConvertTo-Json|digest_algorithm') 'Hashing module contains no canonical JSON or object-digest algorithm' 'Hashing module leaked TK-01B-New behavior'
     Check ($atomicSource.Contains("Harness.Hashing.psm1",[StringComparison]::Ordinal) -and $atomicSource -notmatch '\bGet-FileHash\b|Security\.Cryptography\.SHA256') 'AtomicWrite delegates raw SHA-256 to canonical Hashing' 'AtomicWrite retains a parallel raw SHA-256 implementation'
-    Check ($requirementSource.Contains("Harness.Hashing.psm1",[StringComparison]::Ordinal) -and $requirementSource.Contains('ConvertTo-Json -Depth 30 -Compress',[StringComparison]::Ordinal) -and $requirementSource -notmatch '\bGet-FileHash\b|Security\.Cryptography\.SHA256|UTF8Encoding') 'Requirement preserves JSON bytes and delegates only final hashing' 'Requirement serialization changed or direct SHA-256 remained'
-    Check ($runtimeDefaultSource.Contains("Harness.Hashing.psm1",[StringComparison]::Ordinal) -and $runtimeDefaultSource.Contains("'scripts/lib/Harness.Hashing.psm1'",[StringComparison]::Ordinal) -and $runtimeDefaultSource -notmatch 'Security\.Cryptography\.SHA256|\bHashData\b') 'RuntimeDefault binds Hashing into Source Identity and delegates final hashing' 'RuntimeDefault source binding or SHA-256 delegation is incomplete'
+    Check ($requirementSource.Contains('Harness.RuntimeKernel.ps1',[StringComparison]::Ordinal) -and $runtimeKernelSource.Contains("Harness.Hashing.psm1",[StringComparison]::Ordinal) -and $requirementSource.Contains('ConvertTo-Json -Depth 30 -Compress',[StringComparison]::Ordinal) -and $requirementSource -notmatch '\bGet-FileHash\b|Security\.Cryptography\.SHA256|UTF8Encoding') 'Requirement preserves JSON bytes and delegates only final hashing' 'Requirement serialization changed or direct SHA-256 remained'
+    Check ($runtimeDefaultSource.Contains('Harness.RuntimeKernel.ps1',[StringComparison]::Ordinal) -and $runtimeKernelSource.Contains("Harness.Hashing.psm1",[StringComparison]::Ordinal) -and $runtimeDefaultSource.Contains("'scripts/lib/Harness.Hashing.psm1'",[StringComparison]::Ordinal) -and $runtimeDefaultSource -notmatch 'Security\.Cryptography\.SHA256|\bHashData\b') 'RuntimeDefault binds Hashing into Source Identity and delegates final hashing' 'RuntimeDefault source binding or SHA-256 delegation is incomplete'
 
     $missingCompatImports = @($compatMigrationRelatives | Where-Object {
         $source = [IO.File]::ReadAllText((Join-Path $RepoRoot $_))
-        -not ($source.Contains('Harness.Hashing.psm1',[StringComparison]::Ordinal) -and $source.Contains('Import-Module',[StringComparison]::Ordinal))
+        $direct = $source.Contains('Harness.Hashing.psm1',[StringComparison]::Ordinal) -and $source.Contains('Import-Module',[StringComparison]::Ordinal)
+        $shared = $source.Contains('Harness.RuntimeKernel.ps1',[StringComparison]::Ordinal) -and $runtimeKernelSource.Contains('Harness.Hashing.psm1',[StringComparison]::Ordinal)
+        -not ($direct -or $shared)
     })
-    Check ($missingCompatImports.Count -eq 0) 'every second-wave production caller has an explicit Hashing dependency' "TK-01B-Compat Hashing import is missing: $($missingCompatImports -join ', ')"
+    Check ($missingCompatImports.Count -eq 0) 'every second-wave production caller has a static Hashing dependency' "TK-01B-Compat Hashing dependency is missing: $($missingCompatImports -join ', ')"
 
     $productionPaths = @((Join-Path $RepoRoot 'harness.ps1')) + @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'scripts') -File -Recurse | Where-Object { $_.Extension -cin @('.ps1','.psm1') } | ForEach-Object FullName)
     $directShaViolations = [Collections.Generic.List[string]]::new()

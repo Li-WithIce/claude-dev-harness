@@ -1,0 +1,182 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/task-transaction.schema.json",
+  "title": "Task transaction journal compatibility envelope",
+  "oneOf": [
+    { "$ref": "#/definitions/currentJournal" },
+    { "$ref": "#/definitions/legacyJournal" }
+  ],
+  "definitions": {
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "nullableSha256": { "oneOf": [{ "$ref": "#/definitions/sha256" }, { "type": "null" }] },
+    "baseStepProperties": {
+      "id": { "type": "string", "minLength": 1, "pattern": "\\S" },
+      "relative_path": { "type": "string", "minLength": 1 },
+      "action": { "enum": ["write", "delete"] },
+      "before_digest": { "$ref": "#/definitions/nullableSha256" },
+      "after_digest": { "$ref": "#/definitions/nullableSha256" },
+      "content_base64": { "type": ["string", "null"] }
+    },
+    "currentStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "relative_path", "action", "before_digest", "before_content_base64", "after_digest", "content_base64"],
+      "properties": {
+        "id": { "$ref": "#/definitions/baseStepProperties/id" },
+        "relative_path": { "$ref": "#/definitions/baseStepProperties/relative_path" },
+        "action": { "$ref": "#/definitions/baseStepProperties/action" },
+        "before_digest": { "$ref": "#/definitions/baseStepProperties/before_digest" },
+        "before_content_base64": { "type": ["string", "null"] },
+        "after_digest": { "$ref": "#/definitions/baseStepProperties/after_digest" },
+        "content_base64": { "$ref": "#/definitions/baseStepProperties/content_base64" }
+      },
+      "allOf": [{ "$ref": "#/definitions/actionShape" }]
+    },
+    "legacyStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "relative_path", "action", "before_digest", "after_digest", "content_base64"],
+      "properties": {
+        "id": { "$ref": "#/definitions/baseStepProperties/id" },
+        "relative_path": { "$ref": "#/definitions/baseStepProperties/relative_path" },
+        "action": { "$ref": "#/definitions/baseStepProperties/action" },
+        "before_digest": { "$ref": "#/definitions/baseStepProperties/before_digest" },
+        "after_digest": { "$ref": "#/definitions/baseStepProperties/after_digest" },
+        "content_base64": { "$ref": "#/definitions/baseStepProperties/content_base64" }
+      },
+      "allOf": [{ "$ref": "#/definitions/actionShape" }]
+    },
+    "actionShape": {
+      "if": { "properties": { "action": { "const": "write" } } },
+      "then": {
+        "properties": {
+          "after_digest": { "$ref": "#/definitions/sha256" },
+          "content_base64": { "type": "string" }
+        }
+      },
+      "else": {
+        "properties": {
+          "before_digest": { "$ref": "#/definitions/sha256" },
+          "after_digest": { "type": "null" },
+          "content_base64": { "type": "null" }
+        }
+      }
+    },
+    "commonProperties": {
+      "transaction_id": { "type": "string", "pattern": "^txn_[0-9a-f]{32}$" },
+      "operation": { "enum": ["create", "transition", "verify", "approve", "resume"] },
+      "task_id": { "type": "string", "pattern": "^(?!(?:none|idle|unknown)$)[a-z0-9][a-z0-9-]{0,63}$" },
+      "expected_version": { "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 2147483646 }, { "type": "null" }] },
+      "status": { "enum": ["prepared", "applying", "failed", "committed", "recovered"] },
+      "completed_steps": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+      "failed_step": { "type": "string" },
+      "error": { "type": "string" },
+      "replay_command": { "type": "string", "minLength": 1 },
+      "created_at": { "type": "string", "minLength": 1 }
+    },
+    "pointerContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pointer_action"],
+      "properties": { "pointer_action": { "enum": ["unchanged", "activated", "updated", "cleared"] } }
+    },
+    "approvalContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approval_input_path", "pointer_action"],
+      "properties": {
+        "approval_input_path": { "type": "string", "minLength": 1 },
+        "pointer_action": { "enum": ["unchanged", "activated", "updated", "cleared"] }
+      }
+    },
+    "evidenceContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_input_path", "pointer_action"],
+      "properties": {
+        "evidence_input_path": { "type": "string", "minLength": 1 },
+        "pointer_action": { "enum": ["unchanged", "activated", "updated", "cleared"] }
+      }
+    },
+    "currentJournal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transaction_id", "operation", "task_id", "expected_version", "workspace_identity", "operation_context", "intent_digest", "status", "completed_steps", "failed_step", "error", "replay_command", "created_at", "steps"],
+      "properties": {
+        "transaction_id": { "$ref": "#/definitions/commonProperties/transaction_id" },
+        "operation": { "$ref": "#/definitions/commonProperties/operation" },
+        "task_id": { "$ref": "#/definitions/commonProperties/task_id" },
+        "expected_version": { "$ref": "#/definitions/commonProperties/expected_version" },
+        "workspace_identity": { "type": "string", "minLength": 1 },
+        "operation_context": { "type": "object" },
+        "intent_digest": { "$ref": "#/definitions/sha256" },
+        "status": { "$ref": "#/definitions/commonProperties/status" },
+        "completed_steps": { "$ref": "#/definitions/commonProperties/completed_steps" },
+        "failed_step": { "$ref": "#/definitions/commonProperties/failed_step" },
+        "error": { "$ref": "#/definitions/commonProperties/error" },
+        "replay_command": { "$ref": "#/definitions/commonProperties/replay_command" },
+        "created_at": { "$ref": "#/definitions/commonProperties/created_at" },
+        "steps": { "type": "array", "minItems": 2, "maxItems": 4, "items": { "$ref": "#/definitions/currentStep" } }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "operation": { "const": "create" } } },
+          "then": {
+            "properties": {
+              "expected_version": { "type": "null" },
+              "steps": { "items": { "properties": { "before_digest": { "type": "null" }, "before_content_base64": { "type": "null" } } } }
+            }
+          },
+          "else": {
+            "properties": {
+              "expected_version": { "type": "integer", "minimum": 1, "maximum": 2147483646 },
+              "steps": { "contains": { "properties": { "id": { "const": "task-state" }, "before_digest": { "$ref": "#/definitions/sha256" }, "before_content_base64": { "type": "string" } } } }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "operation": { "const": "approve" } } },
+          "then": { "properties": { "operation_context": { "$ref": "#/definitions/approvalContext" } } },
+          "else": {
+            "if": { "properties": { "operation": { "const": "verify" } } },
+            "then": { "properties": { "operation_context": { "$ref": "#/definitions/evidenceContext" } } },
+            "else": { "properties": { "operation_context": { "$ref": "#/definitions/pointerContext" } } }
+          }
+        },
+        {
+          "if": { "properties": { "operation": { "const": "approve" } } },
+          "then": { "properties": { "steps": { "contains": { "properties": { "id": { "const": "approval" }, "before_digest": { "type": "null" }, "before_content_base64": { "type": "null" } } } } } }
+        },
+        {
+          "if": { "properties": { "operation": { "const": "verify" } } },
+          "then": { "properties": { "steps": { "contains": { "properties": { "id": { "const": "evidence" }, "before_digest": { "type": "null" }, "before_content_base64": { "type": "null" } } } } } }
+        }
+      ]
+    },
+    "legacyJournal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transaction_id", "operation", "task_id", "expected_version", "status", "completed_steps", "failed_step", "error", "replay_command", "created_at", "steps"],
+      "properties": {
+        "transaction_id": { "$ref": "#/definitions/commonProperties/transaction_id" },
+        "operation": { "$ref": "#/definitions/commonProperties/operation" },
+        "task_id": { "$ref": "#/definitions/commonProperties/task_id" },
+        "expected_version": { "$ref": "#/definitions/commonProperties/expected_version" },
+        "status": { "enum": ["prepared", "applying", "failed", "recovered"] },
+        "completed_steps": { "$ref": "#/definitions/commonProperties/completed_steps" },
+        "failed_step": { "$ref": "#/definitions/commonProperties/failed_step" },
+        "error": { "$ref": "#/definitions/commonProperties/error" },
+        "replay_command": { "$ref": "#/definitions/commonProperties/replay_command" },
+        "created_at": { "$ref": "#/definitions/commonProperties/created_at" },
+        "steps": { "type": "array", "minItems": 2, "maxItems": 4, "items": { "$ref": "#/definitions/legacyStep" } }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "operation": { "const": "create" } } },
+          "then": { "properties": { "expected_version": { "type": "null" } } },
+          "else": { "properties": { "expected_version": { "type": "integer", "minimum": 1, "maximum": 2147483646 } } }
+        }
+      ]
+    }
+  }
+}

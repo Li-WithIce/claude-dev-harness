@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/host-capabilities.schema.json",
+  "title": "Harness host capabilities",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "product", "actual_version", "observation_status", "capabilities"],
+  "properties": {
+    "schema_version": { "enum": ["harness-host-capabilities/v1"] },
+    "product": { "enum": ["codex"] },
+    "actual_version": { "type": "string", "minLength": 1, "pattern": "\\S" },
+    "observation_status": { "enum": ["observed", "partial", "unavailable"] },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workspace_protocol_config", "structured_tool_events", "request_send_telemetry", "desktop_profile_isolation", "hook_status_query"],
+      "properties": {
+        "workspace_protocol_config": { "$ref": "#/definitions/capability" },
+        "structured_tool_events": { "$ref": "#/definitions/capability" },
+        "request_send_telemetry": { "$ref": "#/definitions/capability" },
+        "desktop_profile_isolation": { "$ref": "#/definitions/capability" },
+        "hook_status_query": { "$ref": "#/definitions/capability" }
+      }
+    }
+  },
+  "definitions": {
+    "capability": {
+      "oneOf": [
+        { "type": "boolean" },
+        { "enum": ["unknown", "unavailable"] }
+      ]
+    }
+  }
+}

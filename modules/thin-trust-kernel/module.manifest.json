@@ -30,6 +30,7 @@
       "scripts/lib/Harness.CanonicalJson.psm1",
       "scripts/lib/Harness.Hashing.psm1",
       "scripts/lib/Harness.Path.psm1",
+      "scripts/lib/Harness.RuntimeKernel.ps1",
       "tests/fixtures/tk00/**"
     ],
     "watch_paths": [

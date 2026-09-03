@@ -6,13 +6,7 @@ $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 function Get-HarnessSha256Bytes {
     [CmdletBinding()]
     param([Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
-
-    $sha256 = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        return 'sha256:' + ([System.BitConverter]::ToString($sha256.ComputeHash($Bytes))).Replace('-', '').ToLowerInvariant()
-    } finally {
-        $sha256.Dispose()
-    }
+    return 'sha256:' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
 }
 
 function Get-HarnessFileSha256 {

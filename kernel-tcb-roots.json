@@ -76,20 +76,29 @@
     { "path": "schemas/adapter-kernel-api.schema.json", "kind": "schema", "reason": "The strict four-operation Adapter request and response contract binds the public K1 boundary.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
     { "path": "schemas/audit-record.schema.json", "kind": "schema", "reason": "Policy-selected independent audit artifacts use this strict record shape.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
     { "path": "schemas/current-pointer.schema.json", "kind": "schema", "reason": "Current task projection and recovery use this strict pointer shape.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/decision-rights.schema.json", "kind": "schema", "reason": "Requirement decision ownership policy is validated before inspection.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
     { "path": "schemas/event.schema.json", "kind": "schema", "reason": "Task lifecycle event-log records are schema validated.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
     { "path": "schemas/evidence.schema.json", "kind": "schema", "reason": "Evidence Chain completion is bound to this strict document shape.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/host-capabilities.schema.json", "kind": "schema", "reason": "Host capability observations use one strict Runtime document shape.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
     { "path": "schemas/distribution-plan.schema.json", "kind": "schema", "reason": "Strict new Distribution desired-state contract validated before installation writes.", "owner_layer": "d1-distribution", "trust_paths": ["distribution"] },
     { "path": "schemas/install-profile.schema.json", "kind": "schema", "reason": "Strict Profile prevents undeclared transport fields or ambiguous asset grants.", "owner_layer": "d1-distribution", "trust_paths": ["distribution"] },
     { "path": "schemas/module-manifest-catalog-v1.schema.json", "kind": "schema", "reason": "Distribution validates the published Manifest identity set without executing the C2 constructor.", "owner_layer": "d1-distribution", "trust_paths": ["distribution"] },
     { "path": "schemas/module-manifest-v1.schema.json", "kind": "schema", "reason": "Frozen v1 Manifest schema validates descriptive capability requests consumed by Distribution.", "owner_layer": "d1-distribution", "trust_paths": ["distribution"] },
     { "path": "schemas/module-manifest.schema.json", "kind": "schema", "reason": "Frozen v0 Manifest schema validates compatibility metadata without inventing install authority.", "owner_layer": "d1-distribution", "trust_paths": ["distribution"] },
+    { "path": "schemas/mcp-write-file.schema.json", "kind": "schema", "reason": "The MCP adapter advertises and validates one strict controlled-write argument contract.", "owner_layer": "a3-adapter", "trust_paths": ["runtime"] },
+    { "path": "schemas/protected-actions.schema.json", "kind": "schema", "reason": "Core protected-action policy is strictly validated before evaluation.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
     { "path": "schemas/protected-actions-overlay.schema.json", "kind": "schema", "reason": "Workspace protected-action overlays cannot weaken core policy and are strictly validated.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
     { "path": "schemas/protocol-config.schema.json", "kind": "schema", "reason": "Workspace protocol configuration and Runtime Default inputs use strict validation.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
     { "path": "schemas/protocol-config-v2.schema.json", "kind": "schema", "reason": "TK-03 v2-only new-work admission and explicit pause must be strictly validated.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
     { "path": "schemas/runtime-default-admission.schema.json", "kind": "schema", "reason": "Current Runtime admits only v2 without rewriting the historical Decision Schema or digest.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
     { "path": "schemas/requirement-contract.schema.json", "kind": "schema", "reason": "Task creation and protected writes bind a clear Requirement Contract.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/requirement-inspection.schema.json", "kind": "schema", "reason": "Requirement inspection requests are validated by one strict input envelope.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
     { "path": "schemas/runtime-default-decision.schema.json", "kind": "schema", "reason": "Auto protocol selection consumes only this distilled version-neutral Runtime decision.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/runtime-policies.schema.json", "kind": "schema", "reason": "Runtime risk and execution policies are validated as one strict bundle.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/task-step-claim.schema.json", "kind": "schema", "reason": "Durable publication claims are validated before transaction recovery.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
     { "path": "schemas/task-state.schema.json", "kind": "schema", "reason": "Durable task state, replay, recovery, and protected writes validate this shape.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/task-transaction.schema.json", "kind": "schema", "reason": "Current and retained legacy journals share a strict compatibility envelope.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/task-transaction-operations.schema.json", "kind": "schema", "reason": "Transaction operations bind exact ordered step signatures declaratively.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
     { "path": "templates/v2/plan.md.template", "kind": "governance-template", "reason": "Plan-required Governed tasks create a Contract-bound plan from this template.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
     { "path": "vault-template/entry/AGENTS.md.template", "kind": "entry-template", "reason": "Runtime source identity binds the installed compatibility entry template until v1 Sunset gates are satisfied.", "owner_layer": "a3-adapter", "trust_paths": ["runtime", "distribution"] }
   ],
@@ -147,6 +156,15 @@
       "reason": "The Codex launcher invokes the installed rendered host adapter.",
       "resolution_limit": "The source path is a CLAUDE_HOME placeholder and resolves only after distribution rendering.",
       "reviewed_by_contract": "TK-00"
+    },
+    {
+      "from": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",
+      "to": "scripts/lib/Harness.RuntimeKernel.ps1",
+      "kind": "dynamic-import",
+      "expression": ". $kernel",
+      "reason": "The rendered Codex launcher reuses the counted K1 process primitive for bounded UTF-8 adapter invocation.",
+      "resolution_limit": "The tracked source contains a distribution placeholder, so the generic AST resolver cannot resolve the Runtime Kernel path.",
+      "reviewed_by_contract": "TK-05"
     }
   ],
   "external_dependencies": [
@@ -176,7 +194,7 @@
     }
   ],
   "budget": {
-    "baseline_executable_loc": 6151,
+    "baseline_executable_loc": 2987,
     "exceptions": []
   }
 }

@@ -11,27 +11,25 @@ $taskScript=Join-Path $RepoRoot 'scripts/task.ps1';$script:passes=[Collections.G
 function Check($Condition,$Pass,$Fail){if($Condition){$script:passes.Add($Pass)}else{$script:failures.Add($Fail)}}
 function Snapshot($Root){$items=@(Get-ChildItem -LiteralPath $Root -Force -Recurse);$entries=[Collections.Generic.List[string]]::new();foreach($item in @($items|Where-Object{$_.PSIsContainer})){$entries.Add('D|'+$item.FullName)};foreach($hash in @($items|Where-Object{-not$_.PSIsContainer}|Get-FileHash -Algorithm SHA256)){$entries.Add('F|'+$hash.Path+'|'+$hash.Hash)};return @($entries|Sort-Object)}
 function Same($Before,$After,$Pass,$Fail){Check (@(Compare-Object @($Before) @($After)).Count -eq 0) $Pass $Fail}
-function Start-Cli($Workspace,[string[]]$Arguments,$Fault='',$FaultBeforeFirstClaim='',$PreclaimReadyEvent='',$PreclaimReleaseEvent=''){
+function Start-Cli($Workspace,[string[]]$Arguments,$Fault='',$FaultBeforeFirstClaim='',$PreclaimDelay=''){
     $old=$env:HARNESS_PROTOCOL
     $oldFault=$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_AFTER_STEP
     $oldPreclaim=$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_FIRST_CLAIM
-    $oldReady=[Environment]::GetEnvironmentVariable('DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_READY_EVENT',[EnvironmentVariableTarget]::Process)
-    $oldRelease=[Environment]::GetEnvironmentVariable('DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_RELEASE_EVENT',[EnvironmentVariableTarget]::Process)
+    $oldDelay=$env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_DELAY_MS
     try{
         $env:HARNESS_PROTOCOL='v2'
         if($Fault){$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_AFTER_STEP=$Fault}else{Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_FAIL_AFTER_STEP -ErrorAction Ignore}
         if($FaultBeforeFirstClaim){$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_FIRST_CLAIM=$FaultBeforeFirstClaim}else{Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_FIRST_CLAIM -ErrorAction Ignore}
-        if($PreclaimReadyEvent){$env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_READY_EVENT=$PreclaimReadyEvent}else{Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_READY_EVENT -ErrorAction Ignore}
-        if($PreclaimReleaseEvent){$env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_RELEASE_EVENT=$PreclaimReleaseEvent}else{Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_RELEASE_EVENT -ErrorAction Ignore}
+        if($PreclaimDelay){$env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_DELAY_MS=$PreclaimDelay}else{Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_DELAY_MS -ErrorAction Ignore}
         return Start-RepoProcess -UserProfile $env:USERPROFILE -ScriptPath $taskScript -Arguments ($Arguments+@('-RepoRoot',$RepoRoot,'-WorkspaceRoot',$Workspace))
     }finally{
         if($null-eq$old){Remove-Item Env:HARNESS_PROTOCOL -ErrorAction Ignore}else{$env:HARNESS_PROTOCOL=$old}
         if($null-eq$oldFault){Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_FAIL_AFTER_STEP -ErrorAction Ignore}else{$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_AFTER_STEP=$oldFault}
         if($null-eq$oldPreclaim){Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_FIRST_CLAIM -ErrorAction Ignore}else{$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_FIRST_CLAIM=$oldPreclaim}
-        if($null-eq$oldReady){Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_READY_EVENT -ErrorAction Ignore}else{$env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_READY_EVENT=$oldReady}
-        if($null-eq$oldRelease){Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_RELEASE_EVENT -ErrorAction Ignore}else{$env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_RELEASE_EVENT=$oldRelease}
+        if($null-eq$oldDelay){Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_DELAY_MS -ErrorAction Ignore}else{$env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_DELAY_MS=$oldDelay}
     }
 }
+function Wait-NewPending($Workspace,$Before,$Handle){for($i=0;$i-lt200-and-not$Handle.Process.HasExited;$i++){$matches=@(Get-ChildItem -LiteralPath (Join-Path $Workspace '.assistant/runtime/failed-writes') -Filter 'txn_*.json' -File -ErrorAction SilentlyContinue|Where-Object{$Before-notcontains$_.BaseName});if($matches.Count){return $matches};Start-Sleep -Milliseconds 50};return @()}
 function Complete-Cli($Handle){if(-not$Handle.Process.WaitForExit(30000)){$Handle.Process.Kill($true);throw 'CLI timeout'};$r=[pscustomobject]@{ExitCode=$Handle.Process.ExitCode;StdOut=$Handle.StdOut.GetAwaiter().GetResult().Trim();StdErr=$Handle.StdErr.GetAwaiter().GetResult().Trim()};$Handle.Process.Dispose();return $r}
 function Invoke-Cli($Workspace,[string[]]$Arguments,$Fault='',$FaultBeforeFirstClaim=''){return Complete-Cli (Start-Cli $Workspace $Arguments $Fault $FaultBeforeFirstClaim)}
 function Read-Output($Result){if($Result.StdOut){return $Result.StdOut|ConvertFrom-Json -Depth 50 -DateKind String};return $null}
@@ -69,7 +67,7 @@ $volumeAlias=$null
 if($runningOnWindows){$root=[IO.Path]::GetPathRoot($workspace);$volumeOutput=@(& mountvol.exe $root /L 2>&1|ForEach-Object{[string]$_});$volumeExit=$LASTEXITCODE;$volumeMatch=[regex]::Match(($volumeOutput-join"`n"),'(?i)\\\\\?\\Volume\{[0-9a-f-]{36}\}\\');if($volumeExit-ne0-or-not$volumeMatch.Success){$script:unavailable.Add('Evidence volume alias fixture unavailable: mountvol did not return a volume GUID')}else{$volumeAlias=$volumeMatch.Value+$workspace.Substring($root.Length);if(-not(Test-Path -LiteralPath $volumeAlias -PathType Container)){$script:failures.Add('Evidence volume alias path does not exist')}}}else{$script:unavailable.Add('Evidence volume alias fixture requires Windows')}
 foreach($file in @('scripts/lib/Harness.Evidence.psm1','scripts/lib/Harness.TaskState.psm1','scripts/task.ps1','tests/verify-v2-evidence.ps1')){$path=Join-Path $RepoRoot $file;$tokens=$null;$errors=$null;[Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)|Out-Null;Check (@($errors).Count-eq 0) "$file parses" "$file parse failed";Check (Test-FileHasUtf8Bom $path) "$file has UTF-8 BOM" "$file lacks UTF-8 BOM"}
 $exports=@(Get-Command -Module Harness.Evidence|Select-Object -ExpandProperty Name|Sort-Object);Check (@(Compare-Object @('Get-HarnessEvidenceRevision','Resolve-HarnessEvidence') $exports).Count-eq 0) 'Evidence exports are exact' 'Evidence exports drifted';$evidenceResolve=Get-Command Resolve-HarnessEvidence -Module Harness.Evidence;Check (-not$evidenceResolve.Parameters.ContainsKey('PinnedRevision')) 'Evidence revision override is module-private' 'Evidence public API exposes a pinned-revision bypass'
-$evidenceSource=Get-Content -LiteralPath (Join-Path $RepoRoot 'scripts/lib/Harness.Evidence.psm1') -Raw -Encoding utf8;Check ($evidenceSource-match 'Environment\.Keys'-and$evidenceSource-match "-like 'GIT_\*'"-and$evidenceSource-match "GIT_CONFIG_NOSYSTEM'\] = '1'"-and$evidenceSource-match "GIT_CONFIG_GLOBAL'\]"-and$evidenceSource-match "GIT_ATTR_NOSYSTEM'\] = '1'"-and$evidenceSource-match "'config','--includes','--get-regexp','\^filter\\\.'"-and$evidenceSource-match "core\.fsmonitor=false"-and$evidenceSource-match "'--ignore-submodules=none','--no-ext-diff','--no-textconv','--binary'") 'Evidence Git inspection isolates config and disables clean/external diff drivers' 'Evidence Git inspection can inherit caller controls, filters, or external diff drivers'
+$evidenceSource=@('scripts/lib/Harness.Evidence.psm1','scripts/lib/Harness.RuntimeKernel.ps1')|ForEach-Object{Get-Content -LiteralPath (Join-Path $RepoRoot $_) -Raw -Encoding utf8};$evidenceSource=$evidenceSource-join"`n";Check ($evidenceSource-match 'Environment\.Keys'-and$evidenceSource-match "-like 'GIT_\*'"-and$evidenceSource-match "GIT_CONFIG_NOSYSTEM'\] = '1'"-and$evidenceSource-match "GIT_CONFIG_GLOBAL'\]"-and$evidenceSource-match "GIT_ATTR_NOSYSTEM'\] = '1'"-and$evidenceSource-match "'config','--includes','--get-regexp','\^filter\\\.'"-and$evidenceSource-match "core\.fsmonitor=false"-and$evidenceSource-match "'--ignore-submodules=none','--no-ext-diff','--no-textconv','--binary'") 'Evidence Git inspection isolates config and disables clean/external diff drivers' 'Evidence Git inspection can inherit caller controls, filters, or external diff drivers'
 Check ($evidenceSource.Contains("':(top,icase,literal,exclude).qoder'")-and$evidenceSource.Contains("':(top,icase,glob,exclude).qoder/**'")-and$evidenceSource.Contains("Test-HarnessEvidenceExcludedPath -Path `$_.Name -ExactPaths @()")) 'Evidence prunes the fixed untracked .qoder root before Git or fallback content reads' 'Evidence does not carry the fixed pre-read .qoder exclusion contract'
 foreach($taskId in $taskIds){Start-TaskVerifying $workspace $taskId $contracts[$taskId].Path -Activate:($taskId-ceq'pass-task')}
 
@@ -151,35 +149,20 @@ Check ($preclaimFault.ExitCode-eq2-and$preclaimMatch.Success-and$preclaimClaims.
 if($runningOnWindows){
     $writerEvidence=New-EvidenceFixture $workspace 'writer-preclaim-task' $contracts['writer-preclaim-task'].Digest 'pass'
     $writerPendingBefore=@(Get-ChildItem -LiteralPath (Join-Path $workspace '.assistant/runtime/failed-writes') -Filter 'txn_*.json' -File -ErrorAction SilentlyContinue|Select-Object -ExpandProperty BaseName)
-    $writerBarrierId=[guid]::NewGuid().ToString('N')
-    $writerReadyName="Local\dev-harness.task-state.preclaim.ready.$writerBarrierId"
-    $writerReleaseName="Local\dev-harness.task-state.preclaim.release.$writerBarrierId"
-    $writerReadyCreated=$false
-    $writerReleaseCreated=$false
-    $writerReadyEvent=$null
-    $writerReleaseEvent=$null
     $writerHandle=$null
     $writerDriftPath=Join-Path $workspace 'normal-writer-drift.txt'
     $writerArtifact=Join-Path $workspace 'docs/tasks/writer-preclaim-task/evidence.json'
     try{
-        $writerReadyEvent=[Threading.EventWaitHandle]::new($false,[Threading.EventResetMode]::ManualReset,$writerReadyName,[ref]$writerReadyCreated)
-        $writerReleaseEvent=[Threading.EventWaitHandle]::new($false,[Threading.EventResetMode]::ManualReset,$writerReleaseName,[ref]$writerReleaseCreated)
-        if(-not$writerReadyCreated-or-not$writerReleaseCreated-or$writerReadyEvent.WaitOne(0)-or$writerReleaseEvent.WaitOne(0)){throw 'Evidence preclaim barrier events were not created in a fresh unsignaled state'}
-        $writerHandle=Start-Cli $workspace @('verify','-TaskId','writer-preclaim-task','-ExpectedVersion','3','-Evidence',$writerEvidence.Path,'-AsJson') '' '' $writerReadyName $writerReleaseName
-        try{
-            $writerReadyObserved=$writerReadyEvent.WaitOne(30000)
-            $writerExitedBeforeRelease=$writerHandle.Process.HasExited
-            $writerPendingMatches=@(Get-ChildItem -LiteralPath (Join-Path $workspace '.assistant/runtime/failed-writes') -Filter 'txn_*.json' -File -ErrorAction SilentlyContinue|Where-Object{$writerPendingBefore -notcontains $_.BaseName})
-            $writerPendingCount=$writerPendingMatches.Count
-            $writerPending=$(if($writerPendingCount-eq1){$writerPendingMatches[0]}else{$null})
-            $writerJournal=$(if($null-ne$writerPending){Get-Content -LiteralPath $writerPending.FullName -Raw -Encoding utf8|ConvertFrom-Json -AsHashtable -DateKind String}else{$null})
-            $writerJournalPrepared=$null-ne$writerJournal-and[string]$writerJournal.status-ceq'prepared'-and@($writerJournal.completed_steps).Count-eq0
-            $writerClaimsBefore=@(Get-ChildItem -LiteralPath (Join-Path $workspace '.assistant/runtime/locks') -Filter 'step_*.json' -File -ErrorAction SilentlyContinue)
-            $writerArtifactBefore=Test-Path -LiteralPath $writerArtifact
-            if($writerReadyObserved){[IO.File]::WriteAllText($writerDriftPath,"drift before first claim`n",[Text.UTF8Encoding]::new($false))}
-        }finally{
-            [void]$writerReleaseEvent.Set()
-        }
+        $writerHandle=Start-Cli $workspace @('verify','-TaskId','writer-preclaim-task','-ExpectedVersion','3','-Evidence',$writerEvidence.Path,'-AsJson') '' '' '10000'
+        $writerPendingMatches=@(Wait-NewPending $workspace $writerPendingBefore $writerHandle)
+        $writerReadyObserved=$writerPendingMatches.Count-eq1-and-not$writerHandle.Process.HasExited
+        $writerPendingCount=$writerPendingMatches.Count
+        $writerPending=$(if($writerPendingCount-eq1){$writerPendingMatches[0]}else{$null})
+        $writerJournal=$(if($null-ne$writerPending){Get-Content -LiteralPath $writerPending.FullName -Raw -Encoding utf8|ConvertFrom-Json -AsHashtable -DateKind String}else{$null})
+        $writerJournalPrepared=$null-ne$writerJournal-and[string]$writerJournal.status-ceq'prepared'-and@($writerJournal.completed_steps).Count-eq0
+        $writerClaimsBefore=@(Get-ChildItem -LiteralPath (Join-Path $workspace '.assistant/runtime/locks') -Filter 'step_*.json' -File -ErrorAction SilentlyContinue)
+        $writerArtifactBefore=Test-Path -LiteralPath $writerArtifact
+        if($writerReadyObserved){[IO.File]::WriteAllText($writerDriftPath,"drift before first claim`n",[Text.UTF8Encoding]::new($false))}
         $writerResult=Complete-Cli $writerHandle
         $writerHandle=$null
         $writerStatus=Read-Output (Invoke-Cli $workspace @('status','-TaskId','writer-preclaim-task','-AsJson'))
@@ -187,8 +170,8 @@ if($runningOnWindows){
         $writerArtifactAfter=Test-Path -LiteralPath $writerArtifact
         $writerStaleError=$writerResult.StdErr-match'Evidence .* revision is stale'
         $writerId=$(if($null-ne$writerPending){$writerPending.BaseName}else{''})
-        $writerDiagnostic="ready=$writerReadyObserved pending_count=$writerPendingCount prepared=$writerJournalPrepared exited_before_release=$writerExitedBeforeRelease artifact_before=$writerArtifactBefore claims_before=$($writerClaimsBefore.Count) writer_exit=$($writerResult.ExitCode) stale_error=$writerStaleError task_version=$($writerStatus.task.version) task_status=$($writerStatus.task.status) artifact_after=$writerArtifactAfter claims_after=$($writerClaimsAfter.Count)"
-        Check ($writerReadyCreated-and$writerReleaseCreated-and$writerReadyObserved-and-not$writerExitedBeforeRelease-and$writerPendingCount-eq1-and$writerJournalPrepared-and-not$writerArtifactBefore-and$writerClaimsBefore.Count-eq0-and$writerResult.ExitCode-eq2-and$writerStaleError-and$writerStatus.task.version-eq3-and$writerStatus.task.status-ceq'verifying'-and-not$writerArtifactAfter-and$writerClaimsAfter.Count-eq0) 'normal writer revalidates the live Evidence revision before its first publication claim' "normal writer pre-claim synchronization or stale rejection failed: $writerDiagnostic"
+        $writerDiagnostic="ready=$writerReadyObserved pending_count=$writerPendingCount prepared=$writerJournalPrepared artifact_before=$writerArtifactBefore claims_before=$($writerClaimsBefore.Count) writer_exit=$($writerResult.ExitCode) stale_error=$writerStaleError task_version=$($writerStatus.task.version) task_status=$($writerStatus.task.status) artifact_after=$writerArtifactAfter claims_after=$($writerClaimsAfter.Count)"
+        Check ($writerReadyObserved-and$writerJournalPrepared-and-not$writerArtifactBefore-and$writerClaimsBefore.Count-eq0-and$writerResult.ExitCode-eq2-and$writerStaleError-and$writerStatus.task.version-eq3-and$writerStatus.task.status-ceq'verifying'-and-not$writerArtifactAfter-and$writerClaimsAfter.Count-eq0) 'normal writer revalidates the live Evidence revision before its first publication claim' "normal writer pre-claim synchronization or stale rejection failed: $writerDiagnostic"
         Remove-Item -LiteralPath $writerDriftPath -Force -ErrorAction SilentlyContinue
         $writerReplay=$(if($writerId){Invoke-Cli $workspace @('replay','-TransactionId',$writerId,'-AsJson')}else{$writerResult})
         $writerRecovered=Read-Output $writerReplay
@@ -196,10 +179,7 @@ if($runningOnWindows){
         $writerCompletedSteps=$(if($null-ne$writerRecovered){@($writerRecovered.completed_steps).Count}else{0})
         Check ($writerReplay.ExitCode-eq0-and$writerReplayResult-ceq'recovered'-and$writerCompletedSteps-ge3) 'claim-free writer rejection remains replayable after the live revision is restored' "pre-claim revision rejection replay failed: replay_exit=$($writerReplay.ExitCode) replay_result=$writerReplayResult completed_steps=$writerCompletedSteps transaction_id_present=$(-not[string]::IsNullOrWhiteSpace($writerId))"
     }finally{
-        if($null-ne$writerReleaseEvent){[void]$writerReleaseEvent.Set()}
         if($null-ne$writerHandle){try{[void](Complete-Cli $writerHandle)}catch{}}
-        if($null-ne$writerReleaseEvent){$writerReleaseEvent.Dispose()}
-        if($null-ne$writerReadyEvent){$writerReadyEvent.Dispose()}
         Remove-Item -LiteralPath $writerDriftPath -Force -ErrorAction SilentlyContinue
     }
 }else{

@@ -143,7 +143,7 @@ try {
             if(-not$acquired){throw "timed out waiting for v1 task lock: $TaskId"}
             $lockedMaterial=Get-MigrationMaterial -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId -ExpectedStage $ExpectedV1Stage
             if ([string]$lockedMaterial.Report.dry_run_digest -cne $ExpectedDryRunDigest) { throw 'v1 task changed after dry-run; rerun -DryRun' }
-            $taskStateModule=Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.TaskState.psm1') -Force -PassThru -ErrorAction Stop
+            $taskMigrationModule=Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.TaskMigration.psm1') -Force -PassThru -ErrorAction Stop
             $oldProtocol=$env:HARNESS_PROTOCOL
             try {
                 $env:HARNESS_PROTOCOL='v2'
@@ -158,7 +158,7 @@ try {
                     DryRunDigest=$ExpectedDryRunDigest
                     ImportedHistorySections=@($lockedMaterial.History)
                 }
-                $result=& $taskStateModule { param($Arguments) Import-HarnessV1TaskState @Arguments } $importArguments
+                $result=Import-HarnessV1TaskState @importArguments
             } finally {
                 if($null-eq$oldProtocol){Remove-Item Env:HARNESS_PROTOCOL -ErrorAction Ignore}else{$env:HARNESS_PROTOCOL=$oldProtocol}
             }

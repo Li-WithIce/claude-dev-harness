@@ -133,7 +133,7 @@ Check ($checkExit-eq0-and$beforeHash-ceq(Get-FileHash -LiteralPath $inventoryPat
 $moduleV1=Read-Text 'schemas/module-manifest-v1.schema.json'|ConvertFrom-Json -Depth 100
 Check (($moduleV1.properties.kind.enum-join'|')-ceq'capability') 'harness-module/v1 remains capability-only' 'TK-05 broadened harness-module/v1 beyond capability packages'
 $tcb=Read-Text 'kernel-tcb-inventory.json'|ConvertFrom-Json -Depth 100
-Check ([int]$tcb.totals.runtime_executable_loc-le6151-and@($tcb.unresolved_dependencies).Count-eq0) 'Runtime TCB stays at or below 6151 with zero unresolved dependencies' 'Runtime TCB budget or dependency closure is invalid'
+Check ([int]$tcb.totals.runtime_executable_loc-lt3000-and@($tcb.unresolved_dependencies).Count-eq0) 'Runtime TCB stays below 3000 with zero unresolved dependencies' 'Runtime TCB budget or dependency closure is invalid'
 
 foreach($pass in $script:Passes){Write-Output "[PASS] $pass"}
 if($script:Failures.Count){foreach($failure in $script:Failures){Write-Output "[FAIL] $failure"};exit 1}

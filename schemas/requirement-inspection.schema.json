@@ -1,0 +1,114 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task_id", "goal", "acceptance", "in_scope", "source_authority", "decisions"],
+  "properties": {
+    "task_id": { "type": "string", "pattern": "^(?!(?:none|idle|unknown)$)[a-z0-9][a-z0-9-]{0,63}$" },
+    "goal": { "$ref": "#/definitions/nonBlank" },
+    "acceptance": { "$ref": "#/definitions/nonEmptyStrings" },
+    "in_scope": { "$ref": "#/definitions/nonEmptyStrings" },
+    "out_of_scope": { "$ref": "#/definitions/strings" },
+    "product_constraints": { "$ref": "#/definitions/strings" },
+    "source_authority": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "contains": { "$ref": "#/definitions/productAuthority" },
+      "items": { "$ref": "#/definitions/authority" }
+    },
+    "decisions": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/decision" }
+    },
+    "repo_checks": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/repoCheck" }
+    },
+    "ask": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "style": { "enum": ["dependency-aware", "sequential"] },
+        "max_independent_questions_per_turn": { "type": "integer", "minimum": 1, "maximum": 5 }
+      }
+    }
+  },
+  "definitions": {
+    "nonBlank": { "type": "string", "minLength": 1, "pattern": "\\S" },
+    "strings": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/nonBlank" }
+    },
+    "nonEmptyStrings": {
+      "allOf": [
+        { "$ref": "#/definitions/strings" },
+        { "minItems": 1 }
+      ]
+    },
+    "scalar": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" }
+      ]
+    },
+    "authority": {
+      "enum": ["current-user-message", "user-confirmed", "approved-spec", "project-policy", "project-product-decision", "project-architecture-decision", "repo-evidence", "engineering-convention"]
+    },
+    "productAuthority": {
+      "enum": ["current-user-message", "user-confirmed", "approved-spec", "project-policy", "project-product-decision"]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "source_id", "value"],
+      "properties": {
+        "authority": { "$ref": "#/definitions/authority" },
+        "source_id": { "$ref": "#/definitions/nonBlank" },
+        "value": { "$ref": "#/definitions/scalar" }
+      }
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["must_be_reversible", "must_not_change_external_behavior", "must_follow_repo_conventions", "must_be_verified"],
+      "properties": {
+        "must_be_reversible": { "type": "boolean" },
+        "must_not_change_external_behavior": { "type": "boolean" },
+        "must_follow_repo_conventions": { "type": "boolean" },
+        "must_be_verified": { "type": "boolean" }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "category", "question", "impact", "recommended", "depends_on", "sources"],
+      "properties": {
+        "key": { "$ref": "#/definitions/nonBlank" },
+        "category": { "$ref": "#/definitions/nonBlank" },
+        "question": { "$ref": "#/definitions/nonBlank" },
+        "impact": { "$ref": "#/definitions/nonBlank" },
+        "options": { "$ref": "#/definitions/strings" },
+        "recommended": { "$ref": "#/definitions/scalar" },
+        "depends_on": { "$ref": "#/definitions/strings" },
+        "sources": { "type": "array", "items": { "$ref": "#/definitions/source" } },
+        "agent_constraints": { "$ref": "#/definitions/constraints" }
+      }
+    },
+    "repoCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path"],
+      "anyOf": [{ "required": ["contains"] }, { "required": ["sha256"] }],
+      "properties": {
+        "id": { "$ref": "#/definitions/nonBlank" },
+        "path": { "$ref": "#/definitions/nonBlank" },
+        "contains": { "$ref": "#/definitions/nonBlank" },
+        "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    }
+  }
+}

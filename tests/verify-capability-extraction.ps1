@@ -104,7 +104,7 @@ try {
         }).Count -eq 0
     })
     $missingC2Paths = @($missingC2 | ForEach-Object { [string]$_.path })
-    Check ($c2.Count -eq 42 -and $missingC2.Count -eq 0) 'all 42 C2 implementation paths belong to one of the seven v1 Capability packages' "C2 package coverage drifted: count=$($c2.Count) missing=$($missingC2Paths -join ',')"
+    Check ($c2.Count -eq 43 -and $missingC2.Count -eq 0) 'all 43 C2 implementation paths belong to one of the seven v1 Capability packages' "C2 package coverage drifted: count=$($c2.Count) missing=$($missingC2Paths -join ',')"
 
     $sourceFiles = @($result.CapabilitySourceCatalog.sources | ForEach-Object { @($_.files) })
     $duplicates = @($sourceFiles.path | Group-Object -CaseSensitive | Where-Object Count -ne 1)

@@ -262,13 +262,25 @@ Check ($absoluteStrings.Count -eq 0) 'inventory contains no absolute local or UN
 
 $runtimePaths = @($inventory.files | Where-Object { @($_.trust_paths) -ccontains 'runtime' } | ForEach-Object path)
 Check ($runtimePaths -contains 'scripts/lib/Harness.Path.psm1' -and $runtimePaths -contains 'scripts/lib/Harness.AtomicWrite.psm1' -and $runtimePaths -contains 'scripts/lib/Harness.Hashing.psm1' -and $runtimePaths -notcontains 'scripts/lib/Harness.CanonicalJson.psm1') 'Runtime TCB contains its three reached K0 primitives while unreferenced CanonicalJson remains outside' 'K0 Runtime reachability or CanonicalJson isolation drifted'
+$packing = [ordered]@{ maximum_line_length=0; lines_over_300=0; semicolon_characters=0; multi_semicolon_lines=0; maximum_semicolons_on_line=0 }
+foreach ($runtimePath in $runtimePaths) {
+    foreach ($line in [IO.File]::ReadAllLines((Join-Path $RepoRoot $runtimePath))) {
+        $packing.maximum_line_length = [Math]::Max([int]$packing.maximum_line_length, $line.Length)
+        if ($line.Length -gt 300) { $packing.lines_over_300++ }
+        $lineSemicolons = [regex]::Matches($line, ';').Count
+        $packing.semicolon_characters += $lineSemicolons
+        if ($lineSemicolons -gt 1) { $packing.multi_semicolon_lines++ }
+        $packing.maximum_semicolons_on_line = [Math]::Max([int]$packing.maximum_semicolons_on_line, $lineSemicolons)
+    }
+}
+Check ([int]$packing.maximum_line_length -le 500 -and [int]$packing.lines_over_300 -le 37 -and [int]$packing.semicolon_characters -le 418 -and [int]$packing.multi_semicolon_lines -le 103 -and [int]$packing.maximum_semicolons_on_line -le 16) 'TK-07 source-density ratchet rejects physical-line packing beyond the reviewed Head' "Runtime physical-line density exceeds the TK-07 review: $($packing | ConvertTo-Json -Compress)"
 $distributionPaths = @($inventory.files | Where-Object { @($_.trust_paths) -ccontains 'distribution' } | ForEach-Object path)
 Check ($distributionPaths -ccontains 'scripts/lib/Harness.Distribution.psm1' -and $distributionPaths -ccontains 'scripts/lib/Harness.CanonicalJson.psm1' -and $runtimePaths -cnotcontains 'scripts/lib/Harness.Distribution.psm1' -and $distributionPaths -cnotcontains 'scripts/lib/Harness.ModuleManifest.psm1' -and $distributionPaths -cnotcontains 'scripts/lib/Harness.CapabilitySource.psm1') 'TK-06 adds only the D1 constructor and canonical primitive, without C2 imports or Runtime reachability' 'Distribution adoption crossed the Runtime or C2 boundary'
 Check (@($runtimePaths | Where-Object { $_ -match '(?i)RolloutEvidence|Qualification|release-(?:model|host|full)|generate-v2-rollout' }).Count -eq 0) 'Runtime TCB excludes Release and Qualification producers' 'Release or Qualification leaked into Runtime TCB'
 $budgetExceptions = @($inventory.budget.exceptions)
-Check ([int]$inventory.budget.baseline_executable_loc -eq 6151 -and [int]$inventory.budget.current_executable_loc -eq 6075 -and [int]$inventory.budget.delta -eq -76 -and [int]$inventory.budget.covered_growth -eq 0 -and [string]$inventory.budget.status -ceq 'within-baseline' -and $budgetExceptions.Count -eq 0) 'TK-03 keeps Runtime below the unchanged 6151 ceiling with a measured 6075 and no exception' 'Runtime budget, Adapter Action closure, or exception state drifted'
-Check (@($inventory.edges | Where-Object kind -ceq 'manual').Count -eq @($roots.manual_edges).Count -and @($roots.manual_edges | Where-Object kind -ceq 'dynamic-import').Count -eq 1) 'manual edges are exact and the dynamic-import exception is minimal' 'manual edge count or dynamic-import boundary drifted'
-Check ([int]$inventory.totals.file_count -eq @($inventory.files).Count -and [int]$inventory.totals.artifact_count -eq @($inventory.artifacts).Count -and [int]$inventory.totals.runtime_executable_loc -eq 6075) 'inventory totals bind the current TK-03 Runtime measurement' 'inventory totals or Runtime measurement drifted'
+Check ([int]$inventory.budget.baseline_executable_loc -eq 2987 -and [int]$inventory.budget.current_executable_loc -eq 2987 -and [int]$inventory.budget.current_executable_loc -lt 3000 -and [int]$inventory.budget.delta -eq 0 -and [int]$inventory.budget.covered_growth -eq 0 -and [string]$inventory.budget.status -ceq 'within-baseline' -and $budgetExceptions.Count -eq 0) 'TK-07 ratchets Runtime to 2987, below the 3000-line target, with no exception' 'Runtime budget, Adapter Action closure, or exception state drifted'
+Check (@($inventory.edges | Where-Object kind -ceq 'manual').Count -eq @($roots.manual_edges).Count -and @($roots.manual_edges | Where-Object kind -ceq 'dynamic-import').Count -eq 2) 'manual edges are exact and the two rendered Adapter imports are explicit' 'manual edge count or dynamic-import boundary drifted'
+Check ([int]$inventory.totals.file_count -eq @($inventory.files).Count -and [int]$inventory.totals.artifact_count -eq @($inventory.artifacts).Count -and [int]$inventory.totals.runtime_executable_loc -eq 2987) 'inventory totals bind the current TK-07 Runtime measurement' 'inventory totals or Runtime measurement drifted'
 
 if ($failures.Count -gt 0) {
     Write-Output "STATUS: FAIL ($($failures.Count) failures)"
