@@ -47,18 +47,18 @@ function Get-HarnessApplyPatchChangedPaths {
         if ($mode -cne 'Update File') { throw 'direct apply_patch input contains an invalid patch hunk' }
         if ($state -ceq 'eof' -and [string]::IsNullOrWhiteSpace($line)) { continue }
         if ($state -ceq 'eof') { throw 'direct apply_patch input contains content after End of File' }
-        if ($header -ceq '*** End of File') {
+        if ($line.TrimEnd() -ceq '*** End of File') {
             if ($state -cne 'have') { throw 'direct apply_patch input contains an invalid End of File directive' }
             $state = 'eof'
             continue
         }
 
-        if ($header -ceq '@@' -or $header.StartsWith('@@ ',[StringComparison]::Ordinal)) {
+        if ($line.TrimEnd() -ceq '@@' -or $line.TrimEnd().StartsWith('@@ ',[StringComparison]::Ordinal)) {
             if ($state -ceq 'need') { throw 'direct apply_patch input contains an empty Update File chunk' }
             $state = 'need'
             continue
         }
-        if ($header.StartsWith('*** ',[StringComparison]::Ordinal)) { throw 'direct apply_patch input contains an unsupported patch directive' }
+        if ($line.TrimEnd().StartsWith('*** ',[StringComparison]::Ordinal)) { throw 'direct apply_patch input contains an unsupported patch directive' }
         if ($line.Length -eq 0 -or $line[0] -in @(' ','+','-')) {
             $state = 'have'
             continue

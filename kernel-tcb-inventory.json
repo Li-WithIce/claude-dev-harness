@@ -185,7 +185,7 @@
     },
     {
       "path": "scripts/lib/Harness.AdapterAction.psm1",
-      "sha256": "sha256:db1f52ee9e6687b1a35a4a1641f15ec2829b57090b2d1eb9ab823fc8895ac8b2",
+      "sha256": "sha256:645469535b01abfd4343e6cfb3dc76b973a48375c37980e0ae7ed4dd354bc357",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
