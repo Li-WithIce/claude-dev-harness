@@ -217,8 +217,7 @@ function Invoke-HarnessKernelProcess {
             $process.StandardInput.BaseStream.Write(($inputBytes=[Text.UTF8Encoding]::new($false).GetBytes($StandardInput)),0,$inputBytes.Length)
             $process.StandardInput.Close()
         }
-        if ($process.WaitForExit($TimeoutMilliseconds)) {
-            [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdout,$stderr))
+        if ($process.WaitForExit($TimeoutMilliseconds) -and [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdout,$stderr),2000)) {
             return [pscustomobject]@{Complete=$true;ExitCode=$process.ExitCode;
                 StdOut=$stdout.GetAwaiter().GetResult().Replace("`r`n","`n");StdErr=$stderr.GetAwaiter().GetResult().Replace("`r`n","`n")}
         }
@@ -262,12 +261,11 @@ function Get-HarnessHostCapabilities {
             $result = Invoke-HarnessKernelProcess -FilePath (Get-Process -Id $PID).Path -WorkingDirectory ([IO.Path]::GetTempPath()) -TimeoutMilliseconds 5000 -Arguments @('-NoLogo','-NoProfile','-NonInteractive','-Command',("& '" + ([string]$command.Path).Replace("'","''") + "' --version"))
             Assert-HarnessKernelCondition ($result.Complete -and $result.ExitCode -eq 0 -and -not $result.StdErr.Length -and $result.StdOut.Length -le 65536) unavailable
             $actualVersion = [string]([regex]::Match($result.StdOut,'\Acodex-cli (?<version>\S+)(?:\n)?\z',[Text.RegularExpressions.RegexOptions]::CultureInvariant).Groups['version'].Value)
-            Assert-HarnessKernelCondition (-not [string]::IsNullOrWhiteSpace($actualVersion)) unavailable
+            if ([string]::IsNullOrWhiteSpace($actualVersion)) { $actualVersion = 'unknown' }
         } catch {}
     }
-    $observed = @($RequiredCapabilities | Where-Object { $capabilities[$_] -is [bool] }).Count
     $document = [ordered]@{schema_version='harness-host-capabilities/v1';product='codex';actual_version=$actualVersion
-        observation_status=$(if($observed-eq$RequiredCapabilities.Count){'observed'}elseif($observed){'partial'}else{'unavailable'});capabilities=$capabilities}
+        observation_status=$(if(-not@($RequiredCapabilities|Where-Object{$capabilities[$_]-isnot[bool]}).Count){'observed'}elseif(@($RequiredCapabilities|Where-Object{$capabilities[$_]-is[bool]}).Count){'partial'}else{'unavailable'});capabilities=$capabilities}
     [void](Assert-HarnessHostCapabilitiesDocument -Document $document)
     return $document
 }
@@ -399,16 +397,14 @@ function Get-HarnessEvidenceRevision {
         $relative=Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path (Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $_.evidence_path -Label 'record evidence_path' -MustExist File)
         [ordered]@{path=$relative;digest=(Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $relative)}
     })
-    $gitToolRoot=Resolve-HarnessToolCompatibleWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
     $git=@{GitPath=[IO.Path]::GetFullPath([string]@(Get-Command git -CommandType Application -ErrorAction Stop)[0].Source)
-        WorkspaceRoot=$gitToolRoot
+        WorkspaceRoot=(Resolve-HarnessToolCompatibleWorkspaceRoot -WorkspaceRoot $WorkspaceRoot)
         DisableFsMonitor=$true}
     $gitRoot=Invoke-HarnessGit @git -Arguments @('rev-parse','--show-toplevel')
     $head,$workingDiff,$stagedDiff,$untracked='','','',[Collections.Generic.List[object]]::new()
     $resolvedGitRoot=$(if($gitRoot.ExitCode-eq0){try{(Resolve-Path -LiteralPath $gitRoot.Text).Path}catch{$null}}else{$null})
-    $gitUsable=$null-ne$resolvedGitRoot-and$(if($runningOnWindows){$resolvedGitRoot.Equals($gitToolRoot,[StringComparison]::OrdinalIgnoreCase)-or `
-        (Get-HarnessPhysicalPathIdentity -Path $resolvedGitRoot)-ceq(Get-HarnessPhysicalPathIdentity -Path $gitToolRoot)}else{$resolvedGitRoot-ceq$gitToolRoot})
-    if($gitUsable){
+    if($null-ne$resolvedGitRoot-and$(if($runningOnWindows){$resolvedGitRoot.Equals($git.WorkspaceRoot,[StringComparison]::OrdinalIgnoreCase)-or `
+        (Get-HarnessPhysicalPathIdentity -Path $resolvedGitRoot)-ceq(Get-HarnessPhysicalPathIdentity -Path $git.WorkspaceRoot)}else{$resolvedGitRoot-ceq$git.WorkspaceRoot})){
         $trackedInput=Invoke-HarnessGit @git -Arguments @('ls-files','--error-unmatch','--',$inputRelative)
         if($trackedInput.ExitCode-eq0){[void]$exactExclusions.Remove($inputRelative)}elseif($trackedInput.ExitCode-ne1){throw 'unable to classify Evidence input path in Git'}
         $headRun=Invoke-HarnessGit @git -Arguments @('rev-parse','HEAD')

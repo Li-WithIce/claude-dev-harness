@@ -301,8 +301,8 @@ observation bound by verifier checks, not a permanent architectural constant.
 The bounded TK-07 Base-to-Head review uses the unchanged inventory algorithm.
 PR #12 Head measured 6075 executable lines across 22 Runtime files, 59552
 executable tokens, and 17693 statement ASTs. TK-07 measures 2999 lines across
-21 Runtime files, 35064 executable tokens, and 10337 statement ASTs: reductions
-of 41.12 percent and 41.58 percent in the two syntax-aware measures. The
+21 Runtime files, 35123 executable tokens, and 10346 statement ASTs: reductions
+of 41.02 percent and 41.52 percent in the two syntax-aware measures. The
 verifier requires both reductions to remain at least 35 percent and separately
 limits every Base-to-Head added Runtime line to 300 characters and two statement
 separators; this Head's observed maxima are 298 and two.

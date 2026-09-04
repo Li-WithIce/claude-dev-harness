@@ -14,10 +14,9 @@ function Read-HarnessProtectedPolicy {
             $overlayValid = Test-Json -Json ($overlay | ConvertTo-Json -Depth 30 -Compress) -SchemaFile (Join-Path $RepoRoot 'schemas\protected-actions-overlay.schema.json') -ErrorAction Stop -WarningAction SilentlyContinue
         } catch { throw "protected action overlay schema is unavailable: $($_.Exception.Message)" }
         if (-not $overlayValid) { throw 'protected action overlay failed schema validation' }
-        $knownIds = [Collections.Generic.HashSet[string]]::new([string[]]@($policy.rules|ForEach-Object{[string]$_.id}),[StringComparer]::Ordinal)
         foreach ($rule in @($overlay.rules)) {
             if($rule.match.Contains('command_regex')){try{[void][regex]::new([string]$rule.match.command_regex)}catch{throw 'protected action overlay is invalid: command_regex'}}
-            if (-not $knownIds.Add([string]$rule.id)) { throw 'protected action overlay rule id collides with another rule' }
+            if (@($policy.rules | Where-Object { [string]$_.id -ceq [string]$rule.id } | Select-Object -First 1).Count) { throw 'protected action overlay rule id collides with another rule' }
             $policy.rules += @($rule)
         }
     }

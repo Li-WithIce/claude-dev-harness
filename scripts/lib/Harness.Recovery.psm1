@@ -4,6 +4,14 @@ $script:TaskStateModule = Import-Module (Join-Path $PSScriptRoot 'Harness.TaskSt
 
 $script:RuntimeRelative = '.assistant/runtime'
 
+function Read-HarnessRecoveryPointer {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$WorkspaceRoot
+    )
+    return & $script:TaskStateModule { param($Root,$Path) Read-CurrentPointer -WorkspaceRoot $Root -Path $Path } $WorkspaceRoot "$($script:RuntimeRelative)/current.json"
+}
+
 function Get-HarnessRecoveryIndex {
     param(
         [Parameter(Mandatory)][string]$RepoRoot,
@@ -29,7 +37,7 @@ function Get-HarnessRecoveryIndex {
                 }
             }
         })
-        try { $pointer = & $script:TaskStateModule { param($Root,$Path) Read-CurrentPointer -WorkspaceRoot $Root -Path $Path } $WorkspaceRoot "$($script:RuntimeRelative)/current.json" }
+        try { $pointer = Read-HarnessRecoveryPointer -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot }
         catch { throw "current pointer validation failed: $($_.Exception.Message)" }
         $currentTasks = @($tasks | Where-Object { [bool]$_.is_current })
         $stable = if ($null -eq $pointer) { $currentTasks.Count -eq 0 } else { $currentTasks.Count -eq 1 -and [string]$currentTasks[0].task_id -ceq [string]$pointer.task_id -and [int]$currentTasks[0].task_version -eq [int]$pointer.task_version }

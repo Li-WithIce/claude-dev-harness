@@ -21,8 +21,7 @@ function Get-HarnessApplyPatchChangedPaths {
             continue
         }
 
-        $header = if ($mode -ceq 'Update File') { $line.TrimEnd() } else { $trimmed }
-        $target = [regex]::Match($header,'^\*\*\* (?:(?<mode>Add File|Update File|Delete File)|(?<move>Move to)): (?<path>.*)$')
+        $target = [regex]::Match($(if ($mode -ceq 'Update File') { $line.TrimEnd() } else { $trimmed }),'^\*\*\* (?:(?<mode>Add File|Update File|Delete File)|(?<move>Move to)): (?<path>.*)$')
         if ($target.Success) {
             if ($target.Groups['move'].Success) {
                 if ($mode -cne 'Update File') { throw 'direct apply_patch input contains an invalid patch hunk' }

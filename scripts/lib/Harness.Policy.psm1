@@ -95,8 +95,7 @@ function Resolve-HarnessExecutionProfile {
             if ($approvalTypes.Count -eq 1) { $approvalPolicy = [string](@($approvalTypes)[0]) }
             $handoff = if ($profile -ceq 'direct') { 'main-agent' } else { 'reroute-before-write' }
         }
-        $profilePolicy = $policies.Execution.profiles[$profile]
-        $requiredCapabilities = @($profilePolicy.minimum_capabilities)
+        $requiredCapabilities = @($policies.Execution.profiles[$profile].minimum_capabilities)
         if ($reviewPolicy -ceq 'independent') { $requiredCapabilities += 'independent_review_required' }
         if ($approvalPolicy -cne 'none') { $requiredCapabilities += 'approval_required' }
         if ($triggers -ccontains 'dry-run-required') { $requiredCapabilities += 'dry_run_required' }
@@ -113,7 +112,7 @@ function Resolve-HarnessExecutionProfile {
         risk_total=$riskTotal
         triggers=@($triggers)
         required_capabilities=@($requiredCapabilities | Sort-Object -Unique)
-        artifact_policy=$(if($null-eq$profile){'none'}elseif($profilePolicy.writes_task_artifacts-eq$true){'durable'}else{'ephemeral'})
+        artifact_policy=$(if($null-eq$profile){'none'}elseif($policies.Execution.profiles[$profile].writes_task_artifacts-eq$true){'durable'}else{'ephemeral'})
         review_policy=$reviewPolicy
         approval_policy=$approvalPolicy
         handoff=$handoff

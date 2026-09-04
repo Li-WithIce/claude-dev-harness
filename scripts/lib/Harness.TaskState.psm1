@@ -16,6 +16,11 @@ $script:WriterTransitionEvents = @{ready='requirement.resolved';running='executi
     verifying='verification.started';blocked='requirement.blocked';
     paused='execution.paused';done='task.completed';
     failed='task.failed';cancelled='task.cancelled'}
+function Get-TaskStatePaths {
+    param([string]$TaskId)
+    return [pscustomobject]@{TaskRoot="$($script:RuntimeRelative)/tasks/$TaskId";Task="$($script:RuntimeRelative)/tasks/$TaskId/task.json"
+        Events="$($script:RuntimeRelative)/tasks/$TaskId/events.jsonl";Current="$($script:RuntimeRelative)/current.json"}
+}
 function Get-TaskStateWorkspaceIdentity {
     param([string]$WorkspaceRoot)
     $root = Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
@@ -281,8 +286,8 @@ function Get-TransactionJournalView {
         Assert-HarnessKernelCondition (($fixedPaths.ContainsKey($id) -and $normalized -ceq $fixedPaths[$id]) -or $approvalPath) "$($prefix)transaction step path or action is invalid"
         if ($step.action -ceq 'write') {
             $content = Get-TransactionStepText -Step $step -Label "$($prefix)transaction step content"
-            if ($id -ceq 'event-log') { $eventText = $content }
             Assert-HarnessKernelCondition ($step.after_digest -ceq (Get-HarnessSha256Text -Content $content)) "$($prefix)transaction step content digest is invalid"
+            if ($id -ceq 'event-log') { $eventLog = ConvertFrom-TaskEventLog -Text $content -Label "$($prefix)transaction event-log payload" }
         }
         if (-not $Legacy -and $null -ne $step.before_content_base64) {
             Assert-HarnessKernelCondition ($step.before_digest -ceq (Get-HarnessSha256Text -Content (Get-TransactionStepText -Step $step -Label "transaction $id preimage" -Property before_content_base64))) "transaction $id preimage digest is invalid"
@@ -302,7 +307,6 @@ function Get-TransactionJournalView {
                 $null-eq$task.block_reason-and-not@($task.approvals).Count-and$null-eq$task.evidence_path) 'create transaction task-state payload is not canonical'
         }
     }
-    $eventLog = ConvertFrom-TaskEventLog -Text $eventText -Label "$($prefix)transaction event-log payload"
     $events = @($eventLog.Events)
     $previousVersion = [int64]0
     foreach ($event in $events) {
@@ -373,8 +377,7 @@ function Get-TransactionJournalView {
         }
     }
     if(-not$Legacy-and$operation-cne'create'){
-        $changed=@($beforeTask.Keys|Sort-Object|Where-Object{(@('version','updated_at')+@($mutable))-cnotcontains$_-and-not(Test-HarnessKernelValueEqual $beforeTask[$_] $task[$_])}|Select-Object -First 1)
-        if($changed.Count){throw "$operation transaction changed an unauthorized task-state field: $($changed[0])"}
+        foreach($field in @($beforeTask.Keys|Sort-Object|Where-Object{(@('version','updated_at')+@($mutable))-cnotcontains$_-and-not(Test-HarnessKernelValueEqual $beforeTask[$_] $task[$_])}|Select-Object -First 1)){throw "$operation transaction changed an unauthorized task-state field: $field"}
     }
     Assert-HarnessKernelCondition $valid "$($prefix)$operation transaction payload intent is invalid"
     $stepIds = @($Journal.steps.id)
@@ -688,7 +691,6 @@ function Invoke-HarnessTaskOperation {
             elseif ($isCurrent) { $pointerAction = if ($next.status -cin @('done','cancelled')) { 'cleared' } else { 'updated' } }
         }
         $event = New-TaskEvent -EventId ('evt_' + $transactionId.Substring(4)) -TaskId $TaskId -Version $next.version -Type $eventType -Host $ActorHost -Model $ActorModel -Timestamp $timestamp -Payload $eventPayload
-        $eventText = $eventPrefix + (ConvertTo-HarnessKernelJson -Value $event -Compress) + "`n" + $extraEventText
         if ($pointerAction -cne 'unchanged') {
             $afterSteps += @(New-TransactionStep -WorkspaceRoot $WorkspaceRoot -Id current-pointer -RelativePath $paths.Current `
                 -Action $(if ($pointerAction -ceq 'cleared') { 'delete' } else { 'write' }) -Content $(if ($pointerAction -ceq 'cleared') { $null } else { ConvertTo-HarnessKernelJson -Value ([ordered]@{
@@ -696,7 +698,7 @@ function Invoke-HarnessTaskOperation {
                     activated_at=$(if ($pointerAction -ceq 'activated') { $next.updated_at } else { $current.activated_at })}) }))
         }
         $steps = @($beforeSteps + @(New-TransactionStep -WorkspaceRoot $WorkspaceRoot -Id task-state -RelativePath $paths.Task -Action write -Content (ConvertTo-HarnessKernelJson -Value $next)) + `
-            @(New-TransactionStep -WorkspaceRoot $WorkspaceRoot -Id event-log -RelativePath $paths.Events -Action write -Content $eventText) + $afterSteps)
+            @(New-TransactionStep -WorkspaceRoot $WorkspaceRoot -Id event-log -RelativePath $paths.Events -Action write -Content ($eventPrefix + (ConvertTo-HarnessKernelJson -Value $event -Compress) + "`n" + $extraEventText)) + $afterSteps)
         $operationContext.pointer_action = $pointerAction
         $journal = [ordered]@{transaction_id=$transactionId;operation=$Operation;
             task_id=$TaskId;expected_version=$ExpectedVersion
@@ -819,9 +821,8 @@ function Repair-HarnessTaskTransaction {
                 result='recovered';completed_steps=@($archived.Journal.completed_steps)}
         }
 
-        $completedSteps = @(Invoke-TaskTransactionCompletion -WorkspaceRoot $WorkspaceRoot -Record $record -PendingPath $pending -ArchivePath $archive -PendingDigest (Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $pending))
         return [ordered]@{operation='replay';transaction_id=$TransactionId
-            result='recovered';completed_steps=$completedSteps}
+            result='recovered';completed_steps=@(Invoke-TaskTransactionCompletion -WorkspaceRoot $WorkspaceRoot -Record $record -PendingPath $pending -ArchivePath $archive -PendingDigest (Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $pending))}
     }
 }
 

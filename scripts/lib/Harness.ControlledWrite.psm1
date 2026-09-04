@@ -42,8 +42,7 @@ function Invoke-HarnessControlledWrite {
     if([string]::IsNullOrWhiteSpace($Path)-or[IO.Path]::IsPathRooted($Path)){throw 'controlled write path must be a non-empty workspace-relative path'}
     if($Path.Contains(':')){throw 'controlled writer refuses alternate data stream paths'}
     $relative=Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path $Path
-    $lower=$relative.ToLowerInvariant()
-    if($lower-ceq'agents.md'-or@('.assistant','.codex','.git','docs/tasks').Where({$lower-ceq$_-or$lower.StartsWith("$_/")}).Count){throw "controlled writer refuses Harness control path: $relative"}
+    if($relative.ToLowerInvariant()-ceq'agents.md'-or@('.assistant','.codex','.git','docs/tasks').Where({$relative.ToLowerInvariant()-ceq$_-or$relative.ToLowerInvariant().StartsWith("$_/")}).Count){throw "controlled writer refuses Harness control path: $relative"}
     $physicalRepo=Resolve-HarnessToolCompatibleWorkspaceRoot -WorkspaceRoot $RepoRoot
     $physicalTarget=[IO.Path]::GetFullPath((Join-Path (Resolve-HarnessToolCompatibleWorkspaceRoot -WorkspaceRoot $WorkspaceRoot) $relative))
     if($physicalTarget.Equals($physicalRepo,[StringComparison]::OrdinalIgnoreCase)-or `
