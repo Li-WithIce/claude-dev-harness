@@ -10,9 +10,7 @@ function Write-CodexDeny {
     param([string]$Reason)
     $message = if ([string]::IsNullOrWhiteSpace($Reason)) { 'Harness PreToolUse launcher failed closed' } else { $Reason.Trim() }
     if ($message.Length -gt 4000) { $message = $message.Substring(0,4000) }
-    $output = '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":' +
-        ($message | ConvertTo-Json -Compress) + '}}'
-    [Console]::Out.Write($output)
+    [Console]::Out.Write('{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":' + ($message | ConvertTo-Json -Compress) + '}}')
     exit 0
 }
 
@@ -23,13 +21,10 @@ try {
     $inputText = [Console]::In.ReadToEnd()
     if ($inputText.Length -gt 0 -and [int]$inputText[0] -eq 0xFEFF) { $inputText = $inputText.Substring(1) }
     if ($inputText.Length -eq 0) { Write-CodexDeny -Reason 'Harness PreToolUse input is empty' }
-    $result = Invoke-HarnessKernelProcess -FilePath '{PWSH_EXE}' -WorkingDirectory ([IO.Path]::GetTempPath()) `
-        -Arguments @('-NoProfile','-NonInteractive','-File','{CLAUDE_HOME}\hooks-memory\pretooluse.ps1') `
-        -TimeoutMilliseconds 9000 -StandardInput $inputText
-    $denial = if (-not $result.Complete) { 'Harness PreToolUse adapter timed out' } `
-        elseif ($result.ExitCode -ne 0 -or -not [string]::IsNullOrWhiteSpace($result.StdErr)) { 'Harness PreToolUse policy denied or failed closed' } `
-        elseif ($result.StdOut.Trim() -cne '{}') { 'Harness PreToolUse adapter returned an unsupported decision' }
-    if ($denial) { Write-CodexDeny -Reason $denial }
+    $result = Invoke-HarnessKernelProcess -FilePath '{PWSH_EXE}' -WorkingDirectory ([IO.Path]::GetTempPath()) -Arguments @('-NoProfile','-NonInteractive','-File','{CLAUDE_HOME}\hooks-memory\pretooluse.ps1') -TimeoutMilliseconds 9000 -StandardInput $inputText
+    if (-not $result.Complete) { Write-CodexDeny -Reason 'Harness PreToolUse adapter timed out' }
+    elseif ($result.ExitCode -ne 0 -or -not [string]::IsNullOrWhiteSpace($result.StdErr)) { Write-CodexDeny -Reason 'Harness PreToolUse policy denied or failed closed' }
+    elseif ($result.StdOut.Trim() -cne '{}') { Write-CodexDeny -Reason 'Harness PreToolUse adapter returned an unsupported decision' }
     [Console]::Out.Write('{}')
     exit 0
 } catch {

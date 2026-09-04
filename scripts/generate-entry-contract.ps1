@@ -8,17 +8,9 @@ param(
 
 $beginMarker,$endMarker = '<!-- BEGIN GENERATED ENTRY CONTRACT -->','<!-- END GENERATED ENTRY CONTRACT -->'
 $sourceRelativePath = 'policies/entry-contract.md'
-$targetRelativePaths = @(
-    'agent-configs/workspace/AGENTS.md.template',
-    'agent-configs/claude/CLAUDE.md.template',
-    'vault-template/entry/AGENTS.md.template'
-)
-$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 $resolvedRepoRoot = Resolve-HarnessWorkspaceRoot -WorkspaceRoot $RepoRoot
-$sourceState = Read-HarnessKernelUtf8File `
-    -Path (Resolve-HarnessContainedPath -WorkspaceRoot $resolvedRepoRoot -Path $sourceRelativePath -Label 'Canonical entry contract' -MustExist File) `
-    -Label 'Canonical entry contract' -AllowBom
+$sourceState = Read-HarnessKernelUtf8File -Path (Resolve-HarnessContainedPath -WorkspaceRoot $resolvedRepoRoot -Path $sourceRelativePath -Label 'Canonical entry contract' -MustExist File) -Label 'Canonical entry contract' -AllowBom
     Assert-HarnessKernelCondition (-not $sourceState.HasBom) "Canonical entry contract must be UTF-8 without BOM: $sourceRelativePath"
 $sourceBody = ($sourceState.Text -replace "`r`n?", "`n").TrimEnd([char[]]"`r`n")
     Assert-HarnessKernelCondition (-not [string]::IsNullOrWhiteSpace($sourceBody)) "Canonical entry contract is empty: $sourceRelativePath"
@@ -28,15 +20,13 @@ foreach ($reservedMarker in @($beginMarker, $endMarker, '<!-- source-sha256:')) 
 $generatedBody = "<!-- source-sha256: $((Get-HarnessNormalizedTextSha256 -Text $sourceState.Text).Substring(7)) -->`n$sourceBody"
 
 $plans = @()
-foreach ($relativePath in $targetRelativePaths) {
+foreach ($relativePath in @('agent-configs/workspace/AGENTS.md.template','agent-configs/claude/CLAUDE.md.template','vault-template/entry/AGENTS.md.template')) {
     $state = Read-HarnessKernelUtf8File -Path (Resolve-HarnessContainedPath -WorkspaceRoot $resolvedRepoRoot -Path $relativePath -Label 'Allowlisted entry template' -MustExist File) -Label 'Entry template' -AllowBom
     $text = $state.Text -replace "`r`n?", "`n"
     $beginMatches,$endMatches = [regex]::Matches($text,[regex]::Escape($beginMarker)),[regex]::Matches($text,[regex]::Escape($endMarker))
     Assert-HarnessKernelCondition ($beginMatches.Count -eq 1 -and $endMatches.Count -eq 1 -and $endMatches[0].Index -gt $beginMatches[0].Index) "Entry template must contain one ordered marker pair: $relativePath"
 
-    $before,$after = $text.Substring(0,$beginMatches[0].Index+$beginMarker.Length),$text.Substring($endMatches[0].Index)
-    $desiredText = ($before + "`n" + $generatedBody + "`n" + $after).TrimEnd([char[]]"`r`n") + "`n"
-    $desiredBytes = $utf8NoBom.GetBytes($desiredText)
+    $desiredBytes = [Text.UTF8Encoding]::new($false).GetBytes(($text.Substring(0,$beginMatches[0].Index+$beginMarker.Length) + "`n" + $generatedBody + "`n" + $text.Substring($endMatches[0].Index)).TrimEnd([char[]]"`r`n") + "`n")
     $plans += [pscustomobject]@{RelativePath = $relativePath
         OriginalBytes = $state.Bytes
         OriginalDigest = Get-HarnessSha256Bytes -Bytes $state.Bytes
@@ -53,8 +43,7 @@ if ($Check) {
 }
 
 $testFailAfterReplace = [int]($env:DEV_HARNESS_TEST_ENTRY_CONTRACT_FAIL_AFTER_REPLACE -as [int])
-Assert-HarnessKernelCondition ([string]::IsNullOrWhiteSpace([string]$env:DEV_HARNESS_TEST_ENTRY_CONTRACT_FAIL_AFTER_REPLACE) -or
-    $testFailAfterReplace -ge 1) 'DEV_HARNESS_TEST_ENTRY_CONTRACT_FAIL_AFTER_REPLACE must be a positive integer'
+Assert-HarnessKernelCondition ([string]::IsNullOrWhiteSpace([string]$env:DEV_HARNESS_TEST_ENTRY_CONTRACT_FAIL_AFTER_REPLACE) -or $testFailAfterReplace -ge 1) 'DEV_HARNESS_TEST_ENTRY_CONTRACT_FAIL_AFTER_REPLACE must be a positive integer'
 
 $published = [System.Collections.Generic.List[object]]::new()
 try {

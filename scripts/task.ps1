@@ -1,11 +1,23 @@
 ﻿[CmdletBinding()]
 param(
-    [Parameter(Position=0)][string]$Command='',[string]$RequestFile='',[string]$TaskId='',[string]$Contract='',
-    [ValidateSet('governed','critical')][string]$Profile='governed',[string[]]$Capabilities=@(),[Nullable[int]]$ExpectedVersion=$null,
-    [ValidateSet('blocked','ready','running','verifying','paused','done','failed','cancelled')][string]$To='ready',
-    [string]$Reason='',[switch]$ActivateCurrent,[switch]$EvidenceSatisfied,[string]$Evidence='',[string]$Approval='',
-    [string]$TransactionId='',[string]$ActorHost='codex',[string]$ActorModel='inherit',
-    [string]$RepoRoot='',[string]$WorkspaceRoot='',
+    [Parameter(Position = 0)][string]$Command = '',
+    [string]$RequestFile = '',
+    [string]$TaskId = '',
+    [string]$Contract = '',
+    [ValidateSet('governed', 'critical')][string]$Profile = 'governed',
+    [string[]]$Capabilities = @(),
+    [Nullable[int]]$ExpectedVersion = $null,
+    [ValidateSet('blocked', 'ready', 'running', 'verifying', 'paused', 'done', 'failed', 'cancelled')][string]$To = 'ready',
+    [string]$Reason = '',
+    [switch]$ActivateCurrent,
+    [switch]$EvidenceSatisfied,
+    [string]$Evidence = '',
+    [string]$Approval = '',
+    [string]$TransactionId = '',
+    [string]$ActorHost = 'codex',
+    [string]$ActorModel = 'inherit',
+    [string]$RepoRoot = '',
+    [string]$WorkspaceRoot = '',
     [switch]$AsJson
 )
 
@@ -26,8 +38,7 @@ try{
     }
 
     if($Command-cin @('enable-v2','reset-auto','disable-v2')){
-        $result=Set-HarnessWorkspaceProtocolConfig -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot `
-            -NewTaskProtocol $(if($Command-ceq'reset-auto'){'auto'}else{'v2'}) -PauseNewWork:($Command-ceq'disable-v2')
+        $result=Set-HarnessWorkspaceProtocolConfig -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -NewTaskProtocol $(if($Command-ceq'reset-auto'){'auto'}else{'v2'}) -PauseNewWork:($Command-ceq'disable-v2')
     }elseif($Command-ceq'protocol'){
         $result=Get-HarnessProtocolResolution -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $TaskId
     }elseif($Command-ceq'inspect'){
@@ -48,8 +59,7 @@ try{
         $env:HARNESS_PROTOCOL='v2'
         Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.TaskState.psm1') -Force -ErrorAction Stop
         $required=@{create=@($Contract,' and -Contract');verify=@($Evidence,' and -Evidence');approve=@($Approval,' and -Approval')}
-        if($Command-cin @('create','verify','approve','transition','resume-and-execute') -and ([string]::IsNullOrWhiteSpace($TaskId) -or
-            ($required.ContainsKey($Command)-and[string]::IsNullOrWhiteSpace([string]$required[$Command][0])))){
+        if($Command-cin @('create','verify','approve','transition','resume-and-execute') -and ([string]::IsNullOrWhiteSpace($TaskId) -or ($required.ContainsKey($Command)-and[string]::IsNullOrWhiteSpace([string]$required[$Command][0])))){
             throw "$Command requires -TaskId$(if($required.ContainsKey($Command)){$required[$Command][1]}else{''})"
         }
         $arguments=@{
@@ -96,6 +106,7 @@ try{
         Write-Output ($result|ConvertTo-Json -Depth 30 -Compress)
         exit 0
     }
+    $taskProjection=@('operation=operation','task_id=task.task_id','version=task.version','status=task.status')
     $projectionMap=@{
         inspect=@('requirement_state=requirement_state','blocking_decisions=blocking_decisions|count','contract_digest=contract.digest|none')
         config=@('operation=operation','action=action','new_task_protocol=new_task_protocol','new_work=new_work','path=path')
@@ -105,11 +116,11 @@ try{
         status=@('task_id=task.task_id','status=task.status','is_current=is_current|bool','pending_transactions=pending_transactions|count')
         resume=@('requirement_state=requirement_state','write_authorized=write_authorized|bool','blocking_decision=blocking_decision')
         replay=@('transaction_id=transaction_id','result=result')
-        create=@('operation=operation','task_id=task.task_id','version=task.version','status=task.status','pointer_action=pointer_action')
-        transition=@('operation=operation','task_id=task.task_id','version=task.version','status=task.status','pointer_action=pointer_action')
-        verify=@('operation=operation','task_id=task.task_id','version=task.version','status=task.status','conclusion=conclusion','evidence_path=evidence_path','pointer_action=pointer_action')
-        approve=@('operation=operation','task_id=task.task_id','version=task.version','status=task.status','approval_id=approval_id','approval_path=approval_path','pointer_action=pointer_action')
-        'resume-and-execute'=@('operation=operation','task_id=task.task_id','version=task.version','status=task.status','write_authorized=write_authorized|bool','pointer_action=pointer_action')
+        create=$taskProjection+@('pointer_action=pointer_action')
+        transition=$taskProjection+@('pointer_action=pointer_action')
+        verify=$taskProjection+@('conclusion=conclusion','evidence_path=evidence_path','pointer_action=pointer_action')
+        approve=$taskProjection+@('approval_id=approval_id','approval_path=approval_path','pointer_action=pointer_action')
+        'resume-and-execute'=$taskProjection+@('write_authorized=write_authorized|bool','pointer_action=pointer_action')
     }
     Write-HarnessKernelProjection $result $projectionMap[$(if($Command-cin @('enable-v2','reset-auto','disable-v2')){'config'}elseif($Command-ceq'status'-and[string]$result.operation-ceq'recovery-index'){'recovery'}else{$Command})]
     if($Command-ceq'protocol'-and-not[string]::IsNullOrWhiteSpace([string]$result.warning)){Write-Output ('warning: {0}' -f $result.warning)}
@@ -119,11 +130,10 @@ try{
     $message=[string]$_.Exception.Message
     $conflict=[regex]::Match($message,'^ExpectedVersion mismatch: expected=\d+ actual=(?<actual>\d+)$')
     if($null-eq$ExpectedVersion-and$conflict.Success){
-        $currentVersion=[int]$conflict.Groups['actual'].Value
         if($AsJson){
-            [Console]::Error.WriteLine(([ordered]@{error='task-version-conflict';current_version=$currentVersion;writes=0}|ConvertTo-Json -Compress))
+            [Console]::Error.WriteLine(([ordered]@{error='task-version-conflict';current_version=[int]$conflict.Groups['actual'].Value;writes=0}|ConvertTo-Json -Compress))
         }else{
-            [Console]::Error.WriteLine("task-version-conflict; current_version=$currentVersion; task changed concurrently, reread and retry")
+            [Console]::Error.WriteLine("task-version-conflict; current_version=$([int]$conflict.Groups['actual'].Value); task changed concurrently, reread and retry")
         }
     }else{
         [Console]::Error.WriteLine($message)

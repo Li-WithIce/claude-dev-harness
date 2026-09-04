@@ -1,16 +1,14 @@
-
+﻿
 . (Join-Path $PSScriptRoot 'Harness.RuntimeKernel.ps1')
 $script:TaskStateModule = Import-Module (Join-Path $PSScriptRoot 'Harness.TaskState.psm1') -Force -PassThru -ErrorAction Stop
 
 $script:RuntimeRelative = '.assistant/runtime'
 
-function Read-HarnessRecoveryPointer {
-    param([string]$RepoRoot,[string]$WorkspaceRoot)
-    return & $script:TaskStateModule { param($Root,$Path) Read-CurrentPointer -WorkspaceRoot $Root -Path $Path } $WorkspaceRoot "$($script:RuntimeRelative)/current.json"
-}
-
 function Get-HarnessRecoveryIndex {
-    param([Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot)
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$WorkspaceRoot
+    )
     $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
     $WorkspaceRoot = Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
     $tasksRoot = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path "$($script:RuntimeRelative)/tasks" -Label 'runtime tasks' -AllowMissing
@@ -23,25 +21,18 @@ function Get-HarnessRecoveryIndex {
                 Assert-HarnessTaskId -TaskId $directory.Name
                 $status = Get-HarnessTaskStatus -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId $directory.Name
                 if ([string]$status.task.status -cin @('done','cancelled')) { $terminalCount++ } else {
-                    $task = Select-HarnessKernelKeys -Value $status.task -Keys @('task_id','status','execution_profile','requirement_state')
-                    $task.Insert(1,'task_version',[int]$status.task.version)
-                    $task.is_current = [bool]$status.is_current
-                    $task.resume_allowed = [string]$status.task.requirement_state -ceq 'clear' -and [string]$status.task.status -cin @('ready','running','paused','failed')
-                    $task.pending_transactions = @($status.pending_transactions)
-                    $task.updated_at = [string]$status.task.updated_at
-                    $task
+                    [ordered]@{task_id=[string]$status.task.task_id;task_version=[int]$status.task.version
+                        status=[string]$status.task.status;execution_profile=[string]$status.task.execution_profile
+                        requirement_state=[string]$status.task.requirement_state;is_current=[bool]$status.is_current
+                        resume_allowed=[string]$status.task.requirement_state -ceq 'clear' -and [string]$status.task.status -cin @('ready','running','paused','failed')
+                        pending_transactions=@($status.pending_transactions);updated_at=[string]$status.task.updated_at}
                 }
             }
         })
-        try { $pointer = Read-HarnessRecoveryPointer -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot }
+        try { $pointer = & $script:TaskStateModule { param($Root,$Path) Read-CurrentPointer -WorkspaceRoot $Root -Path $Path } $WorkspaceRoot "$($script:RuntimeRelative)/current.json" }
         catch { throw "current pointer validation failed: $($_.Exception.Message)" }
         $currentTasks = @($tasks | Where-Object { [bool]$_.is_current })
         $stable = if ($null -eq $pointer) { $currentTasks.Count -eq 0 } else { $currentTasks.Count -eq 1 -and [string]$currentTasks[0].task_id -ceq [string]$pointer.task_id -and [int]$currentTasks[0].task_version -eq [int]$pointer.task_version }
-        $currentSnapshot = if ($stable -and $null -ne $pointer) {
-            $snapshot = Select-HarnessKernelKeys -Value $pointer -Keys @('task_id','task_version','activated_at')
-            $snapshot.Insert(2,'status',[string]$currentTasks[0].status)
-            $snapshot
-        } else { $null }
         if ($stable) { break }
     }
     Assert-HarnessKernelCondition $stable 'recovery state changed during snapshot; retry status'
@@ -49,14 +40,19 @@ function Get-HarnessRecoveryIndex {
         schema_version='recovery-index/v2'
         generated_at=[datetimeoffset]::UtcNow.ToString('o')
         source=$script:RuntimeRelative
-        current=$currentSnapshot
+        current=$(if($null-ne$pointer){[ordered]@{task_id=[string]$pointer.task_id;task_version=[int]$pointer.task_version
+            status=[string]$currentTasks[0].status;activated_at=[string]$pointer.activated_at}}else{$null})
         tasks=@($tasks)
         terminal_task_count=$terminalCount
         side_effects=New-HarnessZeroSideEffects}
 }
 
 function Get-HarnessResumeClarification {
-    param([Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,[string]$TaskId='')
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$WorkspaceRoot,
+        [string]$TaskId = ''
+    )
     if (-not [string]::IsNullOrWhiteSpace($TaskId)) { Assert-HarnessTaskId -TaskId $TaskId }
     return [ordered]@{operation='resume'
         requirement_state='blocked'

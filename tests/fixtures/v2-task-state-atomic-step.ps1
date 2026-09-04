@@ -18,9 +18,9 @@ try {
     $result = & $module {
         param($Root,$Id,$TransactionStep,$IsReplay)
         $record = [pscustomobject]@{Journal=[ordered]@{transaction_id=$Id;task_id='atomic-step-fixture'};IntentDigest=('sha256:' + ('0' * 64))}
-        $applied = Invoke-TransactionStep -WorkspaceRoot $Root -Record $record -Step $TransactionStep -AllowExistingClaim:$IsReplay
-        Remove-TransactionStepClaim -WorkspaceRoot $Root -Record $record -Step $TransactionStep -Claim $applied.Claim
-        return $applied.Result
+        $claim = Invoke-TransactionStep -WorkspaceRoot $Root -Record $record -Step $TransactionStep -AllowExistingClaim:$IsReplay
+        Remove-TransactionStepClaim -WorkspaceRoot $Root -Record $record -Step $TransactionStep -Claim $claim
+        return 'applied'
     } $WorkspaceRoot $TransactionId $step ([bool]$Replay)
     Write-Output ([string]$result)
     exit 0

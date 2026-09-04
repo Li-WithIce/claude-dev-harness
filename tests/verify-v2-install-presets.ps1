@@ -1183,15 +1183,12 @@ try {
         $actionModulePath = Join-Path $RepoRoot 'scripts\lib\Harness.AdapterAction.psm1'
         $actionModuleAst = [System.Management.Automation.Language.Parser]::ParseFile($actionModulePath,[ref]$actionModuleTokens,[ref]$actionModuleErrors)
         $actionModuleFunctions = @($actionModuleAst.FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true))
-        $pathValidatorAst = @($actionModuleFunctions | Where-Object Name -CEQ 'Assert-HarnessApplyPatchRelativePath')[0]
         $patchParserAst = @($actionModuleFunctions | Where-Object Name -CEQ 'Get-HarnessApplyPatchChangedPaths')[0]
-        if (@($actionModuleErrors).Count -eq 0 -and $null -ne $pathValidatorAst -and $null -ne $patchParserAst) {
-            $pathValidatorBody = $pathValidatorAst.Body.GetScriptBlock()
-            function Assert-HarnessApplyPatchRelativePath { param([string]$Path) & $pathValidatorBody -Path $Path }
+        if (@($actionModuleErrors).Count -eq 0 -and $null -ne $patchParserAst) {
             $patchParserBody = $patchParserAst.Body.GetScriptBlock()
             foreach ($controlPath in @("a$([char]0)b.txt","a`rb.txt","a`nb.txt")) {
                 try {
-                    & $pathValidatorBody -Path $controlPath
+                    & $patchParserBody -PatchText "*** Begin Patch`n*** Add File: $controlPath`n+x`n*** End Patch"
                     Add-Failure 'direct apply_patch path validator accepted a NUL, CR, or LF control character'
                 } catch {
                     Add-Check 'direct apply_patch path validator rejects a NUL, CR, or LF control character'

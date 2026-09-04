@@ -38,11 +38,9 @@ function ConvertFrom-HarnessJson {
 
     process {
         if ([string]::IsNullOrWhiteSpace($Json)) { return $null }
-        $options = [Text.Json.JsonDocumentOptions]::new()
-        $options.MaxDepth = $Depth
-        $options.AllowTrailingCommas = $true
-        $options.CommentHandling = [Text.Json.JsonCommentHandling]::Skip
-        Write-Output -InputObject (ConvertFrom-HarnessJsonDocument -Json $Json -Options $options)
+        Write-Output -InputObject (ConvertFrom-HarnessJsonDocument -Json $Json -Options ([Text.Json.JsonDocumentOptions]@{
+            MaxDepth=$Depth;AllowTrailingCommas=$true
+            CommentHandling=[Text.Json.JsonCommentHandling]::Skip}))
     }
 }
 
@@ -62,8 +60,7 @@ function Assert-HarnessNoReparseChain {
     if (-not $cursor.Equals([IO.Path]::GetFullPath($Path),[StringComparison]::OrdinalIgnoreCase) -and -not (Test-Path -LiteralPath $cursor -PathType Container)) { throw "$Label parent is not a directory" }
     $stop = if ($Root) { [IO.Path]::GetFullPath($Root) } else { [IO.Path]::GetPathRoot($cursor) }
     while ($true) {
-        $item = Get-Item -LiteralPath $cursor -Force -ErrorAction Stop
-        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "$Label crosses a reparse point: $cursor" }
+        if ((Get-Item -LiteralPath $cursor -Force -ErrorAction Stop).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "$Label crosses a reparse point: $cursor" }
         if ($cursor.Equals($stop,[StringComparison]::OrdinalIgnoreCase)) { return }
         $parent = [IO.Path]::GetDirectoryName($cursor.TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar))
         if ([string]::IsNullOrWhiteSpace($parent) -or $parent -ceq $cursor) { throw "$Label has no existing contained parent" }
@@ -104,25 +101,19 @@ function Resolve-HarnessSubstPath {
 function Get-HarnessPhysicalPathIdentity {
     param([Parameter(Mandatory)][string]$Path)
 
-    $resolved = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).ProviderPath
     if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) { throw 'WorkspaceRoot physical identity is supported only on Windows' }
-    $physical = Resolve-HarnessSubstPath -Path $resolved
+    $physical = Resolve-HarnessSubstPath -Path (Resolve-Path -LiteralPath $Path -ErrorAction Stop).ProviderPath
     Assert-HarnessNoReparseChain -Path $physical -Label 'WorkspaceRoot physical path'
-    $fileIdOutput = @(& fsutil.exe file queryFileID $physical 2>&1 | ForEach-Object { [string]$_ })
-    if ($LASTEXITCODE -ne 0) { throw 'WorkspaceRoot physical identity is unavailable' }
-    $fileIdMatch = [regex]::Match(($fileIdOutput -join "`n"),'(?i)0x[0-9a-f]{32}')
-    if (-not $fileIdMatch.Success) { throw 'WorkspaceRoot physical identity is unavailable' }
+    $fileIdMatch = [regex]::Match((@(& fsutil.exe file queryFileID $physical 2>&1 | ForEach-Object { [string]$_ }) -join "`n"),'(?i)0x[0-9a-f]{32}')
+    if ($LASTEXITCODE -ne 0 -or -not $fileIdMatch.Success) { throw 'WorkspaceRoot physical identity is unavailable' }
 
     $root = [System.IO.Path]::GetPathRoot($physical)
-    $volume = $null
-    if ($root -match '^\\\\\?\\Volume\{[0-9a-f-]{36}\}\\$') {
-        $volume = $root
+    $volume = if ($root -match '^\\\\\?\\Volume\{[0-9a-f-]{36}\}\\$') {
+        $root
     } else {
         $volumeOutput = @(& mountvol.exe $root /L 2>&1 | ForEach-Object { [string]$_ })
-        if ($LASTEXITCODE -ne 0) { throw 'WorkspaceRoot physical identity is unavailable' }
-        $volumeMatch = [regex]::Match(($volumeOutput -join "`n"),'(?i)\\\\\?\\Volume\{[0-9a-f-]{36}\}\\')
-        if (-not $volumeMatch.Success) { throw 'WorkspaceRoot physical identity is unavailable' }
-        $volume = $volumeMatch.Value
+        if ($LASTEXITCODE -ne 0 -or -not ($volumeMatch = [regex]::Match(($volumeOutput -join "`n"),'(?i)\\\\\?\\Volume\{[0-9a-f-]{36}\}\\')).Success) { throw 'WorkspaceRoot physical identity is unavailable' }
+        $volumeMatch.Value
     }
     return ('volume:{0}|file:{1}' -f $volume.ToLowerInvariant(),$fileIdMatch.Value.ToLowerInvariant())
 }
@@ -134,9 +125,7 @@ function Resolve-HarnessToolCompatibleWorkspaceRoot {
     $physical = Resolve-HarnessSubstPath -Path $resolved
     $physicalRoot = [System.IO.Path]::GetPathRoot($physical)
     if ($physicalRoot -notmatch '^\\\\\?\\Volume\{[0-9a-f-]{36}\}\\$') {
-        if (-not $physical.Equals($resolved,[System.StringComparison]::OrdinalIgnoreCase)) {
-            if ((Get-HarnessPhysicalPathIdentity -Path $resolved) -cne (Get-HarnessPhysicalPathIdentity -Path $physical)) { throw 'WorkspaceRoot tool-compatible path changed physical identity' }
-        }
+        if (-not $physical.Equals($resolved,[System.StringComparison]::OrdinalIgnoreCase) -and (Get-HarnessPhysicalPathIdentity -Path $resolved) -cne (Get-HarnessPhysicalPathIdentity -Path $physical)) { throw 'WorkspaceRoot tool-compatible path changed physical identity' }
         return (Resolve-HarnessWorkspaceRoot -WorkspaceRoot $physical)
     }
     $expectedIdentity = Get-HarnessPhysicalPathIdentity -Path $resolved
@@ -166,8 +155,8 @@ function Resolve-HarnessContainedPath {
 
     $root = Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
     $fullPath = [System.IO.Path]::GetFullPath($Path,$root)
-    $prefix = $root.TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
-    if (-not ($fullPath.Equals($root,[StringComparison]::OrdinalIgnoreCase) -or $fullPath.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase))) { throw "$Label escapes WorkspaceRoot" }
+    if (-not ($fullPath.Equals($root,[StringComparison]::OrdinalIgnoreCase) -or `
+        $fullPath.StartsWith($root.TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase))) { throw "$Label escapes WorkspaceRoot" }
     Assert-HarnessNoReparseChain -Root $root -Path $fullPath -Label $Label
 
     $exists = Test-Path -LiteralPath $fullPath
@@ -178,7 +167,11 @@ function Resolve-HarnessContainedPath {
 }
 
 function New-HarnessContainedDirectory {
-    param([Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][string]$Path,[string]$Label = 'directory')
+    param(
+        [Parameter(Mandatory)][string]$WorkspaceRoot,
+        [Parameter(Mandatory)][string]$Path,
+        [string]$Label = 'directory'
+    )
     $root = Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
     $target = Resolve-HarnessContainedPath -WorkspaceRoot $root -Path $Path -Label $Label -AllowMissing
     [void][System.IO.Directory]::CreateDirectory($target)

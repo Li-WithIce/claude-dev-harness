@@ -4,14 +4,17 @@
 $script:ProtocolConfigRelativePath = '.assistant/config/protocol.json'
 
 function Get-HarnessWorkspaceProtocolConfig {
-    param([Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot)
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$WorkspaceRoot
+    )
 
     $WorkspaceRoot = Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
     $path = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $script:ProtocolConfigRelativePath -Label 'workspace protocol config' -AllowMissing
-    $status,$document,$digest = 'missing',[ordered]@{schema_version='harness-protocol-config/v2';new_task_protocol='auto';new_work='enabled'},$null
+    $status,$document = 'missing',[ordered]@{schema_version='harness-protocol-config/v2';new_task_protocol='auto';new_work='enabled'}
     if (Test-Path -LiteralPath $path) {
         try {
-            $document = Read-HarnessKernelJsonPath -Path $path -Label 'workspace protocol config' -MaximumBytes 4096
+            $document = Read-HarnessKernelJson -Path $path -Label 'workspace protocol config' -MaximumBytes 4096
         } catch {
             $detail = [string]$_.Exception.Message
             if ($detail -match 'too large$') { throw 'workspace protocol config is too large' }
@@ -21,35 +24,41 @@ function Get-HarnessWorkspaceProtocolConfig {
         Assert-HarnessKernelSchema -RepoRoot $RepoRoot -Value $document -Schema $(if ([string]$document.schema_version -ceq 'harness-protocol-config/v2') { 'protocol-config-v2.schema.json' } else { 'protocol-config.schema.json' }) -Label 'workspace protocol config' -Depth 10
         if ([string]$document.new_task_protocol -ceq 'v1') { throw 'v1-protocol-retired: explicit migration or v2 recovery is required' }
         $status = 'present'
-        $digest = Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $path
     }
     return [ordered]@{status = $status
         path = $script:ProtocolConfigRelativePath
         document = $document
-        digest = $digest}
+        digest = $(if($status-ceq'present'){Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $path}else{$null})}
 }
 
 function Set-HarnessWorkspaceProtocolConfig {
-    param([Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,
-        [Parameter(Mandatory)][ValidateSet('auto','v2')][string]$NewTaskProtocol,[switch]$PauseNewWork)
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$WorkspaceRoot,
+        [Parameter(Mandatory)][ValidateSet('auto','v2')][string]$NewTaskProtocol,
+        [switch]$PauseNewWork
+    )
 
     $WorkspaceRoot = Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
     [void](Resolve-Path -LiteralPath (Join-Path $RepoRoot 'schemas/protocol-config-v2.schema.json') -ErrorAction Stop)
     [void](Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $script:ProtocolConfigRelativePath -Label 'workspace protocol config' -AllowMissing)
     $document = [ordered]@{schema_version='harness-protocol-config/v2';new_task_protocol=$NewTaskProtocol;new_work=$(if($PauseNewWork){'paused'}else{'enabled'})}
-    $digest = Write-HarnessAtomicText -WorkspaceRoot $WorkspaceRoot -Path $script:ProtocolConfigRelativePath -Content (($document | ConvertTo-Json -Depth 10) + "`n")
     return [ordered]@{operation = 'protocol-config'
         action = $(if($PauseNewWork){'disable-v2'}elseif($NewTaskProtocol -ceq 'v2'){'enable-v2'}else{'reset-auto'})
         path = $script:ProtocolConfigRelativePath
         new_task_protocol = $NewTaskProtocol
         new_work = $document.new_work
-        digest = $digest
+        digest = Write-HarnessAtomicText -WorkspaceRoot $WorkspaceRoot -Path $script:ProtocolConfigRelativePath -Content (($document | ConvertTo-Json -Depth 10) + "`n")
         side_effects = [ordered]@{config_writes=1;runtime_writes=0;artifact_writes=0}}
 }
 
 function Get-HarnessProtocolResolution {
-    param([Parameter(Mandatory)][string]$WorkspaceRoot,[string]$TaskId = '',
-        [string]$RequestedProtocol = '',[string]$RepoRoot = '')
+    param(
+        [Parameter(Mandatory)][string]$WorkspaceRoot,
+        [string]$TaskId = '',
+        [string]$RequestedProtocol = '',
+        [string]$RepoRoot = ''
+    )
 
     $WorkspaceRoot = Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
     if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Join-Path $PSScriptRoot '../..' }
@@ -66,8 +75,14 @@ function Get-HarnessProtocolResolution {
         default_source='existing-artifact'
         reason='existing-v2-task-state'
         warning=$null
-        workspace_config=[ordered]@{status='not-read';path=$script:ProtocolConfigRelativePath;new_task_protocol=$null;new_work=$null;digest=$null}
-        runtime_default_decision=[ordered]@{status='not-read';usable=$false;reason='artifact-or-explicit-selection';path='.assistant/runtime/protocol-default.json';decision_digest=$null;new_task_protocol=$null;scope=$null;required_capabilities=@();missing_capabilities=@();host_capabilities=$null}
+        workspace_config=[ordered]@{status='not-read';path=$script:ProtocolConfigRelativePath;
+            new_task_protocol=$null;new_work=$null;
+            digest=$null}
+        runtime_default_decision=[ordered]@{status='not-read';usable=$false;
+            reason='artifact-or-explicit-selection';path='.assistant/runtime/protocol-default.json';
+            decision_digest=$null;new_task_protocol=$null;
+            scope=$null;required_capabilities=@();
+            missing_capabilities=@();host_capabilities=$null}
         v2_task_state_path=$null
         side_effects=[ordered]@{runtime_writes=0;artifact_writes=0}}
     if (-not [string]::IsNullOrWhiteSpace($TaskId)) {
@@ -93,17 +108,17 @@ function Get-HarnessProtocolResolution {
     # Admission is checked even for explicit v2; environment preference cannot bypass stop-loss.
     $config = Get-HarnessWorkspaceProtocolConfig -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot
     $newWork = if ($config.document.Contains('new_work')) { [string]$config.document.new_work } else { 'enabled' }
-    $resolution.workspace_config = [ordered]@{status=[string]$config.status;path=[string]$config.path;new_task_protocol=[string]$config.document.new_task_protocol;new_work=$newWork;digest=$config.digest}
+    $resolution.workspace_config = [ordered]@{status=[string]$config.status;path=[string]$config.path;
+        new_task_protocol=[string]$config.document.new_task_protocol;new_work=$newWork;
+        digest=$config.digest}
     if ([string]::IsNullOrWhiteSpace($resolution.requested_protocol)) {
         $resolution.requested_protocol = [string]$config.document.new_task_protocol
         $resolution.preference_source = if ($config.status -ceq 'present') { 'workspace-config' } else { 'default-auto' }
     }
-    $resolution.new_task_admission = $newWork
-    $resolution.default_source = $resolution.preference_source
+    $resolution.new_task_admission,$resolution.default_source = $newWork,$resolution.preference_source
     $resolution.reason = if ($resolution.requested_protocol -ceq 'v2') { if ($resolution.preference_source -ceq 'workspace-config') { 'workspace-v2-new-task' } else { 'explicit-v2-new-task' } } else { 'v2-default-new-task' }
     if ($newWork -ceq 'paused') {
-        $resolution.selected_protocol = $null
-        $resolution.reason = 'new-work-paused'
+        $resolution.selected_protocol,$resolution.reason = $null,'new-work-paused'
     } elseif ($resolution.requested_protocol -ceq 'auto') {
         $resolution.runtime_default_decision = Get-HarnessRuntimeDefaultDecision -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot
         if ($resolution.runtime_default_decision.status -ceq 'missing') {
@@ -111,8 +126,7 @@ function Get-HarnessProtocolResolution {
         } elseif ($resolution.runtime_default_decision.usable -and $resolution.runtime_default_decision.new_task_protocol -ceq 'v2') {
             $resolution.default_source = 'runtime-default-decision'
         } else {
-            $resolution.selected_protocol = $null
-            $resolution.new_task_admission = 'blocked'
+            $resolution.selected_protocol,$resolution.new_task_admission = $null,'blocked'
         }
         if ($resolution.runtime_default_decision.status -cne 'missing') { $resolution.reason = [string]$resolution.runtime_default_decision.reason }
     }

@@ -6,20 +6,13 @@ function Read-HarnessGovernanceText {
     catch { throw "$Label is not valid UTF-8: $($_.Exception.Message)" }
 }
 
-function Get-HarnessGovernanceHeader {
-    param([string]$Text,[string]$Name,[string]$Label)
-    $matches = [regex]::Matches($Text,"(?m)^- $([regex]::Escape($Name)):\s*(?<value>.+?)\s*$")
-    if ($matches.Count -ne 1) { throw "$Label must contain exactly one $Name binding" }
-    return $matches[0].Groups['value'].Value.Trim()
-}
-
-function Get-HarnessMarkdownSection {
-    param([string]$Text,[string]$Name,[string]$Label)
-    $matches = [regex]::Matches($Text,"(?ms)^## $([regex]::Escape($Name))\s*\r?\n(?<body>.*?)(?=^## |\z)")
-    if ($matches.Count -ne 1) { throw "$Label must contain exactly one $Name section" }
-    $body = $matches[0].Groups['body'].Value.Trim()
-    if ([string]::IsNullOrWhiteSpace($body)) { throw "$Label $Name section is empty" }
-    return $body
+function Get-HarnessGovernanceValue {
+    param([string]$Text,[string]$Name,[string]$Label,[switch]$Section)
+    $matches = [regex]::Matches($Text,$(if($Section){"(?ms)^## $([regex]::Escape($Name))\s*\r?\n(?<body>.*?)(?=^## |\z)"}else{"(?m)^- $([regex]::Escape($Name)):\s*(?<value>.+?)\s*$"}))
+    if ($matches.Count -ne 1) { throw "$Label must contain exactly one $Name $(if($Section){'section'}else{'binding'})" }
+    $value = $matches[0].Groups[$(if($Section){'body'}else{'value'})].Value.Trim()
+    if ($Section -and [string]::IsNullOrWhiteSpace($value)) { throw "$Label $Name section is empty" }
+    return $value
 }
 
 function New-HarnessPlanArtifact {
@@ -37,24 +30,27 @@ function Assert-HarnessPlanArtifact {
     param([Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][string]$TaskId,[Parameter(Mandatory)][string]$ContractDigest)
     $path = "docs/tasks/$TaskId/plan.md"
     $text = Read-HarnessGovernanceText -WorkspaceRoot $WorkspaceRoot -Path $path -Label 'governed plan'
-    if ((Get-HarnessGovernanceHeader -Text $text -Name 'task_id' -Label 'governed plan') -cne $TaskId) { throw 'governed plan task_id is stale' }
-    if ((Get-HarnessGovernanceHeader -Text $text -Name 'contract_digest' -Label 'governed plan') -cne $ContractDigest) { throw 'governed plan contract_digest is stale' }
+    foreach ($binding in ([ordered]@{task_id=$TaskId;contract_digest=$ContractDigest}).GetEnumerator()) {
+        if ((Get-HarnessGovernanceValue -Text $text -Name $binding.Key -Label 'governed plan') -cne $binding.Value) { throw "governed plan $($binding.Key) is stale" }
+    }
     if ($text -cmatch '<fill-[a-z0-9-]+>') { throw 'governed plan still contains fill placeholders' }
-    foreach ($section in @('Goal','Scope','Implementation','Verification','Rollback')) { [void](Get-HarnessMarkdownSection -Text $text -Name $section -Label 'governed plan') }
+    foreach ($section in @('Goal','Scope','Implementation','Verification','Rollback')) { [void](Get-HarnessGovernanceValue -Text $text -Name $section -Label 'governed plan' -Section) }
     return [pscustomobject]@{Path=$path;Digest=(Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $path)}
 }
 
 function Resolve-HarnessAuditArtifact {
-    param([Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][string]$TaskId,
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][string]$TaskId,
         [Parameter(Mandatory)][int]$TaskVersion,[Parameter(Mandatory)][string]$ContractDigest,[Parameter(Mandatory)][object]$Evidence,
-        [ValidateSet('isolated-context','different-actor')][string]$RequiredIndependence='isolated-context')
+        [ValidateSet('isolated-context','different-actor')][string]$RequiredIndependence='isolated-context'
+    )
     $path = "docs/tasks/$TaskId/audit.md"
     $text = Read-HarnessGovernanceText -WorkspaceRoot $WorkspaceRoot -Path $path -Label 'independent audit'
-    if ((Get-HarnessGovernanceHeader -Text $text -Name 'task_id' -Label 'independent audit') -cne $TaskId) { throw 'independent audit task_id is stale' }
-    if ((Get-HarnessGovernanceHeader -Text $text -Name 'task_version' -Label 'independent audit') -cne [string]$TaskVersion) { throw 'independent audit task_version is stale' }
-    if ((Get-HarnessGovernanceHeader -Text $text -Name 'contract_digest' -Label 'independent audit') -cne $ContractDigest) { throw 'independent audit contract_digest is stale' }
-    if ((Get-HarnessGovernanceHeader -Text $text -Name 'verdict' -Label 'independent audit') -cne 'pass') { throw 'independent audit verdict must be pass' }
-    if ((Get-HarnessGovernanceHeader -Text $text -Name 'reviewer_participated' -Label 'independent audit') -cne 'false') { throw 'independent reviewer participated in implementation' }
+    foreach ($binding in ([ordered]@{task_id=$TaskId;task_version=[string]$TaskVersion;contract_digest=$ContractDigest}).GetEnumerator()) {
+        if ((Get-HarnessGovernanceValue -Text $text -Name $binding.Key -Label 'independent audit') -cne $binding.Value) { throw "independent audit $($binding.Key) is stale" }
+    }
+    if ((Get-HarnessGovernanceValue -Text $text -Name 'verdict' -Label 'independent audit') -cne 'pass') { throw 'independent audit verdict must be pass' }
+    if ((Get-HarnessGovernanceValue -Text $text -Name 'reviewer_participated' -Label 'independent audit') -cne 'false') { throw 'independent reviewer participated in implementation' }
 
     $recordMatches = [regex]::Matches($text,'(?ms)^<!-- harness-audit-record:start -->\s*\r?\n(?<json>.*?)\r?\n<!-- harness-audit-record:end -->\s*$')
     if ($recordMatches.Count -ne 1) { throw 'independent audit must contain exactly one machine record' }
@@ -81,7 +77,7 @@ function Resolve-HarnessAuditArtifact {
     if ([string]$record.reviewer_context_id -ceq $implementerContext) { throw 'independent reviewer context must differ from implementer context' }
     if ([string]$record.independence_level -ceq 'different-actor' -and [string]$record.reviewer_actor_id -ceq $implementerActor) { throw 'different-actor audit requires a different reviewer actor' }
 
-    $findings = Get-HarnessMarkdownSection -Text $text -Name 'Findings' -Label 'independent audit'
+    $findings = Get-HarnessGovernanceValue -Text $text -Name 'Findings' -Label 'independent audit' -Section
     if ($findings -cne '- none') {
         foreach ($line in @($findings -split "\r?\n")) {
             if ([string]::IsNullOrWhiteSpace($line)) { continue }
@@ -93,7 +89,7 @@ function Resolve-HarnessAuditArtifact {
             if ((Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $evidencePath) -cne $finding.Groups['digest'].Value) { throw 'independent audit finding evidence digest mismatch' }
         }
     }
-    [void](Get-HarnessMarkdownSection -Text $text -Name 'Evidence' -Label 'independent audit')
+    [void](Get-HarnessGovernanceValue -Text $text -Name 'Evidence' -Label 'independent audit' -Section)
     return [pscustomobject]@{Path=$path;Digest=(Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $path);Record=$record}
 }
 
@@ -109,11 +105,12 @@ function Assert-HarnessGovernanceReady {
         if([string]$protectedOperation.approval_type-ceq'none'){throw 'Critical protected_operation requires an Approval type'}
         if(-not$dryRun.Contains('operation_identity')-or[string]$dryRun.operation_identity-cne$identity){throw 'Critical dry-run is not bound to protected_operation'}
         if(@($dryRun.covers).Count-eq0-or@($dryRun.covers)-cnotcontains$identity){throw 'Critical dry-run covers must include protected_operation identity'}
-        if(-not@($Evidence.Document.records|Where-Object{[string]$_.type-ceq'command'-and[int]$_.exit_code-eq0-and$_.Contains('operation_identity')-and[string]$_.operation_identity-ceq$identity-and@($_.covers)-ccontains$identity}).Count){throw 'Critical completion requires successful execution Evidence bound to protected_operation'}
+        if(-not@($Evidence.Document.records|Where-Object{(Test-HarnessKernelFields $_ @{type='command';exit_code=0;operation_identity=$identity})-and@($_.covers)-ccontains$identity}).Count){throw 'Critical completion requires successful execution Evidence bound to protected_operation'}
     }
     if ([bool]$Task.policies.plan_required) { $plan = Assert-HarnessPlanArtifact -WorkspaceRoot $WorkspaceRoot -TaskId ([string]$Task.task_id) -ContractDigest ([string]$Task.contract_digest) }
     if ([bool]$Task.policies.independent_review_required) {
-        $audit = Resolve-HarnessAuditArtifact -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId ([string]$Task.task_id) -TaskVersion ([int]$Task.version) -ContractDigest ([string]$Task.contract_digest) -Evidence $Evidence -RequiredIndependence $(if([string]$Task.execution_profile-ceq'critical'){'different-actor'}else{'isolated-context'})
+        $audit = Resolve-HarnessAuditArtifact -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot -TaskId ([string]$Task.task_id) -TaskVersion ([int]$Task.version) `
+            -ContractDigest ([string]$Task.contract_digest) -Evidence $Evidence -RequiredIndependence $(if([string]$Task.execution_profile-ceq'critical'){'different-actor'}else{'isolated-context'})
     }
     return [pscustomobject]@{Plan=$plan;Audit=$audit;ProtectedOperation=$protectedOperation}
 }

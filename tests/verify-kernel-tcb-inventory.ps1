@@ -86,6 +86,175 @@ function Get-StringLeaves {
         foreach ($item in $Value) { Get-StringLeaves -Value $item }
     }
 }
+function Get-PowerShellSourceDensity {
+    param([string[]]$Paths, [string]$Revision = '')
+
+    $tokenCount = 0
+    $statementCount = 0
+    foreach ($path in $Paths) {
+        if ($path -notmatch '\.psm?1$') { continue }
+        if ($Revision) {
+            $text = @(& git -C $RepoRoot show "$Revision`:$path" 2>$null) -join "`n"
+            if ($LASTEXITCODE -ne 0) { throw "unable to read TK-07 Base source: $path" }
+        } else {
+            $text = [IO.File]::ReadAllText((Join-Path $RepoRoot $path))
+        }
+        $text = $text.TrimStart([char]0xFEFF)
+        $tokens = $null
+        $errors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseInput($text, [ref]$tokens, [ref]$errors)
+        if (@($errors).Count) { throw "PowerShell density parse failed: $path" }
+        $tokenCount += @($tokens | Where-Object { $_.Kind -cnotin @('Comment','NewLine','LineContinuation','EndOfInput') }).Count
+        $statementCount += @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.StatementAst] }, $true)).Count
+    }
+    return [pscustomobject]@{ Tokens=$tokenCount; Statements=$statementCount }
+}
+function Get-Tk07AddedLines {
+    param([string]$BaseRevision, [string[]]$Paths)
+
+    $added = [Collections.Generic.Dictionary[string,Collections.Generic.HashSet[int]]]::new([StringComparer]::Ordinal)
+    $currentPath = ''
+    $currentLine = 0
+    $inHunk = $false
+    foreach ($line in @(& git -C $RepoRoot diff --unified=0 --no-ext-diff $BaseRevision -- @Paths)) {
+        if ($line.StartsWith('diff ',[StringComparison]::Ordinal)) {
+            $inHunk = $false
+            continue
+        }
+        if ($line -match '^\+\+\+ b/(.+)$') {
+            $currentPath = $Matches[1].Replace('\','/')
+            if (-not $added.ContainsKey($currentPath)) { $added[$currentPath] = [Collections.Generic.HashSet[int]]::new() }
+            continue
+        }
+        if ($line -match '^@@ .* \+(\d+)(?:,\d+)? @@') {
+            $currentLine = [int]$Matches[1]
+            $inHunk = $true
+            continue
+        }
+        if (-not $inHunk) { continue }
+        if ($line.StartsWith('+',[StringComparison]::Ordinal) -and -not $line.StartsWith('+++',[StringComparison]::Ordinal)) {
+            if ($currentPath) { [void]$added[$currentPath].Add($currentLine) }
+            $currentLine++
+            continue
+        }
+        if (-not $line.StartsWith('-',[StringComparison]::Ordinal)) { $currentLine++ }
+    }
+
+    return ,$added
+}
+function Get-Tk07AddedLineDensity {
+    param([string]$BaseRevision, [string[]]$Paths)
+
+    $added = Get-Tk07AddedLines -BaseRevision $BaseRevision -Paths $Paths
+
+    $maximumLength = 0
+    $maximumSeparators = 0
+    foreach ($path in $Paths) {
+        if ($path -notmatch '\.psm?1$' -or -not $added.ContainsKey($path)) { continue }
+        $lines = [IO.File]::ReadAllLines((Join-Path $RepoRoot $path))
+        $tokens = $null
+        $errors = $null
+        [void][Management.Automation.Language.Parser]::ParseFile((Join-Path $RepoRoot $path), [ref]$tokens, [ref]$errors)
+        if (@($errors).Count) { throw "PowerShell density parse failed: $path" }
+        $separators = @{}
+        foreach ($token in @($tokens | Where-Object Kind -eq 'Semi')) {
+            $lineNumber = [int]$token.Extent.StartLineNumber
+            $separators[$lineNumber] = 1 + $(if ($separators.ContainsKey($lineNumber)) { [int]$separators[$lineNumber] } else { 0 })
+        }
+        foreach ($lineNumber in $added[$path]) {
+            $maximumLength = [Math]::Max($maximumLength, $lines[$lineNumber - 1].Length)
+            $maximumSeparators = [Math]::Max($maximumSeparators, $(if ($separators.ContainsKey($lineNumber)) { [int]$separators[$lineNumber] } else { 0 }))
+        }
+    }
+    return [pscustomobject]@{ MaximumLineLength=$maximumLength; MaximumStatementSeparators=$maximumSeparators }
+}
+function Get-Tk07LayoutIntegrity {
+    param([string]$BaseRevision, [string[]]$BasePaths, [string[]]$CurrentPaths)
+
+    $basePathSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($path in $BasePaths) { [void]$basePathSet.Add($path) }
+    $added = Get-Tk07AddedLines -BaseRevision $BaseRevision -Paths $CurrentPaths
+    $paramSpans = [Collections.Generic.Dictionary[string,int]]::new([StringComparer]::OrdinalIgnoreCase)
+    $paramShrink = [Collections.Generic.List[string]]::new()
+    $packedStatements = [Collections.Generic.List[string]]::new()
+    $packedKeys = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+
+    foreach ($path in $CurrentPaths) {
+        if ($path -notmatch '\.psm?1$') { continue }
+        $currentFullPath = Join-Path $RepoRoot $path
+        $currentTokens = $null
+        $currentErrors = $null
+        $currentAst = [Management.Automation.Language.Parser]::ParseFile($currentFullPath, [ref]$currentTokens, [ref]$currentErrors)
+        if (@($currentErrors).Count) { throw "PowerShell layout parse failed: $path" }
+
+        if ($basePathSet.Contains($path)) {
+            $baseText = (@(& git -C $RepoRoot show "$BaseRevision`:$path" 2>$null) -join "`n").TrimStart([char]0xFEFF)
+            if ($LASTEXITCODE -ne 0) { throw "unable to read TK-07 Base source: $path" }
+            $baseTokens = $null
+            $baseErrors = $null
+            $baseAst = [Management.Automation.Language.Parser]::ParseInput($baseText, [ref]$baseTokens, [ref]$baseErrors)
+            if (@($baseErrors).Count) { throw "PowerShell Base layout parse failed: $path" }
+
+            $baseParamBlocks = [Collections.Generic.List[object]]::new()
+            if ($null -ne $baseAst.ParamBlock) {
+                $baseParamBlocks.Add([pscustomobject]@{ Name='<script>'; ParamBlock=$baseAst.ParamBlock })
+            }
+            foreach ($function in @($baseAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $true))) {
+                if ($null -ne $function.Body.ParamBlock) {
+                    $baseParamBlocks.Add([pscustomobject]@{ Name=$function.Name; ParamBlock=$function.Body.ParamBlock })
+                }
+            }
+            foreach ($entry in $baseParamBlocks) {
+                $signature = @($entry.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath.ToLowerInvariant() }) -join ','
+                $key = "$path`0$($entry.Name)`0$signature"
+                $span = 1 + $entry.ParamBlock.Extent.EndLineNumber - $entry.ParamBlock.Extent.StartLineNumber
+                if (-not $paramSpans.ContainsKey($key) -or $span -gt $paramSpans[$key]) { $paramSpans[$key] = $span }
+            }
+
+            $currentParamBlocks = [Collections.Generic.List[object]]::new()
+            if ($null -ne $currentAst.ParamBlock) {
+                $currentParamBlocks.Add([pscustomobject]@{ Name='<script>'; ParamBlock=$currentAst.ParamBlock })
+            }
+            foreach ($function in @($currentAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $true))) {
+                if ($null -ne $function.Body.ParamBlock) {
+                    $currentParamBlocks.Add([pscustomobject]@{ Name=$function.Name; ParamBlock=$function.Body.ParamBlock })
+                }
+            }
+            foreach ($entry in $currentParamBlocks) {
+                $signature = @($entry.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath.ToLowerInvariant() }) -join ','
+                $key = "$path`0$($entry.Name)`0$signature"
+                if (-not $paramSpans.ContainsKey($key)) { continue }
+                $span = 1 + $entry.ParamBlock.Extent.EndLineNumber - $entry.ParamBlock.Extent.StartLineNumber
+                if ($span -lt $paramSpans[$key]) {
+                    $paramShrink.Add("$path::$($entry.Name) base=$($paramSpans[$key]) current=$span")
+                }
+            }
+        }
+
+        if (-not $added.ContainsKey($path)) { continue }
+        $blocks = @($currentAst.FindAll({
+            param($node)
+            $node -is [Management.Automation.Language.NamedBlockAst] -or
+                $node -is [Management.Automation.Language.StatementBlockAst]
+        }, $true))
+        foreach ($block in $blocks) {
+            foreach ($group in @($block.Statements | Group-Object { $_.Extent.StartLineNumber })) {
+                $lineNumber = [int]$group.Name
+                if ($group.Count -le 1 -or -not $added[$path].Contains($lineNumber)) { continue }
+                $packedKey = "$path`0$lineNumber"
+                if ($packedKeys.Add($packedKey)) {
+                    $packedStatements.Add("$path`:$lineNumber statements=$($group.Count)")
+                }
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        ParamBlockShrinkCount=$paramShrink.Count
+        PackedSiblingStatementLineCount=$packedStatements.Count
+        Details=@($paramShrink) + @($packedStatements)
+    }
+}
 
 $generatorPath = Join-Path $RepoRoot 'scripts\get-kernel-tcb-inventory.ps1'
 $rootsPath = Join-Path $RepoRoot 'kernel-tcb-roots.json'
@@ -262,18 +431,17 @@ Check ($absoluteStrings.Count -eq 0) 'inventory contains no absolute local or UN
 
 $runtimePaths = @($inventory.files | Where-Object { @($_.trust_paths) -ccontains 'runtime' } | ForEach-Object path)
 Check ($runtimePaths -contains 'scripts/lib/Harness.Path.psm1' -and $runtimePaths -contains 'scripts/lib/Harness.AtomicWrite.psm1' -and $runtimePaths -contains 'scripts/lib/Harness.Hashing.psm1' -and $runtimePaths -notcontains 'scripts/lib/Harness.CanonicalJson.psm1') 'Runtime TCB contains its three reached K0 primitives while unreferenced CanonicalJson remains outside' 'K0 Runtime reachability or CanonicalJson isolation drifted'
-$packing = [ordered]@{ maximum_line_length=0; lines_over_300=0; semicolon_characters=0; multi_semicolon_lines=0; maximum_semicolons_on_line=0 }
-foreach ($runtimePath in $runtimePaths) {
-    foreach ($line in [IO.File]::ReadAllLines((Join-Path $RepoRoot $runtimePath))) {
-        $packing.maximum_line_length = [Math]::Max([int]$packing.maximum_line_length, $line.Length)
-        if ($line.Length -gt 300) { $packing.lines_over_300++ }
-        $lineSemicolons = [regex]::Matches($line, ';').Count
-        $packing.semicolon_characters += $lineSemicolons
-        if ($lineSemicolons -gt 1) { $packing.multi_semicolon_lines++ }
-        $packing.maximum_semicolons_on_line = [Math]::Max([int]$packing.maximum_semicolons_on_line, $lineSemicolons)
-    }
-}
-Check ([int]$packing.maximum_line_length -le 500 -and [int]$packing.lines_over_300 -le 37 -and [int]$packing.semicolon_characters -le 418 -and [int]$packing.multi_semicolon_lines -le 103 -and [int]$packing.maximum_semicolons_on_line -le 16) 'TK-07 source-density ratchet rejects physical-line packing beyond the reviewed Head' "Runtime physical-line density exceeds the TK-07 review: $($packing | ConvertTo-Json -Compress)"
+$tk07Base = '3d9fc13e0cb54f022b33f290b86ec1d6d239f1ba'
+$baseInventory = @(& git -C $RepoRoot show "$tk07Base`:kernel-tcb-inventory.json" 2>$null) -join "`n" | ConvertFrom-Json -Depth 30
+$baseRuntimePaths = @($baseInventory.files | Where-Object { @($_.trust_paths) -ccontains 'runtime' } | ForEach-Object path)
+$baseDensity = Get-PowerShellSourceDensity -Paths $baseRuntimePaths -Revision $tk07Base
+$currentDensity = Get-PowerShellSourceDensity -Paths $runtimePaths
+$addedDensity = Get-Tk07AddedLineDensity -BaseRevision $tk07Base -Paths $runtimePaths
+$layoutIntegrity = Get-Tk07LayoutIntegrity -BaseRevision $tk07Base -BasePaths $baseRuntimePaths -CurrentPaths $runtimePaths
+Check ($currentDensity.Tokens * 100 -le $baseDensity.Tokens * 65 -and $currentDensity.Statements * 100 -le $baseDensity.Statements * 65) 'TK-07 removes at least 35 percent of executable tokens and statement ASTs from the exact Base closure' "TK-07 executable source reduction is too weak: base=$($baseDensity | ConvertTo-Json -Compress) current=$($currentDensity | ConvertTo-Json -Compress)"
+Check ($currentDensity.Tokens -le 35288 -and $currentDensity.Statements -le 10376) 'TK-07 final source improves tokens and statement ASTs from the 3123-line readable checkpoint' "TK-07 source did not preserve the readable-checkpoint density ratchet: current=$($currentDensity | ConvertTo-Json -Compress) limits={\"Tokens\":35288,\"Statements\":10376}"
+Check ($addedDensity.MaximumLineLength -le 300 -and $addedDensity.MaximumStatementSeparators -le 2) 'TK-07 changed Runtime lines stay reviewable and do not pack statement separators' "TK-07 changed Runtime source is packed: $($addedDensity | ConvertTo-Json -Compress)"
+Check ($layoutIntegrity.ParamBlockShrinkCount -eq 0 -and $layoutIntegrity.PackedSiblingStatementLineCount -eq 0) 'TK-07 preserves matching Base parameter layouts and keeps sibling statements on separate changed lines' "TK-07 Runtime layout compression detected: $($layoutIntegrity | ConvertTo-Json -Compress -Depth 5)"
 $distributionPaths = @($inventory.files | Where-Object { @($_.trust_paths) -ccontains 'distribution' } | ForEach-Object path)
 Check ($distributionPaths -ccontains 'scripts/lib/Harness.Distribution.psm1' -and $distributionPaths -ccontains 'scripts/lib/Harness.CanonicalJson.psm1' -and $runtimePaths -cnotcontains 'scripts/lib/Harness.Distribution.psm1' -and $distributionPaths -cnotcontains 'scripts/lib/Harness.ModuleManifest.psm1' -and $distributionPaths -cnotcontains 'scripts/lib/Harness.CapabilitySource.psm1') 'TK-06 adds only the D1 constructor and canonical primitive, without C2 imports or Runtime reachability' 'Distribution adoption crossed the Runtime or C2 boundary'
 Check (@($runtimePaths | Where-Object { $_ -match '(?i)RolloutEvidence|Qualification|release-(?:model|host|full)|generate-v2-rollout' }).Count -eq 0) 'Runtime TCB excludes Release and Qualification producers' 'Release or Qualification leaked into Runtime TCB'

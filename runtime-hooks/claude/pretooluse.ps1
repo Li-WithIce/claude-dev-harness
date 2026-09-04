@@ -27,12 +27,10 @@ try {
 
     $toolInput = $payload.tool_input
     $changedPaths = @()
+    $actionKind = if ($toolName -ceq 'Bash') { 'shell' } elseif ($toolName -ceq 'apply_patch') { 'apply_patch' } else { 'file_mutation' }
     if ($toolName -cin @('Bash','apply_patch')) {
-        if (-not $toolInput.Contains('command') -or $toolInput.command -isnot [string] -or
-            [string]::IsNullOrWhiteSpace([string]$toolInput.command)) { throw "$toolName PreToolUse input is missing command" }
-        $actionKind = if ($toolName -ceq 'Bash') { 'shell' } else { 'apply_patch' }
+        if (-not $toolInput.Contains('command') -or $toolInput.command -isnot [string] -or [string]::IsNullOrWhiteSpace([string]$toolInput.command)) { throw "$toolName PreToolUse input is missing command" }
     } else {
-        $actionKind = 'file_mutation'
         foreach ($key in @('file_path','path','notebook_path')) {
             if (-not $toolInput.Contains($key)) { continue }
             if ($toolInput[$key] -isnot [string]) { throw "$toolName PreToolUse target path must be a string" }
@@ -42,24 +40,21 @@ try {
     }
 
     if ($payload.Contains('cwd') -and $payload.cwd -isnot [string]) { throw 'Codex PreToolUse input contains a non-string cwd' }
-    $payloadRoot = if ($payload.Contains('cwd')) { [string]$payload.cwd } else { '' }
-    if (-not [string]::IsNullOrWhiteSpace($env:HARNESS_SESSION_MODE) -and
-        $env:HARNESS_SESSION_MODE -cnotin @('read-only','write')) {
+    if (-not [string]::IsNullOrWhiteSpace($env:HARNESS_SESSION_MODE) -and $env:HARNESS_SESSION_MODE -cnotin @('read-only','write')) {
         throw "HARNESS_SESSION_MODE must be read-only or write: $env:HARNESS_SESSION_MODE"
     }
     $expectedVersion = 0
-    $expectedVersionValue = if ([int]::TryParse([string]$env:HARNESS_EXPECTED_VERSION,[ref]$expectedVersion)) { $expectedVersion } else { $null }
     $module = '{REPO_ROOT}\scripts\lib\Harness.AdapterAction.psm1'
     if (-not (Test-Path -LiteralPath $module -PathType Leaf)) { throw 'core safety hook module is unavailable' }
     Import-Module $module -Force -ErrorAction Stop
     [void](Invoke-HarnessAdapterPreflightAction -RepoRoot '{REPO_ROOT}' `
-        -WorkspaceRoot $payloadRoot -WorkspaceRootFallback ([Environment]::GetEnvironmentVariable('DEV_HARNESS_WORKSPACE_ROOT','Process')) `
+        -WorkspaceRoot $(if ($payload.Contains('cwd')) { [string]$payload.cwd } else { '' }) -WorkspaceRootFallback ([Environment]::GetEnvironmentVariable('DEV_HARNESS_WORKSPACE_ROOT','Process')) `
         -PermissionMode $permissionMode -SessionMode $(if ($env:HARNESS_SESSION_MODE -ceq 'read-only') { 'read-only' } else { 'write' }) `
         -ActionMode write -ActionKind $actionKind `
         -ShellText $(if($toolName-ceq'Bash'){[string]$toolInput.command}else{''}) `
         -PatchText $(if($toolName-ceq'apply_patch'){[string]$toolInput.command}else{''}) `
         -ChangedPaths $changedPaths -TaskId ([string]$env:HARNESS_TASK_ID) `
-        -ExpectedVersion $expectedVersionValue -Environment ([string]$env:HARNESS_ENVIRONMENT) `
+        -ExpectedVersion $(if ([int]::TryParse([string]$env:HARNESS_EXPECTED_VERSION,[ref]$expectedVersion)) { $expectedVersion } else { $null }) -Environment ([string]$env:HARNESS_ENVIRONMENT) `
         -DryRun:([string]$env:HARNESS_DRY_RUN -ceq '1') `
         -UserInstruction $(if ($payload.Contains('user_prompt')) { [string]$payload.user_prompt } else { '' }))
     [Console]::Out.Write('{}')

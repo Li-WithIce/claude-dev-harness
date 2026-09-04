@@ -299,12 +299,13 @@ generated value with delta zero and no exception. The baseline is a generated
 observation bound by verifier checks, not a permanent architectural constant.
 
 The bounded TK-07 Base-to-Head review uses the unchanged inventory algorithm.
-PR #12 Head measured 6075 executable lines across 22 Runtime files, with a
-976-character maximum physical line, 51 lines over 300 characters, 656
-semicolon characters, and 140 multi-semicolon lines. TK-07 measures 2999 lines
-across 21 Runtime files, with corresponding source-density values of 500, 37,
-418, and 103. The verifier ratchets those Head density values so the reduction
-cannot be recreated later by packing more statements onto physical lines.
+PR #12 Head measured 6075 executable lines across 22 Runtime files, 59552
+executable tokens, and 17693 statement ASTs. TK-07 measures 2999 lines across
+21 Runtime files, 35064 executable tokens, and 10337 statement ASTs: reductions
+of 41.12 percent and 41.58 percent in the two syntax-aware measures. The
+verifier requires both reductions to remain at least 35 percent and separately
+limits every Base-to-Head added Runtime line to 300 characters and two statement
+separators; this Head's observed maxima are 298 and two.
 
 ## Terminal SLOs
 

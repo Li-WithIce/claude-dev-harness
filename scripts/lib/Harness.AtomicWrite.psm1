@@ -22,10 +22,8 @@ function Write-HarnessAtomicText {
         [Parameter(Mandatory)][AllowEmptyString()][string]$Content
     )
 
-    $currentDigest = Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $Path
-    if ($null -eq $currentDigest) { $currentDigest = 'missing' }
     return Write-HarnessAtomicBytes -WorkspaceRoot $WorkspaceRoot -SourceBytes ([System.Text.UTF8Encoding]::new($false).GetBytes($Content)) -Path $Path `
-        -ExpectedSourceDigest (Get-HarnessSha256Text -Content $Content) -ExpectedCurrentDigest $currentDigest
+        -ExpectedSourceDigest (Get-HarnessSha256Text -Content $Content) -ExpectedCurrentDigest $(if($null-eq($currentDigest=Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $Path)){'missing'}else{$currentDigest})
 }
 
 function Write-HarnessAtomicBytes {
@@ -54,8 +52,7 @@ function Write-HarnessAtomicBytes {
         } finally { $stream.Dispose() }
         if ((Get-HarnessFileSha256 -Path $tempPath) -cne $ExpectedSourceDigest) { throw 'atomic source digest changed before publish' }
 
-        $directoryPath = [System.IO.Path]::GetDirectoryName($fullPath)
-        $cursor = $directoryPath
+        $directoryPath = $cursor = [System.IO.Path]::GetDirectoryName($fullPath)
         while (-not (Test-Path -LiteralPath $cursor)) {
             $createdDirectories.Add($cursor)
             $parent = [System.IO.Path]::GetDirectoryName($cursor)
@@ -66,8 +63,7 @@ function Write-HarnessAtomicBytes {
         if ($ExpectedCurrentDigest -ceq 'missing') {
             [System.IO.File]::Move($tempPath,$fullPath)
         } else {
-            if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) { throw 'atomic target digest changed before publish' }
-            if ((Get-HarnessFileSha256 -Path $fullPath) -cne $ExpectedCurrentDigest) { throw 'atomic target digest changed before publish' }
+            if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf) -or (Get-HarnessFileSha256 -Path $fullPath) -cne $ExpectedCurrentDigest) { throw 'atomic target digest changed before publish' }
             [System.IO.File]::Replace($tempPath,$fullPath,$backupPath,$true)
             $overwrittenDigest = $null
             try {
