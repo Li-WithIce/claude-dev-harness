@@ -281,7 +281,7 @@
     },
     {
       "path": "scripts/lib/Harness.Hashing.psm1",
-      "sha256": "sha256:cd5c00086aca1ebefbebcaa785528f9f315bc8ddd262f48811c6cec7f9cf0b65",
+      "sha256": "sha256:8603867d66e8557cd48887dbc6c637d8948cf47bddc708b49e03c06e0bc67e08",
       "layer": "k0-trust-primitive",
       "trust_paths": [
         "distribution",
@@ -297,9 +297,9 @@
         "task-cli",
         "workspace-bootstrap"
       ],
-      "physical_loc": 38,
-      "nonblank_loc": 29,
-      "executable_loc": 29
+      "physical_loc": 43,
+      "nonblank_loc": 33,
+      "executable_loc": 33
     },
     {
       "path": "scripts/lib/Harness.HostCapabilities.psm1",
@@ -1547,20 +1547,20 @@
   "unresolved_dependencies": [],
   "totals": {
     "file_count": 29,
-    "physical_loc": 10342,
-    "nonblank_loc": 9417,
-    "executable_loc": 9360,
+    "physical_loc": 10347,
+    "nonblank_loc": 9421,
+    "executable_loc": 9364,
     "runtime_file_count": 21,
-    "runtime_executable_loc": 2995,
+    "runtime_executable_loc": 2999,
     "distribution_file_count": 18,
-    "distribution_executable_loc": 7696,
+    "distribution_executable_loc": 7700,
     "duplicate_edge_count": 0,
     "artifact_count": 39,
     "artifact_bytes": 143030
   },
   "budget": {
-    "baseline_executable_loc": 2995,
-    "current_executable_loc": 2995,
+    "baseline_executable_loc": 2999,
+    "current_executable_loc": 2999,
     "delta": 0,
     "covered_growth": 0,
     "status": "within-baseline",

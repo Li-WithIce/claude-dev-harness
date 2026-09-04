@@ -53,7 +53,7 @@ Need-Text $codexHooksPath '"matcher": "^(Bash|apply_patch|Write|Edit|MultiEdit|N
 Need-Text $codexHooksPath '"command": "{WINDOWS_POWERSHELL_EXE} -NoLogo -NoProfile -NonInteractive -Command . ''{CODEX_PRETOOLUSE_LAUNCHER_PS_LITERAL}''"'
 Need-Text $codexHooksPath '"timeout": 15'
 Need-Text 'runtime-hooks/claude/codex-pretooluse-launcher.ps1' "`$result.StdOut.Trim() -cne '{}'"
-Need-Text 'runtime-hooks/claude/codex-pretooluse-launcher.ps1' "permissionDecision = 'deny'"
+Need-Text 'runtime-hooks/claude/codex-pretooluse-launcher.ps1' '"permissionDecision":"deny"'
 Reject-Regex $codexHooksPath '(?i)\b(?:EncodedCommand|ExecutionPolicy|WindowStyle)\b' 'Codex Hook command must remain a transparent, unencoded launcher invocation'
 Reject-Regex 'runtime-hooks/claude/codex-pretooluse-launcher.ps1' '(?i)\b(?:EncodedCommand|Invoke-Expression|FromBase64String|CreateNoWindow|WindowStyle)\b|ScriptBlock\s*\]\s*::\s*Create' 'Codex Hook launcher must not hide or dynamically evaluate its payload'
 Need-Text 'README.md' 'direct `apply_patch` 严格解析全部 Add/Update/Delete/Move 目标'

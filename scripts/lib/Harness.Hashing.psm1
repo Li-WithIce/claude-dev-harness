@@ -6,7 +6,13 @@ $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 function Get-HarnessSha256Bytes {
     [CmdletBinding()]
     param([Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
-    return 'sha256:' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
+
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return 'sha256:' + ([System.BitConverter]::ToString($sha256.ComputeHash($Bytes))).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+    }
 }
 
 function Get-HarnessFileSha256 {
@@ -31,8 +37,7 @@ function Get-HarnessNormalizedTextSha256 {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
 
     $normalized = $Text.Replace("`r`n", "`n").Replace("`r", "`n")
-    $normalized = $normalized.TrimEnd([char[]]"`r`n") + "`n"
-    return Get-HarnessUtf8TextSha256 -Text $normalized
+    return Get-HarnessUtf8TextSha256 -Text ($normalized.TrimEnd([char[]]"`r`n") + "`n")
 }
 
 Export-ModuleMember -Function Get-HarnessSha256Bytes,Get-HarnessFileSha256,Get-HarnessUtf8TextSha256,Get-HarnessNormalizedTextSha256

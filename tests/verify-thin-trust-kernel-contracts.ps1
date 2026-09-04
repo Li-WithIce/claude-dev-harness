@@ -237,7 +237,7 @@ $thinTokens = @(
     'active Runtime protocol = v2 only',
     'active v1 Runtime reader = 0',
     'status writes = 0',
-    '2995'
+    '2999'
 )
 $missingThinTokens = @($thinTokens | Where-Object { -not $thinText.Contains($_, [StringComparison]::Ordinal) })
 Check ($missingThinHeadings.Count -eq 0 -and $missingThinTokens.Count -eq 0) 'Thin Trust Kernel document freezes layers, paths, budget, and terminal SLOs' "Thin Trust Kernel omissions: $($missingThinHeadings + $missingThinTokens -join ', ')"
