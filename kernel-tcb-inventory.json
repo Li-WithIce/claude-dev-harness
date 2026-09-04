@@ -434,7 +434,7 @@
     },
     {
       "path": "scripts/lib/Harness.RuntimeDefaultReader.ps1",
-      "sha256": "sha256:8385e53c336eba86735a50c6d84f7feb9827ccb26a7761f9df37e0ec45049a9a",
+      "sha256": "sha256:f9c9f2d28faf841ffa650ca07cef26c6e46e2789420774dbfbdcebd2290fa780",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "distribution",

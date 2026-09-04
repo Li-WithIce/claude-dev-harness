@@ -103,9 +103,14 @@ try {
     $expiredWorkspace=Join-Path $temp 'canary-expired';[void][IO.Directory]::CreateDirectory($expiredWorkspace);$issued=[datetimeoffset]::UtcNow.AddHours(-2);$expired=& $script:runtimeModule {param($Root,$Work,$Start)New-HarnessRuntimeDefaultDecisionDocument -RepoRoot $Root -WorkspaceRoot $Work -Scope workspace-canary -IssuedAtUtc $Start -ExpiresAtUtc $Start.AddHours(1)} $RepoRoot $expiredWorkspace $issued;Write-Decision $expiredWorkspace $expired;$canaryExpired=Resolve-Protocol $expiredWorkspace
     Check ($canaryValid.selected_protocol-ceq'v2'-and$canaryCopied.selected_protocol -eq $null-and$canaryCopied.reason-ceq'runtime-default-workspace-mismatch'-and$canaryExpired.selected_protocol -eq $null-and$canaryExpired.reason-ceq'runtime-default-expired') 'workspace canary is bounded to its workspace and expiry' 'workspace canary escaped its binding or lifetime'
 
-    $sourceRepo=Join-Path $temp 'runtime-source-repo';$cloneOutput=@(& git clone --quiet --no-hardlinks $RepoRoot $sourceRepo 2>&1);if($LASTEXITCODE-ne0){throw "runtime source fixture clone failed: $($cloneOutput-join' ')"}
+    $sourceRepo=Join-Path $temp 'runtime-source-repo';$cloneOutput=@(& git -c core.autocrlf=true clone --quiet --no-hardlinks $RepoRoot $sourceRepo 2>&1);if($LASTEXITCODE-ne0){throw "runtime source fixture clone failed: $($cloneOutput-join' ')"}
     $sourceWorkspace=Join-Path $temp 'runtime-source-workspace';[void][IO.Directory]::CreateDirectory($sourceWorkspace)
-    $sourceDecision=& $script:runtimeModule {param($Root,$Work)New-HarnessRuntimeDefaultDecisionDocument -RepoRoot $Root -WorkspaceRoot $Work -Scope release-default} $sourceRepo $sourceWorkspace;Write-Decision $sourceWorkspace $sourceDecision
+    [IO.File]::SetLastWriteTimeUtc((Join-Path $sourceRepo 'scripts/lib/Harness.RuntimeDefaultReader.ps1'),[datetime]::UtcNow)
+    $sourceDecision=& $script:runtimeModule {param($Root,$Work)New-HarnessRuntimeDefaultDecisionDocument -RepoRoot $Root -WorkspaceRoot $Work -Scope release-default} $sourceRepo $sourceWorkspace
+    Check ([string]$sourceDecision.source_identity.revision -ceq (& git -C $sourceRepo rev-parse HEAD).Trim()) 'global-only CRLF checkout remains a clean Runtime source after stat refresh' 'global-only CRLF checkout was misclassified as dirty Runtime source'
+    & git -C $sourceRepo config core.autocrlf input
+    if($LASTEXITCODE-ne0){throw 'runtime source fixture could not stabilize local line-ending policy'}
+    Write-Decision $sourceWorkspace $sourceDecision
     $observedIdentity=& $script:runtimeModule {param($Root)Get-HarnessRuntimeSourceIdentity -RepoRoot $Root} $sourceRepo
     Check (($sourceDecision.source_identity|ConvertTo-Json -Compress)-ceq($observedIdentity|ConvertTo-Json -Compress)-and$sourceDecision.source_revision-ceq$observedIdentity.revision) 'Runtime Decision binds the shared deterministic Source Identity' 'Runtime Decision Source Identity differs from the shared observation'
 

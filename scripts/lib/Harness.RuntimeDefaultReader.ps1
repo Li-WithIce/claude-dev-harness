@@ -19,7 +19,7 @@ function Get-HarnessRuntimeSourceIdentity {
     $source = @((Invoke-HarnessGit -WorkspaceRoot $root -Arguments @('show','-s','--format=format:%H%n%T','HEAD') -FailureReason 'runtime-default-source-revision-unavailable').Lines)
     Assert-HarnessKernelCondition ($source.Count -eq 2 -and $source[0] -cmatch '^[0-9a-f]{40,64}$' -and $source[1] -cmatch '^[0-9a-f]{40,64}$') 'runtime-default-source-revision-unavailable'
     $indexLines = @((Invoke-HarnessGit -WorkspaceRoot $root -Arguments (@('ls-files','--stage','-v','--') + $script:RuntimeSourcePaths) -FailureReason 'runtime-default-source-index-unavailable').Lines)
-    $statusLines = @((Invoke-HarnessGit -WorkspaceRoot $root -Arguments (@('status','--porcelain=v2','--untracked-files=all','--') + $script:RuntimeSourcePaths) -FailureReason 'runtime-default-source-status-unavailable').Lines)
+    $statusLines = @((Invoke-HarnessGit -WorkspaceRoot $root -Arguments (@('-c','core.autocrlf=input','status','--porcelain=v2','--untracked-files=all','--') + $script:RuntimeSourcePaths) -FailureReason 'runtime-default-source-status-unavailable').Lines)
 
     Assert-HarnessKernelCondition (-not @($statusLines | Where-Object { $_.StartsWith('? ',[StringComparison]::Ordinal) }).Count) 'runtime-default-source-untracked-shadow'
     if ($statusLines.Count -gt 0) { throw 'runtime-default-source-dirty' }
