@@ -1,5 +1,15 @@
 {
   "schema_version": "decision-rights/v1",
+  "authority_rank": {
+    "current-user-message": 0,
+    "user-confirmed": 0,
+    "approved-spec": 1,
+    "project-policy": 2,
+    "project-product-decision": 2,
+    "project-architecture-decision": 3,
+    "repo-evidence": 4,
+    "engineering-convention": 5
+  },
   "categories": {
     "product": [
       "user_visible_behavior",

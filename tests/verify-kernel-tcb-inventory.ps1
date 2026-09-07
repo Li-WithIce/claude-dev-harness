@@ -86,6 +86,318 @@ function Get-StringLeaves {
         foreach ($item in $Value) { Get-StringLeaves -Value $item }
     }
 }
+function Get-PowerShellSourceDensity {
+    param([string[]]$Paths, [string]$Revision = '')
+
+    $tokenCount = 0
+    $statementCount = 0
+    foreach ($path in $Paths) {
+        if ($path -notmatch '\.psm?1$') { continue }
+        if ($Revision) {
+            $text = @(& git -C $RepoRoot show "$Revision`:$path" 2>$null) -join "`n"
+            if ($LASTEXITCODE -ne 0) { throw "unable to read TK-07 Base source: $path" }
+        } else {
+            $text = [IO.File]::ReadAllText((Join-Path $RepoRoot $path))
+        }
+        $text = $text.TrimStart([char]0xFEFF)
+        $tokens = $null
+        $errors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseInput($text, [ref]$tokens, [ref]$errors)
+        if (@($errors).Count) { throw "PowerShell density parse failed: $path" }
+        $tokenCount += @($tokens | Where-Object { $_.Kind -cnotin @('Comment','NewLine','LineContinuation','EndOfInput') }).Count
+        $statementCount += @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.StatementAst] }, $true)).Count
+    }
+    return [pscustomobject]@{ Tokens=$tokenCount; Statements=$statementCount }
+}
+function Get-Tk07AddedLines {
+    param([string]$BaseRevision, [string[]]$Paths)
+
+    $added = [Collections.Generic.Dictionary[string,Collections.Generic.HashSet[int]]]::new([StringComparer]::Ordinal)
+    $currentPath = ''
+    $currentLine = 0
+    $inHunk = $false
+    foreach ($line in @(& git -C $RepoRoot diff --unified=0 --no-ext-diff $BaseRevision -- @Paths)) {
+        if ($line.StartsWith('diff ',[StringComparison]::Ordinal)) {
+            $inHunk = $false
+            continue
+        }
+        if ($line -match '^\+\+\+ b/(.+)$') {
+            $currentPath = $Matches[1].Replace('\','/')
+            if (-not $added.ContainsKey($currentPath)) { $added[$currentPath] = [Collections.Generic.HashSet[int]]::new() }
+            continue
+        }
+        if ($line -match '^@@ .* \+(\d+)(?:,\d+)? @@') {
+            $currentLine = [int]$Matches[1]
+            $inHunk = $true
+            continue
+        }
+        if (-not $inHunk) { continue }
+        if ($line.StartsWith('+',[StringComparison]::Ordinal) -and -not $line.StartsWith('+++',[StringComparison]::Ordinal)) {
+            if ($currentPath) { [void]$added[$currentPath].Add($currentLine) }
+            $currentLine++
+            continue
+        }
+        if (-not $line.StartsWith('-',[StringComparison]::Ordinal)) { $currentLine++ }
+    }
+
+    return ,$added
+}
+function Get-Tk07AddedLineDensity {
+    param([string]$BaseRevision, [string[]]$Paths)
+
+    $added = Get-Tk07AddedLines -BaseRevision $BaseRevision -Paths $Paths
+
+    $maximumLength = 0
+    $maximumSeparators = 0
+    foreach ($path in $Paths) {
+        if ($path -notmatch '\.psm?1$' -or -not $added.ContainsKey($path)) { continue }
+        $lines = [IO.File]::ReadAllLines((Join-Path $RepoRoot $path))
+        $tokens = $null
+        $errors = $null
+        [void][Management.Automation.Language.Parser]::ParseFile((Join-Path $RepoRoot $path), [ref]$tokens, [ref]$errors)
+        if (@($errors).Count) { throw "PowerShell density parse failed: $path" }
+        $separators = @{}
+        foreach ($token in @($tokens | Where-Object Kind -eq 'Semi')) {
+            $lineNumber = [int]$token.Extent.StartLineNumber
+            $separators[$lineNumber] = 1 + $(if ($separators.ContainsKey($lineNumber)) { [int]$separators[$lineNumber] } else { 0 })
+        }
+        foreach ($lineNumber in $added[$path]) {
+            $maximumLength = [Math]::Max($maximumLength, $lines[$lineNumber - 1].Length)
+            $maximumSeparators = [Math]::Max($maximumSeparators, $(if ($separators.ContainsKey($lineNumber)) { [int]$separators[$lineNumber] } else { 0 }))
+        }
+    }
+    return [pscustomobject]@{ MaximumLineLength=$maximumLength; MaximumStatementSeparators=$maximumSeparators }
+}
+function Get-Tk07ParameterLayouts {
+    param([Management.Automation.Language.ScriptBlockAst]$Ast, [object[]]$Tokens, [string]$Path)
+
+    $blocks = [Collections.Generic.List[object]]::new()
+    $blocks.Add([pscustomobject]@{
+        Name='<script>'
+        Extent=$(if ($null -ne $Ast.ParamBlock) { $Ast.ParamBlock.Extent } else { $null })
+        Parameters=$(if ($null -ne $Ast.ParamBlock) { @($Ast.ParamBlock.Parameters) } else { @() })
+    })
+    foreach ($function in $Ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
+        if ($null -ne $function.Body.ParamBlock) {
+            $extent = $function.Body.ParamBlock.Extent
+            $parameters = @($function.Body.ParamBlock.Parameters)
+        } else {
+            $header = @($Tokens | Where-Object {
+                $_.Extent.StartOffset -ge $function.Extent.StartOffset -and $_.Extent.EndOffset -le $function.Body.Extent.StartOffset -and
+                    $_.Kind -cin @('LParen','RParen')
+            })
+            $extent = if ($header.Count) { [pscustomobject]@{
+                StartOffset=$header[0].Extent.StartOffset
+                EndOffset=$header[-1].Extent.EndOffset
+                StartLineNumber=$header[0].Extent.StartLineNumber
+                EndLineNumber=$header[-1].Extent.EndLineNumber
+            } } else { $null }
+            $parameters = @($function.Parameters)
+        }
+        $blocks.Add([pscustomobject]@{ Name=($function.Name -ireplace '^(?:global|local|script|private|[0-9]+):',''); Extent=$extent; Parameters=$parameters })
+    }
+    foreach ($block in $blocks) {
+        $extent = $block.Extent
+        $lines = [Collections.Generic.HashSet[int]]::new()
+        foreach ($token in $Tokens) {
+            if ($null -eq $extent -or $token.Kind -cin @('Comment','NewLine','LineContinuation','EndOfInput') -or
+                $token.Extent.EndOffset -le $extent.StartOffset -or $token.Extent.StartOffset -ge $extent.EndOffset) { continue }
+            for ($line = $token.Extent.StartLineNumber; $line -le $token.Extent.EndLineNumber; $line++) { [void]$lines.Add($line) }
+        }
+        [pscustomobject]@{
+            Path=$Path
+            Name=$block.Name
+            Signature=@($block.Parameters | Where-Object { $null -ne $_ } | ForEach-Object { $_.Name.VariablePath.UserPath.ToLowerInvariant() }) -join ','
+            Span=$(if ($null -eq $extent) { 0 } else { 1 + $extent.EndLineNumber - $extent.StartLineNumber })
+            ExecutableLines=$lines.Count
+            StartLine=$(if ($null -eq $extent) { 0 } else { $extent.StartLineNumber })
+            EndLine=$(if ($null -eq $extent) { 0 } else { $extent.EndLineNumber })
+            Parameters=@($block.Parameters | Where-Object { $null -ne $_ } | ForEach-Object {
+                $parameter = $_
+                [pscustomobject]@{
+                    Name=$parameter.Name.VariablePath.UserPath.ToLowerInvariant()
+                    StartLine=$parameter.Extent.StartLineNumber
+                    EndLine=$parameter.Extent.EndLineNumber
+                    Definition=@($Tokens | Where-Object {
+                        $_.Extent.StartOffset -ge $parameter.Extent.StartOffset -and $_.Extent.EndOffset -le $parameter.Extent.EndOffset -and
+                            $_.Kind -cnotin @('Comment','NewLine','LineContinuation','EndOfInput')
+                    } | ForEach-Object Text) -join ''
+                }
+            })
+        }
+    }
+}
+function Test-Tk07RecordParameterConsolidation {
+    param([object]$Base, [object]$Current)
+
+    # These two private refactors carry the same independently calculated intent:
+    # TransactionId -> Record.Journal.transaction_id; TaskId -> Record.Journal.task_id;
+    # IntentDigest -> Record.IntentDigest (not Journal.intent_digest, which legacy lacks).
+    # Remove also drops the unused AllowMissing switch; every Base caller used false.
+    # This is a signature- and definition-bound structural check, not a LOC exemption.
+    $path = 'scripts/lib/Harness.TaskState.psm1'
+    if ($Base.Path -cne $path -or $Current.Path -cne $path) { return $false }
+    $signatures = switch -CaseSensitive ($Current.Name) {
+        'Remove-TransactionStepClaim' {
+            'workspaceroot,transactionid,taskid,intentdigest,step,claim,allowmissing'
+            'workspaceroot,record,step,claim'
+        }
+        'Invoke-TransactionStep' {
+            'workspaceroot,transactionid,taskid,intentdigest,step,allowexistingclaim,allowlegacyunclaimedpostimage'
+            'workspaceroot,record,step,allowexistingclaim,allowlegacyunclaimedpostimage'
+        }
+        default { return $false }
+    }
+    if ($Base.Signature -cne $signatures[0] -or $Current.Signature -cne $signatures[1]) { return $false }
+    if ($Current.ExecutableLines -lt $Current.Parameters.Count + 2) { return $false }
+    $previousEnd = $Current.StartLine
+    foreach ($parameter in $Current.Parameters) {
+        if ($parameter.StartLine -le $previousEnd -or $parameter.EndLine -ge $Current.EndLine) { return $false }
+        $previousEnd = $parameter.EndLine
+        if ($parameter.Name -ceq 'record') {
+            if ($parameter.Definition -cne '[pscustomobject]$Record') { return $false }
+            continue
+        }
+        $retained = @($Base.Parameters | Where-Object Name -CEQ $parameter.Name)
+        if ($retained.Count -ne 1 -or $parameter.Definition -cne $retained[0].Definition -or
+            $parameter.EndLine - $parameter.StartLine -lt $retained[0].EndLine - $retained[0].StartLine) { return $false }
+    }
+    return $true
+}
+function Compare-Tk07ParameterLayouts {
+    param([object[]]$BaseLayouts, [object[]]$CurrentLayouts)
+
+    foreach ($current in $CurrentLayouts) {
+        $candidates = @($BaseLayouts | Where-Object {
+            $_.Name -ieq $current.Name -and
+                ($current.Name -cne '<script>' -or $_.Path -ceq $current.Path)
+        })
+        if (-not $candidates.Count) { continue }
+        if ($candidates.Count -gt 1) {
+            $samePath = @($candidates | Where-Object Path -CEQ $current.Path)
+            if ($samePath.Count -ne 1) {
+                [pscustomobject]@{Kind='ambiguous';Detail="$($current.Path)::$($current.Name) ambiguous Base parameter layouts: $($candidates.Path -join ', ')"}
+                continue
+            }
+            $candidates = $samePath
+        }
+        $base = $candidates[0]
+        if (($current.Span -lt $base.Span -or $current.ExecutableLines -lt $base.ExecutableLines) -and
+            -not (Test-Tk07RecordParameterConsolidation -Base $base -Current $current)) {
+            [pscustomobject]@{Kind='shrink';Detail="$($base.Path) -> $($current.Path)::$($current.Name) span=$($base.Span)->$($current.Span) executable=$($base.ExecutableLines)->$($current.ExecutableLines)"}
+        }
+    }
+}
+function Get-Tk07LayoutIntegrity {
+    param([string]$BaseRevision, [string[]]$BasePaths, [string[]]$CurrentPaths)
+
+    $added = Get-Tk07AddedLines -BaseRevision $BaseRevision -Paths $CurrentPaths
+    $baseLayouts = @(foreach ($path in $BasePaths) {
+        if ($path -notmatch '\.psm?1$') { continue }
+        $baseText = (@(& git -C $RepoRoot show "$BaseRevision`:$path" 2>$null) -join "`n").TrimStart([char]0xFEFF)
+        if ($LASTEXITCODE -ne 0) { throw "unable to read TK-07 Base source: $path" }
+        $baseTokens = $null
+        $baseErrors = $null
+        $baseAst = [Management.Automation.Language.Parser]::ParseInput($baseText, [ref]$baseTokens, [ref]$baseErrors)
+        if (@($baseErrors).Count) { throw "PowerShell Base layout parse failed: $path" }
+        Get-Tk07ParameterLayouts -Ast $baseAst -Tokens $baseTokens -Path $path
+    })
+    $currentLayouts = [Collections.Generic.List[object]]::new()
+    $packedStatements = [Collections.Generic.List[string]]::new()
+    $packedKeys = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+
+    foreach ($path in $CurrentPaths) {
+        if ($path -notmatch '\.psm?1$') { continue }
+        $currentFullPath = Join-Path $RepoRoot $path
+        $currentTokens = $null
+        $currentErrors = $null
+        $currentAst = [Management.Automation.Language.Parser]::ParseFile($currentFullPath, [ref]$currentTokens, [ref]$currentErrors)
+        if (@($currentErrors).Count) { throw "PowerShell layout parse failed: $path" }
+
+        foreach ($layout in @(Get-Tk07ParameterLayouts -Ast $currentAst -Tokens $currentTokens -Path $path)) { $currentLayouts.Add($layout) }
+
+        if (-not $added.ContainsKey($path)) { continue }
+        $blocks = @($currentAst.FindAll({
+            param($node)
+            $node -is [Management.Automation.Language.NamedBlockAst] -or
+                $node -is [Management.Automation.Language.StatementBlockAst]
+        }, $true))
+        foreach ($block in $blocks) {
+            foreach ($group in @($block.Statements | Group-Object { $_.Extent.StartLineNumber })) {
+                $lineNumber = [int]$group.Name
+                if ($group.Count -le 1 -or -not $added[$path].Contains($lineNumber)) { continue }
+                $packedKey = "$path`0$lineNumber"
+                if ($packedKeys.Add($packedKey)) {
+                    $packedStatements.Add("$path`:$lineNumber statements=$($group.Count)")
+                }
+            }
+        }
+    }
+
+    $parameterFindings = @(Compare-Tk07ParameterLayouts -BaseLayouts $baseLayouts -CurrentLayouts @($currentLayouts))
+    return [pscustomobject]@{
+        ParamBlockShrinkCount=@($parameterFindings | Where-Object Kind -CEQ shrink).Count
+        AmbiguousParamBlockCount=@($parameterFindings | Where-Object Kind -CEQ ambiguous).Count
+        PackedSiblingStatementLineCount=$packedStatements.Count
+        Details=@($parameterFindings | ForEach-Object Detail) + @($packedStatements)
+    }
+}
+
+function Test-Tk07ParameterLayoutGuard {
+    function Read-LayoutFixture {
+        param([string]$Text, [string]$Path)
+        $tokens = $null
+        $errors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseInput($Text, [ref]$tokens, [ref]$errors)
+        if (@($errors).Count) { throw 'invalid parameter layout fixture' }
+        return @(Get-Tk07ParameterLayouts -Ast $ast -Tokens $tokens -Path $Path)
+    }
+
+    $readable = 'function Moved-Function {' + "`n" + 'param(' + "`n" + '[string]$A,' + "`n" + '[int]$B' + "`n" + ')' + "`n" + '}'
+    $packed = 'function Moved-Function {' + "`n" + 'param([string]$A,[int]$B)' + "`n" + '}'
+    $padded = 'function Moved-Function {' + "`n" + 'param(' + "`n" + '# padding' + "`n" + '[string]$A,[int]$B' + "`n" + ')' + "`n" + '}'
+    $base = @(Read-LayoutFixture -Text $readable -Path 'old.psm1')
+    $moved = @(Read-LayoutFixture -Text $readable -Path 'new.ps1')
+    $sameFilePacked = @(Read-LayoutFixture -Text $packed -Path 'old.psm1')
+    $movedPacked = @(Read-LayoutFixture -Text $packed -Path 'new.ps1')
+    $movedPadded = @(Read-LayoutFixture -Text $padded -Path 'new.ps1')
+    $renamed = @(Read-LayoutFixture -Text $packed.Replace('$A','$Renamed') -Path 'new.ps1')
+    $scoped = @(Read-LayoutFixture -Text $packed.Replace('Moved-Function','local:Moved-Function') -Path 'new.ps1')
+    $header = @(Read-LayoutFixture -Text 'function Moved-Function([string]$A,[int]$B) {}' -Path 'new.ps1')
+
+    Check (@(Compare-Tk07ParameterLayouts $base $moved).Count -eq 0) 'layout guard accepts a readable cross-file move' 'layout guard rejects a readable cross-file move'
+    foreach ($case in @($sameFilePacked, $movedPacked, $movedPadded, $renamed, $scoped, $header)) {
+        $findings = @(Compare-Tk07ParameterLayouts $base @($case))
+        Check ($findings.Count -eq 1 -and $findings[0].Kind -ceq 'shrink') 'layout guard rejects packing across files, padding, renamed parameters, scope prefixes, and function-header parameters' 'layout guard missed parameter packing'
+    }
+    $ambiguousBase = @($base) + @(Read-LayoutFixture -Text $packed -Path 'other.psm1')
+    $ambiguous = @(Compare-Tk07ParameterLayouts $ambiguousBase $movedPacked)
+    Check ($ambiguous.Count -eq 1 -and $ambiguous[0].Kind -ceq 'ambiguous') 'layout guard does not choose the shorter of ambiguous moved functions' 'ambiguous cross-file parameter matching failed open'
+    Check (@(Compare-Tk07ParameterLayouts $ambiguousBase $base).Count -eq 0) 'same-file identity disambiguates a retained function' 'same-file parameter identity was lost'
+    $scriptBase = @(Read-LayoutFixture -Text ('param(' + "`n" + '[string]$A' + "`n" + ')') -Path 'old.ps1')
+    $scriptCurrent = @(Read-LayoutFixture -Text 'param([string]$A)' -Path 'new.ps1')
+    Check (@(Compare-Tk07ParameterLayouts $scriptBase $scriptCurrent).Count -eq 0) 'unrelated top-level script parameters are not cross-matched' 'layout guard conflates different script entry points'
+
+    $recordPath = 'scripts/lib/Harness.TaskState.psm1'
+    $original = @('[string]$WorkspaceRoot','[string]$TransactionId','[string]$TaskId','[string]$IntentDigest','[System.Collections.IDictionary]$Step','[pscustomobject]$Claim','[switch]$AllowMissing')
+    $consolidated = @('[string]$WorkspaceRoot','[pscustomobject]$Record','[System.Collections.IDictionary]$Step','[pscustomobject]$Claim')
+    $prefix = "function Remove-TransactionStepClaim {`nparam(`n"
+    $suffix = "`n)`n}"
+    $recordBase = @(Read-LayoutFixture ($prefix + ($original -join ",`n") + $suffix) $recordPath)
+    $recordCurrent = @(Read-LayoutFixture ($prefix + ($consolidated -join ",`n") + $suffix) $recordPath)
+    Check (@(Compare-Tk07ParameterLayouts $recordBase $recordCurrent).Count -eq 0) 'reviewed Record consolidation retains one parameter per line and exact retained definitions' 'reviewed Record consolidation was rejected'
+    foreach ($bad in @(
+        ($prefix + ($consolidated -join ',') + $suffix),
+        ($prefix + (($consolidated + '[switch]$Dummy') -join ",`n") + $suffix),
+        ($prefix + (($consolidated -replace '\$Claim','$Renamed') -join ",`n") + $suffix),
+        ($prefix + (($consolidated -replace '\[pscustomobject\]\$Claim','[object]$Claim') -join ",`n") + $suffix)
+    )) {
+        $badLayout = @(Read-LayoutFixture $bad $recordPath)
+        Check (@(Compare-Tk07ParameterLayouts $recordBase $badLayout | Where-Object Kind -CEQ shrink).Count -eq 1) 'Record consolidation rejects packing, dummy parameters, renaming, and changed types' 'Record parameter consolidation failed open'
+    }
+}
+
+Test-Tk07ParameterLayoutGuard
 
 $generatorPath = Join-Path $RepoRoot 'scripts\get-kernel-tcb-inventory.ps1'
 $rootsPath = Join-Path $RepoRoot 'kernel-tcb-roots.json'
@@ -262,13 +574,31 @@ Check ($absoluteStrings.Count -eq 0) 'inventory contains no absolute local or UN
 
 $runtimePaths = @($inventory.files | Where-Object { @($_.trust_paths) -ccontains 'runtime' } | ForEach-Object path)
 Check ($runtimePaths -contains 'scripts/lib/Harness.Path.psm1' -and $runtimePaths -contains 'scripts/lib/Harness.AtomicWrite.psm1' -and $runtimePaths -contains 'scripts/lib/Harness.Hashing.psm1' -and $runtimePaths -notcontains 'scripts/lib/Harness.CanonicalJson.psm1') 'Runtime TCB contains its three reached K0 primitives while unreferenced CanonicalJson remains outside' 'K0 Runtime reachability or CanonicalJson isolation drifted'
+$tk07Base = '3d9fc13e0cb54f022b33f290b86ec1d6d239f1ba'
+$baseInventory = @(& git -C $RepoRoot show "$tk07Base`:kernel-tcb-inventory.json" 2>$null) -join "`n" | ConvertFrom-Json -Depth 30
+$baseRuntimePaths = @($baseInventory.files | Where-Object { @($_.trust_paths) -ccontains 'runtime' } | ForEach-Object path)
+$baseDensity = Get-PowerShellSourceDensity -Paths $baseRuntimePaths -Revision $tk07Base
+$currentDensity = Get-PowerShellSourceDensity -Paths $runtimePaths
+$addedDensity = Get-Tk07AddedLineDensity -BaseRevision $tk07Base -Paths $runtimePaths
+$layoutIntegrity = Get-Tk07LayoutIntegrity -BaseRevision $tk07Base -BasePaths $baseRuntimePaths -CurrentPaths $runtimePaths
+Check ($currentDensity.Tokens * 100 -le $baseDensity.Tokens * 65 -and $currentDensity.Statements * 100 -le $baseDensity.Statements * 65) 'TK-07 removes at least 35 percent of executable tokens and statement ASTs from the exact Base closure' "TK-07 executable source reduction is too weak: base=$($baseDensity | ConvertTo-Json -Compress) current=$($currentDensity | ConvertTo-Json -Compress)"
+# Engineering checkpoints are not user LOC limits. KTB-EX-002 accounts for the
+# R2 function's measured +140 tokens/+16 statements without dropping old guards.
+$repairException = @($inventory.budget.exceptions | Where-Object { $_.id -ceq 'KTB-EX-002' -and $_.added_lines -eq 10 })
+$repairAllowance = if ($repairException.Count -eq 1) { @{Tokens=140;Statements=16} } else { @{Tokens=0;Statements=0} }
+Check ($currentDensity.Tokens -le 35288 + $repairAllowance.Tokens -and $currentDensity.Statements -le 10386 + $repairAllowance.Statements) 'TK-07 retains engineering density checkpoints with the explicit R2-only growth allowance' "TK-07 source density exceeded the accounted repair allowance: $($currentDensity | ConvertTo-Json -Compress)"
+Check ($addedDensity.MaximumLineLength -le 300 -and $addedDensity.MaximumStatementSeparators -le 2) 'TK-07 changed Runtime lines stay reviewable and do not pack statement separators' "TK-07 changed Runtime source is packed: $($addedDensity | ConvertTo-Json -Compress)"
+Check ($layoutIntegrity.ParamBlockShrinkCount -eq 0 -and $layoutIntegrity.AmbiguousParamBlockCount -eq 0 -and $layoutIntegrity.PackedSiblingStatementLineCount -eq 0) 'TK-07 preserves unambiguous Base parameter layouts across file moves, including executable parameter lines, and keeps sibling statements on separate changed lines' "TK-07 Runtime layout compression detected: $($layoutIntegrity | ConvertTo-Json -Compress -Depth 5)"
 $distributionPaths = @($inventory.files | Where-Object { @($_.trust_paths) -ccontains 'distribution' } | ForEach-Object path)
 Check ($distributionPaths -ccontains 'scripts/lib/Harness.Distribution.psm1' -and $distributionPaths -ccontains 'scripts/lib/Harness.CanonicalJson.psm1' -and $runtimePaths -cnotcontains 'scripts/lib/Harness.Distribution.psm1' -and $distributionPaths -cnotcontains 'scripts/lib/Harness.ModuleManifest.psm1' -and $distributionPaths -cnotcontains 'scripts/lib/Harness.CapabilitySource.psm1') 'TK-06 adds only the D1 constructor and canonical primitive, without C2 imports or Runtime reachability' 'Distribution adoption crossed the Runtime or C2 boundary'
 Check (@($runtimePaths | Where-Object { $_ -match '(?i)RolloutEvidence|Qualification|release-(?:model|host|full)|generate-v2-rollout' }).Count -eq 0) 'Runtime TCB excludes Release and Qualification producers' 'Release or Qualification leaked into Runtime TCB'
 $budgetExceptions = @($inventory.budget.exceptions)
-Check ([int]$inventory.budget.baseline_executable_loc -eq 6151 -and [int]$inventory.budget.current_executable_loc -eq 6075 -and [int]$inventory.budget.delta -eq -76 -and [int]$inventory.budget.covered_growth -eq 0 -and [string]$inventory.budget.status -ceq 'within-baseline' -and $budgetExceptions.Count -eq 0) 'TK-03 keeps Runtime below the unchanged 6151 ceiling with a measured 6075 and no exception' 'Runtime budget, Adapter Action closure, or exception state drifted'
-Check (@($inventory.edges | Where-Object kind -ceq 'manual').Count -eq @($roots.manual_edges).Count -and @($roots.manual_edges | Where-Object kind -ceq 'dynamic-import').Count -eq 1) 'manual edges are exact and the dynamic-import exception is minimal' 'manual edge count or dynamic-import boundary drifted'
-Check ([int]$inventory.totals.file_count -eq @($inventory.files).Count -and [int]$inventory.totals.artifact_count -eq @($inventory.artifacts).Count -and [int]$inventory.totals.runtime_executable_loc -eq 6075) 'inventory totals bind the current TK-03 Runtime measurement' 'inventory totals or Runtime measurement drifted'
+Check ([int]$inventory.budget.baseline_executable_loc -eq 3068 -and [int]$inventory.budget.current_executable_loc -lt 3100 -and
+    [int]$inventory.budget.delta -eq ([int]$inventory.budget.current_executable_loc - 3068) -and [int]$inventory.budget.delta -gt 0 -and
+    [int]$inventory.budget.delta -le 10 -and [int]$inventory.budget.covered_growth -eq 10 -and
+    [string]$inventory.budget.status -ceq 'covered-by-exception' -and $budgetExceptions.Count -eq 1 -and $repairException.Count -eq 1) 'TK-07 retains the 3068 baseline, honest positive growth covered by KTB-EX-002, and strict user-authorized <3100 bound' 'Runtime budget, Adapter Action closure, or exception state drifted'
+Check (@($inventory.edges | Where-Object kind -ceq 'manual').Count -eq @($roots.manual_edges).Count -and @($roots.manual_edges | Where-Object kind -ceq 'dynamic-import').Count -eq 2) 'manual edges are exact and the two rendered Adapter imports are explicit' 'manual edge count or dynamic-import boundary drifted'
+Check ([int]$inventory.totals.file_count -eq @($inventory.files).Count -and [int]$inventory.totals.artifact_count -eq @($inventory.artifacts).Count -and [int]$inventory.totals.runtime_executable_loc -eq [int]$inventory.budget.current_executable_loc) 'inventory totals bind the current TK-07 Runtime measurement' 'inventory totals or Runtime measurement drifted'
 
 if ($failures.Count -gt 0) {
     Write-Output "STATUS: FAIL ($($failures.Count) failures)"

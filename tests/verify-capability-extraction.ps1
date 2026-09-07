@@ -104,7 +104,7 @@ try {
         }).Count -eq 0
     })
     $missingC2Paths = @($missingC2 | ForEach-Object { [string]$_.path })
-    Check ($c2.Count -eq 42 -and $missingC2.Count -eq 0) 'all 42 C2 implementation paths belong to one of the seven v1 Capability packages' "C2 package coverage drifted: count=$($c2.Count) missing=$($missingC2Paths -join ',')"
+    Check ($c2.Count -eq 43 -and $missingC2.Count -eq 0) 'all 43 C2 implementation paths belong to one of the seven v1 Capability packages' "C2 package coverage drifted: count=$($c2.Count) missing=$($missingC2Paths -join ',')"
 
     $sourceFiles = @($result.CapabilitySourceCatalog.sources | ForEach-Object { @($_.files) })
     $duplicates = @($sourceFiles.path | Group-Object -CaseSensitive | Where-Object Count -ne 1)
@@ -147,6 +147,12 @@ try {
         catch { $unstagedRejected = $_.Exception.Message -match 'unstaged bytes' }
     } finally { [IO.File]::WriteAllBytes($sensitivityPath,$sensitivityBytes) }
     Check $unstagedRejected 'unstaged package-byte changes cannot enter an index-bound source closure' 'Capability source construction accepted unstaged package bytes'
+
+    $flagCases = @(& (Join-Path $PSScriptRoot 'fixtures/tk04/index-flags.ps1') -RepoRoot $RepoRoot)
+    foreach ($case in $flagCases) {
+        Check $case.pass "index-bound source fixture $($case.case): Git=$($case.git_exit), accepted=$($case.accepted), zero-write=$($case.zero_write)" "index-bound source fixture failed: $($case | ConvertTo-Json -Compress)"
+    }
+    Check ($flagCases.Count -eq 8) 'index flag regressions cover clean, hidden edits, LF/CRLF, Unicode workspace paths, and unrelated flags' 'index flag fixture did not execute the complete case set'
 
     [byte[]]$catalogBefore = [IO.File]::ReadAllBytes($catalogPath)
     [byte[]]$sourceBefore = [IO.File]::ReadAllBytes($sourceCatalogPath)

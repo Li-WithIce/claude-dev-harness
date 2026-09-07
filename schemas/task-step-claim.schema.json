@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/task-step-claim.schema.json",
+  "title": "Task transaction publication claim v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "transaction_id",
+    "task_id",
+    "intent_digest",
+    "step_id",
+    "relative_path",
+    "action",
+    "before_digest",
+    "after_digest"
+  ],
+  "properties": {
+    "schema_version": { "const": "task-step-claim/v2" },
+    "transaction_id": { "type": "string", "pattern": "^txn_[0-9a-f]{32}$" },
+    "task_id": { "type": "string", "pattern": "^(?!(?:none|idle|unknown)$)[a-z0-9][a-z0-9-]{0,63}$" },
+    "intent_digest": { "$ref": "#/definitions/sha256" },
+    "step_id": { "type": "string", "minLength": 1, "pattern": "\\S" },
+    "relative_path": { "type": "string", "minLength": 1 },
+    "action": { "enum": ["write", "delete"] },
+    "before_digest": { "$ref": "#/definitions/nullableSha256" },
+    "after_digest": { "$ref": "#/definitions/nullableSha256" }
+  },
+  "definitions": {
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "nullableSha256": { "oneOf": [{ "$ref": "#/definitions/sha256" }, { "type": "null" }] }
+  }
+}

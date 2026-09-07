@@ -97,6 +97,46 @@ $controlledParameters=(Get-Command Invoke-HarnessAdapterControlledWrite).Paramet
 Check ($preflightParameters-ccontains'ActionKind'-and$preflightParameters-ccontains'PatchText'-and(-not $preflightParameters.Contains('Policy'))) 'preflight_action owns explicit patch semantics without a Policy override' 'preflight_action signature is not explicit or exposes Policy'
 Check ($controlledParameters-ccontains'Content'-and$controlledParameters-ccontains'ExpectedCurrentSha256'-and(-not $controlledParameters.Contains('ExpectedSourceDigest'))) 'controlled_write owns source digest calculation inside K1' 'controlled_write exposes source digest authority to A3'
 
+$readPreflight = @{RepoRoot=$RepoRoot;WorkspaceRoot=$RepoRoot;SessionMode='read-only';ActionMode='read'}
+$patch = "*** Begin Patch`n*** Add File: tmp/tk07-adapter-shape.txt`n+x`n*** End Patch"
+foreach ($case in @(
+    @{ActionKind='shell';ShellText='echo harmless'},
+    @{ActionKind='Shell';ShellText='echo harmless'},
+    @{ActionKind='apply_patch';PatchText=$patch},
+    @{ActionKind='APPLY_PATCH';PatchText=$patch},
+    @{ActionKind='file_mutation';ChangedPaths=@('tmp/tk07-adapter-shape.txt')},
+    @{ActionKind='File_Mutation';ChangedPaths=@('tmp/tk07-adapter-shape.txt')},
+    @{ActionKind='normalized_action'},
+    @{ActionKind='Normalized_Action'},
+    @{}
+)) {
+    try {
+        $response = Invoke-HarnessAdapterPreflightAction @readPreflight @case
+        Check ($response.body.allowed -eq $true -and $response.body.protected -eq $false) 'valid preflight shape preserves case-insensitive routing and omitted ActionKind compatibility' 'valid preflight shape changed its read-only response'
+    } catch { Check $false '' "valid preflight shape failed: $($_.Exception.Message)" }
+}
+foreach ($case in @(
+    @{Input=@{ActionKind='shell'};Error='shell preflight action shape is invalid'},
+    @{Input=@{ActionKind='Shell';ShellText=" `t"};Error='shell preflight action shape is invalid'},
+    @{Input=@{ActionKind='Shell';ShellText='echo x';PatchText='x'};Error='shell preflight action shape is invalid'},
+    @{Input=@{ActionKind='Shell';ShellText='echo x';ChangedPaths=@('tmp/x')};Error='shell preflight action shape is invalid'},
+    @{Input=@{ActionKind='Shell';ShellText='apply_patch payload'};Error='Bash shell-form apply_patch is denied because Codex PreToolUse does not expose the effective tool workdir or environment identity'},
+    @{Input=@{ActionKind='apply_patch'};Error='apply_patch preflight action shape is invalid'},
+    @{Input=@{ActionKind='APPLY_PATCH';PatchText=$patch;ShellText='x'};Error='apply_patch preflight action shape is invalid'},
+    @{Input=@{ActionKind='APPLY_PATCH';PatchText=$patch;ChangedPaths=@('tmp/x')};Error='apply_patch preflight action shape is invalid'},
+    @{Input=@{ActionKind='APPLY_PATCH';PatchText='invalid patch'};Error='direct apply_patch input has an invalid patch envelope'},
+    @{Input=@{ActionKind='File_Mutation'};Error='file mutation preflight action shape is invalid'},
+    @{Input=@{ActionKind='File_Mutation';ChangedPaths=@('tmp/x');ShellText='x'};Error='file mutation preflight action shape is invalid'},
+    @{Input=@{ActionKind='File_Mutation';ChangedPaths=@('tmp/x');PatchText='x'};Error='file mutation preflight action shape is invalid'},
+    @{Input=@{ActionKind='File_Mutation';ChangedPaths=@(" `t")};Error='file mutation input is missing target path'},
+    @{Input=@{ActionKind='Normalized_Action';PatchText='x'};Error='normalized preflight action must not carry patch_text'}
+)) {
+    $message = ''
+    try { $inputArguments = $case.Input; $null = Invoke-HarnessAdapterPreflightAction @readPreflight @inputArguments }
+    catch { $message = [string]$_.Exception.Message }
+    Check ($message -ceq $case.Error) 'invalid preflight shape is denied before policy, including mixed-case ActionKind' "preflight shape guard changed: expected=[$($case.Error)] actual=[$message]"
+}
+
 $classification=Read-Text 'kernel-component-classification.json'|ConvertFrom-Json -Depth 100
 $a3=@($classification.components|Where-Object layer -CEQ 'a3-adapter')
 $expectedA3=@('runtime-hooks/claude/codex-pretooluse-launcher.ps1','runtime-hooks/claude/pretooluse.ps1','runtime-hooks/claude/stop.js','runtime-hooks/claude/userpromptsubmit.js','runtime-hooks/claude/workspace-resolver.js','scripts/harness-write-mcp.ps1','scripts/invoke-harness-skill-dispatcher.ps1','scripts/invoke-harness-skill-supervisor.ps1','scripts/invoke-harness-skill.ps1')|Sort-Object
@@ -133,7 +173,7 @@ Check ($checkExit-eq0-and$beforeHash-ceq(Get-FileHash -LiteralPath $inventoryPat
 $moduleV1=Read-Text 'schemas/module-manifest-v1.schema.json'|ConvertFrom-Json -Depth 100
 Check (($moduleV1.properties.kind.enum-join'|')-ceq'capability') 'harness-module/v1 remains capability-only' 'TK-05 broadened harness-module/v1 beyond capability packages'
 $tcb=Read-Text 'kernel-tcb-inventory.json'|ConvertFrom-Json -Depth 100
-Check ([int]$tcb.totals.runtime_executable_loc-le6151-and@($tcb.unresolved_dependencies).Count-eq0) 'Runtime TCB stays at or below 6151 with zero unresolved dependencies' 'Runtime TCB budget or dependency closure is invalid'
+Check ([int]$tcb.totals.runtime_executable_loc-lt3100-and@($tcb.unresolved_dependencies).Count-eq0) 'Runtime TCB stays below the user-authorized 3100 fallback with zero unresolved dependencies' 'Runtime TCB budget or dependency closure is invalid'
 
 foreach($pass in $script:Passes){Write-Output "[PASS] $pass"}
 if($script:Failures.Count){foreach($failure in $script:Failures){Write-Output "[FAIL] $failure"};exit 1}

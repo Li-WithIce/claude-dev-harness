@@ -26,7 +26,7 @@ function Snapshot([string]$Root) {
 }
 function Invoke-Hook([string]$Hook,[string]$WorkingDirectory,[string]$InputText='',[hashtable]$Environment=@{},[ValidateRange(100,60000)][int]$TimeoutMilliseconds=20000) {
     $info=[Diagnostics.ProcessStartInfo]::new()
-    $info.FileName=(Get-Command node -CommandType Application -ErrorAction Stop).Source
+    $info.FileName=@(Get-Command node -CommandType Application -ErrorAction Stop)[0].Source
     $info.ArgumentList.Add($Hook);$info.WorkingDirectory=$WorkingDirectory
     $info.UseShellExecute=$false;$info.CreateNoWindow=$true
     $info.RedirectStandardInput=$true;$info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true

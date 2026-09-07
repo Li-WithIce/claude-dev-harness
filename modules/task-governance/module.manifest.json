@@ -26,6 +26,7 @@
       "scripts/lib/Harness.Governance.psm1",
       "scripts/lib/Harness.Policy.psm1",
       "scripts/lib/Harness.ProtectedAction.psm1",
+      "scripts/lib/Harness.TaskMigration.psm1",
       "scripts/lib/Harness.TaskState.psm1"
     ],
     "watch_paths": [

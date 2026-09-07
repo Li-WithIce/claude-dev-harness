@@ -15,27 +15,25 @@ function Snapshot($Root){$items=@(Get-ChildItem -LiteralPath $Root -Force -Recur
 function Same($Before,$After,$Pass,$Fail){Check (@(Compare-Object @($Before) @($After)).Count-eq0) $Pass $Fail}
 function Digest($Text){$hash=[Security.Cryptography.SHA256]::Create();try{return 'sha256:'+([BitConverter]::ToString($hash.ComputeHash([Text.UTF8Encoding]::new($false).GetBytes($Text))).Replace('-','').ToLowerInvariant())}finally{$hash.Dispose()}}
 function Complete-Process($Handle){if(-not$Handle.Process.WaitForExit(30000)){$Handle.Process.Kill($true);throw 'process timeout'};$result=[pscustomobject]@{ExitCode=$Handle.Process.ExitCode;StdOut=$Handle.StdOut.GetAwaiter().GetResult().Trim();StdErr=$Handle.StdErr.GetAwaiter().GetResult().Trim()};$Handle.Process.Dispose();return $result}
-function Start-Cli($Workspace,[string[]]$Arguments,$Fault='',$FaultBeforeFirstClaim='',$PreclaimReadyEvent='',$PreclaimReleaseEvent=''){
+function Start-Cli($Workspace,[string[]]$Arguments,$Fault='',$FaultBeforeFirstClaim='',$PreclaimDelay=''){
     $old=$env:HARNESS_PROTOCOL
     $oldFault=$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_AFTER_STEP
     $oldPreclaim=$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_FIRST_CLAIM
-    $oldReady=[Environment]::GetEnvironmentVariable('DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_READY_EVENT',[EnvironmentVariableTarget]::Process)
-    $oldRelease=[Environment]::GetEnvironmentVariable('DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_RELEASE_EVENT',[EnvironmentVariableTarget]::Process)
+    $oldDelay=$env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_DELAY_MS
     try{
         $env:HARNESS_PROTOCOL='v2'
         if($Fault){$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_AFTER_STEP=$Fault}else{Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_FAIL_AFTER_STEP -ErrorAction Ignore}
         if($FaultBeforeFirstClaim){$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_FIRST_CLAIM=$FaultBeforeFirstClaim}else{Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_FIRST_CLAIM -ErrorAction Ignore}
-        if($PreclaimReadyEvent){$env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_READY_EVENT=$PreclaimReadyEvent}else{Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_READY_EVENT -ErrorAction Ignore}
-        if($PreclaimReleaseEvent){$env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_RELEASE_EVENT=$PreclaimReleaseEvent}else{Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_RELEASE_EVENT -ErrorAction Ignore}
+        if($PreclaimDelay){$env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_DELAY_MS=$PreclaimDelay}else{Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_DELAY_MS -ErrorAction Ignore}
         return Start-RepoProcess -UserProfile $env:USERPROFILE -ScriptPath $taskScript -Arguments ($Arguments+@('-RepoRoot',$RepoRoot,'-WorkspaceRoot',$Workspace))
     }finally{
         if($null-eq$old){Remove-Item Env:HARNESS_PROTOCOL -ErrorAction Ignore}else{$env:HARNESS_PROTOCOL=$old}
         if($null-eq$oldFault){Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_FAIL_AFTER_STEP -ErrorAction Ignore}else{$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_AFTER_STEP=$oldFault}
         if($null-eq$oldPreclaim){Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_FIRST_CLAIM -ErrorAction Ignore}else{$env:DEV_HARNESS_TEST_TASK_STATE_FAIL_BEFORE_FIRST_CLAIM=$oldPreclaim}
-        if($null-eq$oldReady){Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_READY_EVENT -ErrorAction Ignore}else{$env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_READY_EVENT=$oldReady}
-        if($null-eq$oldRelease){Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_RELEASE_EVENT -ErrorAction Ignore}else{$env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_RELEASE_EVENT=$oldRelease}
+        if($null-eq$oldDelay){Remove-Item Env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_DELAY_MS -ErrorAction Ignore}else{$env:DEV_HARNESS_TEST_TASK_STATE_PRECLAIM_DELAY_MS=$oldDelay}
     }
 }
+function Wait-NewPending($Workspace,$Before,$Handle){for($i=0;$i-lt200-and-not$Handle.Process.HasExited;$i++){$matches=@(Get-ChildItem -LiteralPath (Join-Path $Workspace '.assistant/runtime/failed-writes') -Filter 'txn_*.json' -File -ErrorAction SilentlyContinue|Where-Object{$Before-notcontains$_.BaseName});if($matches.Count){return $matches};Start-Sleep -Milliseconds 50};return @()}
 function Invoke-Cli($Workspace,[string[]]$Arguments,$Fault='',$FaultBeforeFirstClaim=''){return Complete-Process (Start-Cli $Workspace $Arguments $Fault $FaultBeforeFirstClaim)}
 function Invoke-Hook($Workspace,[string[]]$Arguments,$HookRepo=$RepoRoot,$HookPath=$hookScript){return Complete-Process (Start-RepoProcess -UserProfile $env:USERPROFILE -ScriptPath $HookPath -Arguments ($Arguments+@('-RepoRoot',$HookRepo,'-WorkspaceRoot',$Workspace,'-AsJson')))}
 function Read-Output($Result){if($Result.StdOut){return $Result.StdOut|ConvertFrom-Json -Depth 50 -DateKind String};return $null}
@@ -66,36 +64,21 @@ try{
     $approvalWriterInput=Write-Approval $workspace 'approval-writer-preclaim-task' 2 $contracts['approval-writer-preclaim-task'].Digest 'apr_writer_expiry' 'product' @('task:complete') 'granted' ([DateTimeOffset]::UtcNow.AddHours(1).ToString('o'))
     $approvalWriterPendingBefore=@(Get-ChildItem -LiteralPath (Join-Path $workspace '.assistant/runtime/failed-writes') -Filter 'txn_*.json' -File -ErrorAction SilentlyContinue|Select-Object -ExpandProperty BaseName)
     $approvalWriterTarget=Join-Path $workspace '.assistant/runtime/tasks/approval-writer-preclaim-task/approvals/apr_writer_expiry.json'
-    $approvalWriterBarrierId=[guid]::NewGuid().ToString('N')
-    $approvalWriterReadyName="Local\dev-harness.task-state.preclaim.ready.$approvalWriterBarrierId"
-    $approvalWriterReleaseName="Local\dev-harness.task-state.preclaim.release.$approvalWriterBarrierId"
-    $approvalWriterReadyCreated=$false
-    $approvalWriterReleaseCreated=$false
-    $approvalWriterReadyEvent=$null
-    $approvalWriterReleaseEvent=$null
     $approvalWriterHandle=$null
     try{
-        $approvalWriterReadyEvent=[Threading.EventWaitHandle]::new($false,[Threading.EventResetMode]::ManualReset,$approvalWriterReadyName,[ref]$approvalWriterReadyCreated)
-        $approvalWriterReleaseEvent=[Threading.EventWaitHandle]::new($false,[Threading.EventResetMode]::ManualReset,$approvalWriterReleaseName,[ref]$approvalWriterReleaseCreated)
-        if(-not$approvalWriterReadyCreated-or-not$approvalWriterReleaseCreated-or$approvalWriterReadyEvent.WaitOne(0)-or$approvalWriterReleaseEvent.WaitOne(0)){throw 'Approval preclaim barrier events were not created in a fresh unsignaled state'}
-        $approvalWriterHandle=Start-Cli $workspace @('approve','-TaskId','approval-writer-preclaim-task','-ExpectedVersion','1','-Approval',$approvalWriterInput,'-AsJson') '' '' $approvalWriterReadyName $approvalWriterReleaseName
-        try{
-            $approvalWriterReadyObserved=$approvalWriterReadyEvent.WaitOne(30000)
-            $approvalWriterExitedBeforeRelease=$approvalWriterHandle.Process.HasExited
-            $approvalWriterPendingMatches=@(Get-ChildItem -LiteralPath (Join-Path $workspace '.assistant/runtime/failed-writes') -Filter 'txn_*.json' -File -ErrorAction SilentlyContinue|Where-Object{$approvalWriterPendingBefore -notcontains $_.BaseName})
-            $approvalWriterPendingCount=$approvalWriterPendingMatches.Count
-            $approvalWriterPending=$(if($approvalWriterPendingCount-eq1){$approvalWriterPendingMatches[0]}else{$null})
-            $approvalWriterJournal=$(if($null-ne$approvalWriterPending){Get-Content -LiteralPath $approvalWriterPending.FullName -Raw -Encoding utf8|ConvertFrom-Json -AsHashtable -DateKind String}else{$null})
-            $approvalWriterJournalPrepared=$null-ne$approvalWriterJournal-and[string]$approvalWriterJournal.status-ceq'prepared'-and@($approvalWriterJournal.completed_steps).Count-eq0
-            $approvalWriterClaimsBefore=@(Get-ChildItem -LiteralPath (Join-Path $workspace '.assistant/runtime/locks') -Filter 'step_*.json' -File -ErrorAction SilentlyContinue)
-            $approvalWriterTargetBefore=Test-Path -LiteralPath $approvalWriterTarget
-            if($approvalWriterReadyObserved){
-                $approvalWriterDocument=Get-Content -LiteralPath (Join-Path $workspace $approvalWriterInput) -Raw -Encoding utf8|ConvertFrom-Json -AsHashtable -DateKind String
-                $approvalWriterDocument.expires_at=[DateTimeOffset]::UtcNow.AddMinutes(-1).ToString('o')
-                Write-JsonFile $workspace $approvalWriterInput $approvalWriterDocument
-            }
-        }finally{
-            [void]$approvalWriterReleaseEvent.Set()
+        $approvalWriterHandle=Start-Cli $workspace @('approve','-TaskId','approval-writer-preclaim-task','-ExpectedVersion','1','-Approval',$approvalWriterInput,'-AsJson') '' '' '10000'
+        $approvalWriterPendingMatches=@(Wait-NewPending $workspace $approvalWriterPendingBefore $approvalWriterHandle)
+        $approvalWriterReadyObserved=$approvalWriterPendingMatches.Count-eq1-and-not$approvalWriterHandle.Process.HasExited
+        $approvalWriterPendingCount=$approvalWriterPendingMatches.Count
+        $approvalWriterPending=$(if($approvalWriterPendingCount-eq1){$approvalWriterPendingMatches[0]}else{$null})
+        $approvalWriterJournal=$(if($null-ne$approvalWriterPending){Get-Content -LiteralPath $approvalWriterPending.FullName -Raw -Encoding utf8|ConvertFrom-Json -AsHashtable -DateKind String}else{$null})
+        $approvalWriterJournalPrepared=$null-ne$approvalWriterJournal-and[string]$approvalWriterJournal.status-ceq'prepared'-and@($approvalWriterJournal.completed_steps).Count-eq0
+        $approvalWriterClaimsBefore=@(Get-ChildItem -LiteralPath (Join-Path $workspace '.assistant/runtime/locks') -Filter 'step_*.json' -File -ErrorAction SilentlyContinue)
+        $approvalWriterTargetBefore=Test-Path -LiteralPath $approvalWriterTarget
+        if($approvalWriterReadyObserved){
+            $approvalWriterDocument=Get-Content -LiteralPath (Join-Path $workspace $approvalWriterInput) -Raw -Encoding utf8|ConvertFrom-Json -AsHashtable -DateKind String
+            $approvalWriterDocument.expires_at=[DateTimeOffset]::UtcNow.AddMinutes(-1).ToString('o')
+            Write-JsonFile $workspace $approvalWriterInput $approvalWriterDocument
         }
         $approvalWriterResult=Complete-Process $approvalWriterHandle
         $approvalWriterHandle=$null
@@ -103,13 +86,10 @@ try{
         $approvalWriterClaimsAfter=@(Get-ChildItem -LiteralPath (Join-Path $workspace '.assistant/runtime/locks') -Filter 'step_*.json' -File -ErrorAction SilentlyContinue)
         $approvalWriterTargetAfter=Test-Path -LiteralPath $approvalWriterTarget
         $approvalWriterExpiredError=$approvalWriterResult.StdErr-match'Approval is expired'
-        $approvalWriterDiagnostic="ready=$approvalWriterReadyObserved pending_count=$approvalWriterPendingCount prepared=$approvalWriterJournalPrepared exited_before_release=$approvalWriterExitedBeforeRelease target_before=$approvalWriterTargetBefore claims_before=$($approvalWriterClaimsBefore.Count) writer_exit=$($approvalWriterResult.ExitCode) expired_error=$approvalWriterExpiredError task_version=$($approvalWriterStatus.task.version) approvals=$(@($approvalWriterStatus.task.approvals).Count) target_after=$approvalWriterTargetAfter claims_after=$($approvalWriterClaimsAfter.Count)"
-        Check ($approvalWriterReadyCreated-and$approvalWriterReleaseCreated-and$approvalWriterReadyObserved-and-not$approvalWriterExitedBeforeRelease-and$approvalWriterPendingCount-eq1-and$approvalWriterJournalPrepared-and-not$approvalWriterTargetBefore-and$approvalWriterClaimsBefore.Count-eq0-and$approvalWriterResult.ExitCode-eq2-and$approvalWriterExpiredError-and$approvalWriterStatus.task.version-eq1-and@($approvalWriterStatus.task.approvals).Count-eq0-and-not$approvalWriterTargetAfter-and$approvalWriterClaimsAfter.Count-eq0) 'normal writer revalidates Approval expiry before its first publication claim' "normal Approval writer pre-claim synchronization or expiry rejection failed: $approvalWriterDiagnostic"
+        $approvalWriterDiagnostic="ready=$approvalWriterReadyObserved pending_count=$approvalWriterPendingCount prepared=$approvalWriterJournalPrepared target_before=$approvalWriterTargetBefore claims_before=$($approvalWriterClaimsBefore.Count) writer_exit=$($approvalWriterResult.ExitCode) expired_error=$approvalWriterExpiredError task_version=$($approvalWriterStatus.task.version) approvals=$(@($approvalWriterStatus.task.approvals).Count) target_after=$approvalWriterTargetAfter claims_after=$($approvalWriterClaimsAfter.Count)"
+        Check ($approvalWriterReadyObserved-and$approvalWriterJournalPrepared-and-not$approvalWriterTargetBefore-and$approvalWriterClaimsBefore.Count-eq0-and$approvalWriterResult.ExitCode-eq2-and$approvalWriterExpiredError-and$approvalWriterStatus.task.version-eq1-and@($approvalWriterStatus.task.approvals).Count-eq0-and-not$approvalWriterTargetAfter-and$approvalWriterClaimsAfter.Count-eq0) 'normal writer revalidates Approval expiry before its first publication claim' "normal Approval writer pre-claim synchronization or expiry rejection failed: $approvalWriterDiagnostic"
     }finally{
-        if($null-ne$approvalWriterReleaseEvent){[void]$approvalWriterReleaseEvent.Set()}
         if($null-ne$approvalWriterHandle){try{[void](Complete-Process $approvalWriterHandle)}catch{}}
-        if($null-ne$approvalWriterReleaseEvent){$approvalWriterReleaseEvent.Dispose()}
-        if($null-ne$approvalWriterReadyEvent){$approvalWriterReadyEvent.Dispose()}
     }
 
     [void](Start-Task $workspace 'legacy-approval-prepared' $contracts['legacy-approval-prepared'] 'governed' @('approval_required'))
@@ -274,7 +254,7 @@ try{
     [void](Start-Task $workspace 'no-review-task' $contracts['no-review-task']);$missingReview=Invoke-Hook $workspace @('-SessionMode','write','-ActionMode','write','-TaskId','no-review-task','-ExpectedVersion','1','-ChangedPaths','src/auth/authorize.ps1');$missingRootReviews=@(foreach($protectedPath in @('auth/authorize.ps1','permissions/policy.json','rbac/roles.json')){Invoke-Hook $workspace @('-SessionMode','write','-ActionMode','write','-TaskId','no-review-task','-ExpectedVersion','1','-ChangedPaths',$protectedPath)});Check ($missingReview.ExitCode-eq2-and$missingReview.StdErr-match'independent review policy'-and@($missingRootReviews|Where-Object{$_.ExitCode-eq2-and$_.StdErr-match'independent review policy'}).Count-eq3) 'authorization paths at root and nested depths require independent review capability' 'an authorization path bypassed review policy'
     [void](Start-Task $workspace 'review-task' $contracts['review-task'] 'governed' @('independent_review_required'));$reviewAllowed=Invoke-Hook $workspace @('-SessionMode','write','-ActionMode','write','-TaskId','review-task','-ExpectedVersion','1','-ChangedPaths','src/auth/authorize.ps1');$rootReviewAllowed=Invoke-Hook $workspace @('-SessionMode','write','-ActionMode','write','-TaskId','review-task','-ExpectedVersion','1','-ChangedPaths','auth/authorize.ps1');Check ($reviewAllowed.ExitCode-eq0-and(Read-Output $reviewAllowed).protected-and$rootReviewAllowed.ExitCode-eq0-and(Read-Output $rootReviewAllowed).protected) 'governed authorization writes at root and nested depths pass with required review policy' 'valid authorization preflight failed'
     $governedText="governed`n";$governedDigest=Digest $governedText;$runtimeSnap=Snapshot (Join-Path $workspace '.assistant');$controlledProtected=Invoke-HarnessControlledWrite -RepoRoot $RepoRoot -WorkspaceRoot $workspace -Path 'auth/controlled.json' -Content $governedText -ExpectedSourceDigest $governedDigest -ExpectedCurrentDigest missing -TaskId review-task -ExpectedVersion 1 -ExecutionProfile governed -ContractPath $contracts['review-task'].Path -ContractDigest $contracts['review-task'].Digest -ApprovalId none -DryRun:$false;Check ($controlledProtected.written-and$controlledProtected.protected-and@($controlledProtected.matched_rules)-ccontains'authorization-path-change') 'controlled writer publishes an exactly bound governed authorization file' 'controlled protected writer rejected valid metadata';Same $runtimeSnap (Snapshot (Join-Path $workspace '.assistant')) 'controlled protected write creates no new lifecycle state' 'controlled protected write changed lifecycle state';$profileMismatch=$false;try{Invoke-HarnessControlledWrite -RepoRoot $RepoRoot -WorkspaceRoot $workspace -Path 'auth/mismatch.json' -Content $governedText -ExpectedSourceDigest $governedDigest -ExpectedCurrentDigest missing -TaskId review-task -ExpectedVersion 1 -ExecutionProfile critical -ContractPath $contracts['review-task'].Path -ContractDigest $contracts['review-task'].Digest -ApprovalId none -DryRun:$false|Out-Null}catch{$profileMismatch=$_.Exception.Message-match'execution profile'};Check ($profileMismatch-and-not(Test-Path (Join-Path $workspace 'auth/mismatch.json'))) 'controlled protected metadata mismatch fails closed with zero write' 'controlled protected writer accepted mismatched metadata';$preview=Invoke-HarnessControlledWrite -RepoRoot $RepoRoot -WorkspaceRoot $workspace -Path 'auth/preview.json' -Content $governedText -ExpectedSourceDigest $governedDigest -ExpectedCurrentDigest missing -TaskId review-task -ExpectedVersion 1 -ExecutionProfile governed -ContractPath $contracts['review-task'].Path -ContractDigest $contracts['review-task'].Digest -ApprovalId none -DryRun:$true;Check (-not$preview.written-and$preview.dry_run-and-not(Test-Path (Join-Path $workspace 'auth/preview.json'))) 'controlled dry-run authorizes without publishing bytes' 'controlled dry-run published bytes'
-    $dryRaceRelative='auth/dry-run-cas-race.json';$dryRacePath=Join-Path $workspace $dryRaceRelative;$dryRaceInitial="dry-run preimage`n";$dryRaceExternal="external winner`n";[IO.File]::WriteAllText($dryRacePath,$dryRaceInitial,[Text.UTF8Encoding]::new($false));$dryRaceRuntimeSnap=Snapshot (Join-Path $workspace '.assistant');$dryRaceModule=Get-Module -Name Harness.ControlledWrite -ErrorAction Stop;$dryRaceMutexNames=& $dryRaceModule {param($Root,$TaskId)$identity=Get-HarnessPhysicalPathIdentity -Path $Root;return [pscustomobject]@{Writer=Get-HarnessControlledMutexName -WorkspaceIdentity $identity -Suffix 'writer';Task=Get-HarnessControlledMutexName -WorkspaceIdentity $identity -Suffix "task.$TaskId"}} $workspace 'review-task'
+    $dryRaceRelative='auth/dry-run-cas-race.json';$dryRacePath=Join-Path $workspace $dryRaceRelative;$dryRaceInitial="dry-run preimage`n";$dryRaceExternal="external winner`n";[IO.File]::WriteAllText($dryRacePath,$dryRaceInitial,[Text.UTF8Encoding]::new($false));$dryRaceRuntimeSnap=Snapshot (Join-Path $workspace '.assistant');$dryRaceModule=Get-Module -Name Harness.ControlledWrite -ErrorAction Stop;$dryRaceMutexNames=& $dryRaceModule {param($Root,$TaskId)$identity=Get-HarnessPhysicalPathIdentity -Path $Root;return [pscustomobject]@{Writer=Get-HarnessKernelMutexName -WorkspaceIdentity $identity -Suffix 'writer';Task=Get-HarnessKernelMutexName -WorkspaceIdentity $identity -Suffix state}} $workspace 'review-task'
     $dryRaceTaskMutex=$null;$dryRaceWriterProbe=$null;$dryRaceJob=$null;$dryRaceTaskHeld=$false;$dryRaceWriterHeld=$false;$dryRaceCompleted=$false;$dryRaceJobState='';$dryRaceJobError='';$dryRaceInfrastructureError=''
     try{
         $dryRaceTaskMutex=[Threading.Mutex]::new($false,[string]$dryRaceMutexNames.Task);try{$dryRaceTaskHeld=$dryRaceTaskMutex.WaitOne(10000)}catch [Threading.AbandonedMutexException]{$dryRaceTaskHeld=$true};if(-not$dryRaceTaskHeld){throw 'timed out acquiring dry-run race task mutex'}

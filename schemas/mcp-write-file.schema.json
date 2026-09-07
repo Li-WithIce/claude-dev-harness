@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "path": { "type": "string", "minLength": 1 },
+    "content": { "type": "string" },
+    "expected_current_sha256": { "type": "string", "pattern": "^(?:missing|sha256:[0-9a-f]{64})$" },
+    "task_id": { "type": "string" },
+    "expected_version": { "type": "integer", "minimum": 1 },
+    "execution_profile": { "type": "string", "enum": ["governed", "critical"] },
+    "contract_path": { "type": "string" },
+    "contract_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "approval_id": { "type": "string" },
+    "dry_run": { "type": "boolean" }
+  },
+  "required": ["path", "content", "expected_current_sha256"]
+}

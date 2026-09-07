@@ -36,9 +36,7 @@ function Get-HarnessNormalizedTextSha256 {
     [CmdletBinding()]
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
 
-    $normalized = $Text.Replace("`r`n", "`n").Replace("`r", "`n")
-    $normalized = $normalized.TrimEnd([char[]]"`r`n") + "`n"
-    return Get-HarnessUtf8TextSha256 -Text $normalized
+    return Get-HarnessUtf8TextSha256 -Text ($Text.Replace("`r`n", "`n").Replace("`r", "`n").TrimEnd([char[]]"`r`n") + "`n")
 }
 
 Export-ModuleMember -Function Get-HarnessSha256Bytes,Get-HarnessFileSha256,Get-HarnessUtf8TextSha256,Get-HarnessNormalizedTextSha256

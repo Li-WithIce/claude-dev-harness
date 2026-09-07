@@ -214,7 +214,18 @@ try {
     Assert-ErrorWire -Result (Invoke-TaskProcess -TaskScript $taskScript -RequestFile $requestPaths['clear-explicit-product-decision'] -TaskRepoRoot $RepoRoot -WorkspaceRoot $scratchRoot -AsJson -Command 'run') -Label 'unsupported command'
 
     $fixtureRepo = Join-Path $scratchRoot 'fixture-repo'
-    foreach ($relativePath in @('scripts/task.ps1','scripts/lib/Harness.Requirement.psm1','policies/decision-rights.json','schemas/requirement-contract.schema.json')) {
+    foreach ($relativePath in @(
+        'scripts/task.ps1',
+        'scripts/lib/Harness.Requirement.psm1',
+        'scripts/lib/Harness.RuntimeKernel.ps1',
+        'scripts/lib/Harness.AtomicWrite.psm1',
+        'scripts/lib/Harness.Path.psm1',
+        'scripts/lib/Harness.Hashing.psm1',
+        'policies/decision-rights.json',
+        'schemas/decision-rights.schema.json',
+        'schemas/requirement-inspection.schema.json',
+        'schemas/requirement-contract.schema.json'
+    )) {
         Copy-RepoPathToFixture -SourceRoot $RepoRoot -FixtureRoot $fixtureRepo -RelativePath $relativePath
     }
     $fixturePolicy = Join-Path $fixtureRepo 'policies\decision-rights.json'

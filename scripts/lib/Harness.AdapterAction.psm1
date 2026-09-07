@@ -1,193 +1,76 @@
-﻿Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop'
-
-Import-Module (Join-Path $PSScriptRoot 'Harness.Path.psm1') -Force -ErrorAction Stop
-Import-Module (Join-Path $PSScriptRoot 'Harness.Hashing.psm1') -Force -ErrorAction Stop
-Import-Module (Join-Path $PSScriptRoot 'Harness.ProtectedAction.psm1') -Force -ErrorAction Stop
+﻿Import-Module (Join-Path $PSScriptRoot 'Harness.ProtectedAction.psm1') -Force -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot 'Harness.ControlledWrite.psm1') -Force -ErrorAction Stop
-
-function Test-HarnessShellApplyPatchInvocation {
-    param([Parameter(Mandatory)][string]$CommandText)
-
-    return [regex]::IsMatch($CommandText,'(?i)(?<![A-Za-z0-9_])(?:apply_patch|applypatch)(?![A-Za-z0-9_])')
-}
-
-function Assert-HarnessApplyPatchRelativePath {
-    param([Parameter(Mandatory)][AllowEmptyString()][string]$Path)
-
-    if ([string]::IsNullOrEmpty($Path) -or $Path -cne $Path.Trim() -or
-        $Path.IndexOfAny([char[]]@(0,10,13)) -ge 0) {
-        throw 'direct apply_patch input contains an invalid target path'
-    }
-    if ($Path.StartsWith('/',[StringComparison]::Ordinal) -or
-        $Path.StartsWith('\',[StringComparison]::Ordinal) -or
-        $Path -cmatch '^[A-Za-z]:' -or $Path.Contains(':')) {
-        throw 'direct apply_patch input requires a relative target path'
-    }
-    foreach ($segment in [regex]::Split($Path,'[\\/]')) {
-        if ([string]::IsNullOrEmpty($segment) -or $segment -ceq '.' -or $segment -ceq '..' -or
-            $segment.IndexOfAny([char[]](0..31 + @(60,62,34,124,63,42))) -ge 0 -or
-            $segment.EndsWith('.',[StringComparison]::Ordinal) -or
-            $segment.EndsWith(' ',[StringComparison]::Ordinal)) {
-            throw 'direct apply_patch input contains an invalid target path'
-        }
-    }
-}
+. (Join-Path $PSScriptRoot 'Harness.RuntimeKernel.ps1')
 
 function Get-HarnessApplyPatchChangedPaths {
     param([Parameter(Mandatory)][string]$PatchText)
 
-    $normalized = $PatchText.Replace("`r`n","`n")
-    if ($normalized.Contains("`r")) { throw 'direct apply_patch input has an invalid patch envelope' }
-    if ($normalized.EndsWith("`n",[StringComparison]::Ordinal)) { $normalized = $normalized.Substring(0,$normalized.Length - 1) }
-    $lines = $normalized.Split([char]10)
-    if ($lines.Count -lt 2 -or $lines[0].Trim() -cne '*** Begin Patch' -or
-        $lines[$lines.Count - 1].Trim() -cne '*** End Patch') {
-        throw 'direct apply_patch input has an invalid patch envelope'
-    }
+    $text = $PatchText.Replace("`r`n","`n")
+    if ($text.Contains([char]13) -or $text.EndsWith("`n`n",[StringComparison]::Ordinal)) { throw 'direct apply_patch input has an invalid patch envelope' }
+    $lines = $text.TrimEnd([char]10).Split([char]10)
+    if ($lines.Count -lt 2 -or $lines[0].Trim() -cne '*** Begin Patch' -or $lines[-1].Trim() -cne '*** End Patch') { throw 'direct apply_patch input has an invalid patch envelope' }
 
-    $paths = [Collections.Generic.List[string]]::new()
-    $pathKeys = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    $operation = 'none'
-    $environmentSeen = $false
-    $moveSeen = $false
-    $updateStarted = $false
-    $updateContentSeen = $false
-    $updateNeedsContent = $false
-    $endOfFileSeen = $false
-    $fileOperationCount = 0
+    $paths,$keys,$mode,$state,$environmentSeen = [Collections.Generic.List[string]]::new(),[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase),'','none',$false
+
     for ($index = 1; $index -lt $lines.Count - 1; $index++) {
         $line = [string]$lines[$index]
         $trimmed = $line.Trim()
-        if ($operation -ceq 'none' -and
-            $trimmed.StartsWith('*** Environment ID:',[StringComparison]::Ordinal)) {
-            if ($environmentSeen) { throw 'direct apply_patch input contains a duplicate Environment ID directive' }
-            if ([string]::IsNullOrWhiteSpace($trimmed.Substring('*** Environment ID:'.Length))) {
-                throw 'direct apply_patch input contains an empty Environment ID directive'
-            }
+        if (-not $mode -and $trimmed.StartsWith('*** Environment ID:',[StringComparison]::Ordinal)) {
+            if ($environmentSeen -or [string]::IsNullOrWhiteSpace($trimmed.Substring(19))) { throw 'direct apply_patch input contains an invalid Environment ID directive' }
             $environmentSeen = $true
             continue
         }
 
-        $headerLine = if ($operation -ceq 'Update File') { $line.TrimEnd() } else { $trimmed }
-        if ($headerLine -ceq '*** Begin Patch' -or $headerLine -ceq '*** End Patch') {
-            throw 'direct apply_patch input has an invalid patch envelope'
-        }
-        $fileMatch = [regex]::Match($headerLine,'^\*\*\* (?<operation>Add File|Update File|Delete File): (?<path>.*)$')
-        if ($fileMatch.Success) {
-            if ($operation -ceq 'Update File' -and (-not $updateContentSeen -or $updateNeedsContent)) {
-                throw 'direct apply_patch input contains an empty Update File hunk'
+        $target = [regex]::Match($(if ($mode -ceq 'Update File') { $line.TrimEnd() } else { $trimmed }),'^\*\*\* (?:(?<mode>Add File|Update File|Delete File)|(?<move>Move to)): (?<path>.*)$')
+        if ($target.Success) {
+            if ($target.Groups['move'].Success) {
+                if ($mode -cne 'Update File') { throw 'direct apply_patch input contains an invalid patch hunk' }
+                if ($state -ceq 'eof') { throw 'direct apply_patch input contains content after End of File' }
+                if ($state -cne 'none') { throw 'direct apply_patch input contains an invalid Move to directive' }
+                $state = 'moved'
+            } else {
+                if ($mode -ceq 'Update File' -and $state -cnotin @('have','eof')) { throw 'direct apply_patch input contains an empty Update File hunk' }
+                $mode = $target.Groups['mode'].Value
+                $state = 'none'
             }
-            $operation = $fileMatch.Groups['operation'].Value
-            $path = [string]$fileMatch.Groups['path'].Value
-            Assert-HarnessApplyPatchRelativePath -Path $path
-            $moveSeen = $false
-            $updateStarted = $false
-            $updateContentSeen = $false
-            $updateNeedsContent = $false
-            $endOfFileSeen = $false
-            $fileOperationCount++
-            if ($pathKeys.Add($path.Replace('/','\'))) { $paths.Add($path) }
+            $path = $target.Groups['path'].Value
+            if ([string]::IsNullOrEmpty($path) -or $path -cne $path.Trim() -or $path.IndexOfAny([char[]]@(0,10,13)) -ge 0) { throw 'direct apply_patch input contains an invalid target path' }
+            if ($path.StartsWith('/',[StringComparison]::Ordinal) -or $path.StartsWith('\',[StringComparison]::Ordinal) -or $path -cmatch '^[A-Za-z]:' -or $path.Contains(':')) { throw 'direct apply_patch input requires a relative target path' }
+            if (@([regex]::Split($path,'[\\/]') | Where-Object {
+                [string]::IsNullOrEmpty($_) -or $_ -cin @('.','..') -or $_.IndexOfAny([char[]](0..31 + @(60,62,34,124,63,42))) -ge 0 -or $_.EndsWith('.',[StringComparison]::Ordinal) -or $_.EndsWith(' ',[StringComparison]::Ordinal)
+            } | Select-Object -First 1).Count) { throw 'direct apply_patch input contains an invalid target path' }
+            if ($keys.Add($path.Replace('/','\'))) { $paths.Add($path) }
             continue
         }
 
-        if ($operation -ceq 'Update File') {
-            if ($headerLine -ceq '*** End of File') {
-                if ($endOfFileSeen -or -not $updateContentSeen -or $updateNeedsContent) {
-                    throw 'direct apply_patch input contains an invalid End of File directive'
-                }
-                $endOfFileSeen = $true
-                continue
-            }
-            $moveMatch = [regex]::Match($headerLine,'^\*\*\* Move to: (?<path>.*)$')
-            if ($moveMatch.Success) {
-                if ($moveSeen -or $updateStarted -or $endOfFileSeen) {
-                    throw 'direct apply_patch input contains an invalid Move to directive'
-                }
-                $path = [string]$moveMatch.Groups['path'].Value
-                Assert-HarnessApplyPatchRelativePath -Path $path
-                $moveSeen = $true
-                if ($pathKeys.Add($path.Replace('/','\'))) { $paths.Add($path) }
-                continue
-            }
-            if ($endOfFileSeen) {
-                if ([string]::IsNullOrWhiteSpace($line)) { continue }
-                throw 'direct apply_patch input contains content after End of File'
-            }
-            if ($headerLine.StartsWith('*** ',[StringComparison]::Ordinal)) {
-                throw 'direct apply_patch input contains an unsupported patch directive'
-            }
-            if ($headerLine -ceq '@@' -or $headerLine.StartsWith('@@ ',[StringComparison]::Ordinal)) {
-                if ($updateNeedsContent) {
-                    throw 'direct apply_patch input contains an empty Update File chunk'
-                }
-                $updateStarted = $true
-                $updateNeedsContent = $true
-                continue
-            }
-            if ($line.Length -eq 0 -or $line.StartsWith(' ',[StringComparison]::Ordinal) -or
-                $line.StartsWith('+',[StringComparison]::Ordinal) -or
-                $line.StartsWith('-',[StringComparison]::Ordinal)) {
-                $updateStarted = $true
-                $updateContentSeen = $true
-                $updateNeedsContent = $false
-                continue
-            }
-            throw 'direct apply_patch input contains an invalid Update File hunk'
+        if ($mode -ceq 'Add File' -and $line.StartsWith('+',[StringComparison]::Ordinal)) { continue }
+        if ($mode -cne 'Update File') { throw 'direct apply_patch input contains an invalid patch hunk' }
+        if ($state -ceq 'eof' -and [string]::IsNullOrWhiteSpace($line)) { continue }
+        if ($state -ceq 'eof') { throw 'direct apply_patch input contains content after End of File' }
+        if ($line.TrimEnd() -ceq '*** End of File') {
+            if ($state -cne 'have') { throw 'direct apply_patch input contains an invalid End of File directive' }
+            $state = 'eof'
+            continue
         }
 
-        if ($trimmed -ceq '*** End of File') { throw 'direct apply_patch input contains an invalid End of File directive' }
-        if ($trimmed.StartsWith('*** Move to:',[StringComparison]::Ordinal)) {
-            throw 'direct apply_patch input contains an invalid Move to directive'
+        if ($line.TrimEnd() -ceq '@@' -or $line.TrimEnd().StartsWith('@@ ',[StringComparison]::Ordinal)) {
+            if ($state -ceq 'need') { throw 'direct apply_patch input contains an empty Update File chunk' }
+            $state = 'need'
+            continue
         }
-        if ($trimmed.StartsWith('*** ',[StringComparison]::Ordinal)) {
-            throw 'direct apply_patch input contains an unsupported patch directive'
+        if ($line.TrimEnd().StartsWith('*** ',[StringComparison]::Ordinal)) { throw 'direct apply_patch input contains an unsupported patch directive' }
+        if ($line.Length -eq 0 -or $line[0] -in @(' ','+','-')) {
+            $state = 'have'
+            continue
         }
-        if ($operation -ceq 'Add File' -and $line.StartsWith('+',[StringComparison]::Ordinal)) { continue }
-        throw 'direct apply_patch input contains an invalid patch hunk'
+        throw 'direct apply_patch input contains an invalid Update File hunk'
     }
-    if ($operation -ceq 'Update File' -and (-not $updateContentSeen -or $updateNeedsContent)) {
-        throw 'direct apply_patch input contains an empty Update File hunk'
-    }
-    if ($fileOperationCount -eq 0) { throw 'direct apply_patch input is missing a file operation' }
+    if ($mode -ceq 'Update File' -and $state -cnotin @('have','eof')) { throw 'direct apply_patch input contains an empty Update File hunk' }
+    if (-not $paths.Count) { throw 'direct apply_patch input is missing a file operation' }
     return $paths.ToArray()
 }
 
-function Resolve-HarnessAdapterMutationPaths {
-    param(
-        [Parameter(Mandatory)][string]$WorkspaceRoot,
-        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Paths
-    )
-
-    $result = [Collections.Generic.List[string]]::new()
-    $identities = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($path in $Paths) {
-        if ([string]::IsNullOrWhiteSpace($path)) { throw 'file mutation input is missing target path' }
-        $fullPath = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $path -Label 'file mutation target' -AllowMissing
-        if (Test-Path -LiteralPath $fullPath -PathType Container) {
-            throw 'file mutation target must not be a directory'
-        }
-        if ($identities.Add($fullPath)) { $result.Add($path) }
-    }
-    return $result.ToArray()
-}
-
-function Resolve-HarnessAdapterActionWorkspace {
-    param([string]$Primary,[string]$Fallback)
-
-    $primaryRoot = if ([string]::IsNullOrWhiteSpace($Primary)) { '' } else { Resolve-HarnessWorkspaceRoot -WorkspaceRoot $Primary }
-    $fallbackRoot = if ([string]::IsNullOrWhiteSpace($Fallback)) { '' } else { Resolve-HarnessWorkspaceRoot -WorkspaceRoot $Fallback }
-    if ($primaryRoot -and $fallbackRoot -and
-        -not $primaryRoot.Equals($fallbackRoot,[StringComparison]::OrdinalIgnoreCase)) {
-        throw 'Codex PreToolUse cwd conflicts with DEV_HARNESS_WORKSPACE_ROOT'
-    }
-    $workspace = if ($primaryRoot) { $primaryRoot } else { $fallbackRoot }
-    if (-not $workspace) { throw 'Codex PreToolUse input is missing cwd and DEV_HARNESS_WORKSPACE_ROOT' }
-    return $workspace
-}
-
 function Invoke-HarnessAdapterPreflightAction {
-    [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$RepoRoot,
         [AllowEmptyString()][string]$WorkspaceRoot='',
@@ -207,61 +90,38 @@ function Invoke-HarnessAdapterPreflightAction {
     )
 
     $repoRoot = (Resolve-Path -LiteralPath $RepoRoot -ErrorAction Stop).Path
-    $workspaceRoot = Resolve-HarnessAdapterActionWorkspace -Primary $WorkspaceRoot -Fallback $WorkspaceRootFallback
-    $paths = [string[]]@($ChangedPaths)
-    $commandText = ''
-    switch ($ActionKind) {
-        'shell' {
-            if ([string]::IsNullOrWhiteSpace($ShellText) -or $PatchText -or $paths.Count) {
-                throw 'shell preflight action shape is invalid'
-            }
-            $commandText = $ShellText
-            if (Test-HarnessShellApplyPatchInvocation -CommandText $commandText) {
-                throw 'Bash shell-form apply_patch is denied because Codex PreToolUse does not expose the effective tool workdir or environment identity'
-            }
-        }
-        'apply_patch' {
-            if ([string]::IsNullOrWhiteSpace($PatchText) -or $ShellText -or $paths.Count) {
-                throw 'apply_patch preflight action shape is invalid'
-            }
-            $paths = [string[]]@(Resolve-HarnessAdapterMutationPaths -WorkspaceRoot $workspaceRoot -Paths (Get-HarnessApplyPatchChangedPaths -PatchText $PatchText))
-        }
-        'file_mutation' {
-            if ($ShellText -or $PatchText -or $paths.Count -eq 0) {
-                throw 'file mutation preflight action shape is invalid'
-            }
-            $paths = [string[]]@(Resolve-HarnessAdapterMutationPaths -WorkspaceRoot $workspaceRoot -Paths $paths)
-        }
-        'normalized_action' {
-            if ($PatchText) { throw 'normalized preflight action must not carry patch_text' }
-            $commandText = $ShellText
-            $paths = [string[]]@(Resolve-HarnessAdapterMutationPaths -WorkspaceRoot $workspaceRoot -Paths $paths)
-        }
+    $primaryRoot = if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) { '' } else { Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot }
+    $fallbackRoot = if ([string]::IsNullOrWhiteSpace($WorkspaceRootFallback)) { '' } else { Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRootFallback }
+    Assert-HarnessKernelCondition (-not $primaryRoot -or -not $fallbackRoot -or $primaryRoot.Equals($fallbackRoot,[StringComparison]::OrdinalIgnoreCase)) 'Codex PreToolUse cwd conflicts with DEV_HARNESS_WORKSPACE_ROOT'
+    $workspaceRoot,$paths,$commandText = $(if ($primaryRoot) { $primaryRoot } elseif ($fallbackRoot) { $fallbackRoot } else { throw 'Codex PreToolUse input is missing cwd and DEV_HARNESS_WORKSPACE_ROOT' }),[string[]]@($ChangedPaths),$ShellText
+    $kind = $ActionKind.ToLowerInvariant()
+    if ($kind -cin @('shell','apply_patch')) {
+        $isShell = $kind -ceq 'shell'
+        $requiredText,$otherText = if ($isShell) { $ShellText,$PatchText } else { $PatchText,$ShellText }
+        Assert-HarnessKernelCondition (-not [string]::IsNullOrWhiteSpace($requiredText) -and -not $otherText -and -not $paths.Count) "$kind preflight action shape is invalid"
+        if ($isShell) {
+            Assert-HarnessKernelCondition (-not [regex]::IsMatch($commandText,'(?i)(?<![A-Za-z0-9_])(?:apply_patch|applypatch)(?![A-Za-z0-9_])')) 'Bash shell-form apply_patch is denied because Codex PreToolUse does not expose the effective tool workdir or environment identity'
+        } else { $paths = [string[]]@(Get-HarnessApplyPatchChangedPaths -PatchText $PatchText) }
+    } elseif ($kind -ceq 'file_mutation') {
+        Assert-HarnessKernelCondition (-not $ShellText -and -not $PatchText -and $paths.Count -gt 0) 'file mutation preflight action shape is invalid'
+    } elseif ($kind -ceq 'normalized_action' -and $PatchText) { throw 'normalized preflight action must not carry patch_text' }
+    if ($ActionKind -cne 'shell') {
+        $identities = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        $paths = [string[]]@($paths | ForEach-Object {
+            if ([string]::IsNullOrWhiteSpace($_)) { throw 'file mutation input is missing target path' }
+            $fullPath = Resolve-HarnessContainedPath -WorkspaceRoot $workspaceRoot -Path $_ -Label 'file mutation target' -AllowMissing
+            Assert-HarnessKernelCondition (-not (Test-Path -LiteralPath $fullPath -PathType Container)) 'file mutation target must not be a directory'
+            if ($identities.Add($fullPath)) { [string]$_ }
+        })
     }
 
-    $guard = Assert-HarnessProtectedAction -RepoRoot $repoRoot -WorkspaceRoot $workspaceRoot `
+    return New-HarnessAdapterResponse -Operation preflight_action -Value (Assert-HarnessProtectedAction -RepoRoot $repoRoot -WorkspaceRoot $workspaceRoot `
         -SessionMode $SessionMode -ActionMode $ActionMode -TaskId $TaskId -ExpectedVersion $ExpectedVersion `
         -CommandText $commandText -ChangedPaths $paths -Environment $Environment `
-        -DryRun:$DryRun -UserInstruction $UserInstruction
-    $response = [ordered]@{
-        schema_version = 'adapter-kernel-api/v1'
-        message_type = 'response'
-        body = [ordered]@{
-            operation = 'preflight_action'
-            allowed = [bool]$guard.allowed
-            protected = [bool]$guard.protected
-            matched_rules = @($guard.matched_rules)
-            required_scopes = @($guard.required_scopes)
-            approval_id = $guard.approval_id
-            operation_identity = $guard.operation_identity
-            protected_operation = $guard.protected_operation
-        }
-    }
-    return $response
+        -DryRun:$DryRun -UserInstruction $UserInstruction) -Keys @('allowed','protected','matched_rules','required_scopes','approval_id','operation_identity','protected_operation')
 }
 
 function Invoke-HarnessAdapterControlledWrite {
-    [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$RepoRoot,
         [Parameter(Mandatory)][string]$WorkspaceRoot,
@@ -278,30 +138,13 @@ function Invoke-HarnessAdapterControlledWrite {
         [Nullable[bool]]$DryRun=$null
     )
 
-    $result = Invoke-HarnessControlledWrite -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot `
+    return New-HarnessAdapterResponse -Operation controlled_write -Value (Invoke-HarnessControlledWrite -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot `
         -Environment $Environment -Path $TargetPath -Content $Content `
         -ExpectedSourceDigest (Get-HarnessUtf8TextSha256 -Text $Content) `
         -ExpectedCurrentDigest $ExpectedCurrentSha256 -TaskId $TaskId `
         -ExpectedVersion $ExpectedVersion -ExecutionProfile $ExecutionProfile `
         -ContractPath $ContractPath -ContractDigest $ContractDigest `
-        -ApprovalId $ApprovalId -DryRun $DryRun
-    $response = [ordered]@{
-        schema_version = 'adapter-kernel-api/v1'
-        message_type = 'response'
-        body = [ordered]@{
-            operation = 'controlled_write'
-            written = [bool]$result.written
-            dry_run = [bool]$result.dry_run
-            path = [string]$result.path
-            digest = [string]$result.digest
-            protected = [bool]$result.protected
-            matched_rules = @($result.matched_rules)
-            approval_id = $result.approval_id
-            operation_identity = $result.operation_identity
-            protected_operation = $result.protected_operation
-        }
-    }
-    return $response
+        -ApprovalId $ApprovalId -DryRun $DryRun) -Keys @('written','dry_run','path','digest','protected','matched_rules','approval_id','operation_identity','protected_operation')
 }
 
 Export-ModuleMember -Function Invoke-HarnessAdapterPreflightAction,Invoke-HarnessAdapterControlledWrite

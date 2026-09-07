@@ -7,7 +7,8 @@
   "dependencies": {
     "kernel_api": "v1",
     "modules": [
-      "entry-kernel"
+      "entry-kernel",
+      "task-governance"
     ]
   },
   "requested_capabilities": [
@@ -26,7 +27,8 @@
     "watch_paths": [
       "docs/architecture/v1-sunset-contract.md",
       "kernel-component-classification.json",
-      "scripts/lib/Harness.Protocol.psm1"
+      "scripts/lib/Harness.Protocol.psm1",
+      "scripts/lib/Harness.TaskMigration.psm1"
     ]
   },
   "entrypoints": {

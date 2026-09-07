@@ -4,7 +4,7 @@
   "source_basis": "git-index-blob/v1",
   "classification": {
     "path": "kernel-component-classification.json",
-    "sha256": "sha256:476af67707949bbaae504353d44a44f0fd7057853d105f70daacc7b20d7cd754"
+    "sha256": "sha256:4b63b621712d7f74107208b9b9f52799f554235fbefebb5335682aaf1be30d62"
   },
   "metric_contract": {
     "powershell": "powershell-token-lines/v1",
@@ -17,11 +17,11 @@
       "path": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",
       "layer": "a3-adapter",
       "language": "powershell",
-      "raw_sha256": "sha256:160dc6a41a9207f600bcb6825f76fd043ab618ca5b988f53023efa41828d3a7e",
-      "physical_loc": 113,
-      "nonblank_loc": 105,
-      "executable_loc": 103,
-      "maximum_line_length": 93,
+      "raw_sha256": "sha256:8296881eaa5519b2647fe8fd698c8a8750fcfbb5e2c2b0e378bbb48199c30da0",
+      "physical_loc": 32,
+      "nonblank_loc": 29,
+      "executable_loc": 27,
+      "maximum_line_length": 258,
       "tcb_included": true,
       "kernel_api_operations": []
     },
@@ -29,11 +29,11 @@
       "path": "runtime-hooks/claude/pretooluse.ps1",
       "layer": "a3-adapter",
       "language": "powershell",
-      "raw_sha256": "sha256:6a9f25000af854ffa6e71cbdefe21d226362f63e655152970e53c48c88bc320e",
-      "physical_loc": 84,
-      "nonblank_loc": 79,
-      "executable_loc": 79,
-      "maximum_line_length": 145,
+      "raw_sha256": "sha256:6abcc1333b5a2bb732a9ca3a268f7ddd6c37824c10d89183b5af542bbd56ed58",
+      "physical_loc": 65,
+      "nonblank_loc": 60,
+      "executable_loc": 60,
+      "maximum_line_length": 206,
       "tcb_included": true,
       "kernel_api_operations": [
         "preflight_action"
@@ -79,11 +79,11 @@
       "path": "scripts/harness-write-mcp.ps1",
       "layer": "a3-adapter",
       "language": "powershell",
-      "raw_sha256": "sha256:91ecd3462f809f77d8e1035d4f9dc39149e5e5f7d1112136edd51b3589cb76a8",
-      "physical_loc": 194,
-      "nonblank_loc": 183,
-      "executable_loc": 183,
-      "maximum_line_length": 276,
+      "raw_sha256": "sha256:5ab44449d3f5463383e42303d31e73804f4ce9545c971d9b6f07b7517cd2a6df",
+      "physical_loc": 94,
+      "nonblank_loc": 89,
+      "executable_loc": 89,
+      "maximum_line_length": 240,
       "tcb_included": true,
       "kernel_api_operations": [
         "controlled_write"
@@ -133,10 +133,10 @@
     "adapter_count": 9,
     "powershell_count": 6,
     "javascript_count": 3,
-    "executable_loc": 1015,
+    "executable_loc": 826,
     "maximum_adapter_executable_loc": 196,
     "threshold_breaches": 0
   },
   "digest_algorithm": "canonical-json/v1",
-  "inventory_digest": "sha256:2620a9004b848e50d5b9facc83d247ebc64032a48f93e08b47a02bd2cbac3218"
+  "inventory_digest": "sha256:a01f594a02c83f567ec6f425723cc164d5b9b2c889192108426433a9b7f66ac5"
 }

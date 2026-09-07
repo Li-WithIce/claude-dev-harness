@@ -110,10 +110,12 @@ $expectedSchemaFiles = @(
     'capability-source-catalog.schema.json',
     'capability-source.schema.json',
     'current-pointer.schema.json',
+    'decision-rights.schema.json',
     'distribution-plan.schema.json',
     'event.schema.json',
     'evidence.schema.json',
     'exact-head-engineering-evidence.schema.json',
+    'host-capabilities.schema.json',
     'install-profile.schema.json',
     'kernel-component-classification.schema.json',
     'kernel-tcb-roots.schema.json',
@@ -122,8 +124,10 @@ $expectedSchemaFiles = @(
     'module-manifest-catalog.schema.json',
     'module-manifest-v1.schema.json',
     'module-manifest.schema.json',
+    'mcp-write-file.schema.json',
     'ordinary-ci-receipt.schema.json',
     'protected-actions-overlay.schema.json',
+    'protected-actions.schema.json',
     'model-eval-observation.schema.json',
     'preset-lifecycle-report.schema.json',
     'protocol-config-v2.schema.json',
@@ -134,6 +138,7 @@ $expectedSchemaFiles = @(
     'release-model-receipt.schema.json',
     'release-runner-observation.schema.json',
     'requirement-contract.schema.json',
+    'requirement-inspection.schema.json',
     'rollout-canary-authorization.schema.json',
     'rollout-eligibility-v2.schema.json',
     'rollout-evidence-set.schema.json',
@@ -142,7 +147,11 @@ $expectedSchemaFiles = @(
     'rollout-review-receipt.schema.json',
     'runtime-default-admission.schema.json',
     'runtime-default-decision.schema.json',
+    'runtime-policies.schema.json',
     'task-state.schema.json',
+    'task-step-claim.schema.json',
+    'task-transaction-operations.schema.json',
+    'task-transaction.schema.json',
     'v1-stop-loss-report.schema.json'
 )
 $actualSchemaFiles = @(Get-ChildItem -LiteralPath $schemaRoot -Filter '*.json' -File | Select-Object -ExpandProperty Name | Sort-Object)
@@ -220,11 +229,13 @@ $allContractText = @(Get-ChildItem -LiteralPath $policyRoot,$schemaRoot -Filter 
 Assert-True -Condition ($allContractText -notmatch '"(?:task/v2|evidence/v2|risk-rules/v1|execution-profiles/v1)"') -Success 'contracts contain no conflicting or unauthorized public versions' -Failure 'contracts contain a conflicting or unauthorized public version'
 
 $decision = Read-JsonHashtable -Path (Join-Path $policyRoot 'decision-rights.json')
-$decisionTopKeys = @('schema_version', 'categories', 'default_unknown_owner', 'agent_decision_constraints')
+$decisionTopKeys = @('schema_version', 'authority_rank', 'categories', 'default_unknown_owner', 'agent_decision_constraints')
+$decisionAuthorityKeys = @('current-user-message', 'user-confirmed', 'approved-spec', 'project-policy', 'project-product-decision', 'project-architecture-decision', 'repo-evidence', 'engineering-convention')
 $decisionCategoryKeys = @('product', 'architecture', 'agent')
 $decisionConstraintKeys = @('must_be_reversible', 'must_not_change_external_behavior', 'must_follow_repo_conventions', 'must_be_verified')
 Assert-True -Condition (Test-KeySet -Value $decision -Expected $decisionTopKeys) -Success 'decision policy top-level keys are exact' -Failure 'decision policy top-level keys drifted'
 Assert-True -Condition ([string]$decision['schema_version'] -ceq 'decision-rights/v1' -and (Test-KeySet -Value $decision['categories'] -Expected $decisionCategoryKeys) -and (Test-KeySet -Value $decision['agent_decision_constraints'] -Expected $decisionConstraintKeys)) -Success 'decision policy shape and version are canonical' -Failure 'decision policy shape or version is invalid'
+Assert-True -Condition ((Test-KeySet -Value $decision['authority_rank'] -Expected $decisionAuthorityKeys) -and @($decisionAuthorityKeys | Where-Object { $decision['authority_rank'][$_] -isnot [long] -or $decision['authority_rank'][$_] -lt 0 -or $decision['authority_rank'][$_] -gt 5 }).Count -eq 0) -Success 'decision authority ranks are exact bounded integers' -Failure 'decision authority rank shape is invalid'
 $allCategories = @($decisionCategoryKeys | ForEach-Object { @($decision['categories'][$_]) })
 $duplicateCategories = @($allCategories | Group-Object | Where-Object { $_.Count -gt 1 })
 Assert-True -Condition ($duplicateCategories.Count -eq 0) -Success 'decision categories have one owner each' -Failure 'decision categories overlap across owners'

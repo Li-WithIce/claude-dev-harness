@@ -237,7 +237,9 @@ $thinTokens = @(
     'active Runtime protocol = v2 only',
     'active v1 Runtime reader = 0',
     'status writes = 0',
-    '6151'
+    '3068',
+    'Runtime transitive executable LOC < 3100',
+    'original below-3000 goal is not achieved'
 )
 $missingThinTokens = @($thinTokens | Where-Object { -not $thinText.Contains($_, [StringComparison]::Ordinal) })
 Check ($missingThinHeadings.Count -eq 0 -and $missingThinTokens.Count -eq 0) 'Thin Trust Kernel document freezes layers, paths, budget, and terminal SLOs' "Thin Trust Kernel omissions: $($missingThinHeadings + $missingThinTokens -join ', ')"
@@ -269,6 +271,7 @@ $expectedPaths = @(
     'tests/fixture-test-common.ps1',
     'tests/verify-installation.ps1'
 ) + @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'scripts') -Filter '*.ps1' -File | ForEach-Object { 'scripts/' + $_.Name }) +
+    @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'scripts\lib') -Filter '*.ps1' -File | ForEach-Object { 'scripts/lib/' + $_.Name }) +
     @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'scripts\lib') -Filter '*.psm1' -File | ForEach-Object { 'scripts/lib/' + $_.Name }) +
     @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'modules') -Filter '*.psm1' -File -Recurse | ForEach-Object { [IO.Path]::GetRelativePath($RepoRoot, $_.FullName).Replace([char]92, [char]47) }) +
     @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'runtime-hooks') -File -Recurse | ForEach-Object { [IO.Path]::GetRelativePath($RepoRoot, $_.FullName).Replace([char]92, [char]47) })
@@ -287,7 +290,7 @@ Check ($rolloutClassification.Count -eq 1 -and [string]$rolloutClassification[0]
 $manifestConstructionPaths = @('scripts/get-module-manifest-catalog.ps1','scripts/lib/Harness.CapabilitySource.psm1','scripts/lib/Harness.ModuleManifest.psm1')
 $manifestConstructionClassification = @($classification.components | Where-Object { [string]$_.path -cin $manifestConstructionPaths })
 Check ($manifestConstructionClassification.Count -eq 3 -and @($manifestConstructionClassification | Where-Object { [string]$_.layer -cne 'c2-capability' -or [bool]$_.tcb_included -or [string]$_.owner_candidate -cne 'engineering-validation' }).Count -eq 0) 'Manifest generator, constructor, and source consumer are C2 engineering components outside Runtime TCB' 'Manifest construction classification leaked into Runtime TCB or another owner'
-Check (@($classification.components | Where-Object { [string]$_.layer -ceq 'c2-capability' }).Count -eq 42) 'classification contains the 41 TK-04 C2 paths plus the TK-05 Adapter inventory generator' 'C2 classification count drifted'
+Check (@($classification.components | Where-Object { [string]$_.layer -ceq 'c2-capability' }).Count -eq 43) 'classification contains the earlier C2 paths plus the TK-07 validation-process helper' 'C2 classification count drifted'
 Check (@($classification.components | Where-Object { [string]$_.layer -ceq 'c2-capability' -and [bool]$_.tcb_included }).Count -eq 0) 'no C2 capability is included in the measured Kernel TCB' 'a C2 capability leaked into TCB inclusion'
 
 $entryContractPath = Join-Path $RepoRoot 'policies\entry-contract.md'
@@ -295,7 +298,7 @@ $entryContractDigest = Get-LfNormalizedSha256 -Path $entryContractPath
 $entryContractLines = @(Get-Content -LiteralPath $entryContractPath).Count
 $entryContractBytes = [Text.Encoding]::UTF8.GetByteCount([IO.File]::ReadAllText($entryContractPath))
 Check ($entryContractDigest -ceq '4838491707510140a0c698ac26d0faa8b45d6dde90d03427dc78006f0643396c' -and $entryContractLines -eq 16 -and $entryContractBytes -eq 2052) 'TK-03 freezes the explicitly confirmed v2-only Entry Contract' 'Entry Contract differs from the confirmed TK-03 admission boundary'
-Check ((Get-LfNormalizedSha256 -Path (Join-Path $RepoRoot 'scripts\lib\Harness.Path.psm1')) -ceq '774b55f8095b65f289a78adda04e6ee8752ead48a36653384119a393423e27de') 'TK-00 leaves canonical Harness.Path unchanged across checkout line endings' 'Harness.Path changed during TK-00'
+Check ((Get-LfNormalizedSha256 -Path (Join-Path $RepoRoot 'scripts\lib\Harness.Path.psm1')) -ceq '6a3e0abef8a96cee16c388e3bc584376484ee676289d3fdf0ba0bc1d7fcd6363') 'TK-07 binds the simplified canonical Harness.Path source across checkout line endings' 'Harness.Path differs from the TK-07 canonical source'
 $atomicWriteText = Read-Text -Path 'scripts/lib/Harness.AtomicWrite.psm1'
 Check ($atomicWriteText.Contains("Harness.Hashing.psm1",[StringComparison]::Ordinal) -and $thinText.Contains('scripts/lib/Harness.Hashing.psm1',[StringComparison]::Ordinal)) 'TK-01A installs Hashing as the canonical K0 dependency of AtomicWrite' 'canonical Hashing ownership or AtomicWrite dependency is missing'
 $canonicalText = Read-Text -Path 'docs/architecture/canonical-json-contract.md'

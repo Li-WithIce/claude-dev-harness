@@ -384,10 +384,10 @@
     {
       "path": "scripts/lib/Harness.Approval.psm1",
       "layer": "k1-runtime-kernel",
-      "current_role": "Approval and protected-operation trust contract.",
+      "current_role": "Compatibility export for Approval and protected-operation functions implemented by Runtime Kernel.",
       "owner_candidate": "trust-kernel",
-      "tcb_included": true,
-      "reason": "Task-state and protected writes depend on Approval validation.",
+      "tcb_included": false,
+      "reason": "Selected Runtime roots use the counted Runtime Kernel implementation directly; the public compatibility module remains outside executable reachability.",
       "migration_target": null,
       "legacy_status": "not-legacy"
     },
@@ -444,10 +444,10 @@
     {
       "path": "scripts/lib/Harness.Evidence.psm1",
       "layer": "k1-runtime-kernel",
-      "current_role": "Revision-bound Evidence trust contract.",
+      "current_role": "Compatibility export for revision-bound Evidence functions implemented by Runtime Kernel.",
       "owner_candidate": "trust-kernel",
-      "tcb_included": true,
-      "reason": "Evidence validity gates durable task completion.",
+      "tcb_included": false,
+      "reason": "Selected Runtime roots use the counted Runtime Kernel implementation directly; the public compatibility module remains outside executable reachability.",
       "migration_target": null,
       "legacy_status": "not-legacy"
     },
@@ -584,12 +584,42 @@
     {
       "path": "scripts/lib/Harness.RuntimeDefault.psm1",
       "layer": "k1-runtime-kernel",
-      "current_role": "Strict version-neutral Runtime Default Decision reader and writer.",
+      "current_role": "Public K1 composition surface for Runtime Default readers and the explicit Decision constructor.",
       "owner_candidate": "trust-kernel",
-      "tcb_included": true,
-      "reason": "Protocol resolution consumes only this distilled Runtime input.",
+      "tcb_included": false,
+      "reason": "Ordinary Protocol resolution uses the explicit counted reader directly; this compatibility surface is reached only by construction and verification callers.",
       "migration_target": null,
       "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.RuntimeDefaultReader.ps1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Strict version-neutral Runtime Default Decision reader and source-identity validator.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "Protocol resolution directly dot-sources this explicit K1 reader; every ordinary admission dependency remains AST-visible and measured.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.RuntimeKernel.ps1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Counted shared implementation for Runtime Kernel validation, process, governance, and lifecycle contracts.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "Public compatibility modules dot-source this tracked K1 implementation; it remains explicitly classified, dependency-reachable, and fully measured.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.TaskMigration.psm1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "K1 task-state publication seam used only by the explicit v1-to-v2 migration maintenance command.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": false,
+      "reason": "The explicit legacy maintenance command retains Kernel-governed migration writes without making migration-only implementation reachable from the ordinary task CLI root.",
+      "migration_target": "v1-sunset/V1S-10",
+      "legacy_status": "sunset-gated"
     },
     {
       "path": "scripts/lib/Harness.TaskState.psm1",
@@ -599,6 +629,16 @@
       "tcb_included": true,
       "reason": "Primary K1 durable state and Evidence Chain implementation.",
       "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.ValidationProcess.ps1",
+      "layer": "c2-capability",
+      "current_role": "Process containment helper for engineering validation suites.",
+      "owner_candidate": "engineering-validation",
+      "tcb_included": false,
+      "reason": "Validation process orchestration is engineering Evidence production outside ordinary Runtime.",
+      "migration_target": "engineering-validation-module",
       "legacy_status": "not-legacy"
     },
     {

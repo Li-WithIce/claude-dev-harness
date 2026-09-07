@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/protected-actions.schema.json",
+  "title": "Protected actions core policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "rules"],
+  "properties": {
+    "schema_version": { "enum": ["protected-actions/v1"] },
+    "rules": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/rule" },
+      "allOf": [
+        { "contains": { "properties": { "id": { "enum": ["production-database-destructive"] } } } },
+        { "contains": { "properties": { "id": { "enum": ["authorization-path-change"] } } } }
+      ]
+    }
+  },
+  "definitions": {
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "match", "requires_profile", "requires_approval", "requires_dry_run", "requires_independent_review"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+        "match": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "command_regex": { "type": "string" },
+            "environment": { "type": "string", "minLength": 1, "pattern": "\\S" },
+            "path_globs": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1, "pattern": "\\S" }
+            }
+          }
+        },
+        "requires_profile": { "enum": ["governed", "critical"] },
+        "requires_approval": { "enum": ["none", "product", "architecture", "production"] },
+        "requires_dry_run": { "type": "boolean" },
+        "requires_independent_review": { "type": "boolean" }
+      }
+    }
+  }
+}

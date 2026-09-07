@@ -2880,7 +2880,7 @@ function Remove-HarnessRolloutPublicationFile {
     param([string]$WorkspaceRoot,[string]$Path,[string]$ExpectedDigest)
     return & $script:RolloutAtomicModule {
         param($Root,$Target,$Digest)
-        Remove-HarnessFileIfDigestAtomic -WorkspaceRoot $Root -Path $Target -ExpectedDigest $Digest
+        Remove-HarnessFileIfDigest -WorkspaceRoot $Root -Path $Target -ExpectedDigest $Digest
     } $WorkspaceRoot $Path $ExpectedDigest
 }
 

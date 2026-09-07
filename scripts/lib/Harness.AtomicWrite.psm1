@@ -22,25 +22,8 @@ function Write-HarnessAtomicText {
         [Parameter(Mandatory)][AllowEmptyString()][string]$Content
     )
 
-    $fullPath = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $Path -Label 'atomic target' -AllowMissing
-    $directory = New-HarnessContainedDirectory -WorkspaceRoot $WorkspaceRoot -Path ([System.IO.Path]::GetDirectoryName($fullPath)) -Label 'atomic target parent'
-    if ((Test-Path -LiteralPath $fullPath) -and -not (Test-Path -LiteralPath $fullPath -PathType Leaf)) { throw "atomic target is not a file: $Path" }
-
-    $tempPath = Join-Path $directory ('.{0}.{1}.{2}.tmp' -f [System.IO.Path]::GetFileName($fullPath),$PID,[guid]::NewGuid().ToString('N'))
-    $backupPath = "$tempPath.bak"
-    try {
-        $bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($Content)
-        $stream = [System.IO.FileStream]::new($tempPath,[System.IO.FileMode]::CreateNew,[System.IO.FileAccess]::Write,[System.IO.FileShare]::None,4096,[System.IO.FileOptions]::WriteThrough)
-        try { $stream.Write($bytes,0,$bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
-        if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
-            [System.IO.File]::Replace($tempPath,$fullPath,$backupPath,$true)
-        } else {
-            [System.IO.File]::Move($tempPath,$fullPath)
-        }
-    } finally {
-        foreach ($candidate in @($tempPath,$backupPath)) { if ([System.IO.File]::Exists($candidate)) { [System.IO.File]::Delete($candidate) } }
-    }
-    return Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $fullPath
+    return Write-HarnessAtomicBytes -WorkspaceRoot $WorkspaceRoot -SourceBytes ([System.Text.UTF8Encoding]::new($false).GetBytes($Content)) -Path $Path `
+        -ExpectedSourceDigest (Get-HarnessSha256Text -Content $Content) -ExpectedCurrentDigest $(if($null-eq($currentDigest=Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $Path)){'missing'}else{$currentDigest})
 }
 
 function Write-HarnessAtomicBytes {
@@ -58,19 +41,18 @@ function Write-HarnessAtomicBytes {
     if ((Test-Path -LiteralPath $fullPath) -and -not (Test-Path -LiteralPath $fullPath -PathType Leaf)) { throw "atomic target is not a file: $Path" }
 
     $tempPath = Join-Path $workspace ('.harness-publish.{0}.{1}.tmp' -f $PID,[guid]::NewGuid().ToString('N'))
-    $backupPath = "$tempPath.bak"
-    $rejectedPath = "$tempPath.rejected"
+    $backupPath,$rejectedPath = "$tempPath.bak","$tempPath.rejected"
     $createdDirectories = [System.Collections.Generic.List[string]]::new()
-    $committed = $false
-    $cleanupConflictFiles = $false
+    $committed,$cleanupConflictFiles = $false,$false
     try {
         $stream = [System.IO.FileStream]::new($tempPath,[System.IO.FileMode]::CreateNew,[System.IO.FileAccess]::Write,[System.IO.FileShare]::None,4096,[System.IO.FileOptions]::WriteThrough)
-        try { $stream.Write($SourceBytes,0,$SourceBytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
-        $tempDigest = Get-HarnessFileSha256 -Path $tempPath
-        if ($tempDigest -cne $ExpectedSourceDigest) { throw 'atomic source digest changed before publish' }
+        try {
+            $stream.Write($SourceBytes,0,$SourceBytes.Length)
+            $stream.Flush($true)
+        } finally { $stream.Dispose() }
+        if ((Get-HarnessFileSha256 -Path $tempPath) -cne $ExpectedSourceDigest) { throw 'atomic source digest changed before publish' }
 
-        $directoryPath = [System.IO.Path]::GetDirectoryName($fullPath)
-        $cursor = $directoryPath
+        $directoryPath = $cursor = [System.IO.Path]::GetDirectoryName($fullPath)
         while (-not (Test-Path -LiteralPath $cursor)) {
             $createdDirectories.Add($cursor)
             $parent = [System.IO.Path]::GetDirectoryName($cursor)
@@ -81,9 +63,7 @@ function Write-HarnessAtomicBytes {
         if ($ExpectedCurrentDigest -ceq 'missing') {
             [System.IO.File]::Move($tempPath,$fullPath)
         } else {
-            if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) { throw 'atomic target digest changed before publish' }
-            $currentDigest = Get-HarnessFileSha256 -Path $fullPath
-            if ($currentDigest -cne $ExpectedCurrentDigest) { throw 'atomic target digest changed before publish' }
+            if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf) -or (Get-HarnessFileSha256 -Path $fullPath) -cne $ExpectedCurrentDigest) { throw 'atomic target digest changed before publish' }
             [System.IO.File]::Replace($tempPath,$fullPath,$backupPath,$true)
             $overwrittenDigest = $null
             try {
@@ -93,12 +73,10 @@ function Write-HarnessAtomicBytes {
                 $verificationError = $_
                 try {
                     if (-not [System.IO.File]::Exists($backupPath)) { throw 'atomic target backup is unavailable' }
-                    $publishedDigest = Get-HarnessFileSha256 -Path $fullPath
-                    if ($publishedDigest -cne $ExpectedSourceDigest) { throw 'atomic target conflict recovery changed concurrently' }
+                    if ((Get-HarnessFileSha256 -Path $fullPath) -cne $ExpectedSourceDigest) { throw 'atomic target conflict recovery changed concurrently' }
                     [System.IO.File]::Replace($backupPath,$fullPath,$rejectedPath,$true)
-                    $restoredDigest = Get-HarnessFileSha256 -Path $fullPath
-                    $rejectedDigest = Get-HarnessFileSha256 -Path $rejectedPath
-                    if (($null -ne $overwrittenDigest -and $restoredDigest -cne $overwrittenDigest) -or $rejectedDigest -cne $ExpectedSourceDigest) { throw 'atomic target conflict recovery changed concurrently' }
+                    if (($null -ne $overwrittenDigest -and (Get-HarnessFileSha256 -Path $fullPath) -cne $overwrittenDigest) -or
+                        (Get-HarnessFileSha256 -Path $rejectedPath) -cne $ExpectedSourceDigest) { throw 'atomic target conflict recovery changed concurrently' }
                     $cleanupConflictFiles = $true
                 } catch {
                     throw 'atomic target conflict recovery failed; recovery files were preserved'
@@ -121,7 +99,7 @@ function Write-HarnessAtomicBytes {
     }
 }
 
-function Remove-HarnessFileIfDigestAtomic {
+function Remove-HarnessFileIfDigest {
     param(
         [Parameter(Mandatory)][string]$WorkspaceRoot,
         [Parameter(Mandatory)][string]$Path,
@@ -131,14 +109,15 @@ function Remove-HarnessFileIfDigestAtomic {
     $fullPath = Resolve-HarnessContainedPath -WorkspaceRoot $workspace -Path $Path -Label 'atomic delete target' -AllowMissing
     if (-not (Test-Path -LiteralPath $fullPath)) { return $false }
     if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) { throw 'atomic delete target is not a file' }
-    $currentDigest = Get-HarnessFileSha256 -Path $fullPath
-    if ($currentDigest -cne $ExpectedDigest) { throw 'atomic delete target digest changed' }
+    if ((Get-HarnessFileSha256 -Path $fullPath) -cne $ExpectedDigest) { throw 'atomic delete target digest changed' }
     $quarantinePath = Join-Path $workspace ('.harness-delete.{0}.{1}.tmp' -f $PID,[guid]::NewGuid().ToString('N'))
     $restore = $false
     try {
         [System.IO.File]::Move($fullPath,$quarantinePath)
-        $actualDigest = Get-HarnessFileSha256 -Path $quarantinePath
-        if ($actualDigest -cne $ExpectedDigest) { $restore = $true; throw 'atomic delete target digest changed' }
+        if ((Get-HarnessFileSha256 -Path $quarantinePath) -cne $ExpectedDigest) {
+            $restore = $true
+            throw 'atomic delete target digest changed'
+        }
         [System.IO.File]::Delete($quarantinePath)
         return $true
     } finally {
@@ -146,21 +125,6 @@ function Remove-HarnessFileIfDigestAtomic {
             try { [System.IO.File]::Move($quarantinePath,$fullPath) } catch { throw 'atomic delete conflict recovery failed; recovery file was preserved' }
         }
     }
-}
-
-function Remove-HarnessFileIfDigest {
-    param(
-        [Parameter(Mandatory)][string]$WorkspaceRoot,
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$ExpectedDigest
-    )
-
-    $fullPath = Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $Path -Label 'delete target' -AllowMissing
-    if (-not (Test-Path -LiteralPath $fullPath)) { return $false }
-    $actual = Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $fullPath
-    if ($actual -cne $ExpectedDigest) { throw "delete target digest changed: $Path" }
-    [System.IO.File]::Delete($fullPath)
-    return $true
 }
 
 Export-ModuleMember -Function Get-HarnessSha256Text,Get-HarnessFileDigest,Write-HarnessAtomicText,Remove-HarnessFileIfDigest

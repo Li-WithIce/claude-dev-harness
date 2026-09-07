@@ -278,7 +278,7 @@ try {
     Assert-True -Condition (Test-MinimumEntryReduction -CurrentBytes $currentBytes -BaselineBytes $baselineBytes -CurrentLines $currentLines -BaselineLines $baselineLines) -Success ("default entry surfaces shrink by at least 25 percent to {0} bytes and {1} lines" -f $currentBytes,$currentLines) -Failure ("default entry surfaces missed the 25 percent reduction gate: {0} bytes and {1} lines" -f $currentBytes,$currentLines)
 
     New-Item -ItemType Directory -Path $scratchRoot | Out-Null
-    foreach ($relativePath in @('scripts/generate-entry-contract.ps1', 'scripts/lib/Harness.Hashing.psm1', 'policies/entry-contract.md') + $generatedTargetRelativePaths) {
+    foreach ($relativePath in @('scripts/generate-entry-contract.ps1', 'scripts/lib/Harness.RuntimeKernel.ps1', 'scripts/lib/Harness.AtomicWrite.psm1', 'scripts/lib/Harness.Hashing.psm1', 'scripts/lib/Harness.Path.psm1', 'policies/entry-contract.md') + $generatedTargetRelativePaths) {
         Copy-RepoPathToFixture -SourceRoot $RepoRoot -FixtureRoot $scratchRoot -RelativePath $relativePath
     }
     $fifthPath = Join-Path $scratchRoot 'agent-configs\unmanaged\AGENTS.md.template'
