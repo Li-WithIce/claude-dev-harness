@@ -170,8 +170,8 @@
   "external_dependencies": [
     {
       "id": "dotnet-base-class-library",
-      "name": ".NET base class library and System.Text.Json",
-      "reason": "Strict UTF-8, JSON parsing, cryptography, process, and filesystem primitives are provided by the PowerShell host runtime.",
+      "name": ".NET and .NET Framework base class libraries; System.Text.Json on PowerShell 7",
+      "reason": "Strict UTF-8, JSON parsing, cryptography, process, and filesystem primitives are provided by the host runtime. The installed Windows PowerShell 5.1 first hop uses .NET Framework before invoking the pinned PowerShell 7 runtime.",
       "trust_paths": ["runtime", "distribution"]
     },
     {
@@ -187,14 +187,20 @@
       "trust_paths": ["runtime", "distribution"]
     },
     {
+      "id": "operating-system-process-tree",
+      "name": "Operating-system owned process-tree termination and Windows System32 taskkill.exe",
+      "reason": "The Windows PowerShell 5.1 launcher lacks Process.Kill(bool); its bounded cleanup invokes the absolute system taskkill executable only for the process it started. Modern hosts use Process.Kill(true). Cleanup is best effort on exceptional OS failure and never establishes successful execution.",
+      "trust_paths": ["runtime", "distribution"]
+    },
+    {
       "id": "powershell-runtime",
-      "name": "PowerShell 7 runtime and language parser",
-      "reason": "All selected executable roots and AST dependency analysis require PowerShell language and parser semantics.",
+      "name": "PowerShell 7 runtime and parser; Windows PowerShell 5.1 installed first hop",
+      "reason": "Selected Runtime work and AST dependency analysis use PowerShell 7. The installed Windows Hook launcher first executes in Windows PowerShell 5.1 with compatible argument quoting and owned process-tree cleanup.",
       "trust_paths": ["runtime", "distribution"]
     }
   ],
   "budget": {
-    "baseline_executable_loc": 2999,
+    "baseline_executable_loc": 3068,
     "exceptions": []
   }
 }

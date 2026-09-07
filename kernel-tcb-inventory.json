@@ -141,7 +141,7 @@
     },
     {
       "path": "scripts/harness-status.ps1",
-      "sha256": "sha256:015da784fb48adc46a64dbb56a4c4a9d635c9e3e78fb67f4824e63e84c75427d",
+      "sha256": "sha256:9a7821210400f1c4b4b2cc0f47101192e465541785b623688aa55e062367f192",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "distribution",
@@ -151,9 +151,9 @@
         "status-cli",
         "workspace-bootstrap"
       ],
-      "physical_loc": 72,
-      "nonblank_loc": 66,
-      "executable_loc": 65
+      "physical_loc": 66,
+      "nonblank_loc": 60,
+      "executable_loc": 59
     },
     {
       "path": "scripts/harness-write-mcp.ps1",
@@ -185,7 +185,7 @@
     },
     {
       "path": "scripts/lib/Harness.AdapterAction.psm1",
-      "sha256": "sha256:645469535b01abfd4343e6cfb3dc76b973a48375c37980e0ae7ed4dd354bc357",
+      "sha256": "sha256:629fbc570710e76460f1c3bcc9f4e1760d2b7c88b128debdc7679f7196bf1532",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
@@ -195,9 +195,9 @@
         "codex-pretooluse-launcher",
         "controlled-write-adapter"
       ],
-      "physical_loc": 155,
-      "nonblank_loc": 142,
-      "executable_loc": 142
+      "physical_loc": 150,
+      "nonblank_loc": 137,
+      "executable_loc": 137
     },
     {
       "path": "scripts/lib/Harness.AtomicWrite.psm1",
@@ -237,7 +237,7 @@
     },
     {
       "path": "scripts/lib/Harness.ControlledWrite.psm1",
-      "sha256": "sha256:6c537dc0d5bd07b0edddf2e7e03461da9d8bf58d80725fe40142522d0deca172",
+      "sha256": "sha256:9f56cb74f401c4d2e43c79411a41ec1e8cb26f48a0f786351653856b399f1c6f",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
@@ -247,9 +247,9 @@
         "codex-pretooluse-launcher",
         "controlled-write-adapter"
       ],
-      "physical_loc": 92,
-      "nonblank_loc": 88,
-      "executable_loc": 88
+      "physical_loc": 96,
+      "nonblank_loc": 92,
+      "executable_loc": 92
     },
     {
       "path": "scripts/lib/Harness.Distribution.psm1",
@@ -406,7 +406,7 @@
     },
     {
       "path": "scripts/lib/Harness.Recovery.psm1",
-      "sha256": "sha256:6b029512f3c5f5215f19820c9a4dfc4a6ab08cf0b1c1089b0fe480b37fae3275",
+      "sha256": "sha256:de956ab3612bcbf01ba7b9a9c2155ea61d925807e9a6edfdfc33e83f31d66ea8",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
@@ -414,9 +414,9 @@
       "root_ids": [
         "task-cli"
       ],
-      "physical_loc": 74,
-      "nonblank_loc": 68,
-      "executable_loc": 68
+      "physical_loc": 66,
+      "nonblank_loc": 61,
+      "executable_loc": 61
     },
     {
       "path": "scripts/lib/Harness.Requirement.psm1",
@@ -434,7 +434,7 @@
     },
     {
       "path": "scripts/lib/Harness.RuntimeDefaultReader.ps1",
-      "sha256": "sha256:91109d334e0212e993354d00f0824422a09a2977191803bd0f3c33ff2dd64297",
+      "sha256": "sha256:30a3ee87cdc0c8280e675a26baaf02d75218e471db715db79c9b2c232ea7986a",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "distribution",
@@ -449,13 +449,13 @@
         "task-cli",
         "workspace-bootstrap"
       ],
-      "physical_loc": 138,
-      "nonblank_loc": 123,
-      "executable_loc": 122
+      "physical_loc": 149,
+      "nonblank_loc": 134,
+      "executable_loc": 133
     },
     {
       "path": "scripts/lib/Harness.RuntimeKernel.ps1",
-      "sha256": "sha256:efb821c01c811ded6e7bc5fc61e8b646c370071a9f46bafab7351c993a2254e2",
+      "sha256": "sha256:47dc9635c8000df39e1d53658fe112abe87b4905f83da489535cceb9cff71c4f",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "distribution",
@@ -471,13 +471,13 @@
         "task-cli",
         "workspace-bootstrap"
       ],
-      "physical_loc": 507,
-      "nonblank_loc": 470,
-      "executable_loc": 470
+      "physical_loc": 566,
+      "nonblank_loc": 529,
+      "executable_loc": 527
     },
     {
       "path": "scripts/lib/Harness.TaskState.psm1",
-      "sha256": "sha256:cea4de6c5e2f67afe92ba293c36fd1cb8f8fe73c2d8366a58db6a25d6751d965",
+      "sha256": "sha256:948176aad4142c7b6468461b9ddb0bdde2321adb8ae45898525f658817320a2e",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
@@ -485,9 +485,9 @@
       "root_ids": [
         "task-cli"
       ],
-      "physical_loc": 829,
-      "nonblank_loc": 788,
-      "executable_loc": 788
+      "physical_loc": 844,
+      "nonblank_loc": 803,
+      "executable_loc": 803
     },
     {
       "path": "scripts/task.ps1",
@@ -1509,8 +1509,8 @@
   "external_dependencies": [
     {
       "id": "dotnet-base-class-library",
-      "name": ".NET base class library and System.Text.Json",
-      "reason": "Strict UTF-8, JSON parsing, cryptography, process, and filesystem primitives are provided by the PowerShell host runtime.",
+      "name": ".NET and .NET Framework base class libraries; System.Text.Json on PowerShell 7",
+      "reason": "Strict UTF-8, JSON parsing, cryptography, process, and filesystem primitives are provided by the host runtime. The installed Windows PowerShell 5.1 first hop uses .NET Framework before invoking the pinned PowerShell 7 runtime.",
       "trust_paths": [
         "distribution",
         "runtime"
@@ -1535,9 +1535,18 @@
       ]
     },
     {
+      "id": "operating-system-process-tree",
+      "name": "Operating-system owned process-tree termination and Windows System32 taskkill.exe",
+      "reason": "The Windows PowerShell 5.1 launcher lacks Process.Kill(bool); its bounded cleanup invokes the absolute system taskkill executable only for the process it started. Modern hosts use Process.Kill(true). Cleanup is best effort on exceptional OS failure and never establishes successful execution.",
+      "trust_paths": [
+        "distribution",
+        "runtime"
+      ]
+    },
+    {
       "id": "powershell-runtime",
-      "name": "PowerShell 7 runtime and language parser",
-      "reason": "All selected executable roots and AST dependency analysis require PowerShell language and parser semantics.",
+      "name": "PowerShell 7 runtime and parser; Windows PowerShell 5.1 installed first hop",
+      "reason": "Selected Runtime work and AST dependency analysis use PowerShell 7. The installed Windows Hook launcher first executes in Windows PowerShell 5.1 with compatible argument quoting and owned process-tree cleanup.",
       "trust_paths": [
         "distribution",
         "runtime"
@@ -1547,20 +1556,20 @@
   "unresolved_dependencies": [],
   "totals": {
     "file_count": 29,
-    "physical_loc": 10327,
-    "nonblank_loc": 9421,
-    "executable_loc": 9364,
+    "physical_loc": 10397,
+    "nonblank_loc": 9492,
+    "executable_loc": 9433,
     "runtime_file_count": 21,
-    "runtime_executable_loc": 2999,
+    "runtime_executable_loc": 3068,
     "distribution_file_count": 18,
-    "distribution_executable_loc": 7669,
+    "distribution_executable_loc": 7731,
     "duplicate_edge_count": 0,
     "artifact_count": 39,
     "artifact_bytes": 143030
   },
   "budget": {
-    "baseline_executable_loc": 2999,
-    "current_executable_loc": 2999,
+    "baseline_executable_loc": 3068,
+    "current_executable_loc": 3068,
     "delta": 0,
     "covered_growth": 0,
     "status": "within-baseline",

@@ -74,13 +74,18 @@ try {
     $recoveryModule=@(Get-Module Harness.Recovery)[-1];$retryState=[ordered]@{pointer_reads=0}
     & $recoveryModule {
         param($State)
-        $script:RecoveryRetryState=$State
-        function script:Read-HarnessRecoveryPointer {
-            param([string]$RepoRoot,[string]$WorkspaceRoot)
-            $script:RecoveryRetryState.pointer_reads++
-            $pointer=[IO.File]::ReadAllText((Join-Path $WorkspaceRoot '.assistant/runtime/current.json'),[Text.UTF8Encoding]::new($false,$true))|ConvertFrom-Json -AsHashtable -DateKind String
-            if($script:RecoveryRetryState.pointer_reads-eq1){$pointer.task_version=[int]$pointer.task_version-1}
-            return $pointer
+        # Inject only the final pointer-read module boundary. Task enumeration still
+        # uses the real TaskState module and its ordinary validated read path.
+        $script:TaskStateModule = New-Module -ArgumentList $State -ScriptBlock {
+            param($State)
+            $script:RecoveryRetryState=$State
+            function Read-CurrentPointer {
+                param([string]$WorkspaceRoot,[string]$Path)
+                $script:RecoveryRetryState.pointer_reads++
+                $pointer=[IO.File]::ReadAllText((Join-Path $WorkspaceRoot $Path),[Text.UTF8Encoding]::new($false,$true))|ConvertFrom-Json -AsHashtable -DateKind String
+                if($script:RecoveryRetryState.pointer_reads-eq1){$pointer.task_version=[int]$pointer.task_version-1}
+                return $pointer
+            }
         }
     } $retryState
     $retryIndex=Get-HarnessRecoveryIndex -RepoRoot $fixture -WorkspaceRoot $workspace

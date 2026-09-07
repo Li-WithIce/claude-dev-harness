@@ -8,7 +8,11 @@ function Assert-HarnessControlledPreimage {
 }
 
 function Assert-HarnessControlledGovernanceBinding {
-    param([string]$RepoRoot,[string]$WorkspaceRoot,[string]$TargetRelative,[string]$TaskId,[Nullable[int]]$ExpectedVersion, [string]$ExecutionProfile,[string]$ContractPath,[string]$ContractDigest,[string]$ApprovalId, [Nullable[bool]]$DryRun,$Guard)
+    param(
+        [string]$RepoRoot,[string]$WorkspaceRoot,[string]$TargetRelative,[string]$TaskId,[Nullable[int]]$ExpectedVersion,
+        [string]$ExecutionProfile,[string]$ContractPath,[string]$ContractDigest,[string]$ApprovalId,
+        [Nullable[bool]]$DryRun,$Guard
+    )
     if(@($TaskId,$ExecutionProfile,$ContractPath,$ContractDigest,$ApprovalId).Where({[string]::IsNullOrWhiteSpace([string]$_)}).Count-or$null-eq$ExpectedVersion-or$null-eq$DryRun){throw 'protected controlled write requires explicit task, version, profile, Contract, Approval, and dry-run metadata'}
     $task=& $script:ProtectedActionModule {param($Root,$Workspace,$Id)Read-HarnessProtectedTask -RepoRoot $Root -WorkspaceRoot $Workspace -TaskId $Id} $RepoRoot $WorkspaceRoot $TaskId
     if([int]$task.version-ne[int]$ExpectedVersion){throw "controlled write task version is stale: expected=$ExpectedVersion actual=$($task.version)"}

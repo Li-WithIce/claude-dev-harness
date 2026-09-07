@@ -156,29 +156,73 @@ $entryContractPath = Join-Path $RepoRoot 'policies\entry-contract.md'
 $entryContractContent = Get-Content -LiteralPath $entryContractPath -Raw -Encoding utf8
 $entryContractDigest = (Get-FileHash -LiteralPath $entryContractPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $statusSource = [System.IO.File]::ReadAllText($statusPath, [System.Text.UTF8Encoding]::new($false, $true))
-$optionalLocksSave = '$previousGitOptionalLocks = [Environment]::GetEnvironmentVariable(''GIT_OPTIONAL_LOCKS'', [EnvironmentVariableTarget]::Process)'
-$optionalLocksDisable = '[Environment]::SetEnvironmentVariable(''GIT_OPTIONAL_LOCKS'', ''0'', [EnvironmentVariableTarget]::Process)'
-$optionalLocksRestore = '[Environment]::SetEnvironmentVariable(''GIT_OPTIONAL_LOCKS'', $previousGitOptionalLocks, [EnvironmentVariableTarget]::Process)'
-$optionalLocksSaveIndex = $statusSource.IndexOf($optionalLocksSave, [System.StringComparison]::Ordinal)
-$optionalLocksDisableIndex = $statusSource.IndexOf($optionalLocksDisable, [System.StringComparison]::Ordinal)
-$protocolResolutionIndex = $statusSource.IndexOf('Get-HarnessProtocolResolution', [System.StringComparison]::Ordinal)
-$optionalLocksFinallyIndex = $statusSource.IndexOf('} finally {', $protocolResolutionIndex, [System.StringComparison]::Ordinal)
-$optionalLocksRestoreIndex = $statusSource.IndexOf($optionalLocksRestore, [System.StringComparison]::Ordinal)
-if ([regex]::Matches($statusSource, [regex]::Escape($optionalLocksSave)).Count -eq 1 -and
-    [regex]::Matches($statusSource, [regex]::Escape($optionalLocksDisable)).Count -eq 1 -and
-    [regex]::Matches($statusSource, [regex]::Escape($optionalLocksRestore)).Count -eq 1 -and
-    $optionalLocksSaveIndex -ge 0 -and
-    $optionalLocksSaveIndex -lt $optionalLocksDisableIndex -and
-    $optionalLocksDisableIndex -lt $protocolResolutionIndex -and
-    $protocolResolutionIndex -lt $optionalLocksFinallyIndex -and
-    $optionalLocksFinallyIndex -lt $optionalLocksRestoreIndex) {
-    Add-Check 'harness-status scopes GIT_OPTIONAL_LOCKS=0 around canonical protocol resolution and restores it in finally'
+$kernelSource = [IO.File]::ReadAllText((Join-Path $RepoRoot 'scripts/lib/Harness.RuntimeKernel.ps1'))
+if ($statusSource.Contains('Get-HarnessProtocolResolution') -and
+    -not $statusSource.Contains('SetEnvironmentVariable') -and
+    $kernelSource.Contains("`$info.Environment['GIT_OPTIONAL_LOCKS'] = '0'") -and
+    $kernelSource.Contains('-TimeoutMilliseconds 60000 -CleanGitEnvironment')) {
+    Add-Check 'harness-status delegates Git isolation to the shared child-process boundary without changing the caller environment'
 } else {
-    Add-Failure 'harness-status should save, disable, and finally restore process-level GIT_OPTIONAL_LOCKS around canonical protocol resolution'
+    Add-Failure 'harness-status or the shared Git child-process isolation contract drifted'
 }
 
 try {
 New-Item -ItemType Directory -Path $scratchRoot | Out-Null
+
+# The supported pwsh host preserves native argv with ProcessStartInfo.ArgumentList.
+# Probe only test-owned Git sentinels and fixed child policy fields; never enumerate credentials.
+$processModule = Import-Module (Join-Path $RepoRoot 'scripts/lib/Harness.HostCapabilities.psm1') -Force -PassThru
+$processValues = [string[]]@('', 'with spaces', 'with"quote', 'trailing\', '中 文', "tab`tvalue")
+$gitNames = @('GIT_DIR','GIT_OPTIONAL_LOCKS','GIT_TK07_SENTINEL')
+$gitBefore = @{}
+foreach ($name in $gitNames) { $gitBefore[$name] = [Environment]::GetEnvironmentVariable($name, [EnvironmentVariableTarget]::Process) }
+try {
+    foreach ($name in $gitNames) { [Environment]::SetEnvironmentVariable($name, 'tk07-parent-sentinel', [EnvironmentVariableTarget]::Process) }
+    $processProbe = & $processModule {
+        param($Root, $Values)
+        Invoke-HarnessKernelProcess -FilePath (Get-Process -Id $PID).Path -WorkingDirectory $Root -TimeoutMilliseconds 30000 -CleanGitEnvironment -Arguments (
+            @('-NoLogo','-NoProfile','-NonInteractive','-File',(Join-Path $Root 'tests/fixtures/tk07-process-probe.ps1')) + $Values)
+    } $RepoRoot $processValues
+    if ($processProbe.Complete -and $processProbe.ExitCode -eq 0 -and -not $processProbe.StdErr) {
+        $probe = $processProbe.StdOut | ConvertFrom-Json
+        $argvPreserved = ($probe.values | ConvertTo-Json -Compress) -ceq ($processValues | ConvertTo-Json -Compress)
+        $isolated = $probe.git_dir_removed -and $probe.sentinel_removed -and $probe.optional_locks -ceq '0' -and
+            $probe.terminal_prompt -ceq '0' -and $probe.no_system_config -ceq '1' -and $probe.no_system_attributes -ceq '1' -and $probe.global_config_disabled
+        if ($argvPreserved -and $isolated) { Add-Check 'kernel process preserves exact argv and isolates Git environment in the child' }
+        else { Add-Failure 'kernel child argv or Git environment isolation changed' }
+    } else { Add-Failure 'kernel process characterization did not complete successfully' }
+    if (@($gitNames | Where-Object { [Environment]::GetEnvironmentVariable($_, [EnvironmentVariableTarget]::Process) -cne 'tk07-parent-sentinel' }).Count) {
+        Add-Failure 'kernel process isolation mutated its caller Git environment'
+    } else { Add-Check 'kernel process Git isolation preserves the caller environment' }
+} finally {
+    foreach ($name in $gitNames) {
+        if ($null -eq $gitBefore[$name]) { Remove-Item -LiteralPath ("Env:"+$name) -ErrorAction Ignore }
+        else { [Environment]::SetEnvironmentVariable($name, $gitBefore[$name], [EnvironmentVariableTarget]::Process) }
+    }
+}
+
+# Exercise the real installed Windows PowerShell 5.1 first hop as well as pwsh.
+# Receipts independently distinguish failed execution from confirmed tree cleanup.
+$processHosts = [ordered]@{pwsh=(Get-Process -Id $PID).Path}
+if ($IsWindows) { $processHosts.windows_powershell = Join-Path ([Environment]::GetFolderPath('System')) 'WindowsPowerShell/v1.0/powershell.exe' }
+foreach ($hostName in $processHosts.Keys) {
+    $hostProbe = & $processModule {
+        param($Root,$Scratch,$HostPath,$PwshPath)
+        Invoke-HarnessKernelProcess -FilePath $HostPath -WorkingDirectory $Root -TimeoutMilliseconds 90000 -Arguments @(
+            '-NoLogo','-NoProfile','-NonInteractive','-File',(Join-Path $Root 'tests/fixtures/tk07-kernel-process-host.ps1'),
+            '-RepoRoot',$Root,'-ReceiptRoot',$Scratch,'-PwshPath',$PwshPath)
+    } $RepoRoot (Join-Path $scratchRoot ('process-'+$hostName)) $processHosts[$hostName] $processHosts.pwsh
+    if ($hostProbe.Complete -and $hostProbe.ExitCode -eq 0 -and -not $hostProbe.StdErr) {
+        $hostResult = $hostProbe.StdOut | ConvertFrom-Json
+        if ($hostResult.argv_preserved -and $hostResult.git_child_isolated -and $hostResult.caller_unchanged -and $hostResult.hash_vectors_pass) {
+            Add-Check "$hostName preserves argv, child Git isolation, caller environment, and frozen hashing vectors"
+        } else { Add-Failure "$hostName process or hash compatibility failed: $($hostProbe.StdOut)" }
+        if ($hostResult.timeout_incomplete -and $hostResult.timeout_exit_code -eq -1 -and $hostResult.receipt_count -eq 2 -and
+            $hostResult.root_exited -and $hostResult.tree_cleanup_confirmed -and $hostResult.cleanup_seconds -lt 15) {
+            Add-Check "$hostName fails closed on timeout and independently confirms owned child/grandchild cleanup within the Hook deadline"
+        } else { Add-Failure "$hostName timeout or owned process-tree cleanup failed: $($hostProbe.StdOut)" }
+    } else { Add-Failure "$hostName process characterization did not complete: $($hostProbe.StdErr)" }
+}
 
 # Case 1: bootstrap from a subdirectory inside a fresh git workspace.
 $caseRoot = Join-Path $scratchRoot 'bootstrap-from-git-ancestor'

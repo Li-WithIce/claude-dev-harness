@@ -68,7 +68,13 @@ function Get-HarnessRuntimeWorkspaceIdentityDigest {
 }
 
 function Assert-HarnessRuntimeDefaultDecision {
-    param([Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot, [Parameter(Mandatory)][System.Collections.IDictionary]$Document,[datetimeoffset]$AsOfUtc = [datetimeoffset]::UtcNow, [AllowNull()][System.Collections.IDictionary]$ObservedSourceIdentity = $null)
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$WorkspaceRoot,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Document,
+        [datetimeoffset]$AsOfUtc = [datetimeoffset]::UtcNow,
+        [AllowNull()][System.Collections.IDictionary]$ObservedSourceIdentity = $null
+    )
 
     # Preserve the historical document Schema and digest algorithm; admission is narrower.
     Assert-HarnessKernelSchema -RepoRoot $RepoRoot -Value $Document -Schema 'runtime-default-admission.schema.json' -Label 'runtime default' -Depth 20 -FailureMessage runtime-default-invalid-document
@@ -97,7 +103,12 @@ function Assert-HarnessRuntimeDefaultDecision {
 }
 
 function Get-HarnessRuntimeDefaultDecision {
-    param([Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot, [AllowNull()][System.Collections.IDictionary]$HostCapabilities = $null, [datetimeoffset]$AsOfUtc = [datetimeoffset]::UtcNow)
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$WorkspaceRoot,
+        [AllowNull()][System.Collections.IDictionary]$HostCapabilities = $null,
+        [datetimeoffset]$AsOfUtc = [datetimeoffset]::UtcNow
+    )
 
     $result = [ordered]@{status='missing';usable=$false;reason='runtime-default-missing'
         path=$script:RuntimeDefaultRelativePath;decision_digest=$null;new_task_protocol=$null

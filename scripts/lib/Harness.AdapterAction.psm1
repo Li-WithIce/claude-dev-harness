@@ -94,22 +94,17 @@ function Invoke-HarnessAdapterPreflightAction {
     $fallbackRoot = if ([string]::IsNullOrWhiteSpace($WorkspaceRootFallback)) { '' } else { Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRootFallback }
     Assert-HarnessKernelCondition (-not $primaryRoot -or -not $fallbackRoot -or $primaryRoot.Equals($fallbackRoot,[StringComparison]::OrdinalIgnoreCase)) 'Codex PreToolUse cwd conflicts with DEV_HARNESS_WORKSPACE_ROOT'
     $workspaceRoot,$paths,$commandText = $(if ($primaryRoot) { $primaryRoot } elseif ($fallbackRoot) { $fallbackRoot } else { throw 'Codex PreToolUse input is missing cwd and DEV_HARNESS_WORKSPACE_ROOT' }),[string[]]@($ChangedPaths),$ShellText
-    switch ($ActionKind) {
-        'shell' {
-            Assert-HarnessKernelCondition (-not [string]::IsNullOrWhiteSpace($ShellText) -and -not $PatchText -and -not $paths.Count) 'shell preflight action shape is invalid'
+    $kind = $ActionKind.ToLowerInvariant()
+    if ($kind -cin @('shell','apply_patch')) {
+        $isShell = $kind -ceq 'shell'
+        $requiredText,$otherText = if ($isShell) { $ShellText,$PatchText } else { $PatchText,$ShellText }
+        Assert-HarnessKernelCondition (-not [string]::IsNullOrWhiteSpace($requiredText) -and -not $otherText -and -not $paths.Count) "$kind preflight action shape is invalid"
+        if ($isShell) {
             Assert-HarnessKernelCondition (-not [regex]::IsMatch($commandText,'(?i)(?<![A-Za-z0-9_])(?:apply_patch|applypatch)(?![A-Za-z0-9_])')) 'Bash shell-form apply_patch is denied because Codex PreToolUse does not expose the effective tool workdir or environment identity'
-        }
-        'apply_patch' {
-            Assert-HarnessKernelCondition (-not [string]::IsNullOrWhiteSpace($PatchText) -and -not $ShellText -and -not $paths.Count) 'apply_patch preflight action shape is invalid'
-            $paths = [string[]]@(Get-HarnessApplyPatchChangedPaths -PatchText $PatchText)
-        }
-        'file_mutation' {
-            Assert-HarnessKernelCondition (-not $ShellText -and -not $PatchText -and $paths.Count -gt 0) 'file mutation preflight action shape is invalid'
-        }
-        'normalized_action' {
-            if ($PatchText) { throw 'normalized preflight action must not carry patch_text' }
-        }
-    }
+        } else { $paths = [string[]]@(Get-HarnessApplyPatchChangedPaths -PatchText $PatchText) }
+    } elseif ($kind -ceq 'file_mutation') {
+        Assert-HarnessKernelCondition (-not $ShellText -and -not $PatchText -and $paths.Count -gt 0) 'file mutation preflight action shape is invalid'
+    } elseif ($kind -ceq 'normalized_action' -and $PatchText) { throw 'normalized preflight action must not carry patch_text' }
     if ($ActionKind -cne 'shell') {
         $identities = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         $paths = [string[]]@($paths | ForEach-Object {

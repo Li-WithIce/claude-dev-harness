@@ -225,7 +225,12 @@ function Enter-TransactionStepClaim {
 }
 
 function Remove-TransactionStepClaim {
-    param([string]$WorkspaceRoot,[pscustomobject]$Record,[System.Collections.IDictionary]$Step,[pscustomobject]$Claim)
+    param(
+        [string]$WorkspaceRoot,
+        [pscustomobject]$Record,
+        [System.Collections.IDictionary]$Step,
+        [pscustomobject]$Claim
+    )
     $ownership = Get-TransactionStepClaimOwnership -WorkspaceRoot $WorkspaceRoot -Record $Record -Step $Step
     Assert-HarnessKernelCondition ($ownership.State -cne 'missing') 'transaction step claim disappeared before journal completion'
     Assert-HarnessKernelCondition ($ownership.State -ceq 'own') 'transaction step publication claim is held by another transaction'
@@ -411,7 +416,11 @@ function Read-TaskTransactionJournal {
 }
 
 function Assert-TransactionReplayInputs {
-    param([string]$WorkspaceRoot,[pscustomobject]$View,[switch]$UseAuthorizedSnapshot)
+    param(
+        [string]$WorkspaceRoot,
+        [pscustomobject]$View,
+        [switch]$UseAuthorizedSnapshot
+    )
     $Journal,$stepsById,$prefix,$task,$operation,$Legacy = $View.Journal,$View.StepsById,$View.Prefix,$View.Task,$View.Operation,$View.Legacy
     $replayAsOf = if ($UseAuthorizedSnapshot) { [datetimeoffset]::Parse([string]$Journal.created_at,[Globalization.CultureInfo]::InvariantCulture) } else { [datetimeoffset]::UtcNow }
     $beforeTask = $View.BeforeTask
@@ -472,7 +481,13 @@ function Assert-TransactionReplayInputs {
 }
 
 function Invoke-TransactionStep {
-    param([string]$WorkspaceRoot,[pscustomobject]$Record,[System.Collections.IDictionary]$Step,[switch]$AllowExistingClaim,[switch]$AllowLegacyUnclaimedPostimage)
+    param(
+        [string]$WorkspaceRoot,
+        [pscustomobject]$Record,
+        [System.Collections.IDictionary]$Step,
+        [switch]$AllowExistingClaim,
+        [switch]$AllowLegacyUnclaimedPostimage
+    )
     $claim = Enter-TransactionStepClaim -WorkspaceRoot $WorkspaceRoot -Record $Record -Step $Step -AllowExisting:$AllowExistingClaim
     $current = Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $Step.relative_path
     if ($(if ($Step.action -ceq 'write') { $current -ceq $Step.after_digest } else { $null -eq $current })) {

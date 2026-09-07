@@ -22,14 +22,8 @@ try {
             reason = 'protected-policy-check-failed'}
     }
 
-    $previousGitOptionalLocks = [Environment]::GetEnvironmentVariable('GIT_OPTIONAL_LOCKS', [EnvironmentVariableTarget]::Process)
-    try {
-        [Environment]::SetEnvironmentVariable('GIT_OPTIONAL_LOCKS', '0', [EnvironmentVariableTarget]::Process)
-        Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1') -Force -ErrorAction Stop
-        $resolution = Get-HarnessProtocolResolution -WorkspaceRoot $WorkspaceRoot -RepoRoot $RepoRoot
-    } finally {
-        [Environment]::SetEnvironmentVariable('GIT_OPTIONAL_LOCKS', $previousGitOptionalLocks, [EnvironmentVariableTarget]::Process)
-    }
+    Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1') -Force -ErrorAction Stop
+    $resolution = Get-HarnessProtocolResolution -WorkspaceRoot $WorkspaceRoot -RepoRoot $RepoRoot
     $hostCapabilities = if ($ProbeHostDetails -or $null -eq $resolution.runtime_default_decision.host_capabilities) {
         Get-HarnessHostCapabilities -RepoRoot $RepoRoot -RequiredCapabilities @($resolution.runtime_default_decision.required_capabilities) -ProbeHostDetails:$ProbeHostDetails
     } else {

@@ -187,7 +187,7 @@ function Assert-HarnessKernelSchema {
 }
 
 function Invoke-HarnessKernelProcess {
-    param([string]$FilePath,[string]$WorkingDirectory,[string[]]$Arguments,[int]$TimeoutMilliseconds,[switch]$CleanGitEnvironment,[AllowNull()][string]$StandardInput=$null)
+    param([string]$FilePath,[string]$WorkingDirectory,[string[]]$Arguments,[int]$TimeoutMilliseconds,[switch]$CleanGitEnvironment,[AllowNull()][string]$StandardInput=$null,[switch]$SkipTreeCleanup)
     $info = [Diagnostics.ProcessStartInfo]@{
         FileName=$FilePath;WorkingDirectory=$WorkingDirectory
         UseShellExecute=$false;CreateNoWindow=$true
@@ -201,7 +201,7 @@ function Invoke-HarnessKernelProcess {
         $info.Environment['GIT_TERMINAL_PROMPT'] = '0'
         $info.Environment['GIT_OPTIONAL_LOCKS'] = '0'
         $info.Environment['GIT_CONFIG_NOSYSTEM'] = '1'
-        $info.Environment['GIT_CONFIG_GLOBAL'] = if ($IsWindows) { 'NUL' } else { '/dev/null' }
+        $info.Environment['GIT_CONFIG_GLOBAL'] = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { 'NUL' } else { '/dev/null' }
         $info.Environment['GIT_ATTR_NOSYSTEM'] = '1'
     }
     if ($null -ne $info.PSObject.Properties['ArgumentList']) {
@@ -210,6 +210,7 @@ function Invoke-HarnessKernelProcess {
         $info.Arguments = ($Arguments | ForEach-Object { '"' + (([string]$_ -replace '(\\*)"','$1$1\"') -replace '(\\+)$','$1$1') + '"' }) -join ' '
     }
     $process = $null
+    $complete = $false
     try {
         $process = [Diagnostics.Process]::Start($info)
         $stdout,$stderr = $process.StandardOutput.ReadToEndAsync(),$process.StandardError.ReadToEndAsync()
@@ -218,13 +219,28 @@ function Invoke-HarnessKernelProcess {
             $process.StandardInput.Close()
         }
         if ($process.WaitForExit($TimeoutMilliseconds) -and [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdout,$stderr),2000)) {
-            return [pscustomobject]@{Complete=$true;ExitCode=$process.ExitCode;
+            $result = [pscustomobject]@{Complete=$true;ExitCode=$process.ExitCode;
                 StdOut=$stdout.GetAwaiter().GetResult().Replace("`r`n","`n");StdErr=$stderr.GetAwaiter().GetResult().Replace("`r`n","`n")}
+            $complete = $true
+            return $result
         }
-        try { $process.Kill($true) } catch {}
-        try { [void]$process.WaitForExit(2000) } catch {}
     } catch {} finally {
-        if ($null -ne $process) { $process.Dispose() }
+        if ($null -ne $process) {
+            if (-not $complete) {
+                try { $process.Kill($true) } catch {
+                    # Windows PowerShell 5.1 lacks Kill(bool). Bound its native
+                    # owned-tree cleanup to one hop, including process-I/O failures.
+                    if (-not $SkipTreeCleanup -and [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+                        try {
+                            [void](Invoke-HarnessKernelProcess -FilePath (Join-Path ([Environment]::GetFolderPath('System')) 'taskkill.exe') -WorkingDirectory $WorkingDirectory -Arguments @('/PID',[string]$process.Id,'/T','/F') -TimeoutMilliseconds 1000 -SkipTreeCleanup)
+                        } catch {}
+                    }
+                    try { $process.Kill() } catch {}
+                }
+                try { [void]$process.WaitForExit($(if ($SkipTreeCleanup) { 250 } else { 1000 })) } catch {}
+            }
+            $process.Dispose()
+        }
     }
     return [pscustomobject]@{Complete=$false;ExitCode=-1;
         StdOut='';StdErr=''}
@@ -246,7 +262,11 @@ function Assert-HarnessHostCapabilitiesDocument {
 }
 
 function Get-HarnessHostCapabilities {
-    param([Parameter(Mandatory)][string]$RepoRoot,[string[]]$RequiredCapabilities=@(),[switch]$ProbeHostDetails)
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [string[]]$RequiredCapabilities = @(),
+        [switch]$ProbeHostDetails
+    )
     $root = (Resolve-Path -LiteralPath $RepoRoot).Path
     $capabilities = [ordered]@{workspace_protocol_config=(Test-Path (Join-Path $root 'schemas\protocol-config.schema.json') -PathType Leaf) -and (Test-Path (Join-Path $root 'scripts\lib\Harness.Protocol.psm1') -PathType Leaf)
         structured_tool_events='unavailable';request_send_telemetry='unavailable';
@@ -281,10 +301,15 @@ function ConvertTo-HarnessProtectedOperationArray {
 }
 
 function New-HarnessProtectedOperation {
-    param([Parameter(Mandatory)][int]$TaskVersion,[Parameter(Mandatory)][string]$ContractDigest,
-        [Parameter(Mandatory)][string]$Environment,[Parameter(Mandatory)][ValidateSet('protected-write')][string]$ActionCategory,[Parameter(Mandatory)][string[]]$Targets,
+    param(
+        [Parameter(Mandatory)][int]$TaskVersion,
+        [Parameter(Mandatory)][string]$ContractDigest,
+        [Parameter(Mandatory)][string]$Environment,
+        [Parameter(Mandatory)][ValidateSet('protected-write')][string]$ActionCategory,
+        [Parameter(Mandatory)][string[]]$Targets,
         [Parameter(Mandatory)][ValidateSet('none','product','architecture','production')][string]$ApprovalType,
-        [Parameter(Mandatory)][string[]]$ApprovalScope)
+        [Parameter(Mandatory)][string[]]$ApprovalScope
+    )
     if ($TaskVersion -lt 1) { throw 'protected operation task_version is invalid' }
     Assert-HarnessKernelCondition ($ContractDigest -cmatch '^sha256:[0-9a-f]{64}$') 'protected operation Contract digest is invalid'
     $environment = $Environment.Trim().ToLowerInvariant()
@@ -299,7 +324,12 @@ function New-HarnessProtectedOperation {
 }
 
 function Resolve-HarnessProtectedOperation {
-    param([Parameter(Mandatory)][int]$TaskVersion,[Parameter(Mandatory)][string]$ContractDigest, [Parameter(Mandatory)][System.Collections.IDictionary]$Operation,[string]$Label='protected operation')
+    param(
+        [Parameter(Mandatory)][int]$TaskVersion,
+        [Parameter(Mandatory)][string]$ContractDigest,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Operation,
+        [string]$Label='protected operation'
+    )
     Assert-HarnessKernelCondition (-not @($Operation.Keys | Where-Object { @('schema_version','environment','action_category','targets','approval_type','approval_scope','identity') -cnotcontains $_ }).Count -and $Operation.Count -eq 7) "$Label keys are invalid"
     Assert-HarnessKernelCondition ($Operation.schema_version -ceq 'protected-operation/v1') "$Label schema_version is invalid"
     $resolved = New-HarnessProtectedOperation -TaskVersion $TaskVersion -ContractDigest $ContractDigest -Environment $Operation.environment -ActionCategory $Operation.action_category -Targets @($Operation.targets) -ApprovalType $Operation.approval_type -ApprovalScope @($Operation.approval_scope)
@@ -308,7 +338,10 @@ function Resolve-HarnessProtectedOperation {
 }
 
 function Test-HarnessApprovalExpiry {
-    param([Collections.IDictionary]$Approval,[datetimeoffset]$AsOf=[datetimeoffset]::UtcNow)
+    param(
+        [Collections.IDictionary]$Approval,
+        [datetimeoffset]$AsOf=[datetimeoffset]::UtcNow
+    )
     try { $approvedAt = [datetimeoffset]::Parse([string]$Approval.approved_at,[Globalization.CultureInfo]::InvariantCulture) }
     catch { throw 'Approval approved_at is invalid' }
     if ($approvedAt -gt $AsOf) { throw 'Approval approved_at is in the future' }
@@ -320,9 +353,11 @@ function Test-HarnessApprovalExpiry {
 }
 
 function Resolve-HarnessApprovalInputCore {
-    param([Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,
-        [Parameter(Mandatory)][string]$ApprovalPath,[Parameter(Mandatory)][string]$TaskId,[Parameter(Mandatory)][int]$TargetTaskVersion,
-        [Parameter(Mandatory)][string]$ContractDigest,[datetimeoffset]$AsOf=[datetimeoffset]::UtcNow)
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][string]$ApprovalPath,
+        [Parameter(Mandatory)][string]$TaskId,[Parameter(Mandatory)][int]$TargetTaskVersion,[Parameter(Mandatory)][string]$ContractDigest,
+        [datetimeoffset]$AsOf=[datetimeoffset]::UtcNow
+    )
     $loaded = Read-HarnessKernelJson -WorkspaceRoot $WorkspaceRoot -Path $ApprovalPath -Label 'Approval input'
     $approval = $loaded.Document
     Assert-HarnessKernelCondition (-not [string]::IsNullOrWhiteSpace([string]$approval.approver)) 'Approval approver must not be blank'
@@ -340,14 +375,19 @@ function Resolve-HarnessApprovalInputCore {
 }
 
 function Resolve-HarnessApprovalInput {
-    param([Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][string]$ApprovalPath, [Parameter(Mandatory)][string]$TaskId,[Parameter(Mandatory)][int]$TargetTaskVersion,[Parameter(Mandatory)][string]$ContractDigest)
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][string]$ApprovalPath,
+        [Parameter(Mandatory)][string]$TaskId,[Parameter(Mandatory)][int]$TargetTaskVersion,[Parameter(Mandatory)][string]$ContractDigest
+    )
     return Resolve-HarnessApprovalInputCore @PSBoundParameters
 }
 
 function Assert-HarnessTaskApprovalCore {
-    param([Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,
-        [Parameter(Mandatory)][System.Collections.IDictionary]$Task,[string]$RequiredType='',[string[]]$RequiredScopes=@(),
-        [AllowNull()][System.Collections.IDictionary]$RequiredOperation=$null,[datetimeoffset]$AsOf=[datetimeoffset]::UtcNow)
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][System.Collections.IDictionary]$Task,
+        [string]$RequiredType='',[string[]]$RequiredScopes=@(),[AllowNull()][System.Collections.IDictionary]$RequiredOperation=$null,
+        [datetimeoffset]$AsOf=[datetimeoffset]::UtcNow
+    )
     if ($null -ne $RequiredOperation) {
         $RequiredOperation = Resolve-HarnessProtectedOperation -TaskVersion $Task.version -ContractDigest $Task.contract_digest -Operation $RequiredOperation -Label 'required protected_operation'
         Assert-HarnessKernelCondition (-not $RequiredType -or $RequiredType -ceq $RequiredOperation.approval_type) 'required Approval type conflicts with protected_operation'
@@ -373,7 +413,10 @@ function Assert-HarnessTaskApprovalCore {
 }
 
 function Assert-HarnessTaskApproval {
-    param([Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][System.Collections.IDictionary]$Task, [string]$RequiredType='',[string[]]$RequiredScopes=@(), [AllowNull()][System.Collections.IDictionary]$RequiredOperation=$null)
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][System.Collections.IDictionary]$Task,
+        [string]$RequiredType='',[string[]]$RequiredScopes=@(),[AllowNull()][System.Collections.IDictionary]$RequiredOperation=$null
+    )
     return Assert-HarnessTaskApprovalCore @PSBoundParameters
 }
 
@@ -385,7 +428,13 @@ function Test-HarnessEvidenceExcludedPath {
 }
 
 function Get-HarnessEvidenceRevision {
-    param([Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][string]$ContractDigest, [Parameter(Mandatory)][System.Collections.IDictionary]$Evidence,[Parameter(Mandatory)][string]$EvidenceInputPath, [Parameter(Mandatory)][string]$EvidenceOutputPath)
+    param(
+        [Parameter(Mandatory)][string]$WorkspaceRoot,
+        [Parameter(Mandatory)][string]$ContractDigest,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Evidence,
+        [Parameter(Mandatory)][string]$EvidenceInputPath,
+        [Parameter(Mandatory)][string]$EvidenceOutputPath
+    )
     $WorkspaceRoot=Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
     $inputRelative = Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path (Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $EvidenceInputPath -Label 'Evidence' -MustExist File)
     $runningOnWindows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
@@ -437,10 +486,16 @@ function Get-HarnessEvidenceRevision {
 }
 
 function Resolve-HarnessEvidenceCore {
-    param([Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,
-        [Parameter(Mandatory)][string]$TaskId,[Parameter(Mandatory)][int]$TaskVersion,[Parameter(Mandatory)][string]$ContractDigest,
-        [Parameter(Mandatory)][int]$RequiredAcceptanceCount,[Parameter(Mandatory)][string]$EvidencePath,
-        [AllowEmptyString()][string]$PinnedRevision='')
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$WorkspaceRoot,
+        [Parameter(Mandatory)][string]$TaskId,
+        [Parameter(Mandatory)][int]$TaskVersion,
+        [Parameter(Mandatory)][string]$ContractDigest,
+        [Parameter(Mandatory)][int]$RequiredAcceptanceCount,
+        [Parameter(Mandatory)][string]$EvidencePath,
+        [AllowEmptyString()][string]$PinnedRevision=''
+    )
     $WorkspaceRoot=Resolve-HarnessWorkspaceRoot -WorkspaceRoot $WorkspaceRoot
     $loaded=Read-HarnessKernelJson -WorkspaceRoot $WorkspaceRoot -Path $EvidencePath -Label 'Evidence'
     $document=$loaded.Document
@@ -471,10 +526,8 @@ function Resolve-HarnessEvidenceCore {
         }
         if((Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path (Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $record.evidence_path `
             -Label "$label evidence_path" -MustExist File))-cne$record.digest){throw "$(if($isDryRun){'dry-run Evidence'}else{'Evidence record'}) digest mismatch: $($record.evidence_path)"}
-        if($record.Contains('cwd')){
-            [void](Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $record.cwd -Label "$label cwd" -MustExist Directory)
-            if([int]$record.exit_code-ne0){$severity=3}
-        }else{$severity=[Math]::Max($severity,@('pass','partial','blocked','fail').IndexOf([string]$record.result))}
+        if($record.Contains('cwd')){[void](Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $record.cwd -Label "$label cwd" -MustExist Directory)}
+        $severity=[Math]::Max($severity,$(if($record.Contains('cwd')){3*[int]([int]$record.exit_code-ne0)}else{@('pass','partial','blocked','fail').IndexOf([string]$record.result)}))
         if(-not$isDryRun){foreach($item in @($record.covers)){[void]$covered.Add($item)}}
     }
     $coverage=@($document.coverage.satisfied)+@($document.coverage.not_verified)+@($document.coverage.blocked)
@@ -500,8 +553,14 @@ function Resolve-HarnessEvidenceCore {
 }
 
 function Resolve-HarnessEvidence {
-    param([Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][string]$TaskId,
-        [Parameter(Mandatory)][int]$TaskVersion,[Parameter(Mandatory)][string]$ContractDigest,
-        [Parameter(Mandatory)][int]$RequiredAcceptanceCount,[Parameter(Mandatory)][string]$EvidencePath)
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$WorkspaceRoot,
+        [Parameter(Mandatory)][string]$TaskId,
+        [Parameter(Mandatory)][int]$TaskVersion,
+        [Parameter(Mandatory)][string]$ContractDigest,
+        [Parameter(Mandatory)][int]$RequiredAcceptanceCount,
+        [Parameter(Mandatory)][string]$EvidencePath
+    )
     return Resolve-HarnessEvidenceCore @PSBoundParameters
 }
