@@ -12,8 +12,9 @@ historical receipt bytes. TK-05 adds the strict four-operation Adapter Kernel
 API, makes the exact nine current A3 paths thin, and binds their raw source and
 executable LOC through `adapter-inventory/v1`. TK-07 removes duplicated Runtime
 validation, projection, and task-state machinery while keeping the same public
-contracts. Its honestly measured Runtime closure is 3068 executable LOC, below
-the user's 2026-09-07 revised 3100-line acceptance bound, with no budget exception.
+contracts. Its frozen baseline is 3068 executable LOC; the bounded R1/R2 repair
+measures 3078 with explicit `KTB-EX-002` coverage for the positive 10-line delta,
+still below the user's 2026-09-07 revised strict 3100-line acceptance bound.
 The original below-3000 goal remains unmet; terminal task closure additionally
 requires all prescribed verification evidence. A later
 boundary change requires an explicit Architecture Decision or Change Contract
@@ -310,7 +311,7 @@ review found parameter-layout compression across moved functions. Those layouts
 are restored, Windows PowerShell 5.1 argv and owned-tree timeout cleanup are
 retained, and the original explicit hashing disposal is preserved. The corrected
 3068-line closure removes 3007 real executable lines from the exact PR #12 Base
-(49.50 percent). No budget exception is authorized. Historical failed or
+(49.50 percent). That closure had no budget exception. Historical failed or
 interrupted runs and execution deviations remain failures or deviations.
 
 The bounded TK-07 Base-to-Head review uses the unchanged inventory algorithm.
@@ -332,6 +333,57 @@ historical check. The explicit engineering checkpoint is now 10386 statements;
 the 35288-token cap and at-least-35-percent exact-Base reduction checks are
 unchanged. This does not claim that the old statement limit passed, that the
 user specified an AST count, or that the below-3000 target was achieved.
+
+### TK-07 bounded R1/R2 repair
+
+The sealed compression task and its evidence remain historical and unchanged.
+The linked `thin-trust-kernel-tk07-r1-r2-fix` task starts from PR #13 Head
+`bfecffc2c8c3a2541a446e4423ac37825497a26a` and only repairs these two findings.
+
+R1: quiet Git diff can report clean for a modified `assume-unchanged` or
+`skip-worktree` file, while the Capability record hashes its old index blob and
+an exported library loads the worktree. Manifest construction now rejects those
+flags on each actual Manifest/source-closure path before accepting a record.
+Clean flagged paths receive a truthful precondition error, not a false claim of
+observed content mismatch. Unrelated flagged paths remain allowed. No flags,
+index, configuration, or worktree content are repaired by the check; ordinary
+Git LF/CRLF equivalence and index-blob digest semantics are unchanged. The owner
+fixture exercises the actual constructor in a space/Chinese-named workspace.
+Relative package paths remain constrained by the existing ASCII-only Schema.
+
+R2: stdin uses the existing .NET asynchronous byte write, followed by a finite
+wait and EOF only after successful delivery. A single stopwatch starts after
+successful process start; stdin, exit, and stdout/stderr drains receive only the
+remaining `TimeoutMilliseconds`. Failed delivery or completion returns the
+unchanged fail-closed result (`Complete=false`, `ExitCode=-1`, empty outputs).
+Cleanup has a separate 2250 ms wait budget. Windows PowerShell 5.1 keeps its
+single absolute-system `taskkill` hop (at most 1000 ms execution, 250 ms inner
+cleanup); recursive tree cleanup is disabled for that hop. PowerShell 7 keeps
+owned-tree `Kill(true)`. Synchronous native process start, OS termination and
+handle disposal are not promised to be hard-real-time under arbitrary OS
+failure. Finite application waits, fail-closed results, and observed process
+cleanup are separate assertions, not interchangeable guarantees.
+
+The independent test watchdog treats its own termination as product failure.
+Both supported first-hop hosts exercise full Unicode stdin/stdout/stderr, an
+8 MiB input to a ready non-reader, an early pipe close, and a delayed reader whose
+post-input wait must not receive a fresh full timeout. Existing child/grandchild
+cleanup tests still observe receipt-bound process identities before fixture
+safety cleanup. This does not broaden all Runtime support to PowerShell 5.1.
+
+The unchanged closure algorithm measures 21 Runtime files, **3078 executable
+LOC**, **35352 executable tokens**, and **10402 statement ASTs**. Growth relative
+to the sealed baseline is **+10 LOC / +140 tokens / +16 statements**, entirely
+inside `Invoke-HarnessKernelProcess`; R1 is C2, not newly hidden Runtime code.
+`KTB-EX-002` uses the existing exception schema and retains baseline **3068**,
+delta **+10**, and status **covered-by-exception**. No Runtime paths are moved,
+generated, omitted, or packed. The strict user bound stays **<3100**; `<3000`
+remains unmet. The internal 35288-token/10386-statement checkpoints retain their
+old headroom plus only the documented +140/+16 repair allowance. Those are
+engineering guards, not newly attributed user thresholds. The exact-Base
+35-percent reduction, 300-character/two-separator, and parameter-layout guards
+remain active. Exception repayment/expiry is an explicitly authorized future
+budget review, not additional compression work in this repair.
 
 ## Terminal SLOs
 

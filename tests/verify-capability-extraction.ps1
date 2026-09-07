@@ -148,6 +148,12 @@ try {
     } finally { [IO.File]::WriteAllBytes($sensitivityPath,$sensitivityBytes) }
     Check $unstagedRejected 'unstaged package-byte changes cannot enter an index-bound source closure' 'Capability source construction accepted unstaged package bytes'
 
+    $flagCases = @(& (Join-Path $PSScriptRoot 'fixtures/tk04/index-flags.ps1') -RepoRoot $RepoRoot)
+    foreach ($case in $flagCases) {
+        Check $case.pass "index-bound source fixture $($case.case): Git=$($case.git_exit), accepted=$($case.accepted), zero-write=$($case.zero_write)" "index-bound source fixture failed: $($case | ConvertTo-Json -Compress)"
+    }
+    Check ($flagCases.Count -eq 8) 'index flag regressions cover clean, hidden edits, LF/CRLF, Unicode workspace paths, and unrelated flags' 'index flag fixture did not execute the complete case set'
+
     [byte[]]$catalogBefore = [IO.File]::ReadAllBytes($catalogPath)
     [byte[]]$sourceBefore = [IO.File]::ReadAllBytes($sourceCatalogPath)
     $catalogTime = (Get-Item -LiteralPath $catalogPath).LastWriteTimeUtc.Ticks

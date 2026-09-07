@@ -213,12 +213,19 @@ function Invoke-HarnessKernelProcess {
     $complete = $false
     try {
         $process = [Diagnostics.Process]::Start($info)
+        # One post-start deadline covers input delivery, exit, and both output drains.
+        $timer = [Diagnostics.Stopwatch]::StartNew()
         $stdout,$stderr = $process.StandardOutput.ReadToEndAsync(),$process.StandardError.ReadToEndAsync()
         if ($null -ne $StandardInput) {
-            $process.StandardInput.BaseStream.Write(($inputBytes=[Text.UTF8Encoding]::new($false).GetBytes($StandardInput)),0,$inputBytes.Length)
-            $process.StandardInput.Close()
+            $inputBytes = [Text.UTF8Encoding]::new($false).GetBytes($StandardInput)
+            $stdinWrite = $process.StandardInput.BaseStream.WriteAsync($inputBytes,0,$inputBytes.Length)
+            if (-not $stdinWrite.Wait([int][Math]::Max(0,$TimeoutMilliseconds-$timer.ElapsedMilliseconds))) { throw 'Process stdin deadline expired' }
+            # Direct byte I/O preserves UTF-8 without BOM; close only after delivery to signal EOF.
+            $process.StandardInput.BaseStream.Close()
         }
-        if ($process.WaitForExit($TimeoutMilliseconds) -and [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdout,$stderr),2000)) {
+        if ($process.WaitForExit([int][Math]::Max(0,$TimeoutMilliseconds-$timer.ElapsedMilliseconds)) -and
+            [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdout,$stderr),[int][Math]::Max(0,$TimeoutMilliseconds-$timer.ElapsedMilliseconds)) -and
+            $timer.ElapsedMilliseconds -le $TimeoutMilliseconds) {
             $result = [pscustomobject]@{Complete=$true;ExitCode=$process.ExitCode;
                 StdOut=$stdout.GetAwaiter().GetResult().Replace("`r`n","`n");StdErr=$stderr.GetAwaiter().GetResult().Replace("`r`n","`n")}
             $complete = $true
@@ -227,17 +234,23 @@ function Invoke-HarnessKernelProcess {
     } catch {} finally {
         if ($null -ne $process) {
             if (-not $complete) {
+                # Separate bounded waits; native Start/Kill/Dispose are not OS hard-real-time guarantees.
+                $timer.Restart()
+                $cleanupMilliseconds = if ($SkipTreeCleanup) { 250 } else { 2250 }
                 try { $process.Kill($true) } catch {
                     # Windows PowerShell 5.1 lacks Kill(bool). Bound its native
                     # owned-tree cleanup to one hop, including process-I/O failures.
                     if (-not $SkipTreeCleanup -and [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
                         try {
-                            [void](Invoke-HarnessKernelProcess -FilePath (Join-Path ([Environment]::GetFolderPath('System')) 'taskkill.exe') -WorkingDirectory $WorkingDirectory -Arguments @('/PID',[string]$process.Id,'/T','/F') -TimeoutMilliseconds 1000 -SkipTreeCleanup)
+                            $treeTimeout = [int][Math]::Min(1000,[Math]::Max(0,$cleanupMilliseconds-$timer.ElapsedMilliseconds-250))
+                            if ($treeTimeout -gt 0) {
+                                [void](Invoke-HarnessKernelProcess -FilePath (Join-Path ([Environment]::GetFolderPath('System')) 'taskkill.exe') -WorkingDirectory $WorkingDirectory -Arguments @('/PID',[string]$process.Id,'/T','/F') -TimeoutMilliseconds $treeTimeout -SkipTreeCleanup)
+                            }
                         } catch {}
                     }
                     try { $process.Kill() } catch {}
                 }
-                try { [void]$process.WaitForExit($(if ($SkipTreeCleanup) { 250 } else { 1000 })) } catch {}
+                try { [void]$process.WaitForExit([int][Math]::Max(0,$cleanupMilliseconds-$timer.ElapsedMilliseconds)) } catch {}
             }
             $process.Dispose()
         }

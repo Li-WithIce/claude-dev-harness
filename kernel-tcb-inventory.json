@@ -455,7 +455,7 @@
     },
     {
       "path": "scripts/lib/Harness.RuntimeKernel.ps1",
-      "sha256": "sha256:47dc9635c8000df39e1d53658fe112abe87b4905f83da489535cceb9cff71c4f",
+      "sha256": "sha256:1de12ec3f6170bdf8451584eb12cbbed0c70b8a6760be0906a7cb7d547b23366",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "distribution",
@@ -471,9 +471,9 @@
         "task-cli",
         "workspace-bootstrap"
       ],
-      "physical_loc": 566,
-      "nonblank_loc": 529,
-      "executable_loc": 527
+      "physical_loc": 579,
+      "nonblank_loc": 542,
+      "executable_loc": 537
     },
     {
       "path": "scripts/lib/Harness.TaskState.psm1",
@@ -1556,23 +1556,37 @@
   "unresolved_dependencies": [],
   "totals": {
     "file_count": 29,
-    "physical_loc": 10397,
-    "nonblank_loc": 9492,
-    "executable_loc": 9433,
+    "physical_loc": 10410,
+    "nonblank_loc": 9505,
+    "executable_loc": 9443,
     "runtime_file_count": 21,
-    "runtime_executable_loc": 3068,
+    "runtime_executable_loc": 3078,
     "distribution_file_count": 18,
-    "distribution_executable_loc": 7731,
+    "distribution_executable_loc": 7741,
     "duplicate_edge_count": 0,
     "artifact_count": 39,
     "artifact_bytes": 143030
   },
   "budget": {
     "baseline_executable_loc": 3068,
-    "current_executable_loc": 3068,
-    "delta": 0,
-    "covered_growth": 0,
-    "status": "within-baseline",
-    "exceptions": []
+    "current_executable_loc": 3078,
+    "delta": 10,
+    "covered_growth": 10,
+    "status": "covered-by-exception",
+    "exceptions": [
+      {
+        "id": "KTB-EX-002",
+        "added_lines": 10,
+        "reason": "TK-07 R2 needs asynchronous stdin delivery, one post-start I/O deadline, and a separately bounded cleanup window. The user authorized necessary correctness growth through the existing exception mechanism; Runtime is 3078, not a reset baseline.",
+        "new_trust_assumption": "No new dependency or authority. Existing .NET async pipe I/O and owned OS process cleanup remain host assumptions; bounded waits do not promise arbitrary OS hard-real-time behavior.",
+        "alternatives": [
+          "Synchronous stdin is demonstrably blocked by a live non-reader on both supported first-hop hosts.",
+          "A per-phase full timeout violates the shared deadline; truncating input violates Complete semantics.",
+          "A new process framework or source packing is unnecessary and outside this repair."
+        ],
+        "repayment_plan": "Retain the 3068 baseline and explicit positive delta. Reassess this 10-line allowance at the next explicitly authorized Runtime change; do not delete correctness checks or start extra compression in this repair.",
+        "expires_at_milestone": "Next explicitly authorized Runtime budget review after TK-07 R1/R2 closure"
+      }
+    ]
   }
 }

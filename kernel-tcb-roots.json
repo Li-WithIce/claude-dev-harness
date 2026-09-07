@@ -201,6 +201,20 @@
   ],
   "budget": {
     "baseline_executable_loc": 3068,
-    "exceptions": []
+    "exceptions": [
+      {
+        "id": "KTB-EX-002",
+        "added_lines": 10,
+        "reason": "TK-07 R2 needs asynchronous stdin delivery, one post-start I/O deadline, and a separately bounded cleanup window. The user authorized necessary correctness growth through the existing exception mechanism; Runtime is 3078, not a reset baseline.",
+        "new_trust_assumption": "No new dependency or authority. Existing .NET async pipe I/O and owned OS process cleanup remain host assumptions; bounded waits do not promise arbitrary OS hard-real-time behavior.",
+        "alternatives": [
+          "Synchronous stdin is demonstrably blocked by a live non-reader on both supported first-hop hosts.",
+          "A per-phase full timeout violates the shared deadline; truncating input violates Complete semantics.",
+          "A new process framework or source packing is unnecessary and outside this repair."
+        ],
+        "repayment_plan": "Retain the 3068 baseline and explicit positive delta. Reassess this 10-line allowance at the next explicitly authorized Runtime change; do not delete correctness checks or start extra compression in this repair.",
+        "expires_at_milestone": "Next explicitly authorized Runtime budget review after TK-07 R1/R2 closure"
+      }
+    ]
   }
 }

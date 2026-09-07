@@ -134,6 +134,11 @@ function Test-HarnessManifestPathCoveredByPattern {
 function Assert-HarnessManifestWorktreeMatchesIndex {
     param([string]$RepoRoot, [string]$RelativePath, [string]$Label)
 
+    $flags = Invoke-HarnessManifestGit -RepoRoot $RepoRoot -Arguments @('ls-files','-v','--',(':(literal)' + $RelativePath))
+    if ($flags.ExitCode -ne 0 -or $flags.Lines.Count -ne 1) { throw "$Label index flag inspection failed: $RelativePath" }
+    if ($flags.Lines[0] -cmatch '^[a-zS] ') {
+        throw "$Label uses assume-unchanged or skip-worktree; index-bound source closure requires an unflagged path: $RelativePath"
+    }
     $result = Invoke-HarnessManifestGit -RepoRoot $RepoRoot -Arguments @('diff','--quiet','--no-ext-diff','--',$RelativePath)
     if ($result.ExitCode -eq 1) { throw "$Label has unstaged bytes and cannot enter an index-bound source closure: $RelativePath" }
     if ($result.ExitCode -ne 0) { throw "$Label worktree/index comparison failed: $RelativePath" }

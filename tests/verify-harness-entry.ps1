@@ -222,6 +222,29 @@ foreach ($hostName in $processHosts.Keys) {
             Add-Check "$hostName fails closed on timeout and independently confirms owned child/grandchild cleanup within the Hook deadline"
         } else { Add-Failure "$hostName timeout or owned process-tree cleanup failed: $($hostProbe.StdOut)" }
     } else { Add-Failure "$hostName process characterization did not complete: $($hostProbe.StdErr)" }
+
+    # The outer watchdog does not call the process primitive under test. Its cleanup is failure, not evidence of product cleanup.
+    foreach ($mode in @('normal','no-read','early-close','shared-deadline')) {
+        $stdinObservation = & (Join-Path $PSScriptRoot 'fixtures/tk07-stdin-watchdog.ps1') -ImplementationRoot $RepoRoot -HostName $hostName -Mode $mode | ConvertFrom-Json
+        Write-Output ("[INFO] stdin observation: " + ($stdinObservation | ConvertTo-Json -Depth 8 -Compress))
+        $probe = $stdinObservation.probe
+        $stdinPass = -not $stdinObservation.watchdog_required -and $stdinObservation.driver_exit_code -eq 0 -and
+            -not $stdinObservation.stderr -and $stdinObservation.child_ready -and $stdinObservation.child_started_before_product_timeout -and
+            -not $stdinObservation.child_alive_before_safety_cleanup -and $null -ne $probe
+        if ($stdinPass) {
+            $stdinPass = $probe.elapsed_ms -lt 9000 -and $probe.child_ready -and -not $probe.child_alive_before_safety_cleanup -and
+                $probe.temp -ceq $env:TEMP -and $probe.tmp -ceq $env:TMP -and $probe.child_temp -ceq $env:TEMP -and $probe.child_tmp -ceq $env:TMP
+            if ($mode -ceq 'normal') {
+                $stdinPass = $stdinPass -and $probe.complete -and $probe.exit_code -eq 0 -and $probe.input_delivered -and $probe.stdout_matches -and $probe.stderr_matches
+            } else {
+                $stdinPass = $stdinPass -and -not $probe.complete -and $probe.exit_code -eq -1 -and $probe.failure_output_empty
+                if ($mode -ceq 'shared-deadline') { $stdinPass = $stdinPass -and $probe.input_delivered }
+                else { $stdinPass = $stdinPass -and -not $probe.input_delivered }
+            }
+        }
+        if ($stdinPass) { Add-Check "$hostName stdin $mode preserves delivery/fail-closed semantics, one deadline, and independently observed cleanup" }
+        else { Add-Failure "$hostName stdin $mode failed; watchdog termination never counts as success" }
+    }
 }
 
 # Case 1: bootstrap from a subdirectory inside a fresh git workspace.
