@@ -132,9 +132,9 @@ function Test-HarnessManifestPathCoveredByPattern {
 }
 
 function Assert-HarnessManifestWorktreeMatchesIndex {
-    param([string]$RepoRoot, [string]$RelativePath, [string]$Label)
+    param([string]$RepoRoot, [string]$RelativePath, [string]$Label, [switch]$PassThruIndexBlob)
 
-    $flags = Invoke-HarnessManifestGit -RepoRoot $RepoRoot -Arguments @('ls-files','-v','--',(':(literal)' + $RelativePath))
+    $flags = Invoke-HarnessManifestGit -RepoRoot $RepoRoot -Arguments @('ls-files','-v','--stage','--',(':(literal)' + $RelativePath))
     if ($flags.ExitCode -ne 0 -or $flags.Lines.Count -ne 1) { throw "$Label index flag inspection failed: $RelativePath" }
     if ($flags.Lines[0] -cmatch '^[a-zS] ') {
         throw "$Label uses assume-unchanged or skip-worktree; index-bound source closure requires an unflagged path: $RelativePath"
@@ -142,36 +142,70 @@ function Assert-HarnessManifestWorktreeMatchesIndex {
     $result = Invoke-HarnessManifestGit -RepoRoot $RepoRoot -Arguments @('diff','--quiet','--no-ext-diff','--',$RelativePath)
     if ($result.ExitCode -eq 1) { throw "$Label has unstaged bytes and cannot enter an index-bound source closure: $RelativePath" }
     if ($result.ExitCode -ne 0) { throw "$Label worktree/index comparison failed: $RelativePath" }
+    if ($PassThruIndexBlob) {
+        $entry = [regex]::Match($flags.Lines[0],'^H [0-9]{6} (?<blob>[0-9a-f]{40}|[0-9a-f]{64}) 0\t')
+        if (-not $entry.Success) { throw "$Label has an invalid stage-zero index blob: $RelativePath" }
+        return $entry.Groups['blob'].Value
+    }
 }
 
-function Get-HarnessManifestIndexBlobSha256 {
-    param([string]$RepoRoot, [string]$RelativePath)
+function Get-HarnessManifestIndexFiles {
+    param([string]$RepoRoot, [string[]]$RelativePaths, [string]$ModuleId)
 
     $git = @(Get-Command git -CommandType Application -ErrorAction Stop)[0].Source
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $git
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardInput = $true
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
-    foreach ($argument in @('-c','core.fsmonitor=false','-C',$RepoRoot,'show',(':' + $RelativePath))) {
+    $startInfo.StandardInputEncoding = $script:Utf8NoBom
+    foreach ($argument in @('-c','core.fsmonitor=false','-C',$RepoRoot,'cat-file','--batch=%(objecttype) %(objectsize)')) {
         [void]$startInfo.ArgumentList.Add($argument)
     }
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
+    $started = $false
     try {
-        if (-not $process.Start()) { throw "Unable to start Git for index blob: $RelativePath" }
+        $started = $process.Start()
+        if (-not $started) { throw "Unable to start Git for index blobs: $ModuleId" }
         $stderrTask = $process.StandardError.ReadToEndAsync()
-        $buffer = [System.IO.MemoryStream]::new()
+        $reader = [System.IO.BinaryReader]::new($process.StandardOutput.BaseStream)
+        $files = [System.Collections.Generic.List[object]]::new()
         try {
-            $process.StandardOutput.BaseStream.CopyTo($buffer)
-            [byte[]]$bytes = $buffer.ToArray()
-        } finally { $buffer.Dispose() }
+            foreach ($relativePath in $RelativePaths) {
+                # Keep each fail-closed index/worktree check immediately before its read.
+                $blob = Assert-HarnessManifestWorktreeMatchesIndex -RepoRoot $RepoRoot -RelativePath $relativePath -Label "Capability source for $ModuleId" -PassThruIndexBlob
+                # Address immutable objects; a long-lived cat-file must not cache :path index lookups.
+                $process.StandardInput.WriteLine($blob)
+                $process.StandardInput.Flush()
+                $header = [System.Text.StringBuilder]::new()
+                while (($next = $reader.ReadByte()) -ne 10) {
+                    if ($next -gt 127 -or $header.Length -ge 128) { throw 'Invalid Git index blob header' }
+                    [void]$header.Append([char]$next)
+                }
+                $match = [regex]::Match($header.ToString(),'^blob (0|[1-9][0-9]*)$')
+                [int]$length = 0
+                if (-not $match.Success -or -not [int]::TryParse($match.Groups[1].Value,[ref]$length)) {
+                    throw "Unable to read Git index blob: $relativePath"
+                }
+                [byte[]]$bytes = $reader.ReadBytes($length)
+                if ($bytes.Length -ne $length -or $reader.ReadByte() -ne 10) { throw 'Truncated Git index blob frame' }
+                $files.Add([ordered]@{path=$relativePath;sha256=(Get-HarnessSha256Bytes -Bytes $bytes)})
+            }
+            $process.StandardInput.Close()
+            if ($reader.BaseStream.ReadByte() -ne -1) { throw 'Unexpected trailing Git index blob output' }
+        } finally { $reader.Dispose() }
         $process.WaitForExit()
         $stderr = $stderrTask.GetAwaiter().GetResult()
-        if ($process.ExitCode -ne 0) { throw "Unable to read Git index blob: $RelativePath`: $($stderr.Trim())" }
-        return Get-HarnessSha256Bytes -Bytes $bytes
+        if ($process.ExitCode -ne 0) { throw "Unable to read Git index blobs: $ModuleId`: $($stderr.Trim())" }
+        return @($files)
     } finally {
+        if ($started -and -not $process.HasExited) {
+            $process.Kill($true)
+            $process.WaitForExit()
+        }
         $process.Dispose()
     }
 }
@@ -291,11 +325,7 @@ function Get-HarnessCapabilityPackageRecord {
         if (-not $testSet.Contains([string]$ownerTest)) { throw "Capability owner test is absent from package tests: $moduleId -> $ownerTest" }
     }
 
-    $fileOutput = [System.Collections.Generic.List[object]]::new()
-    foreach ($relativePath in @(Get-HarnessOrdinalStrings -Values @($allRoleFiles.Keys))) {
-        Assert-HarnessManifestWorktreeMatchesIndex -RepoRoot $RepoRoot -RelativePath $relativePath -Label "Capability source for $moduleId"
-        $fileOutput.Add([ordered]@{path=$relativePath;sha256=(Get-HarnessManifestIndexBlobSha256 -RepoRoot $RepoRoot -RelativePath $relativePath)})
-    }
+    $fileOutput = @(Get-HarnessManifestIndexFiles -RepoRoot $RepoRoot -RelativePaths @(Get-HarnessOrdinalStrings -Values @($allRoleFiles.Keys)) -ModuleId $moduleId)
     $withoutDigest = [ordered]@{
         schema_version='capability-source/v1'
         module_id=$moduleId

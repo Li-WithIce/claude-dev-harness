@@ -10,6 +10,14 @@ $relative = "$manifestRoot/sample-capability/source.psm1"
 $manifestPath = "$manifestRoot/sample-capability/module.manifest.json"
 $testPath = 'tests/verify-provider-usage-recording.ps1'
 $original = "`$script:SourceMarker = 'index'`n"
+$blobBytes = [ordered]@{
+    'empty.bin' = [byte[]]@()
+    'bom.bin' = [byte[]]@(239,187,191,65,13,10)
+    'binary.bin' = [byte[]]@(0,255,128,10,13,98,108,111,98,32,49,10,0)
+    'utf8.bin' = [Text.Encoding]::UTF8.GetBytes("原始 UTF-8 字节`n")
+    'large.bin' = [byte[]]::new(65537)
+}
+$blobBytes['large.bin'][65536] = 255
 $locksBefore = $env:GIT_OPTIONAL_LOCKS
 $env:GIT_OPTIONAL_LOCKS = '0'
 
@@ -45,14 +53,17 @@ try {
     }
     $manifest = Get-Content -LiteralPath (Join-Path $RepoRoot 'tests/fixtures/tk04/valid/sample-capability/module.manifest.json') -Raw | ConvertFrom-Json -AsHashtable
     $manifest.ownership.owned_paths = @("$manifestRoot/sample-capability/**",$testPath)
-    $manifest.package.code = @($relative)
+    $manifest.package.code = @($relative) + @($blobBytes.Keys | ForEach-Object { "$manifestRoot/sample-capability/$_" })
     $manifest.exports.commands = @()
     $manifest.exports.libraries = @($relative)
     Write-FixtureFile $manifestPath ($manifest | ConvertTo-Json -Depth 20)
     Write-FixtureFile $relative $original
     Write-FixtureFile $testPath "# Unexecuted package test metadata.`n"
+    foreach ($name in $blobBytes.Keys) {
+        [IO.File]::WriteAllBytes((Join-Path $fixture "$manifestRoot/sample-capability/$name"),$blobBytes[$name])
+    }
     Write-FixtureFile 'unrelated.txt' "not in the source closure`n"
-    Write-FixtureFile '.gitattributes' "* text eol=lf`n"
+    Write-FixtureFile '.gitattributes' "* text eol=lf`n*.bin -text`n"
     $null = Git-Fixture add --all
     Import-Module (Join-Path $RepoRoot 'scripts/lib/Harness.ModuleManifest.psm1') -Force
     $baselineDigest = $null
@@ -81,6 +92,16 @@ try {
             $digest = $catalog.CapabilitySourceCatalog.sources[0].source_digest
         } catch { $errorText = $_.Exception.Message }
         $after = Get-FixtureSnapshot
+        $blobDigestsMatch = $null
+        if ($accepted) {
+            $blobDigestsMatch = $true
+            foreach ($name in $blobBytes.Keys) {
+                $blobPath = "$manifestRoot/sample-capability/$name"
+                $actual = @($catalog.CapabilitySourceCatalog.sources[0].files | Where-Object { $_.path -ceq $blobPath })
+                $expected = 'sha256:' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([byte[]]$blobBytes[$name])).ToLowerInvariant()
+                if ($actual.Count -ne 1 -or $actual[0].sha256 -cne $expected) { $blobDigestsMatch = $false }
+            }
+        }
         if ($case -ceq 'clean') { $baselineDigest = $digest }
         $flagCase = $case.StartsWith('assume') -or $case.StartsWith('skip')
         $expectedAccept = $case -cin @('clean','crlf-equivalent','unrelated-flag')
@@ -89,7 +110,7 @@ try {
         } else { -not $accepted -and $errorText -match 'unstaged bytes' }
         $gitExpected = if ($case -ceq 'plain-edit') { 1 } else { 0 }
         [pscustomobject]@{case=$case;pass=($correctError -and $gitExit -eq $gitExpected -and $before -ceq $after)
-            git_exit=$gitExit;accepted=$accepted;zero_write=($before -ceq $after);error=$errorText;fixture=$fixture}
+            git_exit=$gitExit;accepted=$accepted;zero_write=($before -ceq $after);blob_digests_match=$blobDigestsMatch;error=$errorText;fixture=$fixture}
     }
 } finally {
     if ($null -eq $locksBefore) { Remove-Item -LiteralPath Env:GIT_OPTIONAL_LOCKS -ErrorAction Ignore }

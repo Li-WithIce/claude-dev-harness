@@ -739,7 +739,7 @@ if ($null -eq $quietProcessFunction) {
             $bridgeResult.StdOut -match '(?m)^STATUS: PASS\s*$') {
             Add-Check 'Windows PowerShell validation entry transparently bridges fixed arguments to pwsh'
         } else {
-            Add-Failure 'Windows PowerShell validation entry should transparently bridge fixed arguments to pwsh and pass quick validation'
+            Add-Failure ('Windows PowerShell validation entry should transparently bridge fixed arguments to pwsh and pass quick validation (exit={0}, timed_out={1}, seconds={2}, stdout_chars={3}, stderr_chars={4})' -f $bridgeResult.ExitCode,$bridgeResult.TimedOut,$bridgeResult.DurationSeconds,$bridgeResult.StdOut.Length,$bridgeResult.StdErr.Length)
         }
     }
 }

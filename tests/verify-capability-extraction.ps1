@@ -153,6 +153,8 @@ try {
         Check $case.pass "index-bound source fixture $($case.case): Git=$($case.git_exit), accepted=$($case.accepted), zero-write=$($case.zero_write)" "index-bound source fixture failed: $($case | ConvertTo-Json -Compress)"
     }
     Check ($flagCases.Count -eq 8) 'index flag regressions cover clean, hidden edits, LF/CRLF, Unicode workspace paths, and unrelated flags' 'index flag fixture did not execute the complete case set'
+    $acceptedBlobCases = @($flagCases | Where-Object { $_.accepted })
+    Check ($acceptedBlobCases.Count -eq 3 -and @($acceptedBlobCases | Where-Object { -not $_.blob_digests_match }).Count -eq 0) 'batched index reads preserve empty, BOM, binary, UTF-8 and multi-buffer blob hashes in Unicode workspaces' 'batched Git index blob framing or raw-byte hashing drifted'
 
     [byte[]]$catalogBefore = [IO.File]::ReadAllBytes($catalogPath)
     [byte[]]$sourceBefore = [IO.File]::ReadAllBytes($sourceCatalogPath)
