@@ -554,6 +554,8 @@ $currentReleaseUpload = [regex]::Match($releaseJob,'(?ms)^      - name: Upload c
 $legacyReleaseUpload = [regex]::Match($releaseJob,'(?ms)^      - name: Upload legacy rollout evidence\s*$.*\z').Value
 $defaultPromotionRef = 'refs/heads/codex/harness-v2-default-promotion'
 $defaultPromotionCondition = "github.event_name == 'workflow_dispatch' && github.ref == '$defaultPromotionRef'"
+$manualReleaseCondition = '${{ !cancelled() && ' + $defaultPromotionCondition + ' }}'
+$manualReleaseGuardPattern = '(?m)^    if: ' + [regex]::Escape($manualReleaseCondition) + '\r?$'
 $pushBlock = [regex]::Match($workflow,'(?ms)^  push:\s*\r?$.*?(?=^  schedule:\s*\r?$)').Value
 $modelBundlePaths = @([regex]::Matches($modelUpload,'(?m)^\s+\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/(?<name>[a-z0-9-]+\.json)\s*$') | ForEach-Object { $_.Groups['name'].Value })
 $hostBundlePaths = @([regex]::Matches($hostUpload,'(?m)^\s+\$\{\{ env\.RELEASE_EVIDENCE_ROOT \}\}/(?<name>[a-z0-9-]+\.json)\s*$') | ForEach-Object { $_.Groups['name'].Value })
@@ -818,16 +820,16 @@ if ($releaseModelJob -match 'run-model-evals\.ps1[^\r\n]+-TimeoutSeconds 120[^\r
     Add-Failure 'release CI Producer orchestration or formal receipt binding is incomplete'
 }
 
-if (@(@($releaseModelJob,$releaseHostJob,$releaseJob) | Where-Object { $_ -match [regex]::Escape($defaultPromotionCondition) }).Count -eq 3 -and
-    @([regex]::Matches($workflow,[regex]::Escape($defaultPromotionCondition))).Count -eq 3 -and
+if (@(@($releaseModelJob,$releaseHostJob,$releaseJob) | Where-Object { @([regex]::Matches($_,$manualReleaseGuardPattern)).Count -eq 1 -and @([regex]::Matches($_,'(?m)^    if:')).Count -eq 1 }).Count -eq 3 -and
+    @([regex]::Matches($workflow,$manualReleaseGuardPattern)).Count -eq 3 -and
     $pushBlock -notmatch [regex]::Escape($defaultPromotionRef) -and
-    @(@($releaseModelJob,$releaseHostJob,$releaseJob) | Where-Object { $_ -match "github.event_name != 'pull_request'" }).Count -eq 3) {
-    Add-Check 'Default Promotion routes model, host, and release-full only through workflow_dispatch while push remains guarded'
+    $workflow -notmatch "github.event_name != 'pull_request'") {
+    Add-Check 'All Release jobs require uncancelled manual dispatch on the promotion ref; automatic events cannot qualify'
 } else {
-    Add-Failure 'Default Promotion producer routing or release guard drifted'
+    Add-Failure 'Release job eligibility must be one strict manual-only promotion guard'
 }
 
-if (@($releaseModelJob,$releaseHostJob | Where-Object { $_ -match $producerRunnerPattern -and $_ -match '(?m)^\s*HOST_BENCHMARK_CODEX_HOME:\s*\$\{\{\s*vars\.HOST_BENCHMARK_CODEX_HOME\s*\}\}\s*$' -and $_ -match '(?m)^\s*environment:\s*thin-v2-release\s*$' -and $_ -match '(?m)^\s*persist-credentials:\s*false\s*$' -and $_ -match 'refs/heads/codex/thin-harness-v2-refactor' -and $_ -notmatch '(?i)secrets\.' }).Count -eq 2 -and
+if (@($releaseModelJob,$releaseHostJob | Where-Object { $_ -match $producerRunnerPattern -and $_ -match '(?m)^\s*HOST_BENCHMARK_CODEX_HOME:\s*\$\{\{\s*vars\.HOST_BENCHMARK_CODEX_HOME\s*\}\}\s*$' -and $_ -match '(?m)^\s*environment:\s*thin-v2-release\s*$' -and $_ -match '(?m)^\s*persist-credentials:\s*false\s*$' -and $_ -match $manualReleaseGuardPattern -and $_ -notmatch '(?i)secrets\.' }).Count -eq 2 -and
     $releaseJob -match $aggregatorRunnerPattern -and $releaseJob -match '(?m)^\s*environment:\s*thin-v2-release\s*$' -and $releaseJob -match '(?m)^\s*persist-credentials:\s*false\s*$' -and $releaseJob -notmatch 'HOST_BENCHMARK_CODEX_HOME' -and $releaseJob -notmatch '(?i)secrets\.') {
     Add-Check 'credentialed producers and the credential-blind aggregator use separate dedicated runner labels'
 } else {

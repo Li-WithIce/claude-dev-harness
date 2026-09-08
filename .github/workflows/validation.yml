@@ -174,7 +174,7 @@ jobs:
           retention-days: 14
 
   release-model:
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/harness-distribution' || github.ref == 'refs/heads/codex/thin-harness-v2-refactor' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/harness-v2-default-promotion')) }}
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/harness-v2-default-promotion' }}
     runs-on:
       - self-hosted
       - Windows
@@ -241,7 +241,7 @@ jobs:
 
   release-host:
     needs: release-model
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/harness-distribution' || github.ref == 'refs/heads/codex/thin-harness-v2-refactor' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/harness-v2-default-promotion')) }}
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/harness-v2-default-promotion' }}
     runs-on:
       - self-hosted
       - Windows
@@ -349,7 +349,7 @@ jobs:
           if-no-files-found: error
 
   release-full:
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/harness-distribution' || github.ref == 'refs/heads/codex/thin-harness-v2-refactor' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/harness-v2-default-promotion')) }}
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/harness-v2-default-promotion' }}
     needs:
       - release-model
       - release-host

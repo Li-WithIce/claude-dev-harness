@@ -16,6 +16,29 @@ function Get-WorkflowJobBlock {
     $matches = [regex]::Matches($Text,$pattern)
     return [pscustomobject]@{ Count=$matches.Count; Value=$(if($matches.Count -eq 1){$matches[0].Value}else{''}) }
 }
+function Test-ManualReleaseJobRouting {
+    param([string]$JobText)
+    $guards = [regex]::Matches($JobText,'(?m)^    if:[ \t]*(?<condition>[^\r\n]+)\r?$')
+    if ($guards.Count -ne 1) { return $false }
+    # Recognize only the frozen conjunction, never evaluate arbitrary workflow text.
+    $condition = [regex]::Match($guards[0].Groups['condition'].Value,'^\$\{\{ !cancelled\(\) && github\.event_name == ''(?<event>[^'']+)'' && github\.ref == ''(?<ref>[^'']+)'' \}\}$')
+    if (-not $condition.Success) { return $false }
+    $refs = @('refs/heads/main','refs/heads/codex/harness-distribution',
+        'refs/heads/codex/thin-harness-v2-refactor','refs/heads/codex/harness-v2-default-promotion',
+        'refs/heads/codex/thin-v2-delivery-integration','refs/heads/topic',
+        'refs/tags/codex/harness-v2-default-promotion','refs/pull/1/merge')
+    foreach ($eventName in @('pull_request','push','schedule','workflow_dispatch','repository_dispatch','workflow_run')) {
+        foreach ($ref in $refs) {
+            foreach ($cancelled in @($false,$true)) {
+                $actual = -not $cancelled -and $eventName -ieq $condition.Groups['event'].Value -and $ref -ieq $condition.Groups['ref'].Value
+                $expected = -not $cancelled -and $eventName -ieq 'workflow_dispatch' -and $ref -ieq 'refs/heads/codex/harness-v2-default-promotion'
+                if ($actual -ne $expected) { return $false }
+            }
+        }
+    }
+    return $true
+}
+
 function Get-Route {
     param([string[]]$Paths)
     $output = @(& $script:router -RepoRoot $RepoRoot -ChangedPaths $Paths -ListOnly -AsJson)
@@ -109,9 +132,9 @@ $legacyReleaseUpload = [regex]::Match($releaseJob,'(?ms)^      - name: Upload le
 $checkoutAction = 'actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5'
 $uploadAction = 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'
 $downloadAction = 'actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093'
-$trustedRefs = @('refs/heads/main','refs/heads/codex/harness-distribution','refs/heads/codex/thin-harness-v2-refactor')
 $defaultPromotionRef = 'refs/heads/codex/harness-v2-default-promotion'
 $defaultPromotionCondition = "github.event_name == 'workflow_dispatch' && github.ref == '$defaultPromotionRef'"
+$manualReleaseCondition = '${{ !cancelled() && ' + $defaultPromotionCondition + ' }}'
 $pushBlock = [regex]::Match($workflow,'(?ms)^  push:\s*\r?$.*?(?=^  schedule:\s*\r?$)').Value
 $fullTriggerMatches = [regex]::Matches($fullValidationWorkflow,'(?ms)^on:[ \t]*\r?$.*?(?=^[A-Za-z][A-Za-z0-9_-]*:[ \t]*\r?$|\z)')
 $fullTriggerBlock = if($fullTriggerMatches.Count -eq 1){$fullTriggerMatches[0].Value}else{''}
@@ -130,12 +153,25 @@ foreach ($producer in @($releaseModelJob,$releaseHostJob)) {
         $producer -match '(?m)^\s*HOST_BENCHMARK_CODEX_HOME:\s*\$\{\{\s*vars\.HOST_BENCHMARK_CODEX_HOME\s*\}\}\s*$' -and
         $producer -match '(?m)^\s*environment:\s*thin-v2-release\s*$' -and
         $producer -match '(?m)^\s*persist-credentials:\s*false\s*$' -and
-        $producer -match '!cancelled\(\)' -and @($trustedRefs | Where-Object { $producer -notmatch [regex]::Escape($_) }).Count -eq 0 -and
+        (Test-ManualReleaseJobRouting -JobText $producer) -and
         $producer -notmatch '(?i)secrets\.') { $trustedProducerCount++ }
 }
-Check ($workflow -match '(?m)^\s*schedule:\s*$' -and $workflow -match '(?m)^\s*workflow_dispatch:\s*$' -and $workflow -match '(?ms)^      engineering_ci_run_id:.*?^        required: true\s*$.*?^        type: string\s*$' -and $workflow -match '(?ms)^      engineering_review_comment_id:.*?^        required: true\s*$.*?^        type: string\s*$') 'CI exposes nightly and required-input manual release validation' 'CI lacks nightly or strict manual release validation'
+Check ($workflow -match '(?m)^\s*schedule:\s*$' -and $workflow -match '(?m)^\s*workflow_dispatch:\s*$' -and $workflow -match '(?ms)^      engineering_ci_run_id:.*?^        required: true\s*$.*?^        type: string\s*$' -and $workflow -match '(?ms)^      engineering_review_comment_id:.*?^        required: true\s*$.*?^        type: string\s*$') 'CI retains its schedule trigger and required-input manual release entry without automatic release eligibility' 'CI schedule declaration or strict manual release inputs drifted'
 Check (@($prCoreChecksBlock,$prCoreBlock,$changedOptionalBlock,$releaseModelBlock,$releaseHostBlock,$releaseBlock | Where-Object Count -eq 1).Count -eq 6) 'CI declares each PR and release job exactly once' 'CI job layering is missing or duplicated'
-Check (@(@($releaseModelJob,$releaseHostJob,$releaseJob) | Where-Object { $_ -match [regex]::Escape($defaultPromotionCondition) }).Count -eq 3 -and @([regex]::Matches($workflow,[regex]::Escape($defaultPromotionCondition))).Count -eq 3 -and $pushBlock -notmatch [regex]::Escape($defaultPromotionRef) -and @(@($releaseModelJob,$releaseHostJob,$releaseJob) | Where-Object { $_ -match "github.event_name != 'pull_request'" }).Count -eq 3) 'Default Promotion routes model, host, and release-full only through workflow_dispatch' 'Default Promotion manual release routing or push guard drifted'
+Check (@(@($releaseModelJob,$releaseHostJob,$releaseJob) | Where-Object { Test-ManualReleaseJobRouting -JobText $_ }).Count -eq 3 -and @([regex]::Matches($workflow,[regex]::Escape($manualReleaseCondition))).Count -eq 3 -and $pushBlock -notmatch [regex]::Escape($defaultPromotionRef)) 'All three Release jobs satisfy 288 event/ref/cancellation cases; only explicit promotion dispatch is eligible' 'Release eligibility escaped manual promotion dispatch or lost cancellation isolation'
+$guardFixture = '  fixture-release:' + [Environment]::NewLine + '    if: ' + $manualReleaseCondition + [Environment]::NewLine
+Check (Test-ManualReleaseJobRouting -JobText $guardFixture) 'Release routing guard accepts its manual-only positive control' 'Release routing guard rejects the approved conjunction'
+$unsafeGuards = @(
+    $guardFixture.Replace('!cancelled() && ',''),
+    $guardFixture.Replace("github.event_name == 'workflow_dispatch'","github.event_name != 'pull_request'"),
+    $guardFixture.Replace("github.event_name == 'workflow_dispatch'","github.event_name == 'push'"),
+    $guardFixture.Replace($defaultPromotionRef,'refs/heads/codex/harness-distribution'),
+    $guardFixture.Replace(' && ',' || '),
+    $guardFixture.Replace(' }}'," || github.ref == 'refs/heads/main' }}"),
+    $guardFixture.Replace('    if: ','    # if: '),
+    ($guardFixture + '    if: ' + $manualReleaseCondition + [Environment]::NewLine)
+)
+Check (@($unsafeGuards | Where-Object { Test-ManualReleaseJobRouting -JobText $_ }).Count -eq 0) 'Release guard rejects missing/duplicate conditions, broad events/refs, removed cancellation, and OR escapes' 'Release guard mutation control admitted an unsafe condition'
 Check (@([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($checkoutAction)))).Count -eq 6 -and @([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($uploadAction)))).Count -eq 7 -and @([regex]::Matches($workflow,('(?m)^        uses: {0}[ \t]*(?:#.*)?\r?$' -f [regex]::Escape($downloadAction)))).Count -eq 4 -and $workflow -notmatch '(?m)^\s*uses:\s*actions/(?:checkout|upload-artifact|download-artifact)@v\d+') 'every GitHub Action dependency is pinned to a verified full commit SHA' 'GitHub Action dependencies are movable or not pinned to the approved commits'
 $fullScheduleMatches = [regex]::Matches($fullTriggerBlock,'(?m)^  schedule:[ \t]*\r?$')
 $fullDispatchMatches = [regex]::Matches($fullTriggerBlock,'(?m)^  workflow_dispatch:[ \t]*\r?$')
