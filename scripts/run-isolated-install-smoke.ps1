@@ -1,6 +1,7 @@
 ﻿[CmdletBinding()]
 param(
-    [string]$RepoRoot = ''
+    [string]$RepoRoot = '',
+    [ValidateSet('core','governed','full')][string]$Preset = 'full'
 )
 
 Set-StrictMode -Version Latest
@@ -29,19 +30,23 @@ $originalUserProfile = $env:USERPROFILE
 
 $installExit = $null
 $verifyExit = $null
+$updateExit = $null
+$secondVerifyExit = $null
 $uninstallExit = $null
 $cleanupExit = 0
 $executionError = $null
 $uninstallError = $null
 $cleanupError = $null
 $installSucceeded = $false
+$firstVerifySucceeded = $false
+$updateSucceeded = $false
 
 try {
     New-Item -ItemType Directory -Path $workspaceRoot, $userProfileRoot -Force | Out-Null
     $env:USERPROFILE = $userProfileRoot
 
     Write-Output 'Smoke stage: install'
-    & $powerShellPath -NoLogo -NoProfile -NonInteractive -File $installScript -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -VaultProfile full
+    & $powerShellPath -NoLogo -NoProfile -NonInteractive -File $installScript -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -Preset $Preset
     $installExit = $LASTEXITCODE
 
     if ($installExit -eq 0) {
@@ -49,6 +54,18 @@ try {
         Write-Output 'Smoke stage: verify'
         & $powerShellPath -NoLogo -NoProfile -NonInteractive -File $verifyScript -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -UserProfileRoot $userProfileRoot -Scope All
         $verifyExit = $LASTEXITCODE
+        if ($verifyExit -eq 0) {
+            $firstVerifySucceeded = $true
+            Write-Output 'Smoke stage: update'
+            & $powerShellPath -NoLogo -NoProfile -NonInteractive -File $installScript -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot
+            $updateExit = $LASTEXITCODE
+            if ($updateExit -eq 0) {
+                $updateSucceeded = $true
+                Write-Output 'Smoke stage: second verify'
+                & $powerShellPath -NoLogo -NoProfile -NonInteractive -File $verifyScript -WorkspaceRoot $workspaceRoot -RepoRoot $RepoRoot -UserProfileRoot $userProfileRoot -Scope All
+                $secondVerifyExit = $LASTEXITCODE
+            }
+        }
     }
 } catch {
     $executionError = $_.Exception.Message
@@ -56,6 +73,10 @@ try {
         $installExit = 1
     } elseif ($installSucceeded -and $null -eq $verifyExit) {
         $verifyExit = 1
+    } elseif ($firstVerifySucceeded -and $null -eq $updateExit) {
+        $updateExit = 1
+    } elseif ($updateSucceeded -and $null -eq $secondVerifyExit) {
+        $secondVerifyExit = 1
     }
 } finally {
     try {
@@ -86,6 +107,8 @@ try {
 Write-Output 'Smoke summary:'
 Write-Output ('- install_exit: {0}' -f $(if ($null -eq $installExit) { 'SKIP' } else { $installExit }))
 Write-Output ('- verify_exit: {0}' -f $(if ($null -eq $verifyExit) { 'SKIP' } else { $verifyExit }))
+Write-Output ('- update_exit: {0}' -f $(if ($null -eq $updateExit) { 'SKIP' } else { $updateExit }))
+Write-Output ('- second_verify_exit: {0}' -f $(if ($null -eq $secondVerifyExit) { 'SKIP' } else { $secondVerifyExit }))
 Write-Output ('- uninstall_exit: {0}' -f $(if ($null -eq $uninstallExit) { 'SKIP' } else { $uninstallExit }))
 Write-Output ('- cleanup_exit: {0}' -f $cleanupExit)
 foreach ($message in @($executionError, $uninstallError, $cleanupError)) {
@@ -94,7 +117,7 @@ foreach ($message in @($executionError, $uninstallError, $cleanupError)) {
     }
 }
 
-foreach ($exitCode in @($installExit, $verifyExit, $uninstallExit, $cleanupExit)) {
+foreach ($exitCode in @($installExit, $verifyExit, $updateExit, $secondVerifyExit, $uninstallExit, $cleanupExit)) {
     if ($null -ne $exitCode -and $exitCode -ne 0) {
         exit $exitCode
     }

@@ -1,84 +1,55 @@
 ---
 name: obsidian-memory
-description: Use when a task needs shared Obsidian memory, session recovery, runtime writeback, or stable preference lookup from the shared `.assistant` vault.
+description: Use only for explicitly needed installed shared-memory recall or user-authorized memory maintenance; never for ordinary task routing or recovery.
 ---
 
 # Obsidian Memory
 
-> **已合入 entry-router**：核心读取顺序、写回规则和 guardrails 已内联到 `entry-router` skill 中。
-> 本文件保留为详细参考文档，无需在每次对话中单独调用。
+Claude and Codex may share the installed optional memory vault at
+`{VAULT_PATH}`. This capability is not an entry router, lifecycle owner or
+task-state authority.
 
-Claude、Codex 共用同一份 Obsidian 记忆仓库：
-`{VAULT_PATH}`
+## Read boundary
 
-## When to Use
+- Load only when the installed memory feature is explicitly needed. A request
+  to continue or recover a task alone does not activate Memory.
+- Use stable configuration/preferences and explicitly relevant historical
+  memory. Current repository facts and current user instructions take priority.
+- Ordinary task recovery uses `.assistant/entry/task.ps1 status`, not legacy
+  pointers, plans, runtime mirrors, orchestration flows or memory notes.
+- Explicit legacy history/health inspection is maintenance only. It cannot
+  resume, create or advance a task, or authorize a pointer write.
 
-- 用户说“继续”“恢复”“resume”
-- 任务需要项目偏好、工具路径、系统边界或历史上下文
-- 多步骤 `mode=workflow` 任务明确开始、切换、暂停或收尾时，需要写回共享运行时状态；read-only inspect/status 不写回
-- 需要判断一条信息该写到运行时、配置还是收件箱
+## Authorized memory writes
 
-## Read Order
+- Save/promote stable memory only when the user explicitly requests it.
+- Keep existing append-only candidate/archive/wisdom history. Use the bounded
+  maintenance commands and preserve source entries when classifying them.
+- Actionable inbox items require explicit capture authority; interactive
+  ambiguity is a question, not an inbox write.
+- Never update lifecycle pointers or task state through Memory. All v2 state
+  changes belong to the Kernel task APIs with their Contract/version/Approval.
+- Never copy secrets into memory, task artifacts, Evidence, logs or reports.
+- Internal failed writes belong in `.assistant/runtime/failed-writes`, not a
+  business inbox.
 
-- 快速了解：`首页.md` -> `配置\系统信息.md` -> `配置\用户偏好.md` -> `配置\工具与组件.md`
-- 恢复任务：先检查 `运行时\收件箱.md` 中 open `[writeback-fallback]` 行，再读 `运行时\恢复索引.md` -> `运行时\当前任务.md`（共享指针） -> `运行时\tasks\<task-id>.md`（任务级详细状态） -> `运行时\中断任务.md` -> `运行时\上次会话.md`
-- 长期稳定记忆：优先只读 `配置\*.md`，按需补读 `工作流\*.md` 与 `运行时\记忆候选归档.md`
+## Optional maintenance tooling
 
-## Writeback
+The installed scripts for memory-health, candidate archive, triage and report
+generation remain opt-in maintenance. Their retained legacy-history checks are
+not ordinary Runtime or evidence that a v1 workflow is supported. Do not invoke
+repair of a retired lifecycle mirror; preserve it as history.
 
-- 单写者：只有当前入口 host 写 `当前任务.md`、`中断任务.md`、`上次会话.md`、`恢复索引.md`
-- Codex 若不是当前入口 host，只有 write-authorized `mode=workflow` 才写 `docs/tasks/{task_id}/*` 和 `运行时\tasks\<task-id>.md`；read-only inspect/status 零写
-- 用户明确开始、切换或继续 write-authorized `mode=workflow`：当前入口 host 更新 `运行时\当前任务.md`（共享指针） + `运行时\tasks\<task-id>.md`
-- write-authorized workflow 暂停或待续：当前入口 host 同步更新 `运行时\tasks\<task-id>.md` 和 `运行时\中断任务.md`
-- write-authorized workflow 阶段完成：当前入口 host 更新 `运行时\上次会话.md` 并刷新 `运行时\恢复索引.md`
-- 发现可能值得沉淀的稳定偏好时只向用户提示；只有用户明确要求记录/沉淀记忆后才写 `运行时\记忆候选.md`
-- 只有用户明确请求或已授权的记忆维护任务，才把已结束生命周期的候选移入 `运行时\记忆候选归档.md`
-- 只有用户或外部来源已授权持久捕获的 actionable/durable 新事项才写 `运行时\收件箱.md`；交互式归属/读写歧义直接 ask，不写 inbox
-- open 收件箱行保持可恢复；需要人工选择时直接向用户提问，任务创建/切换走 entry-router 与 canonical stage driver，处理后再精确 triage
+`memory-maintain` runs candidate archive only. Repair is retired; report and
+health are `NOT_RUN` unless directly requested through their diagnostic
+commands. These diagnostics are explicitly historical-v1-only: a fresh v2
+installation reports `NOT_APPLICABLE`, never a v2 health pass or a request to
+recreate old mirrors. They do not recursively scan agent homes. Inbox capture
+keeps an explicit TaskId unchanged and uses `unknown` when it is omitted,
+without reading historical pointers or flows.
 
-## Wisdom 4 类写入约束
+## agentmemory compatibility
 
-- `运行时\记忆候选.md` 仍是未分流条目的 inbox；4 类 wisdom 文件只接收 triage 后已认定的稳定条目
-- wisdom 目标文件固定为：
-  - `运行时\记忆-学习.md`：跨任务可复用知识
-  - `运行时\记忆-决策.md`：不可逆设计选择
-  - `运行时\记忆-约定.md`：命名 / 路径 / 协议规范
-  - `运行时\记忆-问题.md`：已知缺陷待修
-- 4 文件均为 append-only；禁止 delete / rewrite 旧条目
-- 每条 entry 必须以 `### YYYY-MM-DD HH:mm · <task-id> · <author>` 标题开头
-- 同一时刻只有当前入口 host 可向 4 文件追加
-- 从 inbox 分流到 4 文件时只 `Copy` 不 `Move`，保留原始 inbox 时间线
-- 无法判断归类时，继续留在 `运行时\记忆候选.md`，不要强行写入错误类别
-
-## Guardrails
-
-- 共享真相源只在 `{VAULT_PATH}`
-- `当前任务.md` 只是共享指针，不承载完整任务细节
-- 不在 `.claude`、`.codex` 下创建平行 runtime note
-- 不在 `MEMORY.md`、`配置\*.md`、`配置\引导状态.md` 记录当前任务
-- 长期记忆提升前必须得到用户确认
-
-## agentmemory Compatibility
-
-agentmemory 只能作为 opt-in read-only historical recall sidecar。它不能修改 `.assistant/运行时/*`、不能提升 wisdom、不能决定当前 stage/review verdict/TEST conclusion；与当前 repo、当前 task、`.assistant` 或用户指令冲突时，后者优先。Windows native setup 可能需要手工处理或受限，WSL2 可以作为实际可行路径；harness install/update 不运行 `agentmemory connect`。
-
-## Tooling
-
-- Consistency check: `scripts/check-shared-memory.ps1`
-- One-click health entry: `scripts/run-memory-health.ps1`
-- One-click maintenance entry: `scripts/maintain-shared-memory.ps1`
-- Candidate archiver: `scripts/archive-memory-candidates.ps1`
-- Safe repair helper: `scripts/repair-shared-memory.ps1`
-- Markdown report writer: `scripts/write-memory-health-report.ps1`
-- Workspace quick entry: `..\..\scripts\memory-health.ps1 -VaultRoot {VAULT_PATH}`
-- Workspace maintenance entry: `..\..\scripts\memory-maintain.ps1 -VaultRoot {VAULT_PATH}`
-- Workspace archive helper: `scripts/archive-memory-candidates.ps1 -VaultRoot {VAULT_PATH}`
-- Workspace repair helper: `scripts/repair-shared-memory.ps1 -VaultRoot {VAULT_PATH}`
-- Workspace report helper: `..\..\scripts\memory-health-report.ps1 -VaultRoot {VAULT_PATH}`
-
-## References
-
-- `{VAULT_PATH}\工作流\共享记忆协议.md`
-- `{VAULT_PATH}\工作流\写回协议.md`
-- `{VAULT_PATH}\工作流\恢复协议.md`
-- `{VAULT_PATH}\工作流\记忆管理协议.md`
+agentmemory is an optional read-only historical recall sidecar. It never
+controls task status, review verdicts or Evidence, promotes memory without user
+authorization, or runs connect during Harness installation.

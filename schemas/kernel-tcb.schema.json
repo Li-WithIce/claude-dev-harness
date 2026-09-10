@@ -1,0 +1,283 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/kernel-tcb.schema.json",
+  "title": "Kernel TCB Inventory v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generator_contract_version",
+    "roots",
+    "files",
+    "artifacts",
+    "edges",
+    "external_dependencies",
+    "unresolved_dependencies",
+    "totals",
+    "budget"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["kernel-tcb/v1"] },
+    "generator_contract_version": { "type": "string", "enum": ["kernel-tcb-generator/v1"] },
+    "roots": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 48,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/root" }
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/file" }
+    },
+    "artifacts": {
+      "type": "array",
+      "maxItems": 128,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/artifact" }
+    },
+    "edges": {
+      "type": "array",
+      "maxItems": 2048,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/edge" }
+    },
+    "external_dependencies": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/externalDependency" }
+    },
+    "unresolved_dependencies": {
+      "type": "array",
+      "maxItems": 0,
+      "items": { "$ref": "#/definitions/unresolved" }
+    },
+    "totals": { "$ref": "#/definitions/totals" },
+    "budget": { "$ref": "#/definitions/budget" }
+  },
+  "definitions": {
+    "identifier": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "repoPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!.*\\\\)(?!.*//)(?!\\.\\.?(?:/|$))(?!.*\\/\\.\\.?(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$"
+    },
+    "layer": {
+      "type": "string",
+      "enum": [
+        "k0-trust-primitive",
+        "k1-runtime-kernel",
+        "d1-distribution",
+        "c2-capability",
+        "a3-adapter",
+        "legacy-v1"
+      ]
+    },
+    "trustPaths": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": { "type": "string", "enum": ["runtime", "distribution"] }
+    },
+    "root": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "trust_path", "role", "layer", "reason"],
+      "properties": {
+        "id": { "$ref": "#/definitions/identifier" },
+        "path": { "$ref": "#/definitions/repoPath" },
+        "trust_path": { "type": "string", "enum": ["runtime", "distribution"] },
+        "role": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "layer": { "$ref": "#/definitions/layer" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 500 }
+      }
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "layer",
+        "trust_paths",
+        "root_ids",
+        "physical_loc",
+        "nonblank_loc",
+        "executable_loc"
+      ],
+      "properties": {
+        "path": { "$ref": "#/definitions/repoPath" },
+        "sha256": { "$ref": "#/definitions/sha256" },
+        "layer": { "$ref": "#/definitions/layer" },
+        "trust_paths": { "$ref": "#/definitions/trustPaths" },
+        "root_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 48,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/identifier" }
+        },
+        "physical_loc": { "type": "integer", "minimum": 0 },
+        "nonblank_loc": { "type": "integer", "minimum": 0 },
+        "executable_loc": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "kind",
+        "owner_layer",
+        "trust_paths",
+        "reason",
+        "physical_loc",
+        "bytes"
+      ],
+      "properties": {
+        "path": { "$ref": "#/definitions/repoPath" },
+        "sha256": { "$ref": "#/definitions/sha256" },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "schema",
+            "policy",
+            "entry-contract",
+            "entry-template",
+            "hook-config-template",
+            "governance-template"
+          ]
+        },
+        "owner_layer": { "$ref": "#/definitions/layer" },
+        "trust_paths": { "$ref": "#/definitions/trustPaths" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "physical_loc": { "type": "integer", "minimum": 0 },
+        "bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "kind", "resolution", "trust_paths"],
+      "properties": {
+        "from": { "$ref": "#/definitions/repoPath" },
+        "to": { "$ref": "#/definitions/repoPath" },
+        "kind": { "type": "string", "enum": ["import-module", "dot-source", "manual"] },
+        "resolution": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "trust_paths": { "$ref": "#/definitions/trustPaths" }
+      }
+    },
+    "externalDependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "reason", "trust_paths"],
+      "properties": {
+        "id": { "$ref": "#/definitions/identifier" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "trust_paths": { "$ref": "#/definitions/trustPaths" }
+      }
+    },
+    "unresolved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "expression", "reason"],
+      "properties": {
+        "from": { "$ref": "#/definitions/repoPath" },
+        "expression": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 500 }
+      }
+    },
+    "totals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file_count",
+        "physical_loc",
+        "nonblank_loc",
+        "executable_loc",
+        "runtime_file_count",
+        "runtime_executable_loc",
+        "distribution_file_count",
+        "distribution_executable_loc",
+        "duplicate_edge_count",
+        "artifact_count",
+        "artifact_bytes"
+      ],
+      "properties": {
+        "file_count": { "type": "integer", "minimum": 0 },
+        "physical_loc": { "type": "integer", "minimum": 0 },
+        "nonblank_loc": { "type": "integer", "minimum": 0 },
+        "executable_loc": { "type": "integer", "minimum": 0 },
+        "runtime_file_count": { "type": "integer", "minimum": 0 },
+        "runtime_executable_loc": { "type": "integer", "minimum": 0 },
+        "distribution_file_count": { "type": "integer", "minimum": 0 },
+        "distribution_executable_loc": { "type": "integer", "minimum": 0 },
+        "duplicate_edge_count": { "type": "integer", "minimum": 0 },
+        "artifact_count": { "type": "integer", "minimum": 0 },
+        "artifact_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "budgetException": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "added_lines",
+        "reason",
+        "new_trust_assumption",
+        "alternatives",
+        "repayment_plan",
+        "expires_at_milestone"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^KTB-EX-[0-9]{3}$" },
+        "added_lines": { "type": "integer", "minimum": 1 },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "new_trust_assumption": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "alternatives": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 300 }
+        },
+        "repayment_plan": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "expires_at_milestone": { "type": "string", "minLength": 1, "maxLength": 120 }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseline_executable_loc",
+        "current_executable_loc",
+        "delta",
+        "covered_growth",
+        "status",
+        "exceptions"
+      ],
+      "properties": {
+        "baseline_executable_loc": { "type": "integer", "minimum": 0 },
+        "current_executable_loc": { "type": "integer", "minimum": 0 },
+        "delta": { "type": "integer" },
+        "covered_growth": { "type": "integer", "minimum": 0 },
+        "status": { "type": "string", "enum": ["within-baseline", "covered-by-exception", "uncovered-growth"] },
+        "exceptions": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/budgetException" }
+        }
+      }
+    }
+  }
+}

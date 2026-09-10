@@ -1,6 +1,6 @@
 ﻿# 共享运行时收件箱追加脚本。
 # 负责创建规范化 inbox，并追加新的 open 项。
-# 任务 ID 未显式传入时，以 canonical 当前任务为准；仅指针缺失时回退 legacy current-flow。
+# 任务 ID 未显式传入时使用 unknown；不读取历史指针或 current-flow。
 
 [CmdletBinding()]
 param(
@@ -28,7 +28,7 @@ $ErrorActionPreference = 'Stop'
 
 .DESCRIPTION
 该入口会确保 inbox 文件是标准格式，并在追加前清理占位行。
-当调用方未提供 TaskId 时，以 canonical 当前任务为准；只有指针缺失才回退 legacy current-flow。
+当调用方未提供 TaskId 时使用既有 unknown 标识；历史指针和 current-flow 不参与任务身份解析。
 
 .OUTPUTS
 标准状态行，供 wrapper 和测试读取。

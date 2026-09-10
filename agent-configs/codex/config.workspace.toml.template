@@ -1,0 +1,13 @@
+# Qualification-only prototype. install.ps1 does not deploy this project config.
+# Native read-only also blocks v1 lifecycle, build outputs, deletes, and Git writes;
+# do not use this template as the default Desktop profile until those paths have an equivalent controlled surface.
+default_permissions = ":read-only"
+
+[mcp_servers.harness_write]
+command = "{PWSH_EXE}"
+args = ["-NoLogo", "-NoProfile", "-NonInteractive", "-File", "{REPO_ROOT}\\scripts\\harness-write-mcp.ps1", "-RepoRoot", "{REPO_ROOT}", "-WorkspaceRoot", "{WORKSPACE_ROOT}"]
+required = true
+enabled_tools = ["write_file"]
+
+[mcp_servers.harness_write.tools.write_file]
+approval_mode = "approve"

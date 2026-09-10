@@ -500,7 +500,7 @@ if ($triageBroadExit -eq 0 -or $triageBroadAfter -notmatch '\|\s*open\s*\|') {
     Add-Check 'triage rejects a shared bound-task route and row_id selects one full-row identity'
 }
 
-$autoTaskCaseRoot = Join-Path $tmpRoot 'canonical-pointer-precedence'
+$autoTaskCaseRoot = Join-Path $tmpRoot 'no-implicit-legacy-identity'
 if (Test-Path -LiteralPath $autoTaskCaseRoot) {
     Remove-Item -LiteralPath $autoTaskCaseRoot -Recurse -Force
 }
@@ -570,11 +570,27 @@ $activeTaskCurrentTaskContent = New-CanonicalCurrentTaskContent `
     -Updated '2026-04-03T12:00:00+08:00' `
     -Writer 'test'
 Set-Content -LiteralPath $autoTaskCurrentTaskPath -Value $activeTaskCurrentTaskContent -Encoding utf8
-if ((Resolve-EntryTaskId -VaultRoot $autoTaskVaultRoot) -ne 'active-task') {
-    Add-Failure 'Resolve-EntryTaskId should prefer a valid active canonical pointer over stale current-flow'
+if ((Resolve-EntryTaskId -VaultRoot $autoTaskVaultRoot) -ne 'unknown') {
+    Add-Failure 'Resolve-EntryTaskId must not infer identity from a valid historical pointer'
 } else {
-    Add-Check 'Resolve-EntryTaskId prefers a valid active canonical pointer over stale current-flow'
+    Add-Check 'Resolve-EntryTaskId ignores a valid historical pointer'
 }
+
+$historyDigests = @($autoTaskCurrentTaskPath,$autoTaskFlowPath | ForEach-Object { (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash })
+$historyLocks = @([IO.File]::Open($autoTaskCurrentTaskPath,'Open','ReadWrite','None'),[IO.File]::Open($autoTaskFlowPath,'Open','ReadWrite','None'))
+try {
+    $implicitResult = Invoke-AppendInbox -VaultRoot $autoTaskVaultRoot -TaskId '' -Type 'inbox-first' -Summary 'Locked history implicit identity' -Source 'sunset-test'
+    $explicitResult = Invoke-AppendInbox -VaultRoot $autoTaskVaultRoot -TaskId 'explicit-v2-task' -Type 'inbox-first' -Summary 'Locked history explicit identity' -Source 'sunset-test'
+    $lockedContent = Get-Content -LiteralPath $autoTaskInboxPath -Raw -Encoding utf8
+    if ($implicitResult.ExitCode -eq 0 -and $explicitResult.ExitCode -eq 0 -and
+        $lockedContent -match '\|\s*sunset-test\s*\|\s*unknown\s*\|\s*inbox-first\s*\|\s*open\s*\|\s*Locked history implicit identity\s*\|' -and
+        $lockedContent -match '\|\s*sunset-test\s*\|\s*explicit-v2-task\s*\|\s*inbox-first\s*\|\s*open\s*\|\s*Locked history explicit identity\s*\|') {
+        Add-Check 'append preserves explicit identity and uses unknown by default without reading locked legacy history'
+    } else { Add-Failure 'append must preserve explicit identity and avoid locked legacy identity readers' }
+} finally { foreach ($handle in $historyLocks) { $handle.Dispose() } }
+$afterHistoryDigests = @($autoTaskCurrentTaskPath,$autoTaskFlowPath | ForEach-Object { (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash })
+if (($historyDigests -join '|') -ceq ($afterHistoryDigests -join '|')) { Add-Check 'inbox capture preserves legacy pointer and flow bytes' }
+else { Add-Failure 'inbox capture changed legacy history' }
 
 $malformedPointerCases = @(
     $activeTaskCurrentTaskContent.Replace('schema_version: current-task-pointer/v1.1', 'schema_version: malformed-pointer/v0')
@@ -589,16 +605,16 @@ foreach ($malformedPointer in $malformedPointerCases) {
     }
 }
 if (-not $malformedPointersRejected) {
-    Add-Failure 'Resolve-EntryTaskId should fail closed when an existing canonical pointer has invalid schema, stage case, or timestamp'
+    Add-Failure 'Resolve-EntryTaskId must not infer identity from malformed history'
 } else {
-    Add-Check 'Resolve-EntryTaskId fails closed when an existing canonical pointer has invalid schema, stage case, or timestamp'
+    Add-Check 'Resolve-EntryTaskId leaves malformed history out of identity resolution'
 }
 
 Remove-Item -LiteralPath $autoTaskCurrentTaskPath -Force
-if ((Resolve-EntryTaskId -VaultRoot $autoTaskVaultRoot) -ne 'sample-task') {
-    Add-Failure 'Resolve-EntryTaskId should use a valid legacy current-flow only when the canonical pointer file is missing'
+if ((Resolve-EntryTaskId -VaultRoot $autoTaskVaultRoot) -ne 'unknown') {
+    Add-Failure 'Resolve-EntryTaskId must not fall back to current-flow when the historical pointer is missing'
 } else {
-    Add-Check 'Resolve-EntryTaskId uses a valid legacy current-flow only when the canonical pointer file is missing'
+    Add-Check 'Resolve-EntryTaskId does not fall back to historical current-flow'
 }
 } finally {
     Remove-DirectoryWithRetry -Path $tmpRoot

@@ -278,7 +278,8 @@ try {
         $e5CommandNames -contains 'entry-router' -and
         $e5CommandNames -notcontains 'using-superpowers' -and
         $null -ne $e5EntryRouterCommand -and
-        ([string]$e5EntryRouterCommand.description) -match 'Canonical entry router') {
+        ([string]$e5EntryRouterCommand.description) -match 'V1 compatibility entry router' -and
+        ([string]$e5EntryRouterCommand.description) -match 'Never load for selected v2 Direct') {
         Add-Check 'E5 entry-router is discovered in default PLAN skill manifest'
     } else {
         Add-Failure ("E5 entry-router manifest discoverability failed, got stdout=[{0}] stderr=[{1}] manifest=[{2}]" -f $e5Result.StdOut, $e5Result.StdErr, $e5ManifestText)
@@ -295,7 +296,8 @@ try {
         $e6IndexText -match '# Skills available at PLAN \(backend hint: codex\)' -and
         $e6IndexText -match '\*\*plan\*\*' -and
         $e6IndexText -match '\*\*entry-router\*\*' -and
-        $e6IndexText -match 'Canonical entry router' -and
+        $e6IndexText -match 'V1 compatibility entry router' -and
+        $e6IndexText -match 'Never load for selected v2 Direct' -and
         $e6IndexText -notmatch 'using-superpowers') {
         Add-Check 'E6 generate-skills-index uses entry-router for default PLAN commands'
     } else {

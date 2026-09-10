@@ -649,7 +649,7 @@ stages:
     if ($workflowDefaultTestResult.ExitCode -eq 0 -and
         $workflowDefaultTestResult.StdOut -eq 'TEST | codex' -and
         $workflowDefaultTestResult.StdErr -match 'resolved tool=codex via workflow-default' -and
-        (Assert-ArtifactHasProfileModel -PlanText $workflowDefaultTestPlan -MirrorText $workflowDefaultTestMirror -Profile 'harness-default-codex' -Model 'gpt-5.5/xhigh') -and
+        (Assert-ArtifactHasProfileModel -PlanText $workflowDefaultTestPlan -MirrorText $workflowDefaultTestMirror -Profile 'harness-default-codex' -Model 'inherit') -and
         $workflowDefaultTestManifest.available_commands.Count -eq 1 -and
         $workflowDefaultTestManifest.available_commands[0].name -eq 'test') {
         Add-Check 'B4b CODE_REVIEW -> TEST workflow-default is Codex-only with test skill'
@@ -682,7 +682,7 @@ stages:
     $compatPassMirror = Read-FileUtf8 -Path (Join-Path $vaultRoot "运行时\tasks\$taskCompatPass.md")
     if ($compatPassResult.ExitCode -eq 0 -and
         $compatPassResult.StdOut -eq 'PLAN_REVIEW | codex' -and
-        (Assert-ArtifactHasProfileModel -PlanText $compatPassPlan -MirrorText $compatPassMirror -Profile 'harness-default-codex' -Model 'gpt-5.5/xhigh')) {
+        (Assert-ArtifactHasProfileModel -PlanText $compatPassPlan -MirrorText $compatPassMirror -Profile 'harness-default-codex' -Model 'inherit')) {
         Add-Check 'C1 explicit tool+profile keeps Phase 1 compatible writeback'
     } else {
         Add-Failure ("C1 explicit tool+profile should preserve Phase 1 behavior, got stdout=[{0}] stderr=[{1}]" -f $compatPassResult.StdOut, $compatPassResult.StdErr)
@@ -755,7 +755,7 @@ stages:
         $f1Result.StdErr -match 'resolved tool=codex via workflow-default' -and
         $f1Result.StdErr -notmatch 'via frontmatter-profile' -and
         $f1Result.StdErr -notmatch 'via cli-' -and
-        (Assert-ArtifactHasProfileModel -PlanText $f1Plan -MirrorText $f1Mirror -Profile 'harness-default-codex' -Model 'gpt-5.5/xhigh')) {
+        (Assert-ArtifactHasProfileModel -PlanText $f1Plan -MirrorText $f1Mirror -Profile 'harness-default-codex' -Model 'inherit')) {
         Add-Check 'F1 workflow-default overrides current frontmatter profile and writes descriptor profile/model back'
     } else {
         Add-Failure ("F1 non-sticky workflow-default case failed, got stdout=[{0}] stderr=[{1}]" -f $f1Result.StdOut, $f1Result.StdErr)
@@ -772,7 +772,7 @@ stages:
     if ($f2Result.ExitCode -eq 0 -and
         $f2Result.StdOut -eq 'PLAN_REVIEW | codex' -and
         $f2Result.StdErr -match 'resolved tool=codex via workflow-default' -and
-        (Assert-ArtifactHasProfileModel -PlanText $f2Plan -MirrorText $f2Mirror -Profile 'harness-default-codex' -Model 'gpt-5.5/xhigh')) {
+        (Assert-ArtifactHasProfileModel -PlanText $f2Plan -MirrorText $f2Mirror -Profile 'harness-default-codex' -Model 'inherit')) {
         Add-Check 'F2 workflow-default remains non-sticky even with a different existing profile/model'
     } else {
         Add-Failure ("F2 non-sticky variant failed, got stdout=[{0}] stderr=[{1}]" -f $f2Result.StdOut, $f2Result.StdErr)

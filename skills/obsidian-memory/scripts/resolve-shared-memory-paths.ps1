@@ -55,11 +55,13 @@ function Find-ParentDirectoryNamed {
 function Get-FlowSharedVaultRoot {
     param([string]$OrchestratorFlowPath)
 
-    if ([string]::IsNullOrWhiteSpace($OrchestratorFlowPath) -or -not (Test-Path -LiteralPath $OrchestratorFlowPath -PathType Leaf)) {
+    if ([string]::IsNullOrWhiteSpace($OrchestratorFlowPath)) {
         return $null
     }
 
-    $match = Select-String -Path $OrchestratorFlowPath -Pattern '^shared_vault_root:\s*(.+)$' -Encoding utf8 | Select-Object -First 1
+    # Explicit history is validated before deriving a Vault from its contents.
+    $OrchestratorFlowPath = Assert-LegacyMemoryFlowPath -Path $OrchestratorFlowPath
+    $match = Select-String -LiteralPath $OrchestratorFlowPath -Pattern '^shared_vault_root:\s*(.+)$' -Encoding utf8 | Select-Object -First 1
     if ($null -eq $match) {
         return $null
     }

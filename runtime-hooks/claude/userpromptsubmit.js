@@ -42,7 +42,7 @@ function main() {
   if (resumePattern.test(blob)) {
     writeJson({
       systemMessage:
-        "Resume trigger detected. Read runtime/recovery-index first. Fallback order: current-task -> interrupted-tasks -> last-session. Bootstrap status is in config/引导状态.md, not for runtime task inference.",
+        "Resume trigger detected. Clarify read-only status versus continued execution, then use the native v2 task entry for explicit recovery. No legacy pointer, flow, or plan fallback; this prompt does not authorize writes.",
     });
     return;
   }

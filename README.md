@@ -1,86 +1,100 @@
-# Dev Harness
+# Requirement-Safe Thin Harness v2
 
-Windows 优先的单仓库开发 harness。它把 `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST` 的可执行阶段、`DONE` frontmatter 终态、共享记忆 `.assistant/`、以及 `docs/tasks/{task_id}/` 产物统一到同一套协议里，当前仓库状态已经包含 Phase 1-7 与 shared-memory v2 的主线能力。
+Windows 优先的轻量工程 harness。新任务先经过 Requirement Gate，再按风险选择 Ask、Direct、Governed 或 Critical。当前 TK-03 源码仅接受 v2 新任务与恢复；旧 v1 task 只作为显式迁移/历史维护输入，不会被隐式迁移或删除。
 
-## 这份 README 面向谁
+## 当前交付状态
 
-- 使用者：把 harness 安装到你的工作区后，按这里的“日常使用”与“阶段推进”工作。
-- 维护者：在本仓库里修改脚本、skills、模板与测试，并用这里的校验命令确认行为没有回退。
+- TK-03 当前源码契约是 v2-only：新任务缺省进入 v2；无效/不可用的 Runtime Default Decision 阻断 `auto`；`disable-v2` 暂停新工作，不回退 v1。
+- 这是用户确认的架构变更，不代表已部署到真实工作区或通过 Release Gate。Qualification、Promotion、Canary、Stable 未由 TK-03 执行；物理删除旧源码仍须十项 Sunset gate 和 exact removal diff 的独立授权。详见 [TK-03 契约](docs/architecture/tk03-v2-only-transition.md)。
+- 入口和架构已经瘦身；本页不声明性能已接近 Bare。
 
 ## 快速开始
 
-### 安装到目标工作区
+### 1. 安装默认 core preset
 
 ```powershell
-# 快捷入口
-pwsh -File .\harness.ps1 -WorkspaceRoot D:\my-project
-
-# 直接安装
-pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\dev-harness
-
-# 显式安装完整 Obsidian/shared-memory vault
-pwsh -File .\install.ps1 -WorkspaceRoot D:\my-project -RepoRoot D:\data\dev-harness -VaultProfile full
+pwsh -File .\install.ps1 `
+  -WorkspaceRoot D:\my-project `
+  -RepoRoot D:\data\dev-harness `
+  -Preset core
 ```
 
-默认安装使用 `VaultProfile auto`：新项目安装 minimal vault；已有完整 `.assistant` vault 的项目继续按 full/preserve 更新，不会自动瘦身或删除旧文件。`VaultProfile` 控制本次安装维护哪些文件，不负责清理已有 vault 内容；需要瘦身时先人工确认再删除旧 full 文件。安装完成后，目标工作区至少会得到：
+`core` 只安装 v2 入口与保护 Hook；`governed` 增加规划与审计，`full` 再提供 Memory、md-html、adapter 等可选能力。三者均不安装 v1 shim、阶段技能或旧任务镜像。历史 v1-only `workflow-team` 不在 full 的当前清单内。安装和更新只要求 PowerShell 与 Git；JavaScript Hook 执行仍需要 Node.js。
 
-- 工作区入口文档：`AGENTS.md`
-- 工作区入口 shim：`.assistant/entry/AGENTS.md`
-- 工作区脚本 shim：`.assistant/entry/advance-stage.ps1`、`.assistant/entry/validate-lite-artifacts.ps1`
-- 最小运行时目录：`.assistant/运行时/tasks/`
-- Claude Code hooks：`runtime-hooks/claude/*.js` 的安装副本
+### 2. 用 Codex 桌面打开项目
 
-安装与更新路径只依赖 PowerShell 和 Git；Node.js 不是 harness 安装前置条件。`.js` hooks 只是被复制到目标位置，不要求安装脚本执行 `node` / `npm` / `npx`。
+用 Codex 桌面打开 `D:\my-project`，直接描述需求。新工作不要求设置 `HARNESS_PROTOCOL`；缺省 `auto` 仅可进入 v2。协议与止损命令如下：
 
-只有显式 `-VaultProfile full`，或 `auto` 检测到既有完整 vault 时，才安装/维护 `.assistant/.obsidian`、`.assistant/工作流`、`.assistant/模板`、`.assistant/配置`、`首页.md`、`MEMORY.md` 和默认运行时指针文件。
+```powershell
+# 只读查看当前新任务协议选择
+pwsh -File .assistant\entry\task.ps1 protocol
 
-宿主侧当前真实行为是：
+# 显式启用 v2 新工作（也可解除暂停）
+pwsh -File .assistant\entry\task.ps1 enable-v2
 
-- repo `skills/` 会同步到 `%USERPROFILE%\.claude\skills`、`%USERPROFILE%\.codex\skills` 与 `%USERPROFILE%\.agents\skills`
-- Claude / Codex 会写入各自的共享 `settings.local.json`；Codex 只写 Harness 托管的 `%USERPROFILE%\.codex\managed_config.toml`
-- 用户私有的 `%USERPROFILE%\.codex\config.toml` 不由安装脚本或 workflow 创建、清理或改写
+# reset 恢复 v2-only auto 准入；disable 暂停新工作
+pwsh -File .assistant\entry\task.ps1 reset-auto
+pwsh -File .assistant\entry\task.ps1 disable-v2
+```
 
-### 日常使用
+选择保存在用户持有的 `.assistant/config/protocol.json`，install/update/uninstall 均保留它。新配置 `harness-protocol-config/v2` 使用 `new_task_protocol=auto|v2` 与 `new_work=enabled|paused`。合法旧 auto/v2 配置保持原 bytes；旧 v1 配置被拒绝，不能被重新解释为 v2 授权。已有有效 v2 artifact 始终优先；无效 v2 或仅有旧 plan 时 fail closed。
 
-安装后的用户视角，日常基本只有 4 件事：
+### 3. 直接描述需求
 
-1. 在目标工作区里发起开发或只读工程请求，让入口文档先判定 `resume-current / switch-existing / new-task / authorized durable inbox-first`；`new-task` 再轻量路由到 `quick / workflow / ask`。
-2. `quick` 直接完成并报告验证；`ask` 是阻塞澄清路由，不写 `docs/tasks/{task_id}/`、不改代码；`workflow` 才进入 `entry-router -> orchestrator` 并写 `docs/tasks/{task_id}/`。
-3. 只有明确继续 / 切换并执行 workflow 时才用 `-SyncOnly -ActivateCurrent` 激活或处理 fallback；read-only inspect/status 只读 identity/runtime/artifact，不写 pointer/mirror、不加载 stage skill。
-4. 会话中断后，明确说“继续”/“恢复并执行”/`resume-and-execute` 才处理 open `[writeback-fallback]` 并恢复执行；裸“恢复一下”/`resume` 若意图不明则 ask，只问状态时仅读取。full vault 项目可按 `.assistant/工作流/恢复协议.md` 的顺序恢复。
+直接说明目标、验收和必要约束；入口根据已确认需求、风险和持久化要求选择：
 
-各 route/stage 的工作纪律见 [`docs/工作流/stage-discipline-matrix.md`](docs/工作流/stage-discipline-matrix.md)。该矩阵只定义思考和审查视角，不新增 stage、frontmatter 字段、provider gate 或 validator hard gate；`quick` 仍是轻量 route，`ask` 仍是阻塞澄清 route，workflow 仍只认 `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`。
+| 结果 | 何时使用 | 最短行为 |
+|---|---|---|
+| Ask | 仍有真正未决的用户/产品/授权决定 | 只澄清阻断项，不写代码或任务状态 |
+| Direct | 需求清楚、私有且可逆的低风险改动 | 理解、修改、聚焦验证、自审、报告；不创建任务产物 |
+| Governed | 需要持久留痕、较高风险或受保护范围 | 使用 v2 task state，并按策略产出 Evidence；计划、审批、回滚或独立审查按需组合 |
+| Critical | 生产、权限、资金、破坏性或不可逆高风险动作 | 在执行/完成前满足计划、Approval、回滚、独立审查、dry-run、验证和 Evidence |
 
-### Optional Context Providers
+只读请求使用 Inspect，保持零写入。`quick` / `workflow` 仅是 Direct / Governed 的兼容别名，不是第二套规则。
+
+默认加载面只有 Host Overlay 和短 Bootstrap。新请求先解析一次准入（显式 v2 也受 pause 控制），再就地分类；不扫描 task/current，也不加载旧 entry-router/orchestrator。Codex 从 workspace `AGENTS.md` 读取契约，Claude global `CLAUDE.md` 携带相同 Bootstrap。
+
+恢复语义保持兼容：明确“继续”或“恢复并执行”才推进；只问状态时保持只读；裸“恢复一下”/`resume` 若意图不明则 ask。
+
+## Evidence、Approval 与受保护动作
+
+Evidence 记录真实执行过的验证、覆盖与缺口，并绑定任务版本和仓库修订；没有执行的检查不能写成通过。Critical 的 Approval、顶层结构化 `dry_run` 和至少一条成功执行 record 还必须绑定同一个运行时重算的 `protected-operation/v1` identity，且 `covers` 非空并包含它；无关成功 no-op、环境/目标/scope 漂移或旧 Critical 记录缺少绑定都会 fail closed。该 identity 只使用任务版本、Contract digest、规范化环境/目标、受保护动作类别、Approval 类型与 scope 等稳定非秘密输入。Approval 是对确定操作的合作式授权记录，不是密码学身份认证；参与独立性判断的 actor/context/base-model 字段拒绝空白字符串。
+
+Core 只内置有限的受保护动作规则：生产破坏性数据库命令，以及 `auth` / `permissions` / `rbac` 路径变更。项目特有风险必须通过严格的 `protected-actions-overlay/v1` 增加，不能靠提示词放宽 core。安装器把 Codex `PreToolUse` 合并到普通用户 `hooks.json`，不写信任记录，也不覆盖企业 `hooks=false` / managed-only 策略；经用户正常信任并启用后，普通文件工具只把目标路径送入 core policy，direct `apply_patch` 严格解析全部 Add/Update/Delete/Move 目标并按 Hook payload 的 `cwd` 做 Workspace containment，`Write`、`Edit`、`MultiEdit`、`NotebookEdit` 不把正文送入 `command_text`。因此用户明确授权的数据库凭证和外部服务 Key 可以持久化到指定 Workspace 配置文件，包括生产配置；该能力通用、版本中立，不依赖 Release Qualification、Vault、KMS 或 Secret Provider。持久化不等于披露：敏感值不得进入回复、日志、Task State、Plan、Evidence、Review、PR、CI artifact、测试 snapshot、文档或无关文件。`Bash` 仍把真实 command text 送入 core；缺少有效 tool workdir/environment 绑定的 shell-form `apply_patch` / `applypatch` 继续 fail closed。缺少 `cwd`、无法解析目标、read-only、Workspace 外路径、受保护路径、操作系统或企业端点拒绝也保持 fail closed；adapter 不从 approval/permission 标签臆造只读保证。
+
+Windows 启动链使用绝对 System32 Windows PowerShell 与安装时固化的 PowerShell 7.3+ 路径；用户 JSON 用显式 writer 精确保留 `BigInteger` 与 decimal。命令、参数和脚本文件均保持明文，不使用 `EncodedCommand`、隐藏窗口、动态求值、改写信任或安全产品绕过。用户目录若包含无法同时由 cmd 与 PowerShell 安全表示的 `` ` $ % ! ^ & | < > ( ) `` 字符，安装会在写入前拒绝。`tests/verify-v2-install-presets.ps1` 证明命令链可解析并产生预期 allow/deny JSON，但不证明 Host 已信任或启用 Hook，也不证明端点产品已放行。企业策略、Hook trust 或端点隔离无法观测时，Capability 保持 `unavailable`；普通 Direct 不把这种不可观测性误写成 Release 失败。宿主 Hook 是 guardrail，不是完整执行边界；Critical 生产动作仍必须交给独立受控执行器。
+
+仓库同时提供 release-only 的 `config.workspace.toml.template` 与 `harness-write-mcp.ps1`，用于验证“原生只读、唯一受控写工具”的确定性边界。受控 writer 固定 RepoRoot/WorkspaceRoot、规范化目标、执行目标 preimage CAS，并对受保护写重新绑定 v2 task/version/profile/Contract/Approval/dry-run；它拒绝 Harness 控制面、自身 RepoRoot 和 NTFS alternate data stream。`install.ps1` 不部署该原型；无法观察时状态保持 `unavailable`，不能写成 active/pass。
+
+## Worktree 与回滚最短路径
+
+- 每个 linked worktree 都要以自己的路径单独安装，例如 `-WorkspaceRoot D:\repo-worktrees\feature-a`；不要复制父工作区的 `.assistant/runtime/current.json` 或 live runtime。
+- 真正的 Git submodule 继续使用父 workspace；独立嵌套仓库即使通过 `git init --separate-git-dir` 保存 metadata，也会按自己的 worktree root 隔离安装，不继承父 current、task 或 Approval。
+- v2 持久任务状态当前只在 Windows 上提供物理工作区锁身份；非 Windows、junction/symlink/folder-mount 祖先与其他 reparse 路径会明确 fail closed，不会退化为词法路径锁。
+- 止损时运行 `.assistant\entry\task.ps1 disable-v2`，暂停新工作；已有 v2 task 的只读状态和恢复不受影响。`enable-v2` 或 `reset-auto` 显式重新准入。`HARNESS_PROTOCOL=v1` 已退休，不再是回滚开关。分发回滚只能使用另行授权的已知良好 v2 版本。
+- 快速上手、Requirement Gate 和持久治理分别见 [`docs/quick-start.md`](docs/quick-start.md)、[`docs/requirement-gate.md`](docs/requirement-gate.md)、[`docs/governed-work.md`](docs/governed-work.md)。
+
+## Optional Context Providers
 
 Context providers 是可选辅助输入，不是 workflow 真相源。内置权威仍是 `docs/tasks/{task_id}/`、当前仓库文件和本地 `.assistant/`；CodeGraph、agentmemory、codedb-mcp 只能提供 advisory context provider 结果，且必须落回真实路径、命令、diff、review finding、Implementation Notes 或 test output。安装、更新和 validation 默认不会安装、注册或连接外部 provider；详细边界见 `docs/工作流/context-provider-boundary.md`，工具入口见 `docs/工具/context-providers.md`。
 
-最常用命令：
+## 维护者与显式持久任务命令
 
 ```powershell
-# Codex-only 默认路径：ExpectedStage 是调用方刚读取的 frontmatter stage
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage>
+# 只读 v2 协议/状态
+pwsh -File .assistant\entry\task.ps1 protocol -TaskId {task_id}
+pwsh -File .assistant\entry\task.ps1 status -TaskId {task_id}
 
-# 显式指定 profile，backend 从 profile.backend 解析
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Profile harness-default-codex
-
-# 显式指定 tool + profile + model
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Tool codex -Profile harness-default-codex -Model gpt-5.5/xhigh
-
-# 仍可显式切到其他合法 backend
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -Tool claudecode
-
-# TEST 按 Conclusion 进入 DONE / IMPLEMENT，可省略 -Tool
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage TEST
-
-# 新建/切换 workflow task：不推进 stage，只同步并显式激活 current
-pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> -SyncOnly -ActivateCurrent
-
-# 单独校验任务产物
-pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId {task_id}
+# 仅在用户明确授权继续执行时恢复已存在的 v2 task
+pwsh -File .assistant\entry\task.ps1 resume-and-execute -TaskId {task_id}
 ```
 
-## 真实任务流程
+旧 plan 必须通过显式 migration dry-run、审核其 digest、再确认导入 `paused`；
+不能用退休的阶段命令释放或恢复旧指针。任务级状态写入仍受 v2 Policy/Approval/Evidence 约束。
+
+## 历史 v1 工作流（不再执行）
+
+以下至“当前仓库清单”之前的 v1 阶段/镜像说明保留作历史阅读，不再是当前执行指令。普通 Runtime 不选择 v1，安装不分发这些 shim，`advance-stage.ps1` 在读旧 plan 或写镜像之前即拒绝。v2 生命周期真相源是 `.assistant/runtime/tasks/<task-id>/task.json`；显式迁移另见 [迁移指南](docs/migration/v1-to-v2.md)。
 
 ### 新任务入口模式路由
 
@@ -129,9 +143,9 @@ pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId {task_id}
 
 局部 HTML 增强只允许用于卡片、对比区、流程区、信息网格；不得输出完整页面，不得把 HTML 放进代码块，不得使用 `script`、`iframe` 或外部 JS。paired reading HTML 默认不含 `doctype`、`html`、`head`、`body` 外壳；完整 HTML 页面只有用户明确要求时才生成。
 
-### 阶段与真相源
+### v1 阶段与真相源
 
-以下阶段只适用于 `mode=workflow` 的新任务，`quick` 不创建阶段状态。
+以下阶段只适用于 v1 `mode=workflow` 的任务，`quick` 不创建阶段状态。
 
 可执行阶段是：
 
@@ -143,7 +157,7 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 
 默认 descriptor 是 Codex-only：`PLAN`、`PLAN_REVIEW`、`IMPLEMENT`、`CODE_REVIEW`、`TEST` 都使用 `harness-default-codex`。`claudecode` 仍是合法 backend，但需要在任务 frontmatter 或推进命令中显式指定。
 
-唯一阶段真相源始终是 `docs/tasks/{task_id}/plan.md` frontmatter（`task_id` / `stage` / `tool` / `updated`，加可选 `tool_profile` / `model`）。字段枚举、约束和完整骨架只在 [`skills/orchestrator/references/lite-writing-guide.md`](skills/orchestrator/references/lite-writing-guide.md) 维护一份，本 README 不重复。
+在 v1 workflow 内，唯一阶段真相源是 `docs/tasks/{task_id}/plan.md` frontmatter（`task_id` / `stage` / `tool` / `updated`，加可选 `tool_profile` / `model`）。字段枚举、约束和完整骨架只在 [`skills/orchestrator/references/lite-writing-guide.md`](skills/orchestrator/references/lite-writing-guide.md) 维护一份，本 README 不重复。
 
 ### 每个阶段写什么
 
@@ -187,13 +201,13 @@ PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST
 - mirror 始终同步实际 stage；active advance 更新 current，background advance 不抢 current；active `DONE` 将 current 重置为 canonical idle，background `DONE` 不改 current
 - runtime ladder 任一步失败都返回非零并追加 `[writeback-fallback]`；只有明确继续 / 切换并执行 workflow 时，resume/switch 才处理 fallback 并用相同 `TaskId/ExpectedStage -SyncOnly` 幂等重放
 
-## `.assistant`、`docs/tasks`、validator、git 的职责
+## 历史 v1 的 `.assistant`、`docs/tasks`、validator、git 职责
 
 ### `docs/tasks/{task_id}/`
 
-这是任务的审阅面与阶段真相源。
+这是 v1 任务的审阅面与阶段真相源。
 
-- `plan.md` frontmatter 是唯一阶段真相源
+- 在 v1 workflow 内，`plan.md` frontmatter 是唯一阶段真相源
 - `plan.md` 的 review / implementation run 是 append-only
 - `test.md` 记录 TEST 结论
 - `spec.md` 是可选补充，不是默认入口
@@ -253,17 +267,17 @@ artifact drift 属于 advisory-first 检查，不是硬 gate：
 - `.assistant/` 里的通用协议若需要进入仓库，应先提升到 `docs/工作流/`、`skills/` 或 `vault-template/`，再由安装/更新路径渲染到目标工作区
 - 仓库历史里可能曾保留 shared-memory migration 相关 `.assistant` 文件；当前索引不再跟踪 `.assistant/` 内容
 
-## 历史 Phase 能力（已并入主线）
+## v1 历史 Phase 能力（仅保留维护源码）
 
-当前仓库已包含 Phase 1-7 与 shared-memory v2 的主线能力。这些约束不再按 phase 单独罗列，而是并入对应单一真相源：
+仓库保留 Phase 1-7 与 shared-memory v2 的历史说明和维护源码；不再用于普通任务执行，下面的链接仅用于理解既有产物：
 
 - plan metadata（`read_first` / `convergence` / `artifacts`）与 review `-Quality` 4-dim score（`completeness` / `consistency` / `accuracy` / `depth`）：见 [`skills/orchestrator/references/lite-writing-guide.md`](skills/orchestrator/references/lite-writing-guide.md) 与 [`docs/工作流/quality-rubric.md`](docs/工作流/quality-rubric.md)
 - `PreCompact` 自检与 single-writer 写回（append 走 `append-runtime-inbox.ps1`，非 append 写回只委托 `advance-stage.ps1`）：见 [`skills/orchestrator/SKILL.md`](skills/orchestrator/SKILL.md)、[`skills/workflow-team/SKILL.md`](skills/workflow-team/SKILL.md) 与 [`docs/工作流/single-writer-precompact.md`](docs/工作流/single-writer-precompact.md)
 - team auto mode 环境变量固定为 `HARNESS_AUTO`；长会话恢复优先看已存在 runtime 指针，full vault 项目再读 `.assistant/工作流/长会话恢复.md`；`spec.md` 可选 `front_keywords`
 
-## 关键入口命令
+## 历史 v1 命令说明（普通生命周期已退休）
 
-### 终端用户最常用
+### 安装、状态与 v1 阶段维护
 
 ```powershell
 # 安装 / 更新
@@ -271,6 +285,8 @@ pwsh -File .\harness.ps1 -WorkspaceRoot <workspace-root>
 pwsh -File .\scripts\update-managed-assets.ps1 -WorkspaceRoot <workspace-root>
 
 # 推进与校验
+pwsh -File .assistant\entry\task.ps1 status
+pwsh -File .assistant\entry\task.ps1 protocol -TaskId {task_id}
 pwsh -File .assistant\entry\advance-stage.ps1 -TaskId {task_id} -ExpectedStage <current-stage> [-SyncOnly] [-ActivateCurrent] [-Tool <backend>] [-Profile <profile>] [-Model <full-model-id>]
 pwsh -File .assistant\entry\validate-lite-artifacts.ps1 -TaskId {task_id} [-Quality]
 
@@ -291,6 +307,12 @@ pwsh -File .\scripts\update-managed-assets.ps1 -WorkspaceRoot <workspace-root> -
 ```
 
 这是显式的 digest-bound TOFU：legacy v1.1 没有历史 payload digest，因此只能绑定当前可读来源、恢复计划与 live identity，不能证明过去从未被篡改。apply 禁止 `-SkipVerify`，只有后续 install 完成且 verifier 精确返回 `STATUS: PASS` 才成功；若 rebaseline 已提交而后续 install 或 verifier 未精确完成，命令以非零 `STATUS: UPDATE_COMMITTED_UNVERIFIED` 返回，不声称 rollback，调用方可按各入口自身的安全校验重试 verify、update 或 uninstall。
+
+### 安装 preset 与旧版 VaultProfile
+
+新安装应使用 `-Preset core|governed|full`。未显式传 preset 的新工作区默认使用 `core`；已安装工作区再次运行安装器时，从最新 manifest 保留原 preset，不会隐式缩减能力。
+
+`-VaultProfile auto|minimal|full` 只保留为旧调用方迁移入口，并会输出弃用提示：`minimal` 映射到 `core`，`full` 映射到 `full`，`auto` 对既有 full vault 保持 preserve；与显式 `-Preset` 同时出现时，`auto` 只是无约束兼容提示，显式 preset 胜出。该参数只控制安装器维护范围，不会自动删除既有 vault 内容。
 
 ### 高级 / 维护入口
 
@@ -348,17 +370,24 @@ pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite quick
 
 # 文档 / 协议核心验证
 pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite core
+
+# 只跑一个 core 分组；可选值见下方说明
+pwsh -NoProfile -NonInteractive -File .\scripts\run-validation.ps1 -Suite core -CoreGroup entry-lifecycle
 ```
 
-`scripts/run-validation.ps1` 是推荐的 quiet validation 入口：外层只启动一次 PowerShell；内部验证脚本用无窗口子进程串行执行，保留每个脚本独立 exit code，同时减少验收阶段反复弹出 PowerShell 窗口。
+`scripts/run-validation.ps1` 是推荐的 quiet validation 入口：从 Windows PowerShell 5.1 调用时，入口只把已声明的固定参数透明转交给 `pwsh`；PowerShell 7.3+ runner 才进入后续验证。每项检查先启动固定、可审计的 tracked supervisor，supervisor 发布 `READY` 后才由父进程加入 Windows kill-on-close Job Object，收到匹配的 `GO` 后再执行目标。父进程仍在运行时，正常结束或超时都会主动终止 Job 并确认 active-process 为零；PowerShell 7 runner 被强停时则由操作系统关闭不可继承的 Job handle，触发 kill-on-close。不支持 Job assignment 时 fail closed。参数只经严格 JSON data request 传递，请求绑定系统临时目录中的随机 token 路径，并在确认归属后、目标进入前删除 request 及其专属空目录；不使用编码命令、动态脚本载荷、隐藏窗口或策略绕过参数。Windows 互操作源码固定在 `scripts/lib/Harness.ValidationJob.cs`。
 
 三档口径：
 
 - `quick`：只跑 `git diff --check` 和 `tests/verify-lite-footprint.ps1`，适合 README / 文档小修后的快速回归。
-- `core`：跑 `git diff --check` 加核心协议脚本，包括 context-provider guardrails、artifact validator、footprint、workflow contracts / descriptor、shared-memory layers、review HTML renderer、skill manifest、AiTeamCode skill contract、tool profile，以及安装路径无 Node/npm/npx 强依赖检查。
+- `core`：跑 `git diff --check`、v2 准入/止损/恢复、Requirement/Policy/TaskState/Evidence/Approval、显式兼容迁移、行为 eval、CI 路由与安装合同；被 Manifest 标记的历史 v1 生命周期测试为 archived/not_run，不计入通过数。
 - `all`：跑 `git diff --check` 加除 `verify-installation.ps1` 外所有 `tests/verify-*.ps1`；需要安装验证时额外传 `-WorkspaceRoot`。
 
-GitHub Actions 在 `main` 与 `codex/harness-distribution` 的 push，以及 pull request 上运行 Windows `Suite all`，并在临时 workspace/user profile 做一次安装验证。job 上限为 30 分钟，单个 verify 脚本上限为 360 秒，为重型 install/uninstall 隔离回归保留稳定余量。CI 不安装、注册或连接外部 provider，也不要求 Node.js。
+`-CoreGroup` 只允许与 `-Suite core` 一起使用，默认值 `all` 从 tracked Manifest catalog 保持 54 个 core 脚本及其顺序；五个可单独执行的分组依次为 `entry-lifecycle`（14）、`evaluation-release`（14）、`install-evidence`（3）、`governance-approval`（3）和 `harness-contracts`（20）。从 Windows PowerShell 5.1 进入时，该参数也会透明转交给 PowerShell 7 runner。
+
+GitHub Actions 的普通 PR 路径由五路 `pr-core-checks` matrix、`changed-optional` 和最终 core 安装回滚组成。所有普通 PR job 都 checkout 精确 PR HEAD，并分别上传一个 `thin-harness-ordinary-ci-receipt/v1` 单文件 artifact；receipt 只含 PR/run、base/head/checkout SHA、固定 check identity、outcome 与 UTC 时间，不含 prompt、credential、raw trace/log 或私人绝对路径。最终 `pr-core` 只有在五个分组精确为 `success` 时才继续；`pr-core-checks` 的每个 matrix leg 与最终 `pr-core` job 上限均为 45 分钟，`changed-optional` 上限为 30 分钟。其他 CI 维护合同见 [`docs/release/default-promotion-gates.md`](docs/release/default-promotion-gates.md)。
+
+协议解析先认已有有效 v2 `task.json`；仅有旧 plan 则提示显式迁移，不读取内容。新任务先验证工作区准入，再使用 `auto|v2` 偏好。`auto` 下缺少 Decision 使用 v2 缺省；存在但无效/不可用的 Decision 必须阻断。Runtime 仍不消费完整 Qualification report，源码默认不等于 Release 或 Sunset Gate 通过。
 
 ### 跑完整 verify 套件
 

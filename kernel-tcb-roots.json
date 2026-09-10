@@ -1,0 +1,220 @@
+{
+  "schema_version": "kernel-tcb-roots/v1",
+  "classification_path": "kernel-component-classification.json",
+  "runtime_roots": [
+    {
+      "id": "entry-contract-compiler",
+      "path": "scripts/generate-entry-contract.ps1",
+      "role": "Compile and verify the canonical Entry Contract bootstrap.",
+      "layer": "k1-runtime-kernel",
+      "reason": "Entry Contract is an irreducible Harness trust responsibility."
+    },
+    {
+      "id": "risk-policy-evaluator",
+      "path": "scripts/lib/Harness.Policy.psm1",
+      "role": "Resolve risk routing and execution-profile requirements.",
+      "layer": "k1-runtime-kernel",
+      "reason": "Risk Routing is an irreducible Harness trust responsibility even though host prose performs the first inline classification hop."
+    },
+    {
+      "id": "task-cli",
+      "path": "scripts/task.ps1",
+      "role": "Requirement, task lifecycle, status, recovery, Evidence, and Approval CLI.",
+      "layer": "k1-runtime-kernel",
+      "reason": "Covers ordinary durable task and status trust paths."
+    },
+    {
+      "id": "status-cli",
+      "path": "scripts/harness-status.ps1",
+      "role": "Read-only Runtime, protocol, host-capability, and protected-policy status projection.",
+      "layer": "k1-runtime-kernel",
+      "reason": "Status is a separate read-only root and must not be inferred from task creation."
+    },
+    {
+      "id": "controlled-write-adapter",
+      "path": "scripts/harness-write-mcp.ps1",
+      "role": "MCP host adapter for Kernel-controlled file writes.",
+      "layer": "a3-adapter",
+      "reason": "Covers the ordinary controlled-write entry independent of Hook activation."
+    },
+    {
+      "id": "claude-pretooluse-adapter",
+      "path": "runtime-hooks/claude/pretooluse.ps1",
+      "role": "Deserialize Claude/Codex tool input and call K1 preflight_action.",
+      "layer": "a3-adapter",
+      "reason": "Host mutation transport remains selected while patch, path, and Policy authority move into Harness.AdapterAction."
+    },
+    {
+      "id": "codex-pretooluse-launcher",
+      "path": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",
+      "role": "Bridge Codex Hook transport to the installed PreToolUse adapter.",
+      "layer": "a3-adapter",
+      "reason": "The launcher fails closed and is part of the installed Codex protected-write path."
+    }
+  ],
+  "distribution_roots": [
+    {
+      "id": "workspace-bootstrap",
+      "path": "harness.ps1",
+      "role": "Bootstrap and reconcile installed Workspace assets, then project status.",
+      "layer": "d1-distribution",
+      "reason": "The Distribution Trust Path is inventoried separately so the complete installer never becomes a K1 dependency or Runtime budget input."
+    }
+  ],
+  "trust_artifacts": [
+    { "path": "agent-configs/claude/CLAUDE.md.template", "kind": "entry-template", "reason": "Claude installed Entry Contract template is hashed by Runtime Default and rendered by the compiler.", "owner_layer": "a3-adapter", "trust_paths": ["runtime", "distribution"] },
+    { "path": "agent-configs/workspace/AGENTS.md.template", "kind": "entry-template", "reason": "Workspace installed Entry Contract template is hashed by Runtime Default and rendered by the compiler.", "owner_layer": "a3-adapter", "trust_paths": ["runtime", "distribution"] },
+    { "path": "modules/distribution/profiles/core.json", "kind": "policy", "reason": "TK-06 central core installation allowlist; grants Distribution transport only, never Runtime authority.", "owner_layer": "d1-distribution", "trust_paths": ["distribution"] },
+    { "path": "modules/distribution/profiles/full.json", "kind": "policy", "reason": "TK-06 central full installation allowlist; module requests cannot expand this grant.", "owner_layer": "d1-distribution", "trust_paths": ["distribution"] },
+    { "path": "modules/distribution/profiles/governed.json", "kind": "policy", "reason": "TK-06 central governed installation allowlist independent of Runtime execution policy.", "owner_layer": "d1-distribution", "trust_paths": ["distribution"] },
+    { "path": "policies/decision-rights.json", "kind": "policy", "reason": "Requirement Gate decision ownership is machine enforced from this policy.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "policies/entry-contract.md", "kind": "entry-contract", "reason": "Canonical Entry Contract prose compiled into installed host and workspace templates.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime", "distribution"] },
+    { "path": "policies/execution-profiles.json", "kind": "policy", "reason": "Defines allowed persistence and capability composition for Runtime profiles.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "policies/protected-actions.json", "kind": "policy", "reason": "Core protected-action rules fail closed before writes.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "policies/risk-rules.json", "kind": "policy", "reason": "Defines risk dimensions, thresholds, triggers, and routing overrides.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/approval.schema.json", "kind": "schema", "reason": "Approval documents are validated before protected completion.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/adapter-kernel-api.schema.json", "kind": "schema", "reason": "The strict four-operation Adapter request and response contract binds the public K1 boundary.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/audit-record.schema.json", "kind": "schema", "reason": "Policy-selected independent audit artifacts use this strict record shape.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/current-pointer.schema.json", "kind": "schema", "reason": "Current task projection and recovery use this strict pointer shape.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/decision-rights.schema.json", "kind": "schema", "reason": "Requirement decision ownership policy is validated before inspection.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/event.schema.json", "kind": "schema", "reason": "Task lifecycle event-log records are schema validated.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/evidence.schema.json", "kind": "schema", "reason": "Evidence Chain completion is bound to this strict document shape.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/host-capabilities.schema.json", "kind": "schema", "reason": "Host capability observations use one strict Runtime document shape.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/distribution-plan.schema.json", "kind": "schema", "reason": "Strict new Distribution desired-state contract validated before installation writes.", "owner_layer": "d1-distribution", "trust_paths": ["distribution"] },
+    { "path": "schemas/install-profile.schema.json", "kind": "schema", "reason": "Strict Profile prevents undeclared transport fields or ambiguous asset grants.", "owner_layer": "d1-distribution", "trust_paths": ["distribution"] },
+    { "path": "schemas/module-manifest-catalog-v1.schema.json", "kind": "schema", "reason": "Distribution validates the published Manifest identity set without executing the C2 constructor.", "owner_layer": "d1-distribution", "trust_paths": ["distribution"] },
+    { "path": "schemas/module-manifest-v1.schema.json", "kind": "schema", "reason": "Frozen v1 Manifest schema validates descriptive capability requests consumed by Distribution.", "owner_layer": "d1-distribution", "trust_paths": ["distribution"] },
+    { "path": "schemas/module-manifest.schema.json", "kind": "schema", "reason": "Frozen v0 Manifest schema validates compatibility metadata without inventing install authority.", "owner_layer": "d1-distribution", "trust_paths": ["distribution"] },
+    { "path": "schemas/mcp-write-file.schema.json", "kind": "schema", "reason": "The MCP adapter advertises and validates one strict controlled-write argument contract.", "owner_layer": "a3-adapter", "trust_paths": ["runtime"] },
+    { "path": "schemas/protected-actions.schema.json", "kind": "schema", "reason": "Core protected-action policy is strictly validated before evaluation.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/protected-actions-overlay.schema.json", "kind": "schema", "reason": "Workspace protected-action overlays cannot weaken core policy and are strictly validated.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/protocol-config.schema.json", "kind": "schema", "reason": "Workspace protocol configuration and Runtime Default inputs use strict validation.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/protocol-config-v2.schema.json", "kind": "schema", "reason": "TK-03 v2-only new-work admission and explicit pause must be strictly validated.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/runtime-default-admission.schema.json", "kind": "schema", "reason": "Current Runtime admits only v2 without rewriting the historical Decision Schema or digest.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/requirement-contract.schema.json", "kind": "schema", "reason": "Task creation and protected writes bind a clear Requirement Contract.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/requirement-inspection.schema.json", "kind": "schema", "reason": "Requirement inspection requests are validated by one strict input envelope.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/runtime-default-decision.schema.json", "kind": "schema", "reason": "Auto protocol selection consumes only this distilled version-neutral Runtime decision.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/runtime-policies.schema.json", "kind": "schema", "reason": "Runtime risk and execution policies are validated as one strict bundle.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/task-step-claim.schema.json", "kind": "schema", "reason": "Durable publication claims are validated before transaction recovery.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/task-state.schema.json", "kind": "schema", "reason": "Durable task state, replay, recovery, and protected writes validate this shape.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/task-transaction.schema.json", "kind": "schema", "reason": "Current and retained legacy journals share a strict compatibility envelope.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "schemas/task-transaction-operations.schema.json", "kind": "schema", "reason": "Transaction operations bind exact ordered step signatures declaratively.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "templates/v2/plan.md.template", "kind": "governance-template", "reason": "Plan-required Governed tasks create a Contract-bound plan from this template.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
+    { "path": "vault-template/entry/AGENTS.md.template", "kind": "entry-template", "reason": "Runtime source identity binds the installed compatibility entry template until v1 Sunset gates are satisfied.", "owner_layer": "a3-adapter", "trust_paths": ["runtime", "distribution"] }
+  ],
+  "manual_edges": [
+    {
+      "from": "harness.ps1",
+      "to": "scripts/update-managed-assets.ps1",
+      "kind": "runtime-invocation",
+      "expression": "Join-Path $RepoRoot 'scripts\\update-managed-assets.ps1'",
+      "reason": "Bootstrap invokes managed-asset reconciliation through Invoke-Step.",
+      "resolution_limit": "The script path is passed through a function parameter, so ordinary Import-Module and dot-source AST edges cannot express it.",
+      "reviewed_by_contract": "TK-00"
+    },
+    {
+      "from": "harness.ps1",
+      "to": "scripts/harness-status.ps1",
+      "kind": "runtime-invocation",
+      "expression": "Join-Path $RepoRoot 'scripts\\harness-status.ps1'",
+      "reason": "Bootstrap projects post-reconciliation status through the canonical status entry.",
+      "resolution_limit": "The script path is passed through Invoke-Step rather than imported or dot-sourced.",
+      "reviewed_by_contract": "TK-00"
+    },
+    {
+      "from": "scripts/update-managed-assets.ps1",
+      "to": "install.ps1",
+      "kind": "runtime-invocation",
+      "expression": "Join-Path $RepoRoot 'install.ps1'",
+      "reason": "Managed reconciliation delegates desired-state application to the current installer.",
+      "resolution_limit": "The executable path is data passed to Invoke-Step.",
+      "reviewed_by_contract": "TK-00"
+    },
+    {
+      "from": "scripts/update-managed-assets.ps1",
+      "to": "tests/verify-installation.ps1",
+      "kind": "runtime-invocation",
+      "expression": "Join-Path $RepoRoot 'tests\\verify-installation.ps1'",
+      "reason": "Managed reconciliation verifies the installed postimage before reporting success.",
+      "resolution_limit": "The verifier path is data passed to Invoke-Step.",
+      "reviewed_by_contract": "TK-00"
+    },
+    {
+      "from": "runtime-hooks/claude/pretooluse.ps1",
+      "to": "scripts/lib/Harness.AdapterAction.psm1",
+      "kind": "dynamic-import",
+      "expression": "Import-Module $module -Force -ErrorAction Stop",
+      "reason": "The installed host adapter renders REPO_ROOT and imports only the strict K1 Adapter Action API.",
+      "resolution_limit": "The tracked source contains a distribution placeholder assigned to a variable, so the generic AST resolver cannot resolve the module path.",
+      "reviewed_by_contract": "TK-05"
+    },
+    {
+      "from": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",
+      "to": "runtime-hooks/claude/pretooluse.ps1",
+      "kind": "rendered-invocation",
+      "expression": "hooks-memory\\pretooluse.ps1",
+      "reason": "The Codex launcher invokes the installed rendered host adapter.",
+      "resolution_limit": "The source path is a CLAUDE_HOME placeholder and resolves only after distribution rendering.",
+      "reviewed_by_contract": "TK-00"
+    },
+    {
+      "from": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",
+      "to": "scripts/lib/Harness.RuntimeKernel.ps1",
+      "kind": "dynamic-import",
+      "expression": ". $kernel",
+      "reason": "The rendered Codex launcher reuses the counted K1 process primitive for bounded UTF-8 adapter invocation.",
+      "resolution_limit": "The tracked source contains a distribution placeholder, so the generic AST resolver cannot resolve the Runtime Kernel path.",
+      "reviewed_by_contract": "TK-05"
+    }
+  ],
+  "external_dependencies": [
+    {
+      "id": "dotnet-base-class-library",
+      "name": ".NET and .NET Framework base class libraries; System.Text.Json on PowerShell 7",
+      "reason": "Strict UTF-8, JSON parsing, cryptography, process, and filesystem primitives are provided by the host runtime. The installed Windows PowerShell 5.1 first hop uses .NET Framework before invoking the pinned PowerShell 7 runtime.",
+      "trust_paths": ["runtime", "distribution"]
+    },
+    {
+      "id": "git-executable",
+      "name": "Git executable",
+      "reason": "Evidence revision binding, Runtime source identity, workspace discovery, and distribution verification invoke Git without treating it as a repository file.",
+      "trust_paths": ["runtime", "distribution"]
+    },
+    {
+      "id": "operating-system-filesystem",
+      "name": "Operating-system filesystem identity, locking, and atomic replacement semantics",
+      "reason": "Containment, reparse rejection, mutexes, atomic replace, and installation convergence depend on OS semantics.",
+      "trust_paths": ["runtime", "distribution"]
+    },
+    {
+      "id": "operating-system-process-tree",
+      "name": "Operating-system owned process-tree termination and Windows System32 taskkill.exe",
+      "reason": "The Windows PowerShell 5.1 launcher lacks Process.Kill(bool); its bounded cleanup invokes the absolute system taskkill executable only for the process it started. Modern hosts use Process.Kill(true). Cleanup is best effort on exceptional OS failure and never establishes successful execution.",
+      "trust_paths": ["runtime", "distribution"]
+    },
+    {
+      "id": "powershell-runtime",
+      "name": "PowerShell 7 runtime and parser; Windows PowerShell 5.1 installed first hop",
+      "reason": "Selected Runtime work and AST dependency analysis use PowerShell 7. The installed Windows Hook launcher first executes in Windows PowerShell 5.1 with compatible argument quoting and owned process-tree cleanup.",
+      "trust_paths": ["runtime", "distribution"]
+    }
+  ],
+  "budget": {
+    "baseline_executable_loc": 3068,
+    "exceptions": [
+      {
+        "id": "KTB-EX-002",
+        "added_lines": 10,
+        "reason": "TK-07 R2 needs asynchronous stdin delivery, one post-start I/O deadline, and a separately bounded cleanup window. The user authorized necessary correctness growth through the existing exception mechanism; Runtime is 3078, not a reset baseline.",
+        "new_trust_assumption": "No new dependency or authority. Existing .NET async pipe I/O and owned OS process cleanup remain host assumptions; bounded waits do not promise arbitrary OS hard-real-time behavior.",
+        "alternatives": [
+          "Synchronous stdin is demonstrably blocked by a live non-reader on both supported first-hop hosts.",
+          "A per-phase full timeout violates the shared deadline; truncating input violates Complete semantics.",
+          "A new process framework or source packing is unnecessary and outside this repair."
+        ],
+        "repayment_plan": "Retain the 3068 baseline and explicit positive delta. Reassess this 10-line allowance at the next explicitly authorized Runtime change; do not delete correctness checks or start extra compression in this repair.",
+        "expires_at_milestone": "Next explicitly authorized Runtime budget review after TK-07 R1/R2 closure"
+      }
+    ]
+  }
+}

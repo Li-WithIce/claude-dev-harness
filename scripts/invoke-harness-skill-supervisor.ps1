@@ -4,6 +4,9 @@ param(
     [string]$TargetScriptPath,
 
     [Parameter(Mandatory = $true)]
+    [string]$RequestPath,
+
+    [Parameter(Mandatory = $true)]
     [string]$OutputPath,
 
     [Parameter(Mandatory = $true)]
@@ -19,14 +22,33 @@ if ($PSVersionTable.PSVersion -lt [version]'7.3') {
     exit 1
 }
 if (-not (Test-Path -LiteralPath $TargetScriptPath -PathType Leaf)) {
-    [Console]::Error.WriteLine("Missing adapter target wrapper: $TargetScriptPath")
+    [Console]::Error.WriteLine("Missing adapter target script: $TargetScriptPath")
     exit 1
 }
 
 $resolvedTargetPath = (Resolve-Path -LiteralPath $TargetScriptPath).Path
-$tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+$dispatcherPath = Join-Path $PSScriptRoot 'invoke-harness-skill-dispatcher.ps1'
+if (-not (Test-Path -LiteralPath $dispatcherPath -PathType Leaf)) {
+    [Console]::Error.WriteLine("Missing tracked adapter dispatcher: $dispatcherPath")
+    exit 1
+}
+$resolvedDispatcherPath = (Resolve-Path -LiteralPath $dispatcherPath).Path
+$tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
+$resolvedRequestPath = [System.IO.Path]::GetFullPath($RequestPath)
 $resolvedOutputPath = [System.IO.Path]::GetFullPath($OutputPath)
-if (-not $resolvedOutputPath.StartsWith($tempRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+$pathComparison = if ($IsWindows) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
+if (-not $resolvedRequestPath.StartsWith($tempRoot, $pathComparison) -or
+    (Split-Path -Leaf $resolvedRequestPath) -cnotmatch '^invoke-harness-skill-request-[0-9a-f]{32}\.json$' -or
+    -not (Test-Path -LiteralPath $resolvedRequestPath -PathType Leaf)) {
+    [Console]::Error.WriteLine('Adapter dispatch request must be an existing JSON file under the system temp directory.')
+    exit 1
+}
+$requestItem = Get-Item -LiteralPath $resolvedRequestPath -Force
+if (($requestItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+    [Console]::Error.WriteLine('Adapter dispatch request must not be a reparse point.')
+    exit 1
+}
+if (-not $resolvedOutputPath.StartsWith($tempRoot, $pathComparison)) {
     [Console]::Error.WriteLine('Adapter backend output path must be under the system temp directory.')
     exit 1
 }
@@ -47,8 +69,7 @@ $psi.RedirectStandardOutput = $true
 $psi.RedirectStandardError = $true
 $psi.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $psi.StandardErrorEncoding = [System.Text.UTF8Encoding]::new($false)
-$psi.CreateNoWindow = $true
-foreach ($argument in @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $resolvedTargetPath)) {
+foreach ($argument in @('-NoProfile', '-NonInteractive', '-File', $resolvedDispatcherPath, '-TargetScriptPath', $resolvedTargetPath, '-RequestPath', $resolvedRequestPath, '-ExpectedOutputPath', $resolvedOutputPath)) {
     $psi.ArgumentList.Add($argument)
 }
 
@@ -129,6 +150,7 @@ try {
                 ($outputItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
                 throw 'adapter target output must be a regular non-reparse file'
             }
+            # Base64 is byte framing for arbitrary backend output only; it is never evaluated or executed.
             $backendOutputBase64 = [System.Convert]::ToBase64String([System.IO.File]::ReadAllBytes($resolvedOutputPath))
         } catch {
             $primaryError = $_
@@ -142,6 +164,14 @@ try {
         }
     } catch {
         $cleanupErrors.Add(('delete backend output: ' + $_.Exception.Message))
+    }
+    try {
+        [System.IO.File]::Delete($resolvedRequestPath)
+        if (Test-Path -LiteralPath $resolvedRequestPath) {
+            throw 'dispatch request still exists after delete'
+        }
+    } catch {
+        $cleanupErrors.Add(('delete dispatch request: ' + $_.Exception.Message))
     }
 }
 

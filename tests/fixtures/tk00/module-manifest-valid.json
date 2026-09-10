@@ -1,0 +1,44 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "memory",
+  "kind": "capability",
+  "description": "Optional memory capability with explicit ownership and validation routing.",
+  "default_activation": false,
+  "dependencies": {
+    "kernel_api": "v1",
+    "modules": []
+  },
+  "requested_capabilities": [
+    "filesystem-read",
+    "filesystem-write"
+  ],
+  "ownership": {
+    "owned_paths": [
+      "skills/obsidian-memory/**"
+    ],
+    "watch_paths": [
+      "scripts/lib/Harness.AtomicWrite.psm1"
+    ]
+  },
+  "entrypoints": {
+    "commands": [
+      "scripts/memory-health.ps1"
+    ],
+    "hooks": [
+      "runtime-hooks/memory/userpromptsubmit.js"
+    ]
+  },
+  "validation": {
+    "owner_tests": [
+      "tests/verify-shared-memory-layers.ps1"
+    ],
+    "quick": [],
+    "core_group": "harness-contracts",
+    "changed": [
+      "tests/verify-shared-memory-layers.ps1"
+    ],
+    "full": [
+      "tests/verify-shared-memory-layers.ps1"
+    ]
+  }
+}

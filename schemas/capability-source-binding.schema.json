@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/capability-source-binding.schema.json",
+  "title": "Capability Source Binding",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "binding_kind",
+    "source_revision",
+    "source_catalog_digest",
+    "digest_algorithm",
+    "module_sources",
+    "artifacts",
+    "binding_digest"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["capability-source-binding/v1"] },
+    "binding_kind": { "type": "string", "enum": ["model", "host", "full"] },
+    "source_revision": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+    "source_catalog_digest": { "$ref": "#/definitions/digest" },
+    "digest_algorithm": { "type": "string", "enum": ["canonical-json/v1"] },
+    "module_sources": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["module_id", "source_digest"],
+        "properties": {
+          "module_id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+          "source_digest": { "$ref": "#/definitions/digest" }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.json$" },
+          "sha256": { "$ref": "#/definitions/digest" }
+        }
+      }
+    },
+    "binding_digest": { "$ref": "#/definitions/digest" }
+  },
+  "definitions": {
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+  }
+}

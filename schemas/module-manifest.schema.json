@@ -1,0 +1,200 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/module-manifest.schema.json",
+  "title": "Harness Module Manifest Phase 0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "module_id",
+    "kind",
+    "description",
+    "default_activation",
+    "dependencies",
+    "requested_capabilities",
+    "ownership",
+    "entrypoints",
+    "validation"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["harness-module/v0"] },
+    "module_id": { "$ref": "#/definitions/moduleId" },
+    "kind": { "type": "string", "enum": ["kernel", "capability", "adapter", "legacy"] },
+    "description": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "default_activation": { "type": "boolean" },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kernel_api", "modules"],
+      "properties": {
+        "kernel_api": { "type": "string", "enum": ["v1"] },
+        "modules": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/moduleId" }
+        }
+      }
+    },
+    "requested_capabilities": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/capability" }
+    },
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owned_paths", "watch_paths"],
+      "properties": {
+        "owned_paths": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/ownedPath" }
+        },
+        "watch_paths": {
+          "type": "array",
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/ownedPath" }
+        }
+      }
+    },
+    "entrypoints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commands", "hooks"],
+      "properties": {
+        "commands": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/trackedPath" }
+        },
+        "hooks": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/trackedPath" }
+        }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner_tests", "quick", "core_group", "changed", "full"],
+      "properties": {
+        "owner_tests": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/trackedPath" }
+        },
+        "quick": { "$ref": "#/definitions/testArray" },
+        "core_group": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "entry-lifecycle",
+                "evaluation-release",
+                "install-evidence",
+                "governance-approval",
+                "harness-contracts"
+              ]
+            },
+            { "type": "null" }
+          ]
+        },
+        "changed": { "$ref": "#/definitions/testArray" },
+        "full": { "$ref": "#/definitions/testArray" },
+        "archived": { "$ref": "#/definitions/testArray" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "kernel" } } },
+      "then": {
+        "properties": {
+          "requested_capabilities": {
+            "not": { "contains": { "enum": ["capability-write"] } }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "adapter" } } },
+      "then": {
+        "properties": {
+          "requested_capabilities": {
+            "not": { "contains": { "enum": ["task-state-write"] } }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "legacy" } } },
+      "then": { "properties": { "default_activation": { "const": false } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "capability" } } },
+      "then": {
+        "properties": {
+          "requested_capabilities": {
+            "not": { "contains": { "enum": ["kernel-policy-write"] } }
+          },
+          "ownership": {
+            "properties": {
+              "owned_paths": {
+                "items": { "not": { "pattern": "^policies(?:/|$)" } }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "moduleId": {
+      "type": "string",
+      "pattern": "^(?!(?:kernel|core|runtime|legacy|none)$)[a-z][a-z0-9-]{1,62}$"
+    },
+    "trackedPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!.*\\\\)(?!.*//)(?!\\.\\.?(?:/|$))(?!.*\\/\\.\\.?(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$"
+    },
+    "ownedPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 243,
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!.*\\\\)(?!.*//)(?!\\.\\.?(?:/|$))(?!.*\\/\\.\\.?(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*(?:/\\*\\*)?$"
+    },
+    "capability": {
+      "type": "string",
+      "enum": [
+        "filesystem-read",
+        "filesystem-write",
+        "network",
+        "process-execution",
+        "task-state-read",
+        "task-state-write",
+        "capability-read",
+        "capability-write",
+        "kernel-policy-read",
+        "kernel-policy-write"
+      ]
+    },
+    "testArray": {
+      "type": "array",
+      "maxItems": 128,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/trackedPath" }
+    }
+  }
+}

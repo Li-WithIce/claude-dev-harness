@@ -1,0 +1,18 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "memory",
+  "kind": "capability",
+  "description": "Capabilities cannot own Kernel Policy.",
+  "default_activation": false,
+  "dependencies": { "kernel_api": "v1", "modules": [] },
+  "requested_capabilities": ["kernel-policy-read"],
+  "ownership": { "owned_paths": ["policies/entry-contract.md"], "watch_paths": [] },
+  "entrypoints": { "commands": [], "hooks": [] },
+  "validation": {
+    "owner_tests": ["tests/verify-shared-memory-layers.ps1"],
+    "quick": [],
+    "core_group": "harness-contracts",
+    "changed": [],
+    "full": []
+  }
+}

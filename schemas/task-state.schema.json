@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/task-state.schema.json",
+  "title": "Task State v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "version",
+    "status",
+    "identity",
+    "intent",
+    "requirement_state",
+    "execution_profile",
+    "persistence",
+    "policies",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["task-state/v2"] },
+    "task_id": { "$ref": "#/definitions/taskId" },
+    "version": { "type": "integer", "minimum": 1 },
+    "status": {
+      "type": "string",
+      "enum": ["blocked", "ready", "running", "verifying", "paused", "done", "failed", "cancelled"]
+    },
+    "identity": { "type": "string", "enum": ["new", "existing", "resume"] },
+    "intent": { "type": "string", "enum": ["read", "write"] },
+    "requirement_state": { "type": "string", "enum": ["clear", "blocked"] },
+    "execution_profile": { "type": "string", "enum": ["inspect", "direct", "governed", "critical"] },
+    "persistence": { "type": "string", "enum": ["ephemeral", "durable"] },
+    "contract_path": { "$ref": "#/definitions/nullableRelativePath" },
+    "contract_digest": { "$ref": "#/definitions/nullableSha256" },
+    "block_reason": { "type": ["string", "null"], "minLength": 1 },
+    "policies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan_required", "approval_required", "rollback_required", "independent_review_required", "verification_required"],
+      "properties": {
+        "plan_required": { "type": "boolean" },
+        "approval_required": { "type": "boolean" },
+        "rollback_required": { "type": "boolean" },
+        "independent_review_required": { "type": "boolean" },
+        "verification_required": { "type": "boolean" },
+        "dry_run_required": { "type": "boolean" }
+      }
+    },
+    "approvals": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^apr_[A-Za-z0-9._-]+$" }
+    },
+    "evidence_path": { "$ref": "#/definitions/nullableRelativePath" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  },
+  "definitions": {
+    "taskId": { "type": "string", "pattern": "^(?!(?:none|idle|unknown)$)[a-z0-9][a-z0-9-]{0,63}$" },
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "nullableSha256": { "oneOf": [{ "$ref": "#/definitions/sha256" }, { "type": "null" }] },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?![A-Za-z]:)(?![/\\\\])(?!.*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$)).+"
+    },
+    "nullableRelativePath": { "oneOf": [{ "$ref": "#/definitions/relativePath" }, { "type": "null" }] }
+  }
+}

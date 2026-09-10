@@ -1,0 +1,173 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/v1-stop-loss-report.schema.json",
+  "title": "Thin Harness v1 stop-loss report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at_utc",
+    "source_revision",
+    "source_dirty",
+    "source_state_stable",
+    "source",
+    "report_run_id",
+    "producer_identity",
+    "producer_mode",
+    "execution",
+    "route_probes",
+    "lifecycle",
+    "results",
+    "status",
+    "reason",
+    "report_digest"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["harness-v1-stop-loss-report/v1"] },
+    "generated_at_utc": { "$ref": "#/definitions/utcDateTime" },
+    "source_revision": { "$ref": "#/definitions/objectId" },
+    "source_dirty": { "type": "boolean" },
+    "source_state_stable": { "type": "boolean" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit_tree_oid", "object_format", "start", "end", "input_digests"],
+      "properties": {
+        "commit_tree_oid": { "$ref": "#/definitions/objectId" },
+        "object_format": { "$ref": "#/definitions/objectFormat" },
+        "start": { "$ref": "#/definitions/sourceState" },
+        "end": { "$ref": "#/definitions/sourceState" },
+        "input_digests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["producer_digest", "task_entry_digest", "advance_stage_digest", "protocol_module_digest", "task_state_module_digest", "atomic_write_digest", "path_digest"],
+          "properties": {
+            "producer_digest": { "$ref": "#/definitions/digest" },
+            "task_entry_digest": { "$ref": "#/definitions/digest" },
+            "advance_stage_digest": { "$ref": "#/definitions/digest" },
+            "protocol_module_digest": { "$ref": "#/definitions/digest" },
+            "task_state_module_digest": { "$ref": "#/definitions/digest" },
+            "atomic_write_digest": { "$ref": "#/definitions/digest" },
+            "path_digest": { "$ref": "#/definitions/digest" }
+          }
+        }
+      }
+    },
+    "report_run_id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "producer_identity": { "type": "string", "enum": ["v1-stop-loss-qualification/v1"] },
+    "producer_mode": { "type": "string", "enum": ["formal", "test-only", "diagnostic-smoke"] },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence_contract", "isolated_workspace", "isolated_profile", "workspace_identity_digest", "profile_identity_digest", "duration_ms", "raw_output_persisted", "auth_bytes_persisted", "private_paths_persisted"],
+      "properties": {
+        "sequence_contract": { "type": "string", "enum": ["environment-v1-disable-v2-existing-v1-existing-v2-v1-lifecycle/v1"] },
+        "isolated_workspace": { "type": "boolean", "const": true },
+        "isolated_profile": { "type": "boolean", "const": true },
+        "workspace_identity_digest": { "$ref": "#/definitions/digest" },
+        "profile_identity_digest": { "$ref": "#/definitions/digest" },
+        "duration_ms": { "type": "integer", "minimum": 1 },
+        "raw_output_persisted": { "type": "boolean", "const": false },
+        "auth_bytes_persisted": { "type": "boolean", "const": false },
+        "private_paths_persisted": { "type": "boolean", "const": false }
+      }
+    },
+    "route_probes": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "additionalItems": false,
+      "items": [
+        { "allOf": [{ "$ref": "#/definitions/routeProbe" }, { "properties": { "probe": { "const": "environment-v1-new-task" } } }] },
+        { "allOf": [{ "$ref": "#/definitions/routeProbe" }, { "properties": { "probe": { "const": "disable-v2-new-task" } } }] },
+        { "allOf": [{ "$ref": "#/definitions/routeProbe" }, { "properties": { "probe": { "const": "existing-v1-artifact" } } }] },
+        { "allOf": [{ "$ref": "#/definitions/routeProbe" }, { "properties": { "probe": { "const": "existing-v2-artifact" } } }] }
+      ]
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "initial_stage", "final_stage", "stage_sequence", "transition_count", "plan_digest_before", "plan_digest_after", "test_report_digest", "unexpected_writes", "reason"],
+      "properties": {
+        "status": { "type": "string", "enum": ["pass", "fail", "not_run"] },
+        "initial_stage": { "type": ["string", "null"], "enum": ["PLAN", null] },
+        "final_stage": { "type": ["string", "null"], "enum": ["DONE", "PLAN", "PLAN_REVIEW", "IMPLEMENT", "CODE_REVIEW", "TEST", null] },
+        "stage_sequence": {
+          "type": "array",
+          "maxItems": 6,
+          "items": { "type": "string", "enum": ["PLAN", "PLAN_REVIEW", "IMPLEMENT", "CODE_REVIEW", "TEST", "DONE"] }
+        },
+        "transition_count": { "type": "integer", "minimum": 0, "maximum": 5 },
+        "plan_digest_before": { "$ref": "#/definitions/nullableDigest" },
+        "plan_digest_after": { "$ref": "#/definitions/nullableDigest" },
+        "test_report_digest": { "$ref": "#/definitions/nullableDigest" },
+        "unexpected_writes": { "type": "integer", "minimum": 0 },
+        "reason": { "type": "string", "enum": ["lifecycle-pass", "lifecycle-failure", "not-run"] }
+      }
+    },
+    "results": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environment_v1_selects_v1", "disable_v2_selects_v1", "existing_v1_artifact_remains_v1", "existing_v2_artifact_remains_v2", "existing_artifacts_unchanged_by_routing", "v1_lifecycle_reaches_done", "v1_stage_order_exact", "runtime_default_untouched", "auth_unchanged", "unrelated_user_config_unchanged", "cleanup_no_residue"],
+      "properties": {
+        "environment_v1_selects_v1": { "type": "boolean" },
+        "disable_v2_selects_v1": { "type": "boolean" },
+        "existing_v1_artifact_remains_v1": { "type": "boolean" },
+        "existing_v2_artifact_remains_v2": { "type": "boolean" },
+        "existing_artifacts_unchanged_by_routing": { "type": "boolean" },
+        "v1_lifecycle_reaches_done": { "type": "boolean" },
+        "v1_stage_order_exact": { "type": "boolean" },
+        "runtime_default_untouched": { "type": "boolean" },
+        "auth_unchanged": { "type": "boolean" },
+        "unrelated_user_config_unchanged": { "type": "boolean" },
+        "cleanup_no_residue": { "type": "boolean" }
+      }
+    },
+    "status": { "type": "string", "enum": ["pass", "fail", "unavailable"] },
+    "reason": { "type": "string", "enum": ["all-stop-loss-checks-passed", "non-formal-producer-mode", "route-or-lifecycle-result-failure"] },
+    "report_digest": { "$ref": "#/definitions/digest" }
+  },
+  "definitions": {
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "nullableDigest": { "oneOf": [{ "$ref": "#/definitions/digest" }, { "type": "null" }] },
+    "objectId": { "type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" },
+    "objectFormat": { "type": "string", "enum": ["sha1", "sha256"] },
+    "utcDateTime": { "type": "string", "format": "date-time", "pattern": "(?:Z|\\+00:00)$" },
+    "sourceState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision", "commit_tree_oid", "object_format", "dirty", "status_entry_count", "status_digest", "state_digest", "state_basis"],
+      "properties": {
+        "revision": { "$ref": "#/definitions/objectId" },
+        "commit_tree_oid": { "$ref": "#/definitions/objectId" },
+        "object_format": { "$ref": "#/definitions/objectFormat" },
+        "dirty": { "type": "boolean" },
+        "status_entry_count": { "type": "integer", "minimum": 0 },
+        "status_digest": { "$ref": "#/definitions/digest" },
+        "state_digest": { "$ref": "#/definitions/digest" },
+        "state_basis": { "type": "string", "enum": ["git-revision-tree-status/v1"] }
+      }
+    },
+    "routeProbe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["probe", "status", "exit_code", "requested_protocol", "detected_protocol", "selected_protocol", "preference_source", "reason_code", "expected_write_kind", "unexpected_writes", "artifact_digest_before", "artifact_digest_after", "command_digest", "output_digest"],
+      "properties": {
+        "probe": { "type": "string", "enum": ["environment-v1-new-task", "disable-v2-new-task", "existing-v1-artifact", "existing-v2-artifact"] },
+        "status": { "type": "string", "enum": ["pass", "fail", "not_run"] },
+        "exit_code": { "type": ["integer", "null"] },
+        "requested_protocol": { "type": "string", "enum": ["v1", "v2"] },
+        "detected_protocol": { "type": ["string", "null"], "enum": ["new", "v1", "v2", null] },
+        "selected_protocol": { "type": ["string", "null"], "enum": ["v1", "v2", null] },
+        "preference_source": { "type": ["string", "null"], "enum": ["HARNESS_PROTOCOL", "workspace-config", "existing-artifact", null] },
+        "reason_code": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,127}$" },
+        "expected_write_kind": { "type": "string", "enum": ["none", "workspace-protocol-config"] },
+        "unexpected_writes": { "type": "integer", "minimum": 0 },
+        "artifact_digest_before": { "$ref": "#/definitions/nullableDigest" },
+        "artifact_digest_after": { "$ref": "#/definitions/nullableDigest" },
+        "command_digest": { "$ref": "#/definitions/digest" },
+        "output_digest": { "$ref": "#/definitions/digest" }
+      }
+    }
+  }
+}

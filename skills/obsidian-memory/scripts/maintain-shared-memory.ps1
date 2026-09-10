@@ -6,6 +6,11 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+if (-not [string]::IsNullOrWhiteSpace($OrchestratorFlowPath)) {
+    [Console]::Error.WriteLine('v1-memory-maintain-flow-retired: invoke historical diagnostics explicitly; maintenance does not read a legacy flow.')
+    exit 2
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $scriptRoot 'resolve-shared-memory-paths.ps1')
 $VaultRoot = Resolve-SharedMemoryVaultRoot -VaultRoot $VaultRoot -OrchestratorFlowPath $OrchestratorFlowPath
@@ -50,6 +55,21 @@ function Get-StepStatus {
     }
 }
 
+# Optional business-memory maintenance never rebuilds or diagnoses task state.
+# Historical health/report remain separately invoked read-only diagnostics.
+$archiveStep = Invoke-Step -Name 'archive' -Path (Join-Path $scriptRoot 'archive-memory-candidates.ps1') -VaultRoot $VaultRoot -OrchestratorFlowPath ''
+Write-Output ('STATUS: {0}' -f (Get-StepStatus -ExitCode $archiveStep.ExitCode))
+Write-Output 'Scope: optional-memory-archive'
+Write-Output ('VaultRoot: {0}' -f $VaultRoot)
+Write-Output 'Steps:'
+Write-Output '- repair: NOT_RUN (v1-memory-repair-retired)'
+Write-Output ('- archive: {0} (exit={1})' -f (Get-StepStatus -ExitCode $archiveStep.ExitCode), $archiveStep.ExitCode)
+Write-Output '- report: NOT_RUN (explicit-history-diagnostic-only)'
+Write-Output '- health: NOT_RUN (explicit-history-diagnostic-only)'
+foreach ($line in $archiveStep.Output) { Write-Output $line }
+exit $archiveStep.ExitCode
+
+# Retained legacy orchestration; unreachable pending separately approved removal.
 $repairScript = Join-Path $scriptRoot 'repair-shared-memory.ps1'
 $archiveScript = Join-Path $scriptRoot 'archive-memory-candidates.ps1'
 $reportScript = Join-Path $scriptRoot 'write-memory-health-report.ps1'

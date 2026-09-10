@@ -1,0 +1,21 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "orphan-module",
+  "kind": "capability",
+  "description": "Missing dependency fixture.",
+  "default_activation": false,
+  "dependencies": { "kernel_api": "v1", "modules": ["absent-module"] },
+  "requested_capabilities": ["filesystem-read"],
+  "ownership": {
+    "owned_paths": ["tests/fixtures/tk02/missing-dependency/orphan-module/module.manifest.json"],
+    "watch_paths": []
+  },
+  "entrypoints": { "commands": [], "hooks": [] },
+  "validation": {
+    "owner_tests": ["tests/verify-hashing-module.ps1"],
+    "quick": [],
+    "core_group": null,
+    "changed": [],
+    "full": []
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "schema_version": "harness-module/v1",
+  "module_id": "unknown-field",
+  "module_version": "1.0.0",
+  "classification_owner": "engineering-validation",
+  "kind": "capability",
+  "description": "Invalid unknown field fixture.",
+  "default_activation": false,
+  "dependencies": { "kernel_api": "v1", "modules": [] },
+  "requested_capabilities": ["filesystem-read"],
+  "ownership": { "owned_paths": ["tests/fixtures/tk04/invalid-schema/unknown-field/**"], "watch_paths": [] },
+  "package": { "code": ["scripts/lib/Harness.Hashing.psm1"], "schemas": [], "tests": ["tests/verify-hashing-module.ps1"], "install_assets": [] },
+  "exports": { "commands": [], "hooks": [], "libraries": ["scripts/lib/Harness.Hashing.psm1"] },
+  "validation": { "owner_tests": ["tests/verify-hashing-module.ps1"], "quick": [], "core_groups": {}, "changed": [], "full": [] },
+  "unexpected": true
+}

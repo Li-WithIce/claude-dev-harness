@@ -1,0 +1,165 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.invalid/schemas/release-full-receipt.schema.json",
+  "title": "Thin Harness Release Full Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "generated_at_utc", "source_revision", "source_dirty", "source_state_stable", "source",
+    "receipt_run_id", "producer_identity", "producer_mode", "workflow", "aggregator_observation", "inputs", "status", "reason", "receipt_digest"
+  ],
+  "properties": {
+    "schema_version": { "const": "harness-release-full-receipt/v1" },
+    "generated_at_utc": { "$ref": "#/definitions/utcDateTime" },
+    "source_revision": { "$ref": "#/definitions/objectId" },
+    "source_dirty": { "type": "boolean" },
+    "source_state_stable": { "type": "boolean" },
+    "source": { "$ref": "#/definitions/source" },
+    "receipt_run_id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "producer_identity": { "const": "release-full-receipt/v1" },
+    "producer_mode": { "type": "string", "enum": ["formal", "test-only"] },
+    "workflow": { "$ref": "#/definitions/workflow" },
+    "aggregator_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "observation_digest", "account_digest", "runner_label_digest"],
+      "properties": {
+        "role": { "const": "aggregator" },
+        "observation_digest": { "$ref": "#/definitions/digest" },
+        "account_digest": { "$ref": "#/definitions/digest" },
+        "runner_label_digest": { "$ref": "#/definitions/digest" }
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exact_head", "release_isolation", "release_model", "release_host", "v1_stop_loss", "lifecycle_core", "lifecycle_governed", "lifecycle_full"],
+      "properties": {
+        "exact_head": { "$ref": "#/definitions/exactHeadInput" },
+        "release_isolation": { "$ref": "#/definitions/releaseIsolationInput" },
+        "release_model": { "$ref": "#/definitions/releaseModelInput" },
+        "release_host": { "$ref": "#/definitions/releaseHostInput" },
+        "v1_stop_loss": { "$ref": "#/definitions/v1StopLossInput" },
+        "lifecycle_core": { "$ref": "#/definitions/lifecycleInput" },
+        "lifecycle_governed": { "$ref": "#/definitions/lifecycleInput" },
+        "lifecycle_full": { "$ref": "#/definitions/lifecycleInput" }
+      }
+    },
+    "status": { "$ref": "#/definitions/status" },
+    "reason": { "$ref": "#/definitions/reason" },
+    "receipt_digest": { "$ref": "#/definitions/digest" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "producer_mode": { "const": "test-only" } } },
+      "then": { "properties": { "status": { "const": "unavailable" }, "reason": { "const": "non-formal-producer-mode" } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "pass" } } },
+      "then": {
+        "properties": {
+          "producer_mode": { "const": "formal" },
+          "source_dirty": { "const": false },
+          "source_state_stable": { "const": true },
+          "workflow": { "properties": { "conclusion": { "const": "success" } } },
+          "inputs": {
+            "properties": {
+              "exact_head": { "properties": { "status": { "const": "pass" } } },
+              "release_isolation": { "properties": { "status": { "const": "pass" } } },
+              "release_model": { "properties": { "status": { "const": "pass" } } },
+              "release_host": { "properties": { "status": { "const": "pass" } } },
+              "v1_stop_loss": { "properties": { "status": { "const": "pass" } } },
+              "lifecycle_core": { "properties": { "status": { "const": "pass" } } },
+              "lifecycle_governed": { "properties": { "status": { "const": "pass" } } },
+              "lifecycle_full": { "properties": { "status": { "const": "pass" } } }
+            }
+          },
+          "reason": { "const": "all-release-full-checks-passed" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "producer_mode": { "const": "formal" }, "status": { "const": "fail" } } },
+      "then": { "properties": { "reason": { "const": "release-full-check-failed" } } }
+    },
+    {
+      "if": { "properties": { "producer_mode": { "const": "formal" }, "status": { "const": "unavailable" } } },
+      "then": { "properties": { "reason": { "const": "release-full-check-unavailable" } } }
+    }
+  ],
+  "definitions": {
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "objectId": { "type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" },
+    "objectFormat": { "type": "string", "enum": ["sha1", "sha256"] },
+    "utcDateTime": { "type": "string", "format": "date-time", "pattern": "(?:Z|\\+00:00)$" },
+    "status": { "type": "string", "enum": ["pass", "fail", "unavailable"] },
+    "reason": { "type": "string", "enum": ["all-release-full-checks-passed", "non-formal-producer-mode", "release-full-check-failed", "release-full-check-unavailable"] },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit_tree_oid", "object_format", "start", "end", "input_digests"],
+      "properties": {
+        "commit_tree_oid": { "$ref": "#/definitions/objectId" },
+        "object_format": { "$ref": "#/definitions/objectFormat" },
+        "start": { "$ref": "#/definitions/sourceState" },
+        "end": { "$ref": "#/definitions/sourceState" },
+        "input_digests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["producer_digest", "receipt_schema_digest", "observation_schema_digest", "rollout_evidence_digest"],
+          "properties": {
+            "producer_digest": { "$ref": "#/definitions/digest" },
+            "receipt_schema_digest": { "$ref": "#/definitions/digest" },
+            "observation_schema_digest": { "$ref": "#/definitions/digest" },
+            "rollout_evidence_digest": { "$ref": "#/definitions/digest" }
+          }
+        }
+      }
+    },
+    "sourceState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision", "commit_tree_oid", "object_format", "dirty", "status_entry_count", "status_digest", "state_digest", "state_basis"],
+      "properties": {
+        "revision": { "$ref": "#/definitions/objectId" },
+        "commit_tree_oid": { "$ref": "#/definitions/objectId" },
+        "object_format": { "$ref": "#/definitions/objectFormat" },
+        "dirty": { "type": "boolean" },
+        "status_entry_count": { "type": "integer", "minimum": 0 },
+        "status_digest": { "$ref": "#/definitions/digest" },
+        "state_digest": { "$ref": "#/definitions/digest" },
+        "state_basis": { "const": "git-revision-tree-status/v1" }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "run_attempt", "job_name", "checkout_sha", "conclusion"],
+      "properties": {
+        "run_id": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+        "run_attempt": { "type": "integer", "minimum": 1 },
+        "job_name": { "const": "release-full" },
+        "checkout_sha": { "$ref": "#/definitions/objectId" },
+        "conclusion": { "type": "string", "enum": ["success", "failure", "neutral", "cancelled", "skipped", "timed_out", "action_required", "stale", "startup_failure"] }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_contract", "raw_digest", "document_digest", "source_revision", "status"],
+      "properties": {
+        "evidence_contract": { "type": "string" },
+        "raw_digest": { "$ref": "#/definitions/digest" },
+        "document_digest": { "$ref": "#/definitions/digest" },
+        "source_revision": { "$ref": "#/definitions/objectId" },
+        "status": { "$ref": "#/definitions/status" }
+      }
+    },
+    "exactHeadInput": { "allOf": [{ "$ref": "#/definitions/input" }, { "properties": { "evidence_contract": { "const": "thin-harness-exact-head-engineering-evidence/v1" } } }] },
+    "releaseIsolationInput": { "allOf": [{ "$ref": "#/definitions/input" }, { "properties": { "evidence_contract": { "const": "harness-release-isolation-report/v1" } } }] },
+    "releaseModelInput": { "allOf": [{ "$ref": "#/definitions/input" }, { "properties": { "evidence_contract": { "const": "harness-release-model-receipt/v1" } } }] },
+    "releaseHostInput": { "allOf": [{ "$ref": "#/definitions/input" }, { "properties": { "evidence_contract": { "const": "harness-release-host-receipt/v1" } } }] },
+    "v1StopLossInput": { "allOf": [{ "$ref": "#/definitions/input" }, { "properties": { "evidence_contract": { "const": "harness-v1-stop-loss-report/v1" } } }] },
+    "lifecycleInput": { "allOf": [{ "$ref": "#/definitions/input" }, { "properties": { "evidence_contract": { "const": "harness-preset-lifecycle-report/v1" } } }] }
+  }
+}

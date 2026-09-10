@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/ordinary-ci-receipt.schema.json",
+  "title": "Thin Harness ordinary CI receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "pull_request_number",
+    "run_id",
+    "run_attempt",
+    "head_sha",
+    "base_sha",
+    "checkout_sha",
+    "job_id",
+    "check_name",
+    "outcome",
+    "created_at_utc"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["thin-harness-ordinary-ci-receipt/v1"] },
+    "pull_request_number": { "type": "integer", "minimum": 1 },
+    "run_id": { "type": "string", "pattern": "^[1-9][0-9]{0,19}$" },
+    "run_attempt": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+    "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "checkout_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "job_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+    "check_name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,127}$" },
+    "outcome": { "type": "string", "enum": ["success", "failure", "cancelled", "skipped"] },
+    "created_at_utc": { "type": "string", "format": "date-time" }
+  }
+}

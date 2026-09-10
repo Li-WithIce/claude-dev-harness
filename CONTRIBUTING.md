@@ -20,6 +20,14 @@ Run the core suite before submitting workflow, installer, validator, or provider
 pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation.ps1 -Suite core
 ```
 
+Run every repository verifier that does not require an explicit workspace root:
+
+```powershell
+pwsh -NoLogo -NoProfile -NonInteractive -File scripts/run-validation.ps1 -Suite all -CheckTimeoutSeconds 900
+```
+
+`verify-installation.ps1` is intentionally outside the default no-argument `all` loop. Exercise installation lifecycle coverage with `run-isolated-install-smoke.ps1` for each of the `core`, `governed`, and `full` presets. After `.github/workflows/full-validation.yml` reaches the default branch, it provides daily and input-free manual full validation. This is ordinary engineering validation, not Release Qualification.
+
 Provider tools are optional advisory inputs. Installation, updates, and validation must not install, register, or connect external providers by default.
 
 Do not mutate user-private Claude, Codex, or MCP configuration unless a task explicitly requires it and the change is reviewed as part of the diff.

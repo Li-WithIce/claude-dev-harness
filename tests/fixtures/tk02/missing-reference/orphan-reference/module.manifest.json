@@ -1,0 +1,21 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "orphan-reference",
+  "kind": "capability",
+  "description": "Missing tracked verifier reference fixture.",
+  "default_activation": false,
+  "dependencies": { "kernel_api": "v1", "modules": [] },
+  "requested_capabilities": ["filesystem-read"],
+  "ownership": {
+    "owned_paths": ["tests/fixtures/tk02/missing-reference/orphan-reference/module.manifest.json"],
+    "watch_paths": []
+  },
+  "entrypoints": { "commands": [], "hooks": [] },
+  "validation": {
+    "owner_tests": ["tests/verify-does-not-exist.ps1"],
+    "quick": [],
+    "core_group": null,
+    "changed": [],
+    "full": []
+  }
+}

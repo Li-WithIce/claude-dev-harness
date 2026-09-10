@@ -1,4 +1,16 @@
 {
+  "PreToolUse": [
+    {
+      "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "pwsh -NoProfile -NonInteractive -File \"{CLAUDE_HOME}\\hooks-memory\\pretooluse.ps1\"",
+          "timeout": 15
+        }
+      ]
+    }
+  ],
   "UserPromptSubmit": [
     {
       "hooks": [

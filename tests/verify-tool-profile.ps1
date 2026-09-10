@@ -168,6 +168,10 @@ function Test-FullModelId {
     }
 
     $normalized = $Model.Trim()
+    if ($normalized -ceq 'inherit') {
+        return $true
+    }
+
     if ($normalized -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*[A-Za-z0-9]$') {
         return $false
     }
@@ -309,10 +313,10 @@ try {
     $advancedMirror = Get-Content -LiteralPath (Join-Path $vaultRoot "运行时\tasks\$taskAdvance.md") -Raw -Encoding utf8
     if ($advanceOutput -eq 'PLAN_REVIEW | codex' -and
         $advancedPlan -match '(?m)^tool_profile:\s*harness-default-codex\s*$' -and
-        $advancedPlan -match '(?m)^model:\s*gpt-5\.5/xhigh\s*$' -and
+        $advancedPlan -match '(?m)^model:\s*inherit\s*$' -and
         $advancedMirror -match '(?m)^tool_profile:\s*harness-default-codex\s*$' -and
-        $advancedMirror -match [regex]::Escape('- assigned_model: gpt-5.5/xhigh')) {
-        Add-Check 'advance-stage writes profile default model into plan and mirror'
+        $advancedMirror -match [regex]::Escape('- assigned_model: inherit')) {
+        Add-Check 'advance-stage writes inherited profile model into plan and mirror'
     } else {
         Add-Failure 'advance-stage should write profile and model into plan and mirror'
     }

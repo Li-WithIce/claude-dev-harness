@@ -1,0 +1,18 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "trust-kernel",
+  "kind": "kernel",
+  "description": "Kernel modules cannot request capability writes.",
+  "default_activation": false,
+  "dependencies": { "kernel_api": "v1", "modules": [] },
+  "requested_capabilities": ["capability-write"],
+  "ownership": { "owned_paths": ["scripts/lib/Harness.Path.psm1"], "watch_paths": [] },
+  "entrypoints": { "commands": [], "hooks": [] },
+  "validation": {
+    "owner_tests": ["tests/verify-thin-trust-kernel-contracts.ps1"],
+    "quick": [],
+    "core_group": "harness-contracts",
+    "changed": [],
+    "full": []
+  }
+}

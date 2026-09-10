@@ -1,0 +1,53 @@
+name: Full Validation
+
+on:
+  schedule:
+    - cron: '43 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  all-verifiers:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run all repository verifiers
+        shell: pwsh
+        run: >
+          pwsh -NoLogo -NoProfile -NonInteractive
+          -File scripts/run-validation.ps1
+          -Suite all
+          -CheckTimeoutSeconds 900
+
+  preset-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        preset:
+          - core
+          - governed
+          - full
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run isolated preset lifecycle smoke
+        shell: pwsh
+        run: >
+          pwsh -NoLogo -NoProfile -NonInteractive
+          -File scripts/run-isolated-install-smoke.ps1
+          -RepoRoot $PWD
+          -Preset ${{ matrix.preset }}

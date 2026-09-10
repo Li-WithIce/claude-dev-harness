@@ -1,0 +1,51 @@
+{
+  "schema_version": "decision-rights/v1",
+  "authority_rank": {
+    "current-user-message": 0,
+    "user-confirmed": 0,
+    "approved-spec": 1,
+    "project-policy": 2,
+    "project-product-decision": 2,
+    "project-architecture-decision": 3,
+    "repo-evidence": 4,
+    "engineering-convention": 5
+  },
+  "categories": {
+    "product": [
+      "user_visible_behavior",
+      "authorization_semantics",
+      "money_and_billing",
+      "state_transition",
+      "data_retention_and_deletion",
+      "notification_semantics",
+      "sensitive_data_exposure",
+      "public_api_behavior",
+      "backward_compatibility",
+      "acceptance_criteria",
+      "scope_and_non_goals"
+    ],
+    "architecture": [
+      "service_boundary",
+      "new_infrastructure_dependency",
+      "database_migration_strategy",
+      "security_architecture",
+      "public_protocol_design",
+      "irreversible_technical_direction"
+    ],
+    "agent": [
+      "private_naming",
+      "private_code_structure",
+      "test_file_organization",
+      "existing_helper_selection",
+      "behavior_equivalent_algorithm",
+      "local_reversible_refactor"
+    ]
+  },
+  "default_unknown_owner": "product",
+  "agent_decision_constraints": {
+    "must_be_reversible": true,
+    "must_not_change_external_behavior": true,
+    "must_follow_repo_conventions": true,
+    "must_be_verified": true
+  }
+}

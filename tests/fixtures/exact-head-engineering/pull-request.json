@@ -1,0 +1,14 @@
+{
+  "number": 2,
+  "state": "open",
+  "draft": true,
+  "merged": false,
+  "base": {
+    "ref": "codex/harness-v2-public-optin-beta",
+    "sha": "__BASE_SHA__"
+  },
+  "head": {
+    "ref": "codex/harness-v2-default-promotion",
+    "sha": "__HEAD_SHA__"
+  }
+}

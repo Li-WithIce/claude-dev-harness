@@ -1,0 +1,57 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "task-governance",
+  "kind": "kernel",
+  "description": "Approval, protected action, Evidence, governance, and durable task-state enforcement.",
+  "default_activation": true,
+  "dependencies": {
+    "kernel_api": "v1",
+    "modules": ["thin-trust-kernel"]
+  },
+  "requested_capabilities": ["filesystem-read", "filesystem-write", "kernel-policy-read", "task-state-read", "task-state-write"],
+  "ownership": {
+    "owned_paths": [
+      "modules/task-governance/**",
+      "policies/decision-rights.json",
+      "policies/execution-profiles.json",
+      "policies/protected-actions.json",
+      "policies/risk-rules.json",
+      "runtime-hooks/core/pretooluse.ps1",
+      "schemas/adapter-kernel-api.schema.json",
+      "scripts/lib/Harness.AdapterAction.psm1",
+      "scripts/lib/Harness.AdapterDelegation.psm1",
+      "scripts/lib/Harness.Approval.psm1",
+      "scripts/lib/Harness.ControlledWrite.psm1",
+      "scripts/lib/Harness.Evidence.psm1",
+      "scripts/lib/Harness.Governance.psm1",
+      "scripts/lib/Harness.Policy.psm1",
+      "scripts/lib/Harness.ProtectedAction.psm1",
+      "scripts/lib/Harness.TaskMigration.psm1",
+      "scripts/lib/Harness.TaskState.psm1"
+    ],
+    "watch_paths": [
+      "scripts/lib/Harness.AtomicWrite.psm1",
+      "scripts/lib/Harness.Hashing.psm1",
+      "scripts/lib/Harness.Path.psm1"
+    ]
+  },
+  "entrypoints": {
+    "commands": [],
+    "hooks": ["runtime-hooks/core/pretooluse.ps1"]
+  },
+  "validation": {
+    "owner_tests": [
+      "tests/verify-v2-governed-audit.ps1",
+      "tests/verify-v2-approval.ps1",
+      "tests/verify-v2-readonly-zero-write.ps1"
+    ],
+    "quick": [],
+    "core_group": "governance-approval",
+    "changed": [],
+    "full": [
+      "tests/verify-v2-governed-audit.ps1",
+      "tests/verify-v2-approval.ps1",
+      "tests/verify-v2-readonly-zero-write.ps1"
+    ]
+  }
+}

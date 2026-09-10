@@ -1,0 +1,67 @@
+{
+  "schema_version": "harness-module/v1",
+  "module_id": "team",
+  "module_version": "1.0.0",
+  "classification_owner": "team",
+  "kind": "capability",
+  "description": "Retained Team preset maintenance and independent transport validation; Stage-based Team execution is retired.",
+  "default_activation": false,
+  "dependencies": {
+    "kernel_api": "v1",
+    "modules": ["entry-kernel"]
+  },
+  "requested_capabilities": ["filesystem-read", "filesystem-write", "process-execution"],
+  "ownership": {
+    "owned_paths": [
+      "docs/team-write-authority.md",
+      "modules/team/**",
+      "scripts/export-team-preset.ps1",
+      "skills/workflow-team/**",
+      "tests/verify-adapter-transport.ps1",
+      "tests/verify-team-preset.ps1"
+    ],
+    "watch_paths": [
+      "schemas/adapter-kernel-api.schema.json",
+      "scripts/invoke-harness-skill-dispatcher.ps1",
+      "scripts/invoke-harness-skill-supervisor.ps1",
+      "scripts/invoke-harness-skill.ps1",
+      "scripts/lib/Harness.AdapterDelegation.psm1"
+    ]
+  },
+  "package": {
+    "code": [
+      "scripts/export-team-preset.ps1",
+      "skills/workflow-team/scripts/**"
+    ],
+    "schemas": [],
+    "tests": [
+      "tests/verify-adapter-transport.ps1",
+      "tests/verify-team-preset.ps1"
+    ],
+    "install_assets": [
+      "docs/team-write-authority.md",
+      "skills/workflow-team/SKILL.md"
+    ]
+  },
+  "exports": {
+    "commands": ["scripts/export-team-preset.ps1", "skills/workflow-team/scripts/spawn-team.ps1"],
+    "hooks": [],
+    "libraries": []
+  },
+  "validation": {
+    "owner_tests": [
+      "tests/verify-adapter-transport.ps1",
+      "tests/verify-team-preset.ps1"
+    ],
+    "quick": [],
+    "core_groups": {},
+    "changed": [
+      "tests/verify-adapter-transport.ps1",
+      "tests/verify-team-preset.ps1"
+    ],
+    "full": [
+      "tests/verify-adapter-transport.ps1",
+      "tests/verify-team-preset.ps1"
+    ]
+  }
+}

@@ -1,0 +1,164 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/rollout-eligibility-v2.schema.json",
+  "title": "Thin Harness rollout eligibility v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "phase",
+    "source_revision",
+    "source_digest",
+    "generator_digest",
+    "generated_at_utc",
+    "host",
+    "review_payload_digest",
+    "review_receipt",
+    "provenance_status",
+    "gates",
+    "eligible",
+    "report_digest"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["rollout-eligibility/v2"] },
+    "phase": { "type": "string", "enum": ["canary-candidate", "final-default"] },
+    "source_revision": { "$ref": "#/definitions/revision" },
+    "source_digest": { "$ref": "#/definitions/digest" },
+    "generator_digest": { "$ref": "#/definitions/digest" },
+    "generated_at_utc": { "type": "string", "format": "date-time" },
+    "host": { "$ref": "#/definitions/host" },
+    "review_payload_digest": { "$ref": "#/definitions/digest" },
+    "review_receipt": { "$ref": "#/definitions/reviewReceipt" },
+    "provenance_status": { "type": "string", "enum": ["verified", "test-only"] },
+    "gates": { "$ref": "#/definitions/gates" },
+    "eligible": { "type": "boolean" },
+    "report_digest": { "$ref": "#/definitions/digest" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "phase": { "const": "canary-candidate" } } },
+      "then": { "properties": { "eligible": { "const": false } } }
+    },
+    {
+      "if": { "properties": { "phase": { "const": "final-default" } } },
+      "then": { "properties": { "eligible": { "const": true } } }
+    }
+  ],
+  "definitions": {
+    "revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "identity": { "type": "string", "minLength": 1, "pattern": "\\S" },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["product", "observed_version", "hook_contract", "invocation_telemetry_contract", "request_send_contract"],
+      "properties": {
+        "product": { "type": "string", "const": "codex-cli-service" },
+        "observed_version": { "type": "string", "const": "0.144.4" },
+        "hook_contract": { "type": "string", "const": "codex-0.144.4-environment-shell-hook/v1" },
+        "invocation_telemetry_contract": { "type": "string", "const": "codex-invocation-telemetry/v2" },
+        "request_send_contract": { "type": "string", "const": "codex-0.144.4-successful-websocket-send/v2" }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "evidence_contract", "artifact_path", "evidence_digest", "source_revision", "producer_identity"],
+      "properties": {
+        "status": { "type": "string", "enum": ["pass", "fail", "blocked", "unavailable", "simulated", "not_run", "pending", "skipped", "manual"] },
+        "evidence_contract": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]*/v[1-9][0-9]*$" },
+        "artifact_path": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "evidence_digest": { "$ref": "#/definitions/digest" },
+        "source_revision": { "$ref": "#/definitions/revision" },
+        "producer_identity": { "$ref": "#/definitions/identity" }
+      }
+    },
+    "reviewReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "reviewed_payload_digest",
+        "source_revision",
+        "phase",
+        "reviewer_actor_id",
+        "reviewer_context_id",
+        "reviewer_model",
+        "read_only",
+        "verdict",
+        "findings",
+        "created_at_utc",
+        "receipt_digest"
+      ],
+      "properties": {
+        "schema_version": { "type": "string", "enum": ["rollout-report-review-receipt/v1"] },
+        "reviewed_payload_digest": { "$ref": "#/definitions/digest" },
+        "source_revision": { "$ref": "#/definitions/revision" },
+        "phase": { "type": "string", "enum": ["canary-candidate", "final-default"] },
+        "reviewer_actor_id": { "$ref": "#/definitions/identity" },
+        "reviewer_context_id": { "$ref": "#/definitions/identity" },
+        "reviewer_model": { "$ref": "#/definitions/identity" },
+        "read_only": { "type": "boolean", "const": true },
+        "verdict": { "type": "string", "enum": ["pass", "revise"] },
+        "findings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["p0", "p1", "p2"],
+          "properties": {
+            "p0": { "type": "integer", "minimum": 0 },
+            "p1": { "type": "integer", "minimum": 0 },
+            "p2": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "created_at_utc": { "type": "string", "format": "date-time" },
+        "receipt_digest": { "$ref": "#/definitions/digest" }
+      }
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "DP-G00-EXACT-HEAD-ENGINEERING-CI",
+        "DP-G01-MODEL40",
+        "DP-G02-COGNITIVE-HOST-3X3",
+        "DP-G03-INSTALLED-DESKTOP-HOST-3X3",
+        "DP-G04-CODEX-HOME-RUNNER-ISOLATION",
+        "DP-G05-V2-BARE-1.25",
+        "DP-G06-REQUEST-SEND-REDUCTION",
+        "DP-G07-DISTINCT-INSTALLED-DESKTOP-GATE",
+        "DP-G09-RELEASE-MODEL",
+        "DP-G10-RELEASE-HOST",
+        "DP-G11-RELEASE-FULL",
+        "DP-G12-ROLLOUT-ELIGIBILITY-REPORT",
+        "DP-G13-PROMOTION-AUTO-PROBE",
+        "DP-G14-V1-STOP-LOSS",
+        "DP-G15-CANARY",
+        "DP-G16-STABLE-DECISION",
+        "DP-G18-CORE-LIFECYCLE",
+        "DP-G19-GOVERNED-LIFECYCLE",
+        "DP-G20-FULL-LIFECYCLE"
+      ],
+      "properties": {
+        "DP-G00-EXACT-HEAD-ENGINEERING-CI": { "$ref": "#/definitions/gate" },
+        "DP-G01-MODEL40": { "$ref": "#/definitions/gate" },
+        "DP-G02-COGNITIVE-HOST-3X3": { "$ref": "#/definitions/gate" },
+        "DP-G03-INSTALLED-DESKTOP-HOST-3X3": { "$ref": "#/definitions/gate" },
+        "DP-G04-CODEX-HOME-RUNNER-ISOLATION": { "$ref": "#/definitions/gate" },
+        "DP-G05-V2-BARE-1.25": { "$ref": "#/definitions/gate" },
+        "DP-G06-REQUEST-SEND-REDUCTION": { "$ref": "#/definitions/gate" },
+        "DP-G07-DISTINCT-INSTALLED-DESKTOP-GATE": { "$ref": "#/definitions/gate" },
+        "DP-G09-RELEASE-MODEL": { "$ref": "#/definitions/gate" },
+        "DP-G10-RELEASE-HOST": { "$ref": "#/definitions/gate" },
+        "DP-G11-RELEASE-FULL": { "$ref": "#/definitions/gate" },
+        "DP-G12-ROLLOUT-ELIGIBILITY-REPORT": { "$ref": "#/definitions/gate" },
+        "DP-G13-PROMOTION-AUTO-PROBE": { "$ref": "#/definitions/gate" },
+        "DP-G14-V1-STOP-LOSS": { "$ref": "#/definitions/gate" },
+        "DP-G15-CANARY": { "$ref": "#/definitions/gate" },
+        "DP-G16-STABLE-DECISION": { "$ref": "#/definitions/gate" },
+        "DP-G18-CORE-LIFECYCLE": { "$ref": "#/definitions/gate" },
+        "DP-G19-GOVERNED-LIFECYCLE": { "$ref": "#/definitions/gate" },
+        "DP-G20-FULL-LIFECYCLE": { "$ref": "#/definitions/gate" }
+      }
+    }
+  }
+}

@@ -63,11 +63,10 @@ function Start-AskCodex {
     $psi.UseShellExecute = $false
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
-    $psi.CreateNoWindow = $true
     $utf8 = [System.Text.UTF8Encoding]::new($false)
     $psi.StandardOutputEncoding = $utf8
     $psi.StandardErrorEncoding = $utf8
-    foreach ($argument in @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath) + $Arguments) {
+    foreach ($argument in @('-NoProfile', '-NonInteractive', '-File', $ScriptPath) + $Arguments) {
         $psi.ArgumentList.Add($argument)
     }
     foreach ($entry in $Environment.GetEnumerator()) {
@@ -230,7 +229,8 @@ function Test-EnvironmentSnapshotEqual {
     return $true
 }
 
-$scriptPath = Join-Path $RepoRoot 'skills\codex\scripts\ask_codex.ps1'
+$scriptPath = Join-Path $RepoRoot 'skills\codex\scripts\invoke_codex.ps1'
+$legacyScriptPath = Join-Path $RepoRoot 'skills\codex\scripts\ask_codex.ps1'
 $scratchRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('dev-harness-ask-codex-' + [guid]::NewGuid().ToString('N'))
 $environmentNames = @('PATH', 'USERPROFILE', 'CODEX_HOME', 'TEMP', 'TMP', 'CODEX_CA_CERTIFICATE', 'ASK_CODEX_NATIVE_RECORDER', 'ASK_CODEX_OBSERVED_NATIVE_MODE', 'ASK_CODEX_TEST_CASE', 'ASK_CODEX_TEST_MODE', 'ASK_CODEX_TEST_CAPTURE_ROOT', 'ASK_CODEX_TEST_IDENTITY', 'ASK_CODEX_TEST_MARKER', 'ASK_CODEX_TEST_TOKEN', 'ASK_CODEX_CMD_MARKER')
 $originalEnvironment = Get-EnvironmentSnapshot -Names $environmentNames
@@ -243,6 +243,12 @@ try {
         Add-Check 'wrapper requires PowerShell 7.3+ before using standard native argument passing'
     } else {
         Add-Failure 'wrapper must require PowerShell 7.3+ with no parse errors'
+    }
+    $legacyText = Get-Content -LiteralPath $legacyScriptPath -Raw -Encoding utf8
+    if ($legacyText -match [regex]::Escape("Join-Path `$PSScriptRoot 'invoke_codex.ps1'") -and $legacyText -notmatch 'function Invoke-CodexProcess') {
+        Add-Check 'legacy ask_codex PowerShell entry is a thin invoke_codex compatibility shim'
+    } else {
+        Add-Failure 'legacy ask_codex PowerShell entry should delegate to invoke_codex without duplicating the implementation'
     }
     $skillText = Get-Content -LiteralPath (Join-Path $RepoRoot 'skills\codex\SKILL.md') -Raw -Encoding utf8
     $windowsOptionsMatch = [regex]::Match($skillText, '(?ms)^### Windows PowerShell options\s*(.*?)(?=^## |^### |\z)')
@@ -408,6 +414,14 @@ if ($args.Count -ge 1 -and [string]$args[0] -ceq '__mock-child') {
 $caseId = $env:ASK_CODEX_TEST_CASE
 $mode = $env:ASK_CODEX_TEST_MODE
 $captureRoot = $env:ASK_CODEX_TEST_CAPTURE_ROOT
+if ($args.Count -eq 1 -and [string]$args[0] -ceq '--version') {
+    switch ($mode) {
+        'version-wrong' { [Console]::Out.WriteLine('codex-cli 0.144.3'); exit 0 }
+        'version-multiline' { [Console]::Out.WriteLine('codex-cli 0.144.4'); [Console]::Out.WriteLine('unexpected'); exit 0 }
+        'version-exit7' { [Console]::Error.WriteLine('version unavailable'); exit 7 }
+        default { [Console]::Out.WriteLine('codex-cli 0.144.4'); exit 0 }
+    }
+}
 if ($mode -in @('timeout', 'natural-child')) {
     $inputReader = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), $utf8, $false)
     try { $null = $inputReader.ReadToEnd() } finally { $inputReader.Dispose() }
@@ -421,8 +435,7 @@ if ($mode -in @('timeout', 'natural-child')) {
     $childPsi = [System.Diagnostics.ProcessStartInfo]::new()
     $childPsi.FileName = (Get-Process -Id $PID).Path
     $childPsi.UseShellExecute = $false
-    $childPsi.CreateNoWindow = $true
-    foreach ($argument in @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, '__mock-child', $env:ASK_CODEX_TEST_MARKER, $env:ASK_CODEX_TEST_TOKEN)) {
+    foreach ($argument in @('-NoProfile', '-NonInteractive', '-File', $PSCommandPath, '__mock-child', $env:ASK_CODEX_TEST_MARKER, $env:ASK_CODEX_TEST_TOKEN)) {
         $childPsi.ArgumentList.Add($argument)
     }
     $child = [System.Diagnostics.Process]::Start($childPsi)
@@ -523,6 +536,26 @@ $parameters = @{
         }
     }
 
+    $internalBypassCase = 'internal-shim-binding'
+    $internalBypassResult = Invoke-AskCodex -ScriptPath $scriptPath -Arguments @('-InternalShimPath',$resumeDriverPath,'-InternalShimArgumentsJson','{"arguments":[]}') -Environment (New-CaseEnvironment -CaseId $internalBypassCase) -WorkingDirectory $callerRoot -Label $internalBypassCase
+    if ($internalBypassResult.ExitCode -ne 0 -and $internalBypassResult.StdErr -match 'Internal shim path must match the resolved Codex command' -and $null -eq (Read-MockRecord -CaptureRoot $captureRoot -CaseId $internalBypassCase)) {
+        Add-Check 'internal shim mode is bound to the resolved Codex command and rejects arbitrary scripts'
+    } else {
+        Add-Failure "internal shim binding was bypassed: exit=$($internalBypassResult.ExitCode) stdout=[$($internalBypassResult.StdOut)] stderr=[$($internalBypassResult.StdErr)]"
+    }
+
+    $relativeExecutableCase = 'relative-codex-executable'
+    $relativeExecutableOutput = Join-Path $scratchRoot 'outputs\relative-codex-executable.md'
+    $relativeExecutableEnvironment = New-CaseEnvironment -CaseId $relativeExecutableCase
+    $relativeExecutableEnvironment.CODEX_EXECUTABLE = [IO.Path]::GetRelativePath($callerRoot,$mockScriptPath)
+    $relativeExecutableResult = Invoke-AskCodex -ScriptPath $scriptPath -Arguments @('-Task','relative executable compatibility','-Workspace',$workspace,'-Output',$relativeExecutableOutput,'-TimeoutSeconds','5') -Environment $relativeExecutableEnvironment -WorkingDirectory $callerRoot -Label $relativeExecutableCase
+    $relativeExecutableRecord = Read-MockRecord -CaptureRoot $captureRoot -CaseId $relativeExecutableCase
+    if ($relativeExecutableResult.ExitCode -eq 0 -and $null -ne $relativeExecutableRecord -and [string]$relativeExecutableRecord.current_directory -ceq $workspace) {
+        Add-Check 'relative CODEX_EXECUTABLE remains bound after the child changes to the workspace directory'
+    } else {
+        Add-Failure "relative CODEX_EXECUTABLE compatibility failed: exit=$($relativeExecutableResult.ExitCode) stdout=[$($relativeExecutableResult.StdOut)] stderr=[$($relativeExecutableResult.StdErr)]"
+    }
+
     $ps5Case = 'ps5-gate'
     $ps5Output = Join-Path $callerRoot 'ps5-must-not-exist.md'
     $ps5Before = Get-TreeSnapshot -Root $workspace
@@ -556,16 +589,115 @@ $parameters = @{
         [string]$newRecord.ca -ceq $caSentinel -and $newRecord.ca_exists -eq $true -and
         $newContent.Contains($newCase + '-response-1') -and $newContent.Contains($newCase + '-response-3') -and
         -not (Test-Path -LiteralPath $newInjectionMarker) -and -not (Test-Path -LiteralPath $cmdMarker)) {
-        Add-Check 'new session preserves structured special argv, UTF-8 stdin, environment, and complete JSONL output'
+        Add-Check 'new session preserves default --ignore-user-config argv, UTF-8 stdin, environment, and complete JSONL output'
     } else {
         $newRecordText = if ($null -eq $newRecord) { '<missing>' } else { $newRecord | ConvertTo-Json -Depth 8 -Compress }
         Add-Failure "new session behavior mismatch: exit=$($newResult.ExitCode) outer_timeout=$($newResult.OuterTimedOut) record=[$newRecordText] stdout=[$($newResult.StdOut)] stderr=[$($newResult.StdErr)]"
+    }
+
+    $loadUserConfigCase = 'load-user-config'
+    $loadUserConfigOutput = Join-Path $scratchRoot 'outputs\load-user-config.md'
+    $loadUserConfigTelemetry = Join-Path $scratchRoot 'outputs\load-user-config.telemetry.json'
+    $loadUserConfigModel = 'gpt-5.6-sol'
+    $loadUserConfigResult = Invoke-AskCodex -ScriptPath $scriptPath -Arguments @('-Task','load installed user config','-Workspace',$workspace,'-Model',$loadUserConfigModel,'-ReadOnly','-Ephemeral','-LoadUserConfig','-Output',$loadUserConfigOutput,'-TelemetryOutput',$loadUserConfigTelemetry,'-TimeoutSeconds','5') -Environment (New-CaseEnvironment -CaseId $loadUserConfigCase) -WorkingDirectory $callerRoot -Label $loadUserConfigCase
+    $loadUserConfigRecord = Read-MockRecord -CaptureRoot $captureRoot -CaseId $loadUserConfigCase
+    $loadUserConfigTelemetryValue = if (Test-Path -LiteralPath $loadUserConfigTelemetry -PathType Leaf) { Get-Content -LiteralPath $loadUserConfigTelemetry -Raw -Encoding utf8 | ConvertFrom-Json } else { $null }
+    $expectedLoadUserConfigArgs = @('exec','--cd',$workspace,'--skip-git-repo-check','--json','-c','model_reasoning_effort="medium"','--sandbox','read-only','-m',$loadUserConfigModel,'--ephemeral','-')
+    if ($loadUserConfigResult.ExitCode -eq 0 -and $null -ne $loadUserConfigRecord -and
+        (Test-StringSequenceEqual -Actual @($loadUserConfigRecord.argv) -Expected $expectedLoadUserConfigArgs) -and
+        -not (@($loadUserConfigRecord.argv) -contains '--ignore-user-config') -and
+        $null -ne $loadUserConfigTelemetryValue -and [string]$loadUserConfigTelemetryValue.user_config_mode -ceq 'loaded') {
+        Add-Check 'LoadUserConfig omits --ignore-user-config and records loaded telemetry'
+    } else {
+        Add-Failure "LoadUserConfig contract failed: exit=$($loadUserConfigResult.ExitCode) record=[$($loadUserConfigRecord | ConvertTo-Json -Depth 8 -Compress)] telemetry=[$($loadUserConfigTelemetryValue | ConvertTo-Json -Depth 8 -Compress)] stderr=[$($loadUserConfigResult.StdErr)]"
+    }
+
+    foreach ($missingCodexHomeCase in @(
+        [pscustomobject]@{ Id = 'load-user-config-codex-home-removed'; Value = $null; Label = 'removed' },
+        [pscustomobject]@{ Id = 'load-user-config-codex-home-empty'; Value = ''; Label = 'empty' }
+    )) {
+        $missingCodexHomeOutput = Join-Path $scratchRoot ("outputs\$($missingCodexHomeCase.Id).md")
+        $missingCodexHomeEnvironment = New-CaseEnvironment -CaseId $missingCodexHomeCase.Id
+        $missingCodexHomeEnvironment.CODEX_HOME = $missingCodexHomeCase.Value
+        $missingCodexHomeResult = Invoke-AskCodex -ScriptPath $scriptPath -Arguments @('-Task','must reject missing Codex home','-Workspace',$workspace,'-LoadUserConfig','-Output',$missingCodexHomeOutput,'-TimeoutSeconds','5') -Environment $missingCodexHomeEnvironment -WorkingDirectory $callerRoot -Label $missingCodexHomeCase.Id
+        if ($missingCodexHomeResult.ExitCode -ne 0 -and
+            [string]::IsNullOrWhiteSpace($missingCodexHomeResult.StdOut) -and
+            $missingCodexHomeResult.StdErr -match 'LoadUserConfig requires an explicit absolute CODEX_HOME directory' -and
+            -not (Test-Path -LiteralPath $missingCodexHomeOutput) -and
+            $null -eq (Read-MockRecord -CaptureRoot $captureRoot -CaseId $missingCodexHomeCase.Id)) {
+            Add-Check "LoadUserConfig rejects $($missingCodexHomeCase.Label) CODEX_HOME before fake Codex invocation"
+        } else {
+            Add-Failure "LoadUserConfig accepted $($missingCodexHomeCase.Label) CODEX_HOME: exit=$($missingCodexHomeResult.ExitCode) stdout=[$($missingCodexHomeResult.StdOut)] stderr=[$($missingCodexHomeResult.StdErr)]"
+        }
+    }
+
+    $conflictingConfigCase = 'load-user-config-isolated-conflict'
+    $conflictingConfigOutput = Join-Path $scratchRoot 'outputs\load-user-config-isolated-conflict.md'
+    $conflictingConfigResult = Invoke-AskCodex -ScriptPath $scriptPath -Arguments @('-Task','must reject conflicting config modes','-Workspace',$workspace,'-LoadUserConfig','-Isolated','-Output',$conflictingConfigOutput,'-TimeoutSeconds','5') -Environment (New-CaseEnvironment -CaseId $conflictingConfigCase) -WorkingDirectory $callerRoot -Label $conflictingConfigCase
+    if ($conflictingConfigResult.ExitCode -ne 0 -and
+        $conflictingConfigResult.StdErr -match 'LoadUserConfig cannot be combined with -Isolated' -and
+        -not (Test-Path -LiteralPath $conflictingConfigOutput) -and
+        $null -eq (Read-MockRecord -CaptureRoot $captureRoot -CaseId $conflictingConfigCase)) {
+        Add-Check 'LoadUserConfig and Isolated conflict fails before fake Codex invocation'
+    } else {
+        Add-Failure "LoadUserConfig/Isolated conflict was not rejected before backend invocation: exit=$($conflictingConfigResult.ExitCode) stdout=[$($conflictingConfigResult.StdOut)] stderr=[$($conflictingConfigResult.StdErr)]"
+    }
+
+    $structuredCase = 'structured-telemetry'
+    $structuredOutput = Join-Path $scratchRoot 'outputs\structured.json'
+    $structuredTelemetry = Join-Path $scratchRoot 'outputs\structured.telemetry.json'
+    $structuredSchema = Join-Path $scratchRoot 'structured-output.schema.json'
+    Write-Utf8NoBom -Path $structuredSchema -Content '{"type":"object","additionalProperties":false,"required":["value"],"properties":{"value":{"type":"string"}}}'
+    $structuredModel = 'gpt-5.6-sol'
+    $structuredArgs = @('-Task','structured result','-Workspace',$workspace,'-Model',$structuredModel,'-Reasoning','max','-ReadOnly','-ApprovalPolicy','never','-Ephemeral','-Isolated','-AgentOutputOnly','-Quiet','-OutputSchema',$structuredSchema,'-Output',$structuredOutput,'-TelemetryOutput',$structuredTelemetry,'-ExpectedCodexVersion','0.144.4','-TimeoutSeconds','5')
+    $structuredResult = Invoke-AskCodex -ScriptPath $scriptPath -Arguments $structuredArgs -Environment (New-CaseEnvironment -CaseId $structuredCase) -WorkingDirectory $callerRoot -Label $structuredCase
+    $structuredRecord = Read-MockRecord -CaptureRoot $captureRoot -CaseId $structuredCase
+    $isolationFeatures = @('plugins','remote_plugin','apps','browser_use','computer_use','memories','multi_agent','multi_agent_v2','enable_fanout','in_app_browser','image_generation')
+    $expectedStructuredArgs = [System.Collections.Generic.List[string]]::new()
+    foreach ($value in @('-a','never','exec','--ignore-user-config')) { $expectedStructuredArgs.Add($value) }
+    foreach ($feature in $isolationFeatures) { $expectedStructuredArgs.Add('--disable'); $expectedStructuredArgs.Add($feature) }
+    foreach ($value in @('-c','skills.enabled=false')) { $expectedStructuredArgs.Add($value) }
+    foreach ($value in @('--cd',$workspace,'--skip-git-repo-check','--json','-c','model_reasoning_effort="max"','--sandbox','read-only','-m',$structuredModel,'--ephemeral','--output-schema',$structuredSchema,'-')) { $expectedStructuredArgs.Add($value) }
+    $structuredTelemetryValue = if (Test-Path -LiteralPath $structuredTelemetry -PathType Leaf) { Get-Content -LiteralPath $structuredTelemetry -Raw -Encoding utf8 | ConvertFrom-Json } else { $null }
+    $structuredContent = if (Test-Path -LiteralPath $structuredOutput -PathType Leaf) { Get-Content -LiteralPath $structuredOutput -Raw -Encoding utf8 } else { '' }
+    if ($structuredResult.ExitCode -eq 0 -and $null -ne $structuredRecord -and
+        (Test-StringSequenceEqual -Actual @($structuredRecord.argv) -Expected $expectedStructuredArgs.ToArray()) -and
+        $null -ne $structuredTelemetryValue -and [string]$structuredTelemetryValue.schema_version -ceq 'codex-invocation-telemetry/v2' -and [string]$structuredTelemetryValue.codex_cli_version -ceq '0.144.4' -and
+        [string]$structuredTelemetryValue.model -ceq $structuredModel -and [string]$structuredTelemetryValue.reasoning -ceq 'max' -and
+        [bool]$structuredTelemetryValue.ephemeral -and [string]$structuredTelemetryValue.sandbox -ceq 'read-only' -and [string]$structuredTelemetryValue.approval_policy -ceq 'never' -and
+        -not ($structuredTelemetryValue.PSObject.Properties.Name -contains 'user_config_mode') -and
+        [int]$structuredTelemetryValue.agent_messages -eq 3 -and [string]$structuredTelemetryValue.tokens.status -ceq 'unavailable' -and
+        $structuredResult.StdOut -match '(?m)^telemetry_path=' -and
+        $structuredContent.Trim() -ceq ($structuredCase + '-response-3')) {
+        Add-Check 'isolated max session preserves structured-output argv and the default telemetry keyset'
+    } else {
+        Add-Failure "structured telemetry contract failed: exit=$($structuredResult.ExitCode) record=[$($structuredRecord | ConvertTo-Json -Depth 8 -Compress)] telemetry=[$($structuredTelemetryValue | ConvertTo-Json -Depth 8 -Compress)] stderr=[$($structuredResult.StdErr)]"
+    }
+    foreach ($versionFailure in @('version-wrong','version-multiline','version-exit7')) {
+        $versionOutput = Join-Path $scratchRoot ("outputs\$versionFailure.md")
+        $versionResult = Invoke-AskCodex -ScriptPath $scriptPath -Arguments @('-Task','must not invoke model','-Workspace',$workspace,'-Output',$versionOutput,'-ExpectedCodexVersion','0.144.4','-TimeoutSeconds','5') -Environment (New-CaseEnvironment -CaseId $versionFailure -Mode $versionFailure) -WorkingDirectory $callerRoot -Label $versionFailure
+        if ($versionResult.ExitCode -ne 0 -and $versionResult.StdErr -match 'does not match the required release version' -and -not (Test-Path -LiteralPath $versionOutput) -and $null -eq (Read-MockRecord -CaptureRoot $captureRoot -CaseId $versionFailure)) {
+            Add-Check "version-bound wrapper rejects $versionFailure before the model invocation"
+        } else {
+            Add-Failure "version-bound wrapper did not fail closed for ${versionFailure}: exit=$($versionResult.ExitCode) stdout=[$($versionResult.StdOut)] stderr=[$($versionResult.StdErr)]"
+        }
     }
     $observedNativeMode = if ($null -eq $newRecord) { '' } else { [string]$newRecord.native_argument_mode }
     if ($observedNativeMode -ceq 'Standard') {
         Add-Check 'PowerShell shim observes Standard native argument passing at runtime'
     } else {
         Add-Failure "PowerShell shim native argument mode was not Standard: [$observedNativeMode]"
+    }
+
+    $legacyCase = 'legacy-shim'
+    $legacyOutput = Join-Path $scratchRoot 'outputs\legacy-shim.md'
+    $legacyResult = Invoke-AskCodex -ScriptPath $legacyScriptPath -Arguments @('-Task', 'legacy compatibility', '-Workspace', $workspace, '-Output', $legacyOutput, '-TimeoutSeconds', '5') -Environment (New-CaseEnvironment -CaseId $legacyCase) -WorkingDirectory $callerRoot -Label $legacyCase
+    $legacyRecord = Read-MockRecord -CaptureRoot $captureRoot -CaseId $legacyCase
+    $legacyContent = if (Test-Path -LiteralPath $legacyOutput -PathType Leaf) { Get-Content -LiteralPath $legacyOutput -Raw -Encoding utf8 } else { '' }
+    if ($legacyResult.ExitCode -eq 0 -and $null -ne $legacyRecord -and $legacyContent.Contains($legacyCase + '-response-1')) {
+        Add-Check 'legacy ask_codex PowerShell shim preserves the canonical success protocol'
+    } else {
+        Add-Failure "legacy ask_codex shim failed: exit=$($legacyResult.ExitCode) stdout=[$($legacyResult.StdOut)] stderr=[$($legacyResult.StdErr)]"
     }
 
     $fileCase = 'file-array-binding'

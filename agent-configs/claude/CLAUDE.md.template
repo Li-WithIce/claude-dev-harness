@@ -1,43 +1,27 @@
-# 全局指令
+# Claude Host Overlay
 
-每次对话开始时，先调用 `/entry-router` skill。
+- Legacy `/entry-router` is retired. Use v2 admission and recovery.
+- Workspace: `DEV_HARNESS_WORKSPACE_ROOT` -> `WORKSPACE_ROOT` -> nearest `.assistant` parent. Conflicting roots block writes and require clarification.
+- Workspace runtime is authoritative. Use Chinese. Persist authorized secrets only in the named config; never disclose them.
+- Explicit recovery uses `.assistant\entry\task.ps1 status`; optional Memory requires installation and need.
+- Follow v2 write authority. Direct and read-only work never synchronize runtime.
 
-# Companion Starter 记忆规则
+<!-- BEGIN GENERATED ENTRY CONTRACT -->
+<!-- source-sha256: 4838491707510140a0c698ac26d0faa8b45d6dde90d03427dc78006f0643396c -->
+# Entry Contract Bootstrap
 
-- 当前工作区动态解析：`DEV_HARNESS_WORKSPACE_ROOT` -> `WORKSPACE_ROOT` -> 从当前工作目录向父目录查找包含 `.assistant` 的最近目录。
-- 多个环境变量指向不同目录，或无法找到唯一工作区时，停止共享记忆读写并要求显式指定工作区。
-- 共享记忆目录始终是当前工作区下的 `.assistant`，不得绑定安装时工作区。
-- 默认语言：中文。
+Bootstrap only; routes/lifecycle stay lazy.
 
-## 高频硬规则
+- `protocol_default`: `auto`
+- `auto_resolves_to`: `existing-v2-or-admitted-v2-new-task`
+- `v2_entry_activation`: `v2-only-with-new-work-admission`
 
-1. 运行时真相源只看当前工作区的 `.assistant\运行时\`。
-2. `恢复索引.md` 是低成本恢复视图，不是独立真相源。
-3. 安装状态只看 `.assistant\配置\引导状态.md`，不要用它判断当前任务。
-4. 共享运行时文件采用单写者模型。
-5. 多步骤 `mode=workflow` 任务开始、切换、暂停时同步更新共享运行时；standalone quick/read-only 不写共享运行时。
-6. 新功能开发或功能修改以当前需求和业务正确性为准；不要为了兼容旧测试、旧快照或过期断言而保留或恢复旧行为。若旧测试与新需求冲突，应更新或删除旧测试并说明原因；只有用户明确要求历史兼容时才保留旧测试兼容。
-
-## 恢复触发
-
-当收到“继续”“恢复”“resume”“刚才做到哪里了”等触发词时：
-
-- 先读当前工作区已存在的 `.assistant\运行时\恢复索引.md`。
-- 细节不足且文件存在时再读 `.assistant\运行时\当前任务.md`。
-- 有 `task_id` 且文件存在时读取 `.assistant\运行时\tasks\<task-id>.md`。
-- 最后按需读取 `.assistant\运行时\中断任务.md` 与 `.assistant\运行时\上次会话.md`。
-- 缺失运行时文件表示当前没有已记录的活动状态，不作为错误。
-
-## 懒加载边界
-
-Claude 是显式兼容 host，仍先调用 `/entry-router`，后续读取面跟随当前工作区入口路由：
-
-- `quick` 只加载入口规则、用户偏好 / 必要配置和直接相关 skill。
-- `workflow` 加载 `entry-router`、`orchestrator` 和当前 stage skill。
-- `resume-current` / `switch-existing` 先只读恢复 identity/runtime；只有用户明确继续 / 切换并执行时才加载 current stage skill 或写 runtime，read-only inspect/status 不执行这些动作。
-- `ask` 是 iterative blocking clarification gate：不加载 workflow stage skill，不创建 `docs/tasks/{task_id}/`，不改代码，不进入 quick/workflow/PLAN/IMPLEMENT；默认每轮只问一个最高价值问题，直到所有阻塞不确定性解除后再重新判断路由。
-- “需求澄清 / 需求确认 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认”等同族请求跟随工作区入口规则；需要可审计开发决策时只落到现有 `PLAN -> Clarification`，不新增 stage。
-- PLAN 的验收、非目标、影响面、回滚/兼容仍不确定，或实现路径仍不足以指导 IMPLEMENT 时，也按同一 Clarification 协议处理。
-- 进入 Clarification 协议后，先回答可由代码/文档查证的问题，保留 Clarification 最低字段，剩余用户决策按依赖顺序一次只问一个并给推荐答案；`clarification_ledger` 仍有 `decision: pending` 时，`User Confirmation` 保持 draft。
-- 阶段原则路由只作为认知视角，不新增五转流程：Entry/Clarification 用 Socrates，PLAN 用 Osborn/Hegel/First Principles/Occam，PLAN_REVIEW 用 Hegel+Bayes，IMPLEMENT 用 Ponytail/surgical change，CODE_REVIEW 用 Feynman，TEST 用 Bayes，revise 后用 Debono 保留仍成立的价值和约束。
-- 禁止 bulk-load 全部 skills、全部历史任务、Claude 兼容 skill 或 `workflow-team`，除非显式 backend、stage 或 team-mode 触发。
+- New identity/artifact-free: use host/user-surfaced `HARNESS_PROTOCOL`; else read its process value once; never guess. Resolve admission once with `.assistant\entry\task.ps1 protocol`: only `auto|v2` are supported. Workspace `new_work=paused` stops new work even with explicit v2; missing Runtime Default admits v2, invalid/unavailable decisions block. No task `status`, nested shim, or task/runtime/current inspection.
+- Known identity: `.assistant\entry\task.ps1 protocol -TaskId {task_id}`; valid v2 state wins and may status/resume. Legacy artifact presence stops with an explicit-migration diagnostic, without reading its contents. Explicit v1 and invalid input fail closed. Never create, resume, or migrate a legacy task implicitly.
+- After admission classify inline. Selected v2 Direct loads no `entry-router`, `orchestrator`, lifecycle skill, Memory, Team, or Provider; hand off now. No status/runtime/lifecycle fan-out.
+- An unresolved Requirement or product decision blocks every write and enters Ask. Protected/expanded/non-Direct reroute before writes.
+- A public-contract change found outside confirmed scope stays unresolved until the user explicitly confirms this change; continuation alone enters Ask and authorizes no write.
+- Clear Direct: relevant targets -> minimum edit -> minimum focused checks covering all confirmed acceptance criteria -> one bounded diff/self-review -> report. Stop only when all required checks pass. Expand only after failure/ambiguity. No task/runtime/current/lifecycle writes.
+- Read-only work performs zero writes. Report actual commands/results, self-review, gaps; `not_run`/unavailable is not pass.
+- Legacy lifecycle and shim loading are retired. Stop-loss pauses new work; recovery uses v2. Explicit migration/history maintenance is isolated and requires its own authorization.
+<!-- END GENERATED ENTRY CONTRACT -->

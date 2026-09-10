@@ -1,0 +1,11 @@
+{
+  "schema_version": "kernel-tcb-roots/v1",
+  "schema_version": "kernel-tcb-roots/v1",
+  "classification_path": "tests/fixtures/tk00/tcb/classification.json",
+  "runtime_roots": [],
+  "distribution_roots": [],
+  "trust_artifacts": [],
+  "manual_edges": [],
+  "external_dependencies": [],
+  "budget": { "baseline_executable_loc": 0, "exceptions": [] }
+}

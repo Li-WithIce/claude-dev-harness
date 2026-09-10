@@ -1,0 +1,15 @@
+{
+  "total_count": 10,
+  "jobs": [
+    { "id": 2001, "name": "changed-optional", "status": "completed", "conclusion": "success" },
+    { "id": 2002, "name": "pr-core-checks (entry-lifecycle)", "status": "completed", "conclusion": "success" },
+    { "id": 2003, "name": "pr-core-checks (evaluation-release)", "status": "completed", "conclusion": "success" },
+    { "id": 2004, "name": "pr-core-checks (install-evidence)", "status": "completed", "conclusion": "success" },
+    { "id": 2005, "name": "pr-core-checks (governance-approval)", "status": "completed", "conclusion": "success" },
+    { "id": 2006, "name": "pr-core-checks (harness-contracts)", "status": "completed", "conclusion": "success" },
+    { "id": 2007, "name": "pr-core", "status": "completed", "conclusion": "success" },
+    { "id": 2008, "name": "release-model", "status": "completed", "conclusion": "skipped" },
+    { "id": 2009, "name": "release-host", "status": "completed", "conclusion": "skipped" },
+    { "id": 2010, "name": "release-full", "status": "completed", "conclusion": "skipped" }
+  ]
+}

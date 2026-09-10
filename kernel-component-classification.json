@@ -1,0 +1,935 @@
+{
+  "schema_version": "kernel-component-classification/v1",
+  "components": [
+    {
+      "path": "harness.ps1",
+      "layer": "d1-distribution",
+      "current_role": "Workspace bootstrap and managed-asset reconciliation entry.",
+      "owner_candidate": "distribution",
+      "tcb_included": true,
+      "reason": "Seeds the Distribution Trust Path and delegates installation reconciliation and status.",
+      "migration_target": "distribution-reconciler",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "install.ps1",
+      "layer": "d1-distribution",
+      "current_role": "Distribution plan consumer retaining exact-identity install and update transactions.",
+      "owner_candidate": "distribution",
+      "tcb_included": true,
+      "reason": "TK-06 validates explicit Profile authorization before recovery or install writes, then consumes the selected plan.",
+      "migration_target": "distribution-reconciler",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "modules/legacy-v1/Harness.LegacyMigration.psm1",
+      "layer": "legacy-v1",
+      "current_role": "Strict legacy plan reader used only by explicit paused migration maintenance.",
+      "owner_candidate": "legacy-v1",
+      "tcb_included": false,
+      "reason": "Ordinary Protocol, status and recovery never import this isolated history reader.",
+      "migration_target": "v1-sunset/V1S-10",
+      "legacy_status": "sunset-gated"
+    },
+    {
+      "path": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",
+      "layer": "a3-adapter",
+      "current_role": "Codex-compatible launcher for the installed PreToolUse adapter.",
+      "owner_candidate": "host-adapters",
+      "tcb_included": true,
+      "reason": "Host serialization and process bridging are part of the protected-write trust path.",
+      "migration_target": "codex-adapter",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "runtime-hooks/claude/pretooluse.ps1",
+      "layer": "a3-adapter",
+      "current_role": "Thin Claude and Codex file-mutation input adapter for adapter-kernel-api/v1.",
+      "owner_candidate": "host-adapters",
+      "tcb_included": true,
+      "reason": "Deserializes host input and calls the K1 preflight_action operation without owning patch, path, or Policy decisions.",
+      "migration_target": "claude-adapter",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "runtime-hooks/claude/stop.js",
+      "layer": "a3-adapter",
+      "current_role": "Read-only Claude Stop projection of native v2 recovery.",
+      "owner_candidate": "host-adapters",
+      "tcb_included": false,
+      "reason": "Host lifecycle adapter is outside the ordinary protected-write Runtime TCB closure.",
+      "migration_target": "claude-adapter",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "runtime-hooks/claude/userpromptsubmit.js",
+      "layer": "a3-adapter",
+      "current_role": "Claude UserPromptSubmit routing adapter.",
+      "owner_candidate": "host-adapters",
+      "tcb_included": false,
+      "reason": "Host prompt routing is not an executable dependency of the selected Runtime roots.",
+      "migration_target": "claude-adapter",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "runtime-hooks/claude/workspace-resolver.js",
+      "layer": "a3-adapter",
+      "current_role": "Claude workspace input resolver.",
+      "owner_candidate": "host-adapters",
+      "tcb_included": false,
+      "reason": "Host workspace serialization is classified but is not in the selected PowerShell trust closure.",
+      "migration_target": "claude-adapter",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "runtime-hooks/core/pretooluse.ps1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Compatibility CLI for host-neutral protected-action preflight.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": false,
+      "reason": "The stable CLI path remains compatible, while ordinary host adapters now call the selected K1 Adapter Action module directly.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "runtime-hooks/memory/userpromptsubmit.js",
+      "layer": "c2-capability",
+      "current_role": "Optional memory prompt hook.",
+      "owner_candidate": "memory",
+      "tcb_included": false,
+      "reason": "Memory is an optional capability and is excluded from Runtime Kernel imports.",
+      "migration_target": "memory-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/advance-stage.ps1",
+      "layer": "legacy-v1",
+      "current_role": "Retired v1 lifecycle entry; rejects before any legacy read or write.",
+      "owner_candidate": "legacy-v1",
+      "tcb_included": false,
+      "reason": "Historical source is retained for separately approved removal, not active Runtime execution.",
+      "migration_target": "v1-sunset/V1S-08",
+      "legacy_status": "sunset-gated"
+    },
+    {
+      "path": "scripts/append-runtime-inbox.ps1",
+      "layer": "c2-capability",
+      "current_role": "Memory runtime inbox append command.",
+      "owner_candidate": "memory",
+      "tcb_included": false,
+      "reason": "Optional memory storage is outside K1.",
+      "migration_target": "memory-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/archive-memory-candidates.ps1",
+      "layer": "c2-capability",
+      "current_role": "Memory candidate archival command.",
+      "owner_candidate": "memory",
+      "tcb_included": false,
+      "reason": "Optional memory lifecycle is outside K1.",
+      "migration_target": "memory-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/assert-release-runner-boundary.ps1",
+      "layer": "c2-capability",
+      "current_role": "Release runner isolation assertion.",
+      "owner_candidate": "release-evidence",
+      "tcb_included": false,
+      "reason": "Release-only producer policy is excluded from ordinary Runtime.",
+      "migration_target": "release-evidence-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/audit-context-provider-usage.ps1",
+      "layer": "c2-capability",
+      "current_role": "Optional context-provider usage audit.",
+      "owner_candidate": "providers",
+      "tcb_included": false,
+      "reason": "Provider auditing is optional capability behavior.",
+      "migration_target": "providers-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/audit-task-artifact-drift.ps1",
+      "layer": "c2-capability",
+      "current_role": "Engineering task-artifact drift audit.",
+      "owner_candidate": "engineering-validation",
+      "tcb_included": false,
+      "reason": "Engineering validation is not part of the Runtime write path.",
+      "migration_target": "engineering-validation-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/benchmark-harness.ps1",
+      "layer": "c2-capability",
+      "current_role": "Harness performance benchmark entry.",
+      "owner_candidate": "benchmark",
+      "tcb_included": false,
+      "reason": "Benchmark production is outside Runtime Kernel.",
+      "migration_target": "benchmark-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/check-shared-memory-layers.ps1",
+      "layer": "c2-capability",
+      "current_role": "Explicit historical-v1-only layer diagnostic; not a v2 Runtime health gate.",
+      "owner_candidate": "memory",
+      "tcb_included": false,
+      "reason": "Memory validation remains capability-owned.",
+      "migration_target": "memory-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/export-team-preset.ps1",
+      "layer": "c2-capability",
+      "current_role": "Team preset export command.",
+      "owner_candidate": "team",
+      "tcb_included": false,
+      "reason": "Team orchestration is outside K1.",
+      "migration_target": "team-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/generate-entry-contract.ps1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Canonical Entry Contract compiler and drift checker.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "Entry Contract is one of the three irreducible Harness responsibilities.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/generate-exact-head-engineering-evidence.ps1",
+      "layer": "c2-capability",
+      "current_role": "Exact-head engineering Evidence producer.",
+      "owner_candidate": "release-evidence",
+      "tcb_included": false,
+      "reason": "Evidence production is release and engineering capability behavior, not ordinary Runtime.",
+      "migration_target": "release-evidence-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/generate-release-isolation-report.ps1",
+      "layer": "c2-capability",
+      "current_role": "Release isolation report producer.",
+      "owner_candidate": "release-evidence",
+      "tcb_included": false,
+      "reason": "Release producer code is explicitly excluded from Runtime TCB.",
+      "migration_target": "release-evidence-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/generate-skills-index.ps1",
+      "layer": "d1-distribution",
+      "current_role": "Installed skill inventory renderer.",
+      "owner_candidate": "distribution",
+      "tcb_included": false,
+      "reason": "Renders distribution desired state but is not reached by selected roots.",
+      "migration_target": "distribution-reconciler",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/generate-v2-rollout-report.ps1",
+      "layer": "c2-capability",
+      "current_role": "v2 rollout report aggregator.",
+      "owner_candidate": "release-evidence",
+      "tcb_included": false,
+      "reason": "Rollout aggregation remains release-only.",
+      "migration_target": "release-evidence-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/get-adapter-inventory.ps1",
+      "layer": "c2-capability",
+      "current_role": "Deterministic adapter-inventory/v1 generator and zero-write drift checker.",
+      "owner_candidate": "engineering-validation",
+      "tcb_included": false,
+      "reason": "Engineering validation measures Adapter source and API boundaries but is not imported by Runtime or Distribution roots.",
+      "migration_target": "engineering-validation-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/get-distribution-plan.ps1",
+      "layer": "d1-distribution",
+      "current_role": "Read-only deterministic Distribution plan construction and validation CLI.",
+      "owner_candidate": "distribution",
+      "tcb_included": false,
+      "reason": "Standalone D1 entry; ordinary installation reaches its shared constructor directly.",
+      "migration_target": "distribution-reconciler",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/get-kernel-tcb-inventory.ps1",
+      "layer": "c2-capability",
+      "current_role": "Read-only reproducible Kernel TCB inventory generator.",
+      "owner_candidate": "engineering-validation",
+      "tcb_included": false,
+      "reason": "Maintenance tooling measures the TCB but is not part of the measured ordinary Runtime closure.",
+      "migration_target": "engineering-validation-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/get-module-manifest-catalog.ps1",
+      "layer": "c2-capability",
+      "current_role": "Deterministic tracked Module Manifest catalog generator and drift checker.",
+      "owner_candidate": "engineering-validation",
+      "tcb_included": false,
+      "reason": "Manifest construction runs only in engineering validation and is not imported by selected Runtime or Distribution roots.",
+      "migration_target": "manifest-construction-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/get-repo-inventory.ps1",
+      "layer": "c2-capability",
+      "current_role": "Engineering repository inventory command.",
+      "owner_candidate": "engineering-validation",
+      "tcb_included": false,
+      "reason": "Maintenance inventory is outside Runtime Kernel.",
+      "migration_target": "engineering-validation-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/harness-status.ps1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Read-only Runtime and policy status projection.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "Status projection is an allowed K1 responsibility and a Runtime root.",
+      "migration_target": null,
+      "legacy_status": "transitional"
+    },
+    {
+      "path": "scripts/harness-write-mcp.ps1",
+      "layer": "a3-adapter",
+      "current_role": "Thin MCP JSON-RPC adapter for adapter-kernel-api/v1 controlled_write.",
+      "owner_candidate": "host-adapters",
+      "tcb_included": true,
+      "reason": "The Adapter preserves MCP transport while K1 calculates trust digests, evaluates policy, and commits the write.",
+      "migration_target": "mcp-adapter",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/install-transaction-common.ps1",
+      "layer": "d1-distribution",
+      "current_role": "Shared install transaction and atomic convergence functions.",
+      "owner_candidate": "distribution",
+      "tcb_included": true,
+      "reason": "Dot-sourced by install.ps1 in the Distribution Trust Path.",
+      "migration_target": "distribution-reconciler",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/invoke-harness-skill-dispatcher.ps1",
+      "layer": "a3-adapter",
+      "current_role": "Host-facing skill dispatcher.",
+      "owner_candidate": "host-adapters",
+      "tcb_included": false,
+      "reason": "Skill execution is outside the selected Runtime Kernel roots.",
+      "migration_target": "host-skill-adapter",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/invoke-harness-skill-supervisor.ps1",
+      "layer": "a3-adapter",
+      "current_role": "Host-facing skill process supervisor.",
+      "owner_candidate": "host-adapters",
+      "tcb_included": false,
+      "reason": "Skill process supervision is adapter behavior outside K1.",
+      "migration_target": "host-skill-adapter",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/invoke-harness-skill.ps1",
+      "layer": "a3-adapter",
+      "current_role": "Retained Stage-based delegation CLI; K1 rejects execution before backend entry.",
+      "owner_candidate": "host-adapters",
+      "tcb_included": false,
+      "reason": "The Adapter still delegates its existing envelopes to K1; TK-03 closes both Stage-based operations with a zero-read/write retired diagnostic. Historical code remains for separate removal approval.",
+      "migration_target": "host-skill-adapter",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/invoke-validation-check.ps1",
+      "layer": "c2-capability",
+      "current_role": "Engineering validation child-process wrapper.",
+      "owner_candidate": "engineering-validation",
+      "tcb_included": false,
+      "reason": "Validation process control is outside ordinary Runtime.",
+      "migration_target": "engineering-validation-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.AdapterAction.psm1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "K1 preflight_action and controlled_write Adapter API implementation.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "Selected Hook and MCP roots delegate patch, path, trust-digest, Policy, and controlled commit authority here.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.AdapterDelegation.psm1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "K1 retired Stage-based prepare_delegation and commit_delegation boundary.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": false,
+      "reason": "TK-03 rejects both exports before legacy plan reads or writes. The retained implementation remains classified and counted outside selected ordinary Runtime roots pending separate physical-removal approval.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.Approval.psm1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Compatibility export for Approval and protected-operation functions implemented by Runtime Kernel.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": false,
+      "reason": "Selected Runtime roots use the counted Runtime Kernel implementation directly; the public compatibility module remains outside executable reachability.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.AtomicWrite.psm1",
+      "layer": "k0-trust-primitive",
+      "current_role": "Canonical atomic write, file digest, and compare-and-remove primitive.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "Frozen canonical K0 Atomic Write primitive shared by both trust paths.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.CanonicalJson.psm1",
+      "layer": "k0-trust-primitive",
+      "current_role": "Canonical JSON byte serialization and digest primitive for explicitly new trust objects.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "TK-06 explicitly adopts this primitive on the Distribution path for new Profile and Plan contracts; Runtime still does not reach it.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.CapabilitySource.psm1",
+      "layer": "c2-capability",
+      "current_role": "Strict consumer for current Capability source closure records.",
+      "owner_candidate": "engineering-validation",
+      "tcb_included": false,
+      "reason": "Capability source consumption is confined to build and Evidence production outside Runtime and Distribution.",
+      "migration_target": "manifest-construction-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.ControlledWrite.psm1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Kernel-controlled file write service.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "MCP write adapter delegates protected policy and atomic writes here.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.Distribution.psm1",
+      "layer": "d1-distribution",
+      "current_role": "Strict Profile authorization, deterministic desired-state planning and source-bound consumption.",
+      "owner_candidate": "distribution",
+      "tcb_included": true,
+      "reason": "Reached by the installer without importing C2 constructors or Runtime routing and policy modules.",
+      "migration_target": "distribution-reconciler",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.Evidence.psm1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Compatibility export for revision-bound Evidence functions implemented by Runtime Kernel.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": false,
+      "reason": "Selected Runtime roots use the counted Runtime Kernel implementation directly; the public compatibility module remains outside executable reachability.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.Governance.psm1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Plan and audit governance artifact validator.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "Governed task completion depends on policy-selected artifacts.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.Hashing.psm1",
+      "layer": "k0-trust-primitive",
+      "current_role": "Canonical SHA-256 byte, file, UTF-8 text, and normalized-text primitive.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "Runtime trust digests depend on one frozen K0 hashing byte contract.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.HostCapabilities.psm1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Host capability projection used by Runtime Default and status.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "Runtime protocol selection consumes a strict host-capability document.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.ModelEval.psm1",
+      "layer": "c2-capability",
+      "current_role": "Model evaluation implementation.",
+      "owner_candidate": "benchmark",
+      "tcb_included": false,
+      "reason": "Model evaluation is a C2 producer and is excluded from Runtime imports.",
+      "migration_target": "benchmark-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.ModuleManifest.psm1",
+      "layer": "c2-capability",
+      "current_role": "Strict Manifest discovery, ownership, dependency, and validation catalog constructor.",
+      "owner_candidate": "engineering-validation",
+      "tcb_included": false,
+      "reason": "The construction library adopts K0 primitives but has no selected Runtime or Distribution caller.",
+      "migration_target": "manifest-construction-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.Path.psm1",
+      "layer": "k0-trust-primitive",
+      "current_role": "Canonical containment, physical identity, strict JSON, and path primitive.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "Frozen canonical K0 Path primitive shared by Runtime and Distribution.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.Policy.psm1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Risk-routing and execution-profile evaluator.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "Risk Routing is an irreducible Harness responsibility and a selected root.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.ProtectedAction.psm1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Protected-action policy evaluator.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "Core hook and controlled-write paths depend on this evaluator.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.Protocol.psm1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "v2-only new-work admission, artifact-first recovery and workspace pause configuration.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "Runtime task and status roots require artifact-first protocol selection.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.Qualification.psm1",
+      "layer": "c2-capability",
+      "current_role": "Release Qualification evaluator and report contract.",
+      "owner_candidate": "release-evidence",
+      "tcb_included": false,
+      "reason": "Qualification is explicitly excluded from ordinary Runtime.",
+      "migration_target": "release-evidence-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.Recovery.psm1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Read-only task recovery and resume projection.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "Task status and resume paths require recovery indexing.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.Requirement.psm1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Requirement Gate and product decision resolver.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "Unresolved Requirement must block every write before task creation.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.RolloutEvidence.psm1",
+      "layer": "c2-capability",
+      "current_role": "Release and rollout Evidence producer library.",
+      "owner_candidate": "release-evidence",
+      "tcb_included": false,
+      "reason": "Current AST imports bind it only to C2 producer scripts, not ordinary Runtime.",
+      "migration_target": "release-evidence-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.RuntimeDefault.psm1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Public K1 composition surface for Runtime Default readers and the explicit Decision constructor.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": false,
+      "reason": "Ordinary Protocol resolution uses the explicit counted reader directly; this compatibility surface is reached only by construction and verification callers.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.RuntimeDefaultReader.ps1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Strict version-neutral Runtime Default Decision reader and source-identity validator.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "Protocol resolution directly dot-sources this explicit K1 reader; every ordinary admission dependency remains AST-visible and measured.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.RuntimeKernel.ps1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Counted shared implementation for Runtime Kernel validation, process, governance, and lifecycle contracts.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "Public compatibility modules dot-source this tracked K1 implementation; it remains explicitly classified, dependency-reachable, and fully measured.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.TaskMigration.psm1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "K1 task-state publication seam used only by the explicit v1-to-v2 migration maintenance command.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": false,
+      "reason": "The explicit legacy maintenance command retains Kernel-governed migration writes without making migration-only implementation reachable from the ordinary task CLI root.",
+      "migration_target": "v1-sunset/V1S-10",
+      "legacy_status": "sunset-gated"
+    },
+    {
+      "path": "scripts/lib/Harness.TaskState.psm1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Durable task state machine, CAS, journal, replay, and Evidence transition logic.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "Primary K1 durable state and Evidence Chain implementation.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lib/Harness.ValidationProcess.ps1",
+      "layer": "c2-capability",
+      "current_role": "Process containment helper for engineering validation suites.",
+      "owner_candidate": "engineering-validation",
+      "tcb_included": false,
+      "reason": "Validation process orchestration is engineering Evidence production outside ordinary Runtime.",
+      "migration_target": "engineering-validation-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/lite-artifact-parser.ps1",
+      "layer": "legacy-v1",
+      "current_role": "Parser for legacy staged task artifacts.",
+      "owner_candidate": "legacy-v1",
+      "tcb_included": false,
+      "reason": "Retained only for v1 compatibility and staged artifact validation.",
+      "migration_target": "v1-sunset/V1S-09",
+      "legacy_status": "sunset-gated"
+    },
+    {
+      "path": "scripts/memory-health-report.ps1",
+      "layer": "c2-capability",
+      "current_role": "Memory health report renderer.",
+      "owner_candidate": "memory",
+      "tcb_included": false,
+      "reason": "Memory reporting is optional capability behavior.",
+      "migration_target": "memory-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/memory-health.ps1",
+      "layer": "c2-capability",
+      "current_role": "Explicit historical Memory health maintenance; not an automatic v2 installation or recovery gate.",
+      "owner_candidate": "memory",
+      "tcb_included": false,
+      "reason": "The conditional Memory check is C2-owned and is not a core Runtime or Distribution trust prerequisite.",
+      "migration_target": "memory-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/memory-maintain.ps1",
+      "layer": "c2-capability",
+      "current_role": "Memory maintenance coordinator.",
+      "owner_candidate": "memory",
+      "tcb_included": false,
+      "reason": "Optional memory mutation is outside Runtime Kernel.",
+      "migration_target": "memory-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/migrate-task-v1-to-v2.ps1",
+      "layer": "legacy-v1",
+      "current_role": "Explicit v1 task migration tool.",
+      "owner_candidate": "legacy-v1",
+      "tcb_included": false,
+      "reason": "Compatibility migration remains until its final Sunset gate.",
+      "migration_target": "v1-sunset/V1S-10",
+      "legacy_status": "sunset-gated"
+    },
+    {
+      "path": "scripts/promote-v2-rollout-report.ps1",
+      "layer": "c2-capability",
+      "current_role": "Release-only Runtime Default promotion command.",
+      "owner_candidate": "release-evidence",
+      "tcb_included": false,
+      "reason": "Promotion is excluded from ordinary Runtime TCB.",
+      "migration_target": "release-evidence-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/qualification-status.ps1",
+      "layer": "c2-capability",
+      "current_role": "Release Qualification status projection.",
+      "owner_candidate": "release-evidence",
+      "tcb_included": false,
+      "reason": "Qualification status is release-only and not ordinary Runtime status.",
+      "migration_target": "release-evidence-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/receive-otlp-http.ps1",
+      "layer": "c2-capability",
+      "current_role": "Benchmark OTLP observation receiver.",
+      "owner_candidate": "benchmark",
+      "tcb_included": false,
+      "reason": "Benchmark telemetry is outside Runtime Kernel.",
+      "migration_target": "benchmark-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/render-review-html.ps1",
+      "layer": "c2-capability",
+      "current_role": "Review Markdown-to-HTML renderer.",
+      "owner_candidate": "md-html",
+      "tcb_included": false,
+      "reason": "Presentation capability is outside K1.",
+      "migration_target": "md-html-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/repair-shared-memory.ps1",
+      "layer": "c2-capability",
+      "current_role": "Retired v1 mirror repair and retirement entry; rejects before imports, reads, locks or writes.",
+      "owner_candidate": "memory",
+      "tcb_included": false,
+      "reason": "Retained rejected entry stays fully counted in Memory Capability source; not active Runtime.",
+      "migration_target": "memory-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/resolve-obsidian-memory-script.ps1",
+      "layer": "c2-capability",
+      "current_role": "Memory script compatibility resolver.",
+      "owner_candidate": "memory",
+      "tcb_included": false,
+      "reason": "Optional memory routing remains capability-owned.",
+      "migration_target": "memory-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/run-changed-optional-validation.ps1",
+      "layer": "c2-capability",
+      "current_role": "Changed-path engineering validation router.",
+      "owner_candidate": "engineering-validation",
+      "tcb_included": false,
+      "reason": "CI maintenance routing is not ordinary Runtime routing.",
+      "migration_target": "engineering-validation-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/run-host-benchmark.ps1",
+      "layer": "c2-capability",
+      "current_role": "Host benchmark producer.",
+      "owner_candidate": "benchmark",
+      "tcb_included": false,
+      "reason": "Host benchmark production is release-only capability behavior.",
+      "migration_target": "benchmark-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/run-isolated-install-smoke.ps1",
+      "layer": "d1-distribution",
+      "current_role": "Distribution install-update-uninstall smoke runner.",
+      "owner_candidate": "distribution",
+      "tcb_included": false,
+      "reason": "Engineering distribution verification is not reached by bootstrap at Runtime.",
+      "migration_target": "distribution-reconciler",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/run-model-evals.ps1",
+      "layer": "c2-capability",
+      "current_role": "Model evaluation producer.",
+      "owner_candidate": "benchmark",
+      "tcb_included": false,
+      "reason": "Model evaluation is excluded from Runtime Kernel.",
+      "migration_target": "benchmark-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/run-preset-lifecycle-qualification.ps1",
+      "layer": "c2-capability",
+      "current_role": "Release preset lifecycle qualification producer.",
+      "owner_candidate": "release-evidence",
+      "tcb_included": false,
+      "reason": "Qualification production is release-only.",
+      "migration_target": "release-evidence-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/run-v1-stop-loss-qualification.ps1",
+      "layer": "c2-capability",
+      "current_role": "Release v1 stop-loss Evidence producer.",
+      "owner_candidate": "release-evidence",
+      "tcb_included": false,
+      "reason": "Release Evidence remains outside Runtime; it observes legacy compatibility.",
+      "migration_target": "v1-sunset/V1S-10",
+      "legacy_status": "transitional"
+    },
+    {
+      "path": "scripts/run-validation.ps1",
+      "layer": "c2-capability",
+      "current_role": "Central engineering validation suite runner.",
+      "owner_candidate": "engineering-validation",
+      "tcb_included": false,
+      "reason": "Engineering verification is not a Runtime Kernel execution dependency.",
+      "migration_target": "engineering-validation-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/task.ps1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Canonical v2 task, Requirement, status, recovery, and lifecycle CLI.",
+      "owner_candidate": "trust-kernel",
+      "tcb_included": true,
+      "reason": "Primary Runtime Trust Path root for task state and Evidence.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/triage-runtime-inbox.ps1",
+      "layer": "c2-capability",
+      "current_role": "Memory runtime inbox triage command.",
+      "owner_candidate": "memory",
+      "tcb_included": false,
+      "reason": "Memory triage is outside K1.",
+      "migration_target": "memory-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/update-managed-assets.ps1",
+      "layer": "d1-distribution",
+      "current_role": "Managed installation reconcile coordinator.",
+      "owner_candidate": "distribution",
+      "tcb_included": true,
+      "reason": "Invoked directly by harness.ps1 on the Distribution Trust Path.",
+      "migration_target": "distribution-reconciler",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/validate-lite-artifacts.ps1",
+      "layer": "legacy-v1",
+      "current_role": "Compatibility validator for legacy staged artifacts.",
+      "owner_candidate": "legacy-v1",
+      "tcb_included": false,
+      "reason": "Retained until active validation routing no longer depends on v1 artifacts.",
+      "migration_target": "v1-sunset/V1S-09",
+      "legacy_status": "sunset-gated"
+    },
+    {
+      "path": "scripts/write-capability-source-binding.ps1",
+      "layer": "c2-capability",
+      "current_role": "Canonical Capability source sidecar writer for Release bundles.",
+      "owner_candidate": "release-evidence",
+      "tcb_included": false,
+      "reason": "Release bundle provenance binding is an Evidence producer concern outside Runtime.",
+      "migration_target": "release-evidence-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/write-ordinary-ci-receipt.ps1",
+      "layer": "c2-capability",
+      "current_role": "Ordinary exact-head CI receipt writer.",
+      "owner_candidate": "engineering-validation",
+      "tcb_included": false,
+      "reason": "CI receipt production is engineering Evidence, not ordinary Runtime.",
+      "migration_target": "engineering-validation-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/write-release-full-receipt.ps1",
+      "layer": "c2-capability",
+      "current_role": "Release aggregate receipt writer.",
+      "owner_candidate": "release-evidence",
+      "tcb_included": false,
+      "reason": "Release receipt generation is excluded from Runtime.",
+      "migration_target": "release-evidence-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/write-release-producer-receipt.ps1",
+      "layer": "c2-capability",
+      "current_role": "Release producer receipt writer.",
+      "owner_candidate": "release-evidence",
+      "tcb_included": false,
+      "reason": "Release producer code is excluded from Runtime.",
+      "migration_target": "release-evidence-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "tests/fixture-test-common.ps1",
+      "layer": "d1-distribution",
+      "current_role": "Physical-path-safe fixture utilities used by installed distribution verification.",
+      "owner_candidate": "distribution",
+      "tcb_included": true,
+      "reason": "Dot-sourced by verify-installation on the Distribution Trust Path.",
+      "migration_target": "distribution-reconciler",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "tests/verify-installation.ps1",
+      "layer": "d1-distribution",
+      "current_role": "Installed desired-state and drift verifier invoked by managed update.",
+      "owner_candidate": "distribution",
+      "tcb_included": true,
+      "reason": "Bootstrap reconciliation delegates its post-apply verification to this script.",
+      "migration_target": "distribution-reconciler",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "uninstall.ps1",
+      "layer": "d1-distribution",
+      "current_role": "Current monolithic uninstall convergence implementation.",
+      "owner_candidate": "distribution",
+      "tcb_included": false,
+      "reason": "Classified as D1 but not reached by the selected ordinary bootstrap root.",
+      "migration_target": "distribution-reconciler",
+      "legacy_status": "not-legacy"
+    }
+  ]
+}

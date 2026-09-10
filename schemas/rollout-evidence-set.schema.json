@@ -1,0 +1,89 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/rollout-evidence-set.schema.json",
+  "title": "Thin Harness rollout gate evidence references v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "phase", "source_revision", "host", "gates"],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["rollout-evidence-set/v1"] },
+    "phase": { "type": "string", "enum": ["canary-candidate", "final-default"] },
+    "source_revision": { "$ref": "#/definitions/revision" },
+    "host": { "$ref": "#/definitions/host" },
+    "gates": { "$ref": "#/definitions/gates" }
+  },
+  "definitions": {
+    "revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "identity": { "type": "string", "minLength": 1, "pattern": "\\S" },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["product", "observed_version", "hook_contract", "invocation_telemetry_contract", "request_send_contract"],
+      "properties": {
+        "product": { "type": "string", "const": "codex-cli-service" },
+        "observed_version": { "type": "string", "const": "0.144.4" },
+        "hook_contract": { "type": "string", "const": "codex-0.144.4-environment-shell-hook/v1" },
+        "invocation_telemetry_contract": { "type": "string", "const": "codex-invocation-telemetry/v2" },
+        "request_send_contract": { "type": "string", "const": "codex-0.144.4-successful-websocket-send/v2" }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "evidence_contract", "artifact_path", "evidence_digest", "source_revision", "producer_identity"],
+      "properties": {
+        "status": { "type": "string", "enum": ["pass", "fail", "blocked", "unavailable", "simulated", "not_run", "pending", "skipped", "manual"] },
+        "evidence_contract": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]*/v[1-9][0-9]*$" },
+        "artifact_path": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "evidence_digest": { "$ref": "#/definitions/digest" },
+        "source_revision": { "$ref": "#/definitions/revision" },
+        "producer_identity": { "$ref": "#/definitions/identity" }
+      }
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "DP-G00-EXACT-HEAD-ENGINEERING-CI",
+        "DP-G01-MODEL40",
+        "DP-G02-COGNITIVE-HOST-3X3",
+        "DP-G03-INSTALLED-DESKTOP-HOST-3X3",
+        "DP-G04-CODEX-HOME-RUNNER-ISOLATION",
+        "DP-G05-V2-BARE-1.25",
+        "DP-G06-REQUEST-SEND-REDUCTION",
+        "DP-G07-DISTINCT-INSTALLED-DESKTOP-GATE",
+        "DP-G09-RELEASE-MODEL",
+        "DP-G10-RELEASE-HOST",
+        "DP-G11-RELEASE-FULL",
+        "DP-G13-PROMOTION-AUTO-PROBE",
+        "DP-G14-V1-STOP-LOSS",
+        "DP-G15-CANARY",
+        "DP-G16-STABLE-DECISION",
+        "DP-G18-CORE-LIFECYCLE",
+        "DP-G19-GOVERNED-LIFECYCLE",
+        "DP-G20-FULL-LIFECYCLE"
+      ],
+      "properties": {
+        "DP-G00-EXACT-HEAD-ENGINEERING-CI": { "$ref": "#/definitions/gate" },
+        "DP-G01-MODEL40": { "$ref": "#/definitions/gate" },
+        "DP-G02-COGNITIVE-HOST-3X3": { "$ref": "#/definitions/gate" },
+        "DP-G03-INSTALLED-DESKTOP-HOST-3X3": { "$ref": "#/definitions/gate" },
+        "DP-G04-CODEX-HOME-RUNNER-ISOLATION": { "$ref": "#/definitions/gate" },
+        "DP-G05-V2-BARE-1.25": { "$ref": "#/definitions/gate" },
+        "DP-G06-REQUEST-SEND-REDUCTION": { "$ref": "#/definitions/gate" },
+        "DP-G07-DISTINCT-INSTALLED-DESKTOP-GATE": { "$ref": "#/definitions/gate" },
+        "DP-G09-RELEASE-MODEL": { "$ref": "#/definitions/gate" },
+        "DP-G10-RELEASE-HOST": { "$ref": "#/definitions/gate" },
+        "DP-G11-RELEASE-FULL": { "$ref": "#/definitions/gate" },
+        "DP-G13-PROMOTION-AUTO-PROBE": { "$ref": "#/definitions/gate" },
+        "DP-G14-V1-STOP-LOSS": { "$ref": "#/definitions/gate" },
+        "DP-G15-CANARY": { "$ref": "#/definitions/gate" },
+        "DP-G16-STABLE-DECISION": { "$ref": "#/definitions/gate" },
+        "DP-G18-CORE-LIFECYCLE": { "$ref": "#/definitions/gate" },
+        "DP-G19-GOVERNED-LIFECYCLE": { "$ref": "#/definitions/gate" },
+        "DP-G20-FULL-LIFECYCLE": { "$ref": "#/definitions/gate" }
+      }
+    }
+  }
+}

@@ -28,6 +28,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# TK-03 retains these historical bytes below for the separately approved removal diff.
+# No v1 lifecycle execution, plan read, mirror sync or pointer write remains authorized.
+[Console]::Error.WriteLine('v1-lifecycle-retired: use explicit migration maintenance or v2 recovery')
+exit 2
+
 . (Join-Path $PSScriptRoot 'lite-artifact-parser.ps1')
 
 Assert-LiteTaskId -TaskId $TaskId
@@ -35,10 +40,6 @@ Assert-LiteTaskId -TaskId $TaskId
 $ValidStages = @("PLAN", "PLAN_REVIEW", "IMPLEMENT", "CODE_REVIEW", "TEST", "DONE")
 $ValidTools = @("claudecode", "codex")
 $ModelAliasPattern = '^(opus|sonnet|haiku|default|latest|codex|claude|gpt)$'
-
-if (-not $VaultRoot) {
-    throw "Set OBSIDIAN_VAULT or pass -VaultRoot."
-}
 
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -66,6 +67,20 @@ if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
     $workspaceRoot = $repoRoot
 } else {
     $workspaceRoot = [System.IO.Path]::GetFullPath($WorkspaceRoot)
+}
+$requestedProtocol = [System.Environment]::GetEnvironmentVariable('HARNESS_PROTOCOL', [System.EnvironmentVariableTarget]::Process)
+if (-not [string]::IsNullOrWhiteSpace($requestedProtocol) -and $requestedProtocol -cnotin @('auto', 'v1', 'v2')) {
+    throw 'HARNESS_PROTOCOL must be auto, v1, or v2'
+}
+$v2TaskStatePath = Join-Path $workspaceRoot (".assistant\runtime\tasks\{0}\task.json" -f $TaskId)
+if (Test-Path -LiteralPath $v2TaskStatePath -PathType Leaf) {
+    throw "Task $TaskId is a v2 task; advance-stage.ps1 is v1-only."
+}
+if ($requestedProtocol -ceq 'v2') {
+    throw 'advance-stage.ps1 is v1-only and cannot run with HARNESS_PROTOCOL=v2'
+}
+if (-not $VaultRoot) {
+    throw "Set OBSIDIAN_VAULT or pass -VaultRoot."
 }
 $VaultRoot = Resolve-SharedMemoryVaultRoot -WorkspaceRoot $workspaceRoot -VaultRoot $VaultRoot
 $taskBase = Resolve-LiteContainedPath -Root $workspaceRoot -RelativePath 'docs\tasks' -Label 'task base'
@@ -420,7 +435,7 @@ function Test-FullModelId {
     .SYNOPSIS
     判断 model 是否看起来像完整模型 ID。
     .DESCRIPTION
-    Phase 1 不接入具体模型注册表，只阻止 `opus`、`pro` 这类短别名进入机器可读契约。
+    `inherit` 由宿主解析；显式值仍必须是完整模型 ID，阻止 `opus`、`pro` 这类短别名进入机器可读契约。
     .PARAMETER Model
     待检查的模型 ID。
     .OUTPUTS
@@ -433,6 +448,10 @@ function Test-FullModelId {
     }
 
     $normalized = $Model.Trim()
+    if ($normalized -ceq 'inherit') {
+        return $true
+    }
+
     if ($normalized -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*[A-Za-z0-9]$') {
         return $false
     }
@@ -502,7 +521,7 @@ function Get-ToolProfile {
     }
 
     if (-not (Test-FullModelId -Model $fields['model'])) {
-        throw ("Tool profile {0} model should be a full model id, got: {1}" -f $normalizedName, $fields['model'])
+        throw ("Tool profile {0} model should be inherit or a full model id, got: {1}" -f $normalizedName, $fields['model'])
     }
 
     return [pscustomobject]@{
@@ -946,7 +965,7 @@ function Resolve-LegacyProfileSelection {
     }
 
     if (-not [string]::IsNullOrWhiteSpace($selectedModel) -and -not (Test-FullModelId -Model $selectedModel)) {
-        throw ("Model should be a full model id, got: {0}" -f $selectedModel)
+        throw ("Model should be inherit or a full model id, got: {0}" -f $selectedModel)
     }
 
     return [pscustomobject]@{

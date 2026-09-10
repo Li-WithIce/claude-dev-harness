@@ -1,0 +1,175 @@
+{
+  "schema_version": "harness-module/v1",
+  "module_id": "harness-maintenance",
+  "module_version": "1.0.0",
+  "classification_owner": "engineering-validation",
+  "kind": "capability",
+  "description": "Repository maintenance, validation process control, baseline checks, and install isolation verification.",
+  "default_activation": false,
+  "dependencies": {
+    "kernel_api": "v1",
+    "modules": ["distribution", "thin-trust-kernel"]
+  },
+  "requested_capabilities": ["filesystem-read", "filesystem-write", "process-execution"],
+  "ownership": {
+    "owned_paths": [
+      "modules/harness-maintenance/**",
+      "schemas/adapter-inventory.schema.json",
+      "schemas/capability-source-catalog.schema.json",
+      "schemas/capability-source.schema.json",
+      "schemas/module-manifest-catalog-v1.schema.json",
+      "schemas/module-manifest-catalog.schema.json",
+      "schemas/module-manifest-v1.schema.json",
+      "schemas/module-manifest.schema.json",
+      "schemas/ordinary-ci-receipt.schema.json",
+      "scripts/audit-task-artifact-drift.ps1",
+      "scripts/get-adapter-inventory.ps1",
+      "scripts/get-kernel-tcb-inventory.ps1",
+      "scripts/get-module-manifest-catalog.ps1",
+      "scripts/get-repo-inventory.ps1",
+      "scripts/invoke-validation-check.ps1",
+      "scripts/lib/Harness.CapabilitySource.psm1",
+      "scripts/lib/Harness.ModuleManifest.psm1",
+      "scripts/lib/Harness.ValidationJob.cs",
+      "scripts/lib/Harness.ValidationProcess.ps1",
+      "scripts/run-changed-optional-validation.ps1",
+      "scripts/run-validation.ps1",
+      "scripts/write-ordinary-ci-receipt.ps1",
+      "tests/fixtures/tk02/**",
+      "tests/fixtures/tk03/**",
+      "tests/fixtures/tk04/**",
+      "tests/fixtures/v2/**",
+      "tests/verify-change-contract.ps1",
+      "tests/verify-capability-extraction.ps1",
+      "tests/verify-install-isolation.ps1",
+      "tests/verify-installation.ps1",
+      "tests/verify-runtime-hooks.ps1",
+      "tests/verify-thin-adapters.ps1",
+      "tests/verify-uninstall-isolation.ps1",
+      "tests/verify-update-managed-assets.ps1",
+      "tests/verify-v2-baseline-benchmark.ps1",
+      "tests/verify-v2-policy-contracts.ps1"
+    ],
+    "watch_paths": [
+      "adapter-inventory.json",
+      "install.ps1",
+      "kernel-component-classification.json",
+      "kernel-tcb-roots.json",
+      "runtime-hooks/**",
+      "schemas/adapter-kernel-api.schema.json",
+      "scripts/harness-write-mcp.ps1",
+      "scripts/install-transaction-common.ps1",
+      "scripts/invoke-harness-skill-dispatcher.ps1",
+      "scripts/invoke-harness-skill-supervisor.ps1",
+      "scripts/invoke-harness-skill.ps1",
+      "scripts/lib/Harness.AdapterAction.psm1",
+      "scripts/lib/Harness.AdapterDelegation.psm1",
+      "scripts/lib/Harness.AtomicWrite.psm1",
+      "scripts/lib/Harness.CanonicalJson.psm1",
+      "scripts/lib/Harness.Hashing.psm1",
+      "scripts/lib/Harness.Path.psm1",
+      "scripts/update-managed-assets.ps1",
+      "uninstall.ps1"
+    ]
+  },
+  "package": {
+    "code": [
+      "scripts/audit-task-artifact-drift.ps1",
+      "scripts/get-adapter-inventory.ps1",
+      "scripts/get-kernel-tcb-inventory.ps1",
+      "scripts/get-module-manifest-catalog.ps1",
+      "scripts/get-repo-inventory.ps1",
+      "scripts/invoke-validation-check.ps1",
+      "scripts/lib/Harness.CapabilitySource.psm1",
+      "scripts/lib/Harness.ModuleManifest.psm1",
+      "scripts/lib/Harness.ValidationJob.cs",
+      "scripts/lib/Harness.ValidationProcess.ps1",
+      "scripts/run-changed-optional-validation.ps1",
+      "scripts/run-validation.ps1",
+      "scripts/write-ordinary-ci-receipt.ps1"
+    ],
+    "schemas": [
+      "schemas/adapter-inventory.schema.json",
+      "schemas/capability-source-catalog.schema.json",
+      "schemas/capability-source.schema.json",
+      "schemas/module-manifest-catalog-v1.schema.json",
+      "schemas/module-manifest-catalog.schema.json",
+      "schemas/module-manifest-v1.schema.json",
+      "schemas/module-manifest.schema.json",
+      "schemas/ordinary-ci-receipt.schema.json"
+    ],
+    "tests": [
+      "tests/fixtures/tk02/**",
+      "tests/fixtures/tk03/**",
+      "tests/fixtures/tk04/**",
+      "tests/fixtures/v2/**",
+      "tests/verify-capability-extraction.ps1",
+      "tests/verify-change-contract.ps1",
+      "tests/verify-install-isolation.ps1",
+      "tests/verify-installation.ps1",
+      "tests/verify-runtime-hooks.ps1",
+      "tests/verify-thin-adapters.ps1",
+      "tests/verify-uninstall-isolation.ps1",
+      "tests/verify-update-managed-assets.ps1",
+      "tests/verify-v2-baseline-benchmark.ps1",
+      "tests/verify-v2-policy-contracts.ps1"
+    ],
+    "install_assets": []
+  },
+  "exports": {
+    "commands": [
+      "scripts/audit-task-artifact-drift.ps1",
+      "scripts/get-adapter-inventory.ps1",
+      "scripts/get-kernel-tcb-inventory.ps1",
+      "scripts/get-module-manifest-catalog.ps1",
+      "scripts/get-repo-inventory.ps1",
+      "scripts/run-validation.ps1",
+      "scripts/run-changed-optional-validation.ps1"
+    ],
+    "hooks": [],
+    "libraries": [
+      "scripts/lib/Harness.CapabilitySource.psm1",
+      "scripts/lib/Harness.ModuleManifest.psm1"
+    ]
+  },
+  "validation": {
+    "owner_tests": [
+      "tests/verify-capability-extraction.ps1",
+      "tests/verify-change-contract.ps1",
+      "tests/verify-install-isolation.ps1",
+      "tests/verify-installation.ps1",
+      "tests/verify-runtime-hooks.ps1",
+      "tests/verify-thin-adapters.ps1",
+      "tests/verify-uninstall-isolation.ps1",
+      "tests/verify-update-managed-assets.ps1",
+      "tests/verify-v2-baseline-benchmark.ps1",
+      "tests/verify-v2-policy-contracts.ps1"
+    ],
+    "quick": [],
+    "core_groups": {
+      "harness-contracts": ["tests/verify-thin-adapters.ps1"]
+    },
+    "changed": [
+      "tests/verify-capability-extraction.ps1",
+      "tests/verify-change-contract.ps1",
+      "tests/verify-install-isolation.ps1",
+      "tests/verify-runtime-hooks.ps1",
+      "tests/verify-thin-adapters.ps1",
+      "tests/verify-uninstall-isolation.ps1",
+      "tests/verify-update-managed-assets.ps1",
+      "tests/verify-v2-baseline-benchmark.ps1",
+      "tests/verify-v2-policy-contracts.ps1"
+    ],
+    "full": [
+      "tests/verify-capability-extraction.ps1",
+      "tests/verify-change-contract.ps1",
+      "tests/verify-install-isolation.ps1",
+      "tests/verify-runtime-hooks.ps1",
+      "tests/verify-thin-adapters.ps1",
+      "tests/verify-uninstall-isolation.ps1",
+      "tests/verify-update-managed-assets.ps1",
+      "tests/verify-v2-baseline-benchmark.ps1",
+      "tests/verify-v2-policy-contracts.ps1"
+    ]
+  }
+}

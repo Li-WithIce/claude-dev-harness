@@ -1,0 +1,109 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "thin-trust-kernel",
+  "kind": "kernel",
+  "description": "Shared K0 trust primitives plus deterministic Manifest and Kernel TCB construction contracts.",
+  "default_activation": true,
+  "dependencies": {
+    "kernel_api": "v1",
+    "modules": []
+  },
+  "requested_capabilities": [
+    "filesystem-read",
+    "process-execution"
+  ],
+  "ownership": {
+    "owned_paths": [
+      ".gitattributes",
+      "adapter-inventory.json",
+      "capability-source-catalog.json",
+      "docs/architecture/**",
+      "kernel-component-classification.json",
+      "kernel-tcb-inventory.json",
+      "kernel-tcb-roots.json",
+      "module-manifest-catalog.json",
+      "modules/thin-trust-kernel/**",
+      "schemas/kernel-component-classification.schema.json",
+      "schemas/kernel-tcb-roots.schema.json",
+      "schemas/kernel-tcb.schema.json",
+      "scripts/lib/Harness.AtomicWrite.psm1",
+      "scripts/lib/Harness.CanonicalJson.psm1",
+      "scripts/lib/Harness.Hashing.psm1",
+      "scripts/lib/Harness.Path.psm1",
+      "scripts/lib/Harness.RuntimeKernel.ps1",
+      "tests/fixtures/tk00/**"
+    ],
+    "watch_paths": [
+      "modules/**",
+      "schemas/adapter-inventory.schema.json",
+      "schemas/adapter-kernel-api.schema.json",
+      "schemas/capability-source-binding.schema.json",
+      "schemas/capability-source-catalog.schema.json",
+      "schemas/capability-source.schema.json",
+      "schemas/module-manifest-catalog-v1.schema.json",
+      "schemas/module-manifest-catalog.schema.json",
+      "schemas/module-manifest-v1.schema.json",
+      "schemas/module-manifest.schema.json",
+      "scripts/get-adapter-inventory.ps1",
+      "scripts/get-kernel-tcb-inventory.ps1",
+      "scripts/get-module-manifest-catalog.ps1",
+      "scripts/lib/Harness.CapabilitySource.psm1",
+      "scripts/lib/Harness.ModuleManifest.psm1",
+      "scripts/lib/Harness.AdapterAction.psm1",
+      "scripts/lib/Harness.AdapterDelegation.psm1",
+      "scripts/run-changed-optional-validation.ps1",
+      "scripts/run-validation.ps1",
+      "scripts/write-capability-source-binding.ps1",
+      "tests/fixtures/tk02/**",
+      "tests/fixtures/tk04/**",
+      "tests/verify-capability-extraction.ps1",
+      "tests/verify-thin-adapters.ps1",
+      "tests/verify-v2-ci-routing.ps1"
+    ]
+  },
+  "entrypoints": {
+    "commands": [],
+    "hooks": []
+  },
+  "validation": {
+    "owner_tests": [
+      "tests/verify-canonical-json.ps1",
+      "tests/verify-harness-entry.ps1",
+      "tests/verify-hashing-module.ps1",
+      "tests/verify-kernel-tcb-inventory.ps1",
+      "tests/verify-lite-footprint.ps1",
+      "tests/verify-minimal-safe-change-policy.ps1",
+      "tests/verify-no-node-install-dependency.ps1",
+      "tests/verify-placeholder-rendering.ps1",
+      "tests/verify-release-validation.ps1",
+      "tests/verify-task-artifact-drift-audit.ps1",
+      "tests/verify-thin-trust-kernel-contracts.ps1",
+      "tests/verify-module-manifest-catalog.ps1"
+    ],
+    "quick": [
+      "tests/verify-lite-footprint.ps1"
+    ],
+    "core_group": "harness-contracts",
+    "changed": [
+      "tests/verify-canonical-json.ps1",
+      "tests/verify-hashing-module.ps1",
+      "tests/verify-kernel-tcb-inventory.ps1",
+      "tests/verify-thin-trust-kernel-contracts.ps1",
+      "tests/verify-module-manifest-catalog.ps1"
+    ],
+    "full": [
+      "tests/verify-canonical-json.ps1",
+      "tests/verify-harness-entry.ps1",
+      "tests/verify-hashing-module.ps1",
+      "tests/verify-kernel-tcb-inventory.ps1",
+      "tests/verify-lite-footprint.ps1",
+      "tests/verify-minimal-safe-change-policy.ps1",
+      "tests/verify-no-node-install-dependency.ps1",
+      "tests/verify-placeholder-rendering.ps1",
+      "tests/verify-release-validation.ps1",
+      "tests/verify-task-artifact-drift-audit.ps1",
+      "tests/verify-thin-trust-kernel-contracts.ps1",
+      "tests/verify-module-manifest-catalog.ps1"
+    ]
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "codex-adapter",
+  "kind": "adapter",
+  "description": "Codex host configuration and command serialization adapter.",
+  "default_activation": false,
+  "dependencies": {
+    "kernel_api": "v1",
+    "modules": ["entry-kernel"]
+  },
+  "requested_capabilities": ["capability-read", "filesystem-read", "process-execution"],
+  "ownership": {
+    "owned_paths": [
+      "agent-configs/codex/**",
+      "modules/codex-adapter/**",
+      "skills/codex/**"
+    ],
+    "watch_paths": []
+  },
+  "entrypoints": {
+    "commands": ["skills/codex/scripts/ask_codex.ps1", "skills/codex/scripts/invoke_codex.ps1"],
+    "hooks": []
+  },
+  "validation": {
+    "owner_tests": [
+      "tests/verify-ask-codex.ps1",
+      "tests/verify-codex-entry-autoload.ps1"
+    ],
+    "quick": [],
+    "core_group": null,
+    "changed": [
+      "tests/verify-ask-codex.ps1",
+      "tests/verify-codex-entry-autoload.ps1"
+    ],
+    "full": [
+      "tests/verify-ask-codex.ps1",
+      "tests/verify-codex-entry-autoload.ps1"
+    ]
+  }
+}

@@ -1,0 +1,150 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.invalid/schemas/release-isolation-report.schema.json",
+  "title": "Thin Harness Release Isolation Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "generated_at_utc", "source_revision", "source_dirty", "source_state_stable", "source",
+    "report_run_id", "producer_identity", "producer_mode", "workflow", "observations", "results", "status", "reason", "report_digest"
+  ],
+  "properties": {
+    "schema_version": { "const": "harness-release-isolation-report/v1" },
+    "generated_at_utc": { "$ref": "#/definitions/utcDateTime" },
+    "source_revision": { "$ref": "#/definitions/objectId" },
+    "source_dirty": { "type": "boolean" },
+    "source_state_stable": { "type": "boolean" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit_tree_oid", "object_format", "start", "end", "input_digests"],
+      "properties": {
+        "commit_tree_oid": { "$ref": "#/definitions/objectId" },
+        "object_format": { "$ref": "#/definitions/objectFormat" },
+        "start": { "$ref": "#/definitions/sourceState" },
+        "end": { "$ref": "#/definitions/sourceState" },
+        "input_digests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["producer_digest", "report_schema_digest", "observation_schema_digest", "boundary_script_digest", "rollout_evidence_digest", "host_benchmark_trial_digest", "atomic_write_digest", "path_digest"],
+          "properties": {
+            "producer_digest": { "$ref": "#/definitions/digest" },
+            "report_schema_digest": { "$ref": "#/definitions/digest" },
+            "observation_schema_digest": { "$ref": "#/definitions/digest" },
+            "boundary_script_digest": { "$ref": "#/definitions/digest" },
+            "rollout_evidence_digest": { "$ref": "#/definitions/digest" },
+            "host_benchmark_trial_digest": { "$ref": "#/definitions/digest" },
+            "atomic_write_digest": { "$ref": "#/definitions/digest" },
+            "path_digest": { "$ref": "#/definitions/digest" }
+          }
+        }
+      }
+    },
+    "report_run_id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "producer_identity": { "const": "release-isolation-qualification/v1" },
+    "producer_mode": { "type": "string", "enum": ["formal", "test-only", "diagnostic-smoke"] },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "run_attempt"],
+      "properties": {
+        "run_id": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+        "run_attempt": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "observations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_producer", "host_producer", "aggregator"],
+      "properties": {
+        "model_producer": { "$ref": "#/definitions/observationSummary" },
+        "host_producer": { "$ref": "#/definitions/observationSummary" },
+        "aggregator": { "$ref": "#/definitions/observationSummary" }
+      }
+    },
+    "results": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observations_distinct", "workflow_identity_consistent", "source_identity_consistent", "producer_labels_consistent",
+        "producer_aggregator_labels_distinct", "aggregator_account_distinct_from_model", "aggregator_account_distinct_from_host",
+        "producer_codex_home_same", "producer_codex_home_dedicated", "producer_auth_present", "aggregator_credential_blind", "no_private_identity_persisted"
+      ],
+      "properties": {
+        "observations_distinct": { "type": "boolean" },
+        "workflow_identity_consistent": { "type": "boolean" },
+        "source_identity_consistent": { "type": "boolean" },
+        "producer_labels_consistent": { "type": "boolean" },
+        "producer_aggregator_labels_distinct": { "type": "boolean" },
+        "aggregator_account_distinct_from_model": { "type": "boolean" },
+        "aggregator_account_distinct_from_host": { "type": "boolean" },
+        "producer_codex_home_same": { "type": "boolean" },
+        "producer_codex_home_dedicated": { "type": "boolean" },
+        "producer_auth_present": { "type": "boolean" },
+        "aggregator_credential_blind": { "type": "boolean" },
+        "no_private_identity_persisted": { "type": "boolean" }
+      }
+    },
+    "status": { "type": "string", "enum": ["pass", "fail", "unavailable"] },
+    "reason": { "type": "string", "enum": ["all-isolation-checks-passed", "non-formal-producer-mode", "isolation-check-failed", "isolation-unavailable"] },
+    "report_digest": { "$ref": "#/definitions/digest" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "producer_mode": { "enum": ["test-only", "diagnostic-smoke"] } } },
+      "then": { "properties": { "status": { "not": { "const": "pass" } } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "pass" } } },
+      "then": { "properties": { "reason": { "const": "all-isolation-checks-passed" } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "fail" } } },
+      "then": { "properties": { "reason": { "const": "isolation-check-failed" } } }
+    },
+    {
+      "if": { "properties": { "producer_mode": { "enum": ["test-only", "diagnostic-smoke"] }, "status": { "const": "unavailable" } } },
+      "then": { "properties": { "reason": { "const": "non-formal-producer-mode" } } }
+    },
+    {
+      "if": { "properties": { "producer_mode": { "const": "formal" }, "status": { "const": "unavailable" } } },
+      "then": { "properties": { "reason": { "const": "isolation-unavailable" } } }
+    }
+  ],
+  "definitions": {
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "nullableDigest": { "oneOf": [{ "$ref": "#/definitions/digest" }, { "type": "null" }] },
+    "objectId": { "type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" },
+    "objectFormat": { "type": "string", "enum": ["sha1", "sha256"] },
+    "utcDateTime": { "type": "string", "format": "date-time", "pattern": "(?:Z|\\+00:00)$" },
+    "sourceState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision", "commit_tree_oid", "object_format", "dirty", "status_entry_count", "status_digest", "state_digest", "state_basis"],
+      "properties": {
+        "revision": { "$ref": "#/definitions/objectId" },
+        "commit_tree_oid": { "$ref": "#/definitions/objectId" },
+        "object_format": { "$ref": "#/definitions/objectFormat" },
+        "dirty": { "type": "boolean" },
+        "status_entry_count": { "type": "integer", "minimum": 0 },
+        "status_digest": { "$ref": "#/definitions/digest" },
+        "state_digest": { "$ref": "#/definitions/digest" },
+        "state_basis": { "const": "git-revision-tree-status/v1" }
+      }
+    },
+    "observationSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observation_run_id", "observation_digest", "role", "runner_label_digest", "account_digest", "codex_home_identity_digest", "status"],
+      "properties": {
+        "observation_run_id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+        "observation_digest": { "$ref": "#/definitions/digest" },
+        "role": { "type": "string", "enum": ["model-producer", "host-producer", "aggregator"] },
+        "runner_label_digest": { "$ref": "#/definitions/digest" },
+        "account_digest": { "$ref": "#/definitions/digest" },
+        "codex_home_identity_digest": { "$ref": "#/definitions/nullableDigest" },
+        "status": { "type": "string", "enum": ["pass", "fail", "unavailable"] }
+      }
+    }
+  }
+}

@@ -1,0 +1,166 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.invalid/schemas/release-host-receipt.schema.json",
+  "title": "Thin Harness Release Host Producer Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "generated_at_utc", "source_revision", "source_dirty", "source_state_stable", "source",
+    "receipt_run_id", "producer_identity", "producer_mode", "workflow", "runner_observation", "artifacts", "status", "reason", "receipt_digest"
+  ],
+  "properties": {
+    "schema_version": { "const": "harness-release-host-receipt/v1" },
+    "generated_at_utc": { "$ref": "#/definitions/utcDateTime" },
+    "source_revision": { "$ref": "#/definitions/objectId" },
+    "source_dirty": { "type": "boolean" },
+    "source_state_stable": { "type": "boolean" },
+    "source": { "$ref": "#/definitions/source" },
+    "receipt_run_id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "producer_identity": { "const": "release-host-receipt/v1" },
+    "producer_mode": { "type": "string", "enum": ["formal", "test-only"] },
+    "workflow": { "$ref": "#/definitions/workflow" },
+    "runner_observation": {
+      "allOf": [
+        { "$ref": "#/definitions/runnerObservation" },
+        { "properties": { "role": { "const": "host-producer" } } }
+      ]
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": [
+        {
+          "allOf": [
+            { "$ref": "#/definitions/artifact" },
+            { "properties": { "role": { "const": "cognitive-host" }, "evidence_contract": { "const": "harness-host-benchmark-report/v2" } } }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/definitions/artifact" },
+            { "properties": { "role": { "const": "installed-desktop-primary" }, "evidence_contract": { "const": "harness-installed-desktop-benchmark-report/v1" } } }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/definitions/artifact" },
+            { "properties": { "role": { "const": "installed-desktop-distinct" }, "evidence_contract": { "const": "harness-installed-desktop-benchmark-report/v1" } } }
+          ]
+        }
+      ],
+      "additionalItems": false
+    },
+    "status": { "$ref": "#/definitions/status" },
+    "reason": { "$ref": "#/definitions/reason" },
+    "receipt_digest": { "$ref": "#/definitions/digest" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "producer_mode": { "const": "test-only" } } },
+      "then": { "properties": { "status": { "const": "unavailable" }, "reason": { "const": "non-formal-producer-mode" } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "pass" } } },
+      "then": {
+        "properties": {
+          "producer_mode": { "const": "formal" },
+          "source_dirty": { "const": false },
+          "source_state_stable": { "const": true },
+          "workflow": { "properties": { "conclusion": { "const": "success" } } },
+          "artifacts": { "items": { "properties": { "status": { "const": "pass" } } } },
+          "reason": { "const": "all-producer-checks-passed" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "producer_mode": { "const": "formal" }, "status": { "const": "fail" } } },
+      "then": { "properties": { "reason": { "const": "producer-check-failed" } } }
+    },
+    {
+      "if": { "properties": { "producer_mode": { "const": "formal" }, "status": { "const": "unavailable" } } },
+      "then": { "properties": { "reason": { "const": "producer-check-unavailable" } } }
+    }
+  ],
+  "definitions": {
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "objectId": { "type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" },
+    "objectFormat": { "type": "string", "enum": ["sha1", "sha256"] },
+    "utcDateTime": { "type": "string", "format": "date-time", "pattern": "(?:Z|\\+00:00)$" },
+    "status": { "type": "string", "enum": ["pass", "fail", "unavailable"] },
+    "reason": { "type": "string", "enum": ["all-producer-checks-passed", "non-formal-producer-mode", "producer-check-failed", "producer-check-unavailable"] },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit_tree_oid", "object_format", "start", "end", "input_digests"],
+      "properties": {
+        "commit_tree_oid": { "$ref": "#/definitions/objectId" },
+        "object_format": { "$ref": "#/definitions/objectFormat" },
+        "start": { "$ref": "#/definitions/sourceState" },
+        "end": { "$ref": "#/definitions/sourceState" },
+        "input_digests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["producer_digest", "receipt_schema_digest", "observation_schema_digest", "rollout_evidence_digest"],
+          "properties": {
+            "producer_digest": { "$ref": "#/definitions/digest" },
+            "receipt_schema_digest": { "$ref": "#/definitions/digest" },
+            "observation_schema_digest": { "$ref": "#/definitions/digest" },
+            "rollout_evidence_digest": { "$ref": "#/definitions/digest" }
+          }
+        }
+      }
+    },
+    "sourceState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision", "commit_tree_oid", "object_format", "dirty", "status_entry_count", "status_digest", "state_digest", "state_basis"],
+      "properties": {
+        "revision": { "$ref": "#/definitions/objectId" },
+        "commit_tree_oid": { "$ref": "#/definitions/objectId" },
+        "object_format": { "$ref": "#/definitions/objectFormat" },
+        "dirty": { "type": "boolean" },
+        "status_entry_count": { "type": "integer", "minimum": 0 },
+        "status_digest": { "$ref": "#/definitions/digest" },
+        "state_digest": { "$ref": "#/definitions/digest" },
+        "state_basis": { "const": "git-revision-tree-status/v1" }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "run_attempt", "job_name", "checkout_sha", "conclusion"],
+      "properties": {
+        "run_id": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+        "run_attempt": { "type": "integer", "minimum": 1 },
+        "job_name": { "const": "release-host" },
+        "checkout_sha": { "$ref": "#/definitions/objectId" },
+        "conclusion": { "type": "string", "enum": ["success", "failure", "neutral", "cancelled", "skipped", "timed_out", "action_required", "stale", "startup_failure"] }
+      }
+    },
+    "runnerObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "observation_digest", "account_digest", "runner_label_digest"],
+      "properties": {
+        "role": { "type": "string" },
+        "observation_digest": { "$ref": "#/definitions/digest" },
+        "account_digest": { "$ref": "#/definitions/digest" },
+        "runner_label_digest": { "$ref": "#/definitions/digest" }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "evidence_contract", "raw_digest", "report_digest", "source_revision", "status"],
+      "properties": {
+        "role": { "type": "string" },
+        "evidence_contract": { "type": "string" },
+        "raw_digest": { "$ref": "#/definitions/digest" },
+        "report_digest": { "$ref": "#/definitions/digest" },
+        "source_revision": { "$ref": "#/definitions/objectId" },
+        "status": { "$ref": "#/definitions/status" }
+      }
+    }
+  }
+}

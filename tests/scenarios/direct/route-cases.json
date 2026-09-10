@@ -1,0 +1,131 @@
+{
+  "schema_version": "direct-route-scenarios/v1",
+  "base": {
+    "protocol": "v2",
+    "identity": "new",
+    "intent": "write",
+    "requirement_state": "clear",
+    "persistence": "ephemeral",
+    "risk_scores": {
+      "user_visible_behavior": 0,
+      "data_integrity": 0,
+      "authorization_and_security": 0,
+      "external_side_effects": 0,
+      "blast_radius": 0,
+      "rollback": 0,
+      "verification_coverage": 0
+    },
+    "critical_triggers": [],
+    "changed_paths": ["src/view.ps1"],
+    "command_text": "",
+    "environment": "",
+    "requested_alias": "",
+    "reversible": true,
+    "verification_available": true,
+    "durable_artifacts_requested": false,
+    "scope_expanded": false,
+    "product_blocker_discovered": false
+  },
+  "cases": [
+    {
+      "id": "explicit-v2-low-risk",
+      "expected": { "selected_protocol": "v2", "requirement_state": "clear", "profile": "direct", "handoff": "main-agent", "review_policy": "self", "artifact_policy": "ephemeral" }
+    },
+    {
+      "id": "auto-admits-v2",
+      "protocol": "auto",
+      "expected": { "selected_protocol": "v2", "profile": "direct", "handoff": "main-agent" }
+    },
+    {
+      "id": "explicit-v1-rejected",
+      "protocol": "v1",
+      "expected": { "error": "v1-protocol-retired" }
+    },
+    {
+      "id": "existing-task-v2-recovery",
+      "identity": "existing",
+      "expected": { "selected_protocol": "v2", "profile": null, "handoff": "v2-recovery" }
+    },
+    {
+      "id": "quick-alias-direct",
+      "requested_alias": "quick",
+      "expected": { "selected_protocol": "v2", "profile": "direct", "handoff": "main-agent", "trigger": "legacy-alias:quick" }
+    },
+    {
+      "id": "twenty-files-do-not-escalate",
+      "changed_paths": [
+        "src/private/name-01.ps1", "src/private/name-02.ps1", "src/private/name-03.ps1", "src/private/name-04.ps1", "src/private/name-05.ps1",
+        "src/private/name-06.ps1", "src/private/name-07.ps1", "src/private/name-08.ps1", "src/private/name-09.ps1", "src/private/name-10.ps1",
+        "src/private/name-11.ps1", "src/private/name-12.ps1", "src/private/name-13.ps1", "src/private/name-14.ps1", "src/private/name-15.ps1",
+        "src/private/name-16.ps1", "src/private/name-17.ps1", "src/private/name-18.ps1", "src/private/name-19.ps1", "src/private/name-20.ps1"
+      ],
+      "expected": { "selected_protocol": "v2", "profile": "direct", "handoff": "main-agent" }
+    },
+    {
+      "id": "governed-score-band",
+      "risk_scores": { "user_visible_behavior": 1, "data_integrity": 1, "authorization_and_security": 0, "external_side_effects": 0, "blast_radius": 1, "rollback": 1, "verification_coverage": 1 },
+      "expected": { "selected_protocol": "v2", "profile": "governed", "risk_total": 5, "handoff": "reroute-before-write" }
+    },
+    {
+      "id": "critical-score-band",
+      "risk_scores": { "user_visible_behavior": 2, "data_integrity": 2, "authorization_and_security": 1, "external_side_effects": 1, "blast_radius": 1, "rollback": 1, "verification_coverage": 1 },
+      "expected": { "selected_protocol": "v2", "profile": "critical", "risk_total": 9, "handoff": "reroute-before-write", "review_policy": "independent" }
+    },
+    {
+      "id": "critical-trigger-overrides-score",
+      "critical_triggers": ["breaking_public_api_change"],
+      "expected": { "selected_protocol": "v2", "profile": "critical", "handoff": "reroute-before-write", "trigger": "breaking_public_api_change" }
+    },
+    {
+      "id": "authorization-path-protected",
+      "changed_paths": ["src/auth/authorize.ps1"],
+      "expected": { "selected_protocol": "v2", "profile": "governed", "handoff": "reroute-before-write", "review_policy": "independent", "trigger": "protected:authorization-path-change" }
+    },
+    {
+      "id": "production-delete-protected",
+      "command_text": "DELETE FROM customer",
+      "environment": "production",
+      "expected": { "selected_protocol": "v2", "profile": "critical", "handoff": "reroute-before-write", "review_policy": "independent", "approval_policy": "production", "trigger": "protected:production-database-destructive", "capability": "dry_run_required" }
+    },
+    {
+      "id": "blocked-requirement-stops",
+      "requirement_state": "blocked",
+      "expected": { "selected_protocol": "v2", "requirement_state": "blocked", "profile": null, "handoff": "requirement-gate" }
+    },
+    {
+      "id": "scope-expansion-stops",
+      "scope_expanded": true,
+      "expected": { "selected_protocol": "v2", "requirement_state": "blocked", "profile": null, "handoff": "requirement-gate", "trigger": "scope-expanded" }
+    },
+    {
+      "id": "new-product-blocker-stops",
+      "product_blocker_discovered": true,
+      "expected": { "selected_protocol": "v2", "requirement_state": "blocked", "profile": null, "handoff": "requirement-gate", "trigger": "product-blocker-discovered" }
+    },
+    {
+      "id": "durable-artifact-escalates",
+      "durable_artifacts_requested": true,
+      "expected": { "selected_protocol": "v2", "profile": "governed", "handoff": "reroute-before-write", "trigger": "durable-artifacts-requested" }
+    },
+    {
+      "id": "verification-gap-escalates",
+      "verification_available": false,
+      "expected": { "selected_protocol": "v2", "profile": "governed", "handoff": "reroute-before-write", "trigger": "verification-unavailable" }
+    },
+    {
+      "id": "read-intent-inspects",
+      "intent": "read",
+      "expected": { "selected_protocol": "v2", "profile": "inspect", "handoff": "read-only-response", "artifact_policy": "ephemeral" }
+    },
+    {
+      "id": "workflow-alias-cannot-direct",
+      "requested_alias": "workflow",
+      "expected": { "selected_protocol": "v2", "profile": "governed", "handoff": "reroute-before-write", "trigger": "legacy-alias:workflow" }
+    },
+    {
+      "id": "ask-alias-blocks",
+      "requested_alias": "ask",
+      "expected": { "selected_protocol": "v2", "requirement_state": "blocked", "profile": null, "handoff": "requirement-gate", "trigger": "legacy-alias:ask" }
+    }
+  ]
+}

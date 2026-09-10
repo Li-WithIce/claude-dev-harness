@@ -1,0 +1,30 @@
+{
+  "schema_version": "install-profile/v1",
+  "digest_algorithm": "canonical-json/v1",
+  "profile_id": "governed",
+  "vault_profile": "minimal",
+  "features": ["core","governed"],
+  "system_skill": true,
+  "enabled_modules": [
+    {"module_id":"codex-adapter","allowed_capabilities":["capability-read","filesystem-read","process-execution"]},
+    {"module_id":"distribution","allowed_capabilities":["filesystem-read","filesystem-write","process-execution"]},
+    {"module_id":"entry-kernel","allowed_capabilities":["filesystem-read","process-execution","task-state-read"]},
+    {"module_id":"task-governance","allowed_capabilities":["filesystem-read","filesystem-write","kernel-policy-read","task-state-read","task-state-write"]},
+    {"module_id":"thin-trust-kernel","allowed_capabilities":["filesystem-read","process-execution"]}
+  ],
+  "asset_allowlist": [
+    {"id":"skill-planning","kind":"skill","origin":"bootstrap","module_id":"distribution","source":"skills/planning/SKILL.md","target":"planning","ownership":"managed","files":["skills/planning/SKILL.md"]},
+    {"id":"skill-audit","kind":"skill","origin":"bootstrap","module_id":"distribution","source":"skills/audit/SKILL.md","target":"audit","ownership":"managed","files":["skills/audit/SKILL.md"]},
+    {"id":"hook-pretooluse","kind":"hook","origin":"bootstrap","module_id":"distribution","source":"runtime-hooks/claude/pretooluse.ps1","target":"pretooluse.ps1","ownership":"managed","files":["runtime-hooks/claude/pretooluse.ps1"]},
+    {"id":"hook-codex-pretooluse-launcher","kind":"hook","origin":"bootstrap","module_id":"distribution","source":"runtime-hooks/claude/codex-pretooluse-launcher.ps1","target":"codex-pretooluse-launcher.ps1","ownership":"managed","files":["runtime-hooks/claude/codex-pretooluse-launcher.ps1"]},
+    {"id":"hook-stop","kind":"hook","origin":"bootstrap","module_id":"distribution","source":"runtime-hooks/claude/stop.js","target":"stop.js","ownership":"managed","files":["runtime-hooks/claude/stop.js"]},
+    {"id":"hook-workspace-resolver","kind":"hook","origin":"bootstrap","module_id":"distribution","source":"runtime-hooks/claude/workspace-resolver.js","target":"workspace-resolver.js","ownership":"managed","files":["runtime-hooks/claude/workspace-resolver.js"]},
+    {"id":"vault-03","kind":"vault","origin":"bootstrap","module_id":"distribution","source":"vault-template/entry/task.ps1.template","target":"entry/task.ps1","ownership":"managed","files":["vault-template/entry/task.ps1.template"]},
+    {"id":"template-claude-global","kind":"template","origin":"bootstrap","module_id":"distribution","source":"agent-configs/claude/CLAUDE.md.template","target":"claude-global","ownership":"managed","files":["agent-configs/claude/CLAUDE.md.template"]},
+    {"id":"template-codex-global","kind":"template","origin":"bootstrap","module_id":"distribution","source":"agent-configs/codex/AGENTS.md.template","target":"codex-global","ownership":"managed","files":["agent-configs/codex/AGENTS.md.template"]},
+    {"id":"template-workspace-global","kind":"template","origin":"bootstrap","module_id":"distribution","source":"agent-configs/workspace/AGENTS.md.template","target":"workspace-global","ownership":"managed","files":["agent-configs/workspace/AGENTS.md.template"]},
+    {"id":"template-claude-settings","kind":"template","origin":"bootstrap","module_id":"distribution","source":"agent-configs/claude/settings.local.core.json.template","target":"claude-settings","ownership":"managed","files":["agent-configs/claude/settings.local.core.json.template"]},
+    {"id":"template-codex-settings","kind":"template","origin":"bootstrap","module_id":"distribution","source":"agent-configs/codex/settings.local.shared.json.template","target":"codex-settings","ownership":"managed","files":["agent-configs/codex/settings.local.shared.json.template"]},
+    {"id":"template-codex-hooks","kind":"template","origin":"bootstrap","module_id":"distribution","source":"agent-configs/codex/hooks.shared.json.template","target":"codex-hooks","ownership":"managed","files":["agent-configs/codex/hooks.shared.json.template"]}
+  ]
+}

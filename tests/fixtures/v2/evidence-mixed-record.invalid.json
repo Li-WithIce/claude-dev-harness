@@ -1,0 +1,28 @@
+{
+  "schema_version": "evidence/v1",
+  "task_id": "freeze-user",
+  "task_version": 1,
+  "contract_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "records": [
+    {
+      "type": "command",
+      "command": "pwsh -File tests/example.ps1",
+      "cwd": ".",
+      "exit_code": 0,
+      "method": "diff-review",
+      "result": "pass",
+      "executed_at": "2026-07-13T10:10:00Z",
+      "evidence_path": ".harness/evidence/freeze-user/example.txt",
+      "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "covers": ["AC-1"]
+    }
+  ],
+  "coverage": {
+    "satisfied": ["AC-1"],
+    "not_verified": [],
+    "blocked": []
+  },
+  "gaps": [],
+  "conclusion": "pass"
+}

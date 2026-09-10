@@ -1,0 +1,204 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dev-harness.local/schemas/runtime-policies.schema.json",
+  "title": "Runtime policy bundle",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["execution", "risk", "protected"],
+  "properties": {
+    "execution": { "$ref": "#/definitions/execution" },
+    "risk": { "$ref": "#/definitions/risk" },
+    "protected": { "$ref": "#/definitions/protected" }
+  },
+  "definitions": {
+    "stringArray": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed_intents", "allowed_persistence", "minimum_capabilities", "configurable_capabilities", "writes_task_state", "writes_task_artifacts", "current_pointer_policy"],
+      "properties": {
+        "allowed_intents": { "$ref": "#/definitions/stringArray" },
+        "allowed_persistence": { "$ref": "#/definitions/stringArray" },
+        "minimum_capabilities": { "$ref": "#/definitions/stringArray" },
+        "configurable_capabilities": { "$ref": "#/definitions/stringArray" },
+        "writes_task_state": { "type": "boolean" },
+        "writes_task_artifacts": { "type": "boolean" },
+        "current_pointer_policy": { "type": "string" }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profiles", "legacy_aliases"],
+      "properties": {
+        "profiles": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["inspect", "direct", "governed", "critical"],
+          "properties": {
+            "inspect": { "$ref": "#/definitions/profile" },
+            "direct": {
+              "allOf": [
+                { "$ref": "#/definitions/profile" },
+                {
+                  "properties": {
+                    "writes_task_state": { "enum": [false] },
+                    "writes_task_artifacts": { "enum": [false] },
+                    "minimum_capabilities": { "contains": { "enum": ["verification_required"] } }
+                  }
+                }
+              ]
+            },
+            "governed": { "$ref": "#/definitions/profile" },
+            "critical": {
+              "allOf": [
+                { "$ref": "#/definitions/profile" },
+                {
+                  "properties": {
+                    "minimum_capabilities": {
+                      "type": "array",
+                      "minItems": 7,
+                      "maxItems": 7,
+                      "uniqueItems": true,
+                      "items": { "enum": ["plan_required", "approval_required", "rollback_required", "independent_review_required", "verification_required", "durable_artifacts_required", "dry_run_required"] }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "legacy_aliases": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["quick", "workflow", "ask_requirement_state"],
+          "properties": {
+            "quick": { "enum": ["direct"] },
+            "workflow": { "enum": ["governed"] },
+            "ask_requirement_state": { "enum": ["blocked"] }
+          }
+        }
+      }
+    },
+    "dimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "min_score", "max_score"],
+      "properties": {
+        "id": { "enum": ["user_visible_behavior", "data_integrity", "authorization_and_security", "external_side_effects", "blast_radius", "rollback", "verification_coverage"] },
+        "min_score": { "enum": [0] },
+        "max_score": { "enum": [3] }
+      }
+    },
+    "threshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "min_total", "max_total"],
+      "properties": {
+        "profile": { "type": "string" },
+        "min_total": { "type": "integer" },
+        "max_total": { "type": "integer" }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dimensions", "profile_thresholds", "critical_triggers", "overrides"],
+      "properties": {
+        "dimensions": {
+          "type": "array",
+          "minItems": 7,
+          "maxItems": 7,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/dimension" },
+          "allOf": [
+            { "contains": { "properties": { "id": { "enum": ["user_visible_behavior"] } } } },
+            { "contains": { "properties": { "id": { "enum": ["data_integrity"] } } } },
+            { "contains": { "properties": { "id": { "enum": ["authorization_and_security"] } } } },
+            { "contains": { "properties": { "id": { "enum": ["external_side_effects"] } } } },
+            { "contains": { "properties": { "id": { "enum": ["blast_radius"] } } } },
+            { "contains": { "properties": { "id": { "enum": ["rollback"] } } } },
+            { "contains": { "properties": { "id": { "enum": ["verification_coverage"] } } } }
+          ]
+        },
+        "profile_thresholds": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/threshold" },
+          "allOf": [
+            { "contains": { "properties": { "profile": { "enum": ["direct"] }, "min_total": { "enum": [0] }, "max_total": { "enum": [4] } } } },
+            { "contains": { "properties": { "profile": { "enum": ["governed"] }, "min_total": { "enum": [5] }, "max_total": { "enum": [8] } } } },
+            { "contains": { "properties": { "profile": { "enum": ["critical"] }, "min_total": { "enum": [9] }, "max_total": { "enum": [21] } } } }
+          ]
+        },
+        "critical_triggers": {
+          "type": "array",
+          "minItems": 10,
+          "maxItems": 10,
+          "uniqueItems": true,
+          "items": { "enum": ["authorization_or_security_boundary", "money_billing_refund_or_settlement", "production_database_destructive_migration", "irreversible_user_data_change", "production_release_or_infrastructure", "breaking_public_api_change", "sensitive_data_export_or_compliance", "destructive_git_history_operation", "large_scale_automation_without_dry_run", "unverified_production_impact"] }
+        },
+        "overrides": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requirement_blocked_state", "read_only_profile", "durable_minimum_profile", "critical_trigger_profile", "multiple_files_alone_escalate"],
+          "properties": {
+            "requirement_blocked_state": { "enum": ["blocked"] },
+            "read_only_profile": { "enum": ["inspect"] },
+            "durable_minimum_profile": { "enum": ["governed"] },
+            "critical_trigger_profile": { "enum": ["critical"] },
+            "multiple_files_alone_escalate": { "enum": [false] }
+          }
+        }
+      }
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "match", "requires_profile", "requires_approval", "requires_dry_run", "requires_independent_review"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+        "match": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "command_regex": { "type": "string" },
+            "environment": { "type": "string", "minLength": 1 },
+            "path_globs": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "requires_profile": { "enum": ["governed", "critical"] },
+        "requires_approval": { "enum": ["none", "product", "architecture", "production"] },
+        "requires_dry_run": { "type": "boolean" },
+        "requires_independent_review": { "type": "boolean" }
+      }
+    },
+    "protected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "rules"],
+      "properties": {
+        "schema_version": { "enum": ["protected-actions/v1"] },
+        "rules": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/rule" },
+          "allOf": [
+            { "contains": { "properties": { "id": { "enum": ["production-database-destructive"] } } } },
+            { "contains": { "properties": { "id": { "enum": ["authorization-path-change"] } } } }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,38 +1,8 @@
-# Shared Memory
+# Codex Host Overlay
 
-- Active workspace resolution: explicit `-WorkspaceRoot` -> `DEV_HARNESS_WORKSPACE_ROOT` -> `WORKSPACE_ROOT` -> current working directory inside an installed workspace
-- Shared memory vault: use the active workspace's `.assistant`
-- Once resolved, treat the active workspace's local `AGENTS.md` and `.assistant` as the source of truth; user-level rules are defaults only
-- Default language: 中文
-- If a task needs recovery, runtime state, long-term preferences, or tool paths, use `obsidian-memory` after workspace resolution and only against existing shared memory/runtime docs in the resolved workspace; if optional docs are absent, continue from project files and current evidence
-- Do not keep parallel runtime notes under `{CODEX_HOME}`
-- 新功能开发或功能修改以当前需求和业务正确性为准；不要为了兼容旧测试、旧快照或过期断言而保留或恢复旧行为。若旧测试与新需求冲突，应更新或删除旧测试并说明原因；只有用户明确要求历史兼容时才保留旧测试兼容。
-
-## Read Order
-
-- Orientation: the active workspace's `AGENTS.md` first, then read existing optional files only if present: `.assistant\首页.md` -> `.assistant\工作流\项目约定.md` -> `.assistant\配置\系统信息.md` -> `.assistant\配置\用户偏好.md` -> `.assistant\配置\工具与组件.md`
-- Resume: first inspect open `[writeback-fallback]` rows in `.assistant\运行时\收件箱.md`; then read existing runtime files only if present: `.assistant\运行时\恢复索引.md` -> `.assistant\运行时\当前任务.md` -> `.assistant\运行时\tasks\<task-id>.md` -> `.assistant\运行时\中断任务.md` -> `.assistant\运行时\上次会话.md`; missing runtime files mean no active recorded state
-
-## Lazy Loading
-
-- After task recognition, follow the active workspace's `.assistant\entry\AGENTS.md` mode rules.
-- For project-scoped development and read-only engineering requests, `entry-router` is the default auto-entry skill; it chooses `resume-current`, `switch-existing`, `new-task`, or authorized durable `inbox-first`, then `quick`, `workflow`, or `ask` for new work.
-- `orchestrator`, `plan`, `implement`, `review`, and `test` are available for harness dispatch, but stage skills should be reached through `entry-router` / `orchestrator` and must not bypass `plan.md` frontmatter stage truth.
-- `quick` loads only entry rules, user preferences / necessary config, and the directly relevant skill.
-- `workflow` loads `entry-router`, `orchestrator`, and the current-stage skill.
-- `resume-current` / `switch-existing` reads recovery identity/runtime first. Only explicit continue/switch-and-execute loads the current-stage skill or writes runtime; read-only inspect/status does not.
-- `ask` is an iterative blocking clarification gate: do not load workflow stage skills, create `docs/tasks/{task_id}/`, edit code, or enter quick/workflow/PLAN/IMPLEMENT until all blocking uncertainties are resolved. Ask one highest-value question at a time by default, then reassess.
-- Clarification-family requests such as 需求澄清 / 需求确认 / 拷问 / 头脑风暴 / 方案压力测试 / 边界确认 follow the active workspace entry rules and land in existing `PLAN -> Clarification` when they need durable development decisions; they do not create a new stage.
-- Treat unresolved PLAN acceptance, non-goals, impact, rollback/compatibility, or implementation path that cannot guide IMPLEMENT as the same Clarification protocol.
-- In that protocol, answer code/doc-discoverable questions first, keep the base Clarification fields, ask remaining user decisions one at a time with a recommended answer, and keep `User Confirmation` draft while any `clarification_ledger` item is `decision: pending`.
-- Stage principle routing is only a cognitive lens, not a new five-turn workflow: Entry/Clarification=Socrates, PLAN=Osborn/Hegel/First Principles/Occam, PLAN_REVIEW=Hegel+Bayes, IMPLEMENT=Ponytail/surgical change, CODE_REVIEW=Feynman, TEST=Bayes, revise=Debono value preservation.
-- MCP/connectors are not preloaded, probed, or accessed just because they are installed. Use them only when the user explicitly names them, the task requires them, or the active workspace rules require them.
-- Do not bulk-load all skills, all historical tasks, Claude compatibility skills, or `workflow-team` unless an explicit trigger requires them.
-
-## Writeback
-
-- Single-writer model: only the entry agent writes shared pointer files
-- Only `mode=workflow` writes task artifacts under `docs/tasks/{task_id}/*`; standalone quick/read-only requests do not create them. Active workflow tasks may also require the workspace's `.assistant\运行时\tasks\<task-id>.md`
-- Durable, code-managed conclusions must be promoted into maintained tracked surfaces such as workflow docs, skills, tests, templates, or user-approved tracked docs
-- Codex updates shared pointer files only for `mode=workflow` when the active workspace entry rules identify Codex as entry host and the user explicitly continues/executes the stage; active or inactive read-only inspect/status never updates pointers
-- New durable workflow items go to `运行时\收件箱.md` first; standalone quick/read-only responses do not
+- Resolve the active workspace in this order: explicit `-WorkspaceRoot` -> `DEV_HARNESS_WORKSPACE_ROOT` -> `WORKSPACE_ROOT` -> current directory inside an installed workspace.
+- Read the resolved workspace's `AGENTS.md` first; it and the Harness runtime are authoritative, while user-level rules are defaults.
+- Default language is Chinese. Use `.assistant\entry\task.ps1 status` for read-only v2 recovery; optional Memory requires an installed feature and explicit need or write authorization.
+- Only v2 admission and `.assistant/runtime` recovery are supported. Legacy history is explicit maintenance input only; never load a v1 lifecycle shim.
+- Codex is a shared-pointer writer only when local entry rules identify it as entry host and the user explicitly continues or executes `mode=workflow`; inspect/status and standalone quick work never update pointers.
+- Durable conclusions belong in maintained tracked artifacts; internal failed writes stay in `.assistant/runtime/failed-writes` and never enter a business inbox.

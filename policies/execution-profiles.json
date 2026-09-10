@@ -1,0 +1,45 @@
+{
+  "profiles": {
+    "inspect": {
+      "allowed_intents": ["read"],
+      "allowed_persistence": ["ephemeral"],
+      "minimum_capabilities": ["verification_required"],
+      "configurable_capabilities": [],
+      "writes_task_state": false,
+      "writes_task_artifacts": false,
+      "current_pointer_policy": "never"
+    },
+    "direct": {
+      "allowed_intents": ["write"],
+      "allowed_persistence": ["ephemeral"],
+      "minimum_capabilities": ["verification_required"],
+      "configurable_capabilities": [],
+      "writes_task_state": false,
+      "writes_task_artifacts": false,
+      "current_pointer_policy": "never"
+    },
+    "governed": {
+      "allowed_intents": ["write"],
+      "allowed_persistence": ["durable"],
+      "minimum_capabilities": ["verification_required", "durable_artifacts_required"],
+      "configurable_capabilities": ["plan_required", "approval_required", "rollback_required", "independent_review_required"],
+      "writes_task_state": true,
+      "writes_task_artifacts": true,
+      "current_pointer_policy": "explicit-activation-only"
+    },
+    "critical": {
+      "allowed_intents": ["write"],
+      "allowed_persistence": ["durable"],
+      "minimum_capabilities": ["plan_required", "approval_required", "rollback_required", "independent_review_required", "verification_required", "durable_artifacts_required", "dry_run_required"],
+      "configurable_capabilities": [],
+      "writes_task_state": true,
+      "writes_task_artifacts": true,
+      "current_pointer_policy": "explicit-activation-only"
+    }
+  },
+  "legacy_aliases": {
+    "quick": "direct",
+    "workflow": "governed",
+    "ask_requirement_state": "blocked"
+  }
+}

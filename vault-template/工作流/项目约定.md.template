@@ -18,7 +18,7 @@ updated: __RENDER_AT_INSTALL__
 
 - 仓库边界：默认一个项目对应一个 WorkspaceRoot；Harness 任务 artifact 统一落在 `docs/tasks/{task_id}/`，当前项目拥有独立的 `.assistant` 运行时状态；canonical workspace entry 统一收口在 `.assistant\entry\`
 - 开发默认值：暂无项目特定补充，默认遵循通用 Harness 流程
-- 验证默认值：暂无项目特定补充，默认遵循 `plan.md` / `test.md` 契约
+- 验证默认值：暂无项目特定补充，遵循当前 Requirement Contract、Policy 与 Evidence 要求
 - Review 重点：暂无项目特定补充
 - 交付约束：暂无项目特定补充
 

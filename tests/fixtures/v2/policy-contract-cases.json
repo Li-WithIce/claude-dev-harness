@@ -1,0 +1,240 @@
+{
+  "cases": [
+    {
+      "name": "audit-record",
+      "schema": "audit-record.schema.json",
+      "valid": {
+        "implementer_actor_id": "actor-implementer",
+        "reviewer_actor_id": "actor-reviewer",
+        "reviewer_context_id": "context-reviewer",
+        "reviewer_base_model": "gpt-5",
+        "independence_level": "different-actor",
+        "evidence_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "invalid": {
+        "implementer_actor_id": "actor-implementer",
+        "reviewer_actor_id": "actor-implementer",
+        "reviewer_context_id": "context-reviewer",
+        "reviewer_base_model": "gpt-5",
+        "independence_level": "self-review",
+        "evidence_digest": "not-a-digest"
+      }
+    },
+    {
+      "name": "current-pointer",
+      "schema": "current-pointer.schema.json",
+      "valid": {
+        "schema_version": "current-pointer/v1",
+        "task_id": "freeze-user",
+        "task_version": 4,
+        "activated_at": "2026-07-13T10:12:00Z"
+      },
+      "invalid": {
+        "schema_version": "current-pointer/v1",
+        "task_id": "none",
+        "task_version": 0,
+        "activated_at": "not-a-timestamp",
+        "write_permission": true
+      }
+    },
+    {
+      "name": "requirement-contract",
+      "schema": "requirement-contract.schema.json",
+      "valid": {
+        "schema_version": "requirement-contract/v1",
+        "task_id": "freeze-user",
+        "goal": "Allow an administrator to freeze one user.",
+        "acceptance": ["The target user's existing session is invalidated."],
+        "in_scope": ["User status API"],
+        "out_of_scope": ["Automatic unfreeze"],
+        "product_constraints": ["User data is retained."],
+        "product_decisions": [
+          {
+            "key": "session_invalidation",
+            "value": "immediate",
+            "source": "user-confirmed:2026-07-13"
+          }
+        ],
+        "unresolved_product_decisions": [],
+        "source_authority": ["current-user-message"],
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "invalid": {
+        "schema_version": "requirement-contract/v1",
+        "task_id": "none",
+        "goal": "Allow an administrator to freeze one user.",
+        "acceptance": ["The target user's existing session is invalidated."],
+        "in_scope": ["User status API"],
+        "product_constraints": [],
+        "product_decisions": [],
+        "unresolved_product_decisions": [],
+        "source_authority": ["current-user-message"],
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "route": "workflow"
+      }
+    },
+    {
+      "name": "task-state",
+      "schema": "task-state.schema.json",
+      "valid": {
+        "schema_version": "task-state/v2",
+        "task_id": "freeze-user",
+        "version": 1,
+        "status": "ready",
+        "identity": "new",
+        "intent": "write",
+        "requirement_state": "clear",
+        "execution_profile": "governed",
+        "persistence": "durable",
+        "contract_path": "docs/tasks/freeze-user/contract.md",
+        "contract_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "policies": {
+          "plan_required": true,
+          "approval_required": false,
+          "rollback_required": true,
+          "independent_review_required": true,
+          "verification_required": true
+        },
+        "approvals": [],
+        "evidence_path": null,
+        "created_at": "2026-07-13T10:00:00Z",
+        "updated_at": "2026-07-13T10:00:00Z"
+      },
+      "invalid": {
+        "schema_version": "task-state/v2",
+        "task_id": "freeze-user",
+        "version": 1,
+        "status": "IMPLEMENT",
+        "identity": "new",
+        "intent": "write",
+        "requirement_state": "clear",
+        "execution_profile": "governed",
+        "persistence": "durable",
+        "policies": {
+          "plan_required": true,
+          "approval_required": false,
+          "rollback_required": true,
+          "independent_review_required": true,
+          "verification_required": true
+        },
+        "created_at": "2026-07-13T10:00:00Z",
+        "updated_at": "2026-07-13T10:00:00Z",
+        "stage": "IMPLEMENT"
+      }
+    },
+    {
+      "name": "event",
+      "schema": "event.schema.json",
+      "valid": {
+        "schema_version": "event/v1",
+        "event_id": "01J00000000000000000000000",
+        "task_id": "freeze-user",
+        "task_version": 1,
+        "type": "task.created",
+        "actor": {
+          "host": "codex",
+          "model": "inherit"
+        },
+        "occurred_at": "2026-07-13T10:00:00Z",
+        "payload": {}
+      },
+      "invalid": {
+        "schema_version": "event/v1",
+        "event_id": "01J00000000000000000000000",
+        "task_id": "freeze-user",
+        "task_version": 1,
+        "type": "stage.advanced",
+        "actor": {
+          "host": "codex",
+          "model": "inherit"
+        },
+        "occurred_at": "2026-07-13T10:00:00Z",
+        "payload": {}
+      }
+    },
+    {
+      "name": "evidence",
+      "schema": "evidence.schema.json",
+      "valid": {
+        "schema_version": "evidence/v1",
+        "task_id": "freeze-user",
+        "task_version": 1,
+        "contract_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "records": [
+          {
+            "type": "command",
+            "command": "pwsh -File tests/example.ps1",
+            "cwd": ".",
+            "exit_code": 0,
+            "executed_at": "2026-07-13T10:10:00Z",
+            "evidence_path": ".harness/evidence/freeze-user/example.txt",
+            "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "covers": ["AC-1"]
+          }
+        ],
+        "coverage": {
+          "satisfied": ["AC-1"],
+          "not_verified": [],
+          "blocked": []
+        },
+        "gaps": [],
+        "conclusion": "pass"
+      },
+      "invalid": {
+        "schema_version": "evidence/v1",
+        "task_id": "freeze-user",
+        "task_version": 1,
+        "contract_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "records": [
+          {
+            "type": "inspection",
+            "method": "diff-review",
+            "result": "pass",
+            "executed_at": "2026-07-13T10:10:00Z",
+            "evidence_path": "../outside.txt",
+            "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "covers": ["scope"]
+          }
+        ],
+        "coverage": {
+          "satisfied": ["AC-1"],
+          "not_verified": [],
+          "blocked": ["AC-2"]
+        },
+        "conclusion": "pass"
+      }
+    },
+    {
+      "name": "approval",
+      "schema": "approval.schema.json",
+      "valid": {
+        "schema_version": "approval/v1",
+        "approval_id": "apr_example",
+        "task_id": "freeze-user",
+        "task_version": 1,
+        "contract_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "approval_type": "production",
+        "approved_scope": ["run migration dry-run"],
+        "approver": "user-or-identity",
+        "approved_at": "2026-07-13T10:20:00Z",
+        "expires_at": null,
+        "status": "granted"
+      },
+      "invalid": {
+        "schema_version": "approval/v1",
+        "approval_id": "apr_example",
+        "task_id": "freeze-user",
+        "task_version": 1,
+        "contract_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "approval_type": "production",
+        "approved_scope": [],
+        "approver": "user-or-identity",
+        "approved_at": "2026-07-13T10:20:00Z",
+        "expires_at": null,
+        "status": "requested"
+      }
+    }
+  ]
+}

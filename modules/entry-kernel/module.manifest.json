@@ -1,0 +1,78 @@
+{
+  "schema_version": "harness-module/v0",
+  "module_id": "entry-kernel",
+  "kind": "kernel",
+  "description": "Protocol selection, Requirement gating, recovery, and task entry construction.",
+  "default_activation": true,
+  "dependencies": {
+    "kernel_api": "v1",
+    "modules": [
+      "thin-trust-kernel",
+      "task-governance"
+    ]
+  },
+  "requested_capabilities": [
+    "filesystem-read",
+    "process-execution",
+    "task-state-read"
+  ],
+  "ownership": {
+    "owned_paths": [
+      "modules/entry-kernel/**",
+      "scripts/generate-entry-contract.ps1",
+      "scripts/harness-status.ps1",
+      "scripts/lib/Harness.HostCapabilities.psm1",
+      "scripts/lib/Harness.Protocol.psm1",
+      "scripts/lib/Harness.Recovery.psm1",
+      "scripts/lib/Harness.Requirement.psm1",
+      "scripts/lib/Harness.RuntimeDefault.psm1",
+      "scripts/task.ps1"
+    ],
+    "watch_paths": [
+      "policies/entry-contract.md",
+      "scripts/lib/Harness.Hashing.psm1",
+      "scripts/lib/Harness.Path.psm1"
+    ]
+  },
+  "entrypoints": {
+    "commands": [
+      "scripts/task.ps1",
+      "scripts/harness-status.ps1",
+      "scripts/generate-entry-contract.ps1"
+    ],
+    "hooks": []
+  },
+  "validation": {
+    "owner_tests": [
+      "tests/verify-v1-sunset.ps1",
+      "tests/verify-v2-entry-contract.ps1",
+      "tests/verify-v2-protocol-config.ps1",
+      "tests/verify-runtime-qualification-decoupling.ps1",
+      "tests/verify-v2-direct-no-artifacts.ps1",
+      "tests/verify-v2-requirement-gate.ps1",
+      "tests/verify-v2-json-compat.ps1",
+      "tests/verify-v2-task-state.ps1",
+      "tests/verify-v2-model-neutrality.ps1",
+      "tests/verify-v1-to-v2-migration.ps1",
+      "tests/verify-v2-default-flip.ps1",
+      "tests/verify-v2-runtime-memory-decoupling.ps1"
+    ],
+    "quick": [],
+    "core_group": "entry-lifecycle",
+    "changed": [],
+    "full": [
+      "tests/verify-v1-sunset.ps1",
+      "tests/verify-v2-entry-contract.ps1",
+      "tests/verify-v2-protocol-config.ps1",
+      "tests/verify-runtime-qualification-decoupling.ps1",
+      "tests/verify-v2-direct-no-artifacts.ps1",
+      "tests/verify-v2-requirement-gate.ps1",
+      "tests/verify-v2-json-compat.ps1",
+      "tests/verify-v2-task-state.ps1",
+      "tests/verify-v2-model-neutrality.ps1",
+      "tests/verify-v1-to-v2-migration.ps1",
+      "tests/verify-v2-default-flip.ps1",
+      "tests/verify-v2-runtime-memory-decoupling.ps1"
+    ]
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "schema_version": "harness-module/v1",
+  "module_id": "providers",
+  "module_version": "1.0.0",
+  "classification_owner": "providers",
+  "kind": "capability",
+  "description": "Optional context and code-intelligence provider routing, boundaries, and usage recording.",
+  "default_activation": false,
+  "dependencies": {
+    "kernel_api": "v1",
+    "modules": ["entry-kernel"]
+  },
+  "requested_capabilities": ["filesystem-read", "network", "process-execution"],
+  "ownership": {
+    "owned_paths": [
+      "modules/providers/**",
+      "scripts/audit-context-provider-usage.ps1",
+      "tests/verify-code-intel-provider-boundary.ps1",
+      "tests/verify-context-provider-boundary.ps1",
+      "tests/verify-context-provider-install-isolation.ps1",
+      "tests/verify-context-provider-vnext.ps1",
+      "tests/verify-experimental-provider-docs.ps1",
+      "tests/verify-provider-routing-matrix.ps1",
+      "tests/verify-provider-usage-recording.ps1"
+    ],
+    "watch_paths": [
+      "policies/execution-profiles.json",
+      "skills/implement/references/code-intel-routing.md",
+      "skills/orchestrator/references/context-provider-boundary.md",
+      "skills/plan/references/code-intel-routing.md",
+      "skills/review/references/code-intel-review.md"
+    ]
+  },
+  "package": {
+    "code": ["scripts/audit-context-provider-usage.ps1"],
+    "schemas": [],
+    "tests": [
+      "tests/verify-code-intel-provider-boundary.ps1",
+      "tests/verify-context-provider-boundary.ps1",
+      "tests/verify-context-provider-install-isolation.ps1",
+      "tests/verify-context-provider-vnext.ps1",
+      "tests/verify-experimental-provider-docs.ps1",
+      "tests/verify-provider-routing-matrix.ps1",
+      "tests/verify-provider-usage-recording.ps1"
+    ],
+    "install_assets": []
+  },
+  "exports": {
+    "commands": ["scripts/audit-context-provider-usage.ps1"],
+    "hooks": [],
+    "libraries": []
+  },
+  "validation": {
+    "owner_tests": [
+      "tests/verify-code-intel-provider-boundary.ps1",
+      "tests/verify-context-provider-boundary.ps1",
+      "tests/verify-context-provider-install-isolation.ps1",
+      "tests/verify-context-provider-vnext.ps1",
+      "tests/verify-experimental-provider-docs.ps1",
+      "tests/verify-provider-routing-matrix.ps1",
+      "tests/verify-provider-usage-recording.ps1"
+    ],
+    "quick": [],
+    "core_groups": {},
+    "changed": [
+      "tests/verify-code-intel-provider-boundary.ps1",
+      "tests/verify-context-provider-boundary.ps1",
+      "tests/verify-context-provider-install-isolation.ps1",
+      "tests/verify-context-provider-vnext.ps1",
+      "tests/verify-experimental-provider-docs.ps1",
+      "tests/verify-provider-routing-matrix.ps1",
+      "tests/verify-provider-usage-recording.ps1"
+    ],
+    "full": [
+      "tests/verify-code-intel-provider-boundary.ps1",
+      "tests/verify-context-provider-boundary.ps1",
+      "tests/verify-context-provider-install-isolation.ps1",
+      "tests/verify-context-provider-vnext.ps1",
+      "tests/verify-experimental-provider-docs.ps1",
+      "tests/verify-provider-routing-matrix.ps1",
+      "tests/verify-provider-usage-recording.ps1"
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "total_count": 7,
+  "artifacts": [
+    { "id": 1001, "name": "thin-v2-pr-changed-optional-__HEAD_SHA__-1", "expired": false },
+    { "id": 1002, "name": "thin-v2-pr-core-aggregate-__HEAD_SHA__-1", "expired": false },
+    { "id": 1003, "name": "thin-v2-pr-core-entry-lifecycle-__HEAD_SHA__-1", "expired": false },
+    { "id": 1004, "name": "thin-v2-pr-core-evaluation-release-__HEAD_SHA__-1", "expired": false },
+    { "id": 1005, "name": "thin-v2-pr-core-governance-approval-__HEAD_SHA__-1", "expired": false },
+    { "id": 1006, "name": "thin-v2-pr-core-harness-contracts-__HEAD_SHA__-1", "expired": false },
+    { "id": 1007, "name": "thin-v2-pr-core-install-evidence-__HEAD_SHA__-1", "expired": false }
+  ]
+}
