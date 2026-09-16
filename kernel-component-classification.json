@@ -182,6 +182,16 @@
       "legacy_status": "not-legacy"
     },
     {
+      "path": "scripts/diagnose-harness-host.ps1",
+      "layer": "c2-capability",
+      "current_role": "Manual read-only workspace, source and host-evidence diagnostic projection.",
+      "owner_candidate": "engineering-validation",
+      "tcb_included": false,
+      "reason": "Opt-in observation does not authorize writes and is not reached by Runtime or Distribution roots.",
+      "migration_target": "engineering-validation-module",
+      "legacy_status": "not-legacy"
+    },
+    {
       "path": "scripts/export-team-preset.ps1",
       "layer": "c2-capability",
       "current_role": "Team preset export command.",

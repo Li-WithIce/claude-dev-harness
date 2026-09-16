@@ -225,6 +225,7 @@ try {
     $marker='SYNTHETIC_H02_PRIVATE_MARKER'
     $basePayload=[ordered]@{tool_name='Write';permission_mode='default';cwd=$denyWorkspace;tool_input=[ordered]@{file_path='ordinary.txt';content=$marker}}
     foreach($case in @(
+        @{Name='input';Change='input';Code='input'},
         @{Name='permission-mode';Change='permission';Code='permission-mode'},
         @{Name='missing-cwd';Change='cwd';Code='workspace-binding'},
         @{Name='outside';Change='outside';Code='path-boundary'},
@@ -236,6 +237,7 @@ try {
     )){
         $payload=$basePayload|ConvertTo-Json -Depth 10|ConvertFrom-Json -AsHashtable
         switch($case.Change){
+            input{$payload.Remove('tool_input')}
             permission{$payload.permission_mode=$marker}
             cwd{$payload.Remove('cwd')}
             outside{$payload.tool_input.file_path=Join-Path $denyRoot "$marker.txt"}
@@ -245,9 +247,16 @@ try {
             patchpath{$payload.tool_name=$directPatchCase.ActionKind.ToLowerInvariant();$payload.tool_input=@{command="*** Begin Patch`n*** Add File: C:invalid`n+$marker`n*** End Patch"}}
         }
         $inputJson=if($case.Change -ceq 'unknown'){$marker}else{$payload|ConvertTo-Json -Depth 10 -Compress}
-        try{$result=Run-H02Hook $denyAdapter $inputJson}finally{Remove-Item Env:HARNESS_SESSION_MODE -ErrorAction SilentlyContinue}
+        try{
+            $result=Run-H02Hook $denyAdapter $inputJson
+            $launcherResult=Run-H02Hook $denyLauncher $inputJson
+        }finally{Remove-Item Env:HARNESS_SESSION_MODE -ErrorAction SilentlyContinue}
         Check ($result.Complete -and $result.ExitCode -eq 2 -and $result.StdOut.Length -eq 0 -and $result.StdErr.Trim() -ceq "HARNESS_DENY:$($case.Code)") "H02 adapter reports finite $($case.Name) classification" "H02 adapter classification failed for $($case.Name)"
         Check (-not ($result.StdOut+$result.StdErr).Contains($marker)) 'H02 adapter errors do not disclose synthetic private content' 'H02 adapter error disclosed synthetic content'
+        $launcherDecision=try{($launcherResult.StdOut|ConvertFrom-Json -AsHashtable).hookSpecificOutput}catch{$null}
+        $expectedReason=if($case.Code -ceq 'unknown'){'Harness PreToolUse policy denied or failed closed'}else{"Harness PreToolUse denied: $($case.Code)"}
+        Check ($launcherResult.Complete -and $launcherResult.ExitCode -eq 0 -and $launcherResult.StdErr.Length -eq 0 -and $null -ne $launcherDecision -and $launcherDecision.permissionDecision -ceq 'deny' -and $launcherDecision.permissionDecisionReason -ceq $expectedReason) "I03 synthetic process chain carries $($case.Name) denial to host response format" "I03 launcher decision failed for $($case.Name)"
+        Check (-not ($launcherResult.StdOut+$launcherResult.StdErr).Contains($marker)) 'I03 synthetic chain never exposes private marker' 'I03 synthetic chain disclosed private marker'
     }
     foreach($target in @('ordinary.txt',(Join-Path $denyWorkspace 'ordinary.txt'))){
         $payload=$basePayload|ConvertTo-Json -Depth 10|ConvertFrom-Json -AsHashtable
@@ -266,7 +275,8 @@ try {
     }
     Render-H02Hook 'runtime-hooks/claude/codex-pretooluse-launcher.ps1' $denyLauncher (Join-Path $denyRoot $marker)
     $result=Run-H02Hook $denyLauncher '{}'
-    Check ($result.Complete -and $result.ExitCode -eq 0 -and $result.StdErr.Length -eq 0 -and $result.StdOut.Contains('startup') -and -not $result.StdOut.Contains($marker)) 'H02 missing startup dependency denies without private paths' 'H02 startup rejection was not sanitized'
+    $startupDecision=try{($result.StdOut|ConvertFrom-Json -AsHashtable).hookSpecificOutput}catch{$null}
+    Check ($result.Complete -and $result.ExitCode -eq 0 -and $result.StdErr.Length -eq 0 -and $null -ne $startupDecision -and $startupDecision.permissionDecision -ceq 'deny' -and $startupDecision.permissionDecisionReason -ceq 'Harness PreToolUse denied: startup' -and -not $result.StdOut.Contains($marker)) 'H02 missing startup dependency denies without private paths' 'H02 startup rejection was not sanitized'
     Check (@(Get-ChildItem $denyWorkspace -Recurse -Force).Count -eq 0) 'H02 rendered hook fixtures never apply patches or create state' 'H02 hook fixture wrote business or runtime files'
 } finally {
     $resolved=[IO.Path]::GetFullPath($denyRoot);$prefix=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')+'\'

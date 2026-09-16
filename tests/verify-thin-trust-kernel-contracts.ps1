@@ -290,7 +290,9 @@ Check ($rolloutClassification.Count -eq 1 -and [string]$rolloutClassification[0]
 $manifestConstructionPaths = @('scripts/get-module-manifest-catalog.ps1','scripts/lib/Harness.CapabilitySource.psm1','scripts/lib/Harness.ModuleManifest.psm1')
 $manifestConstructionClassification = @($classification.components | Where-Object { [string]$_.path -cin $manifestConstructionPaths })
 Check ($manifestConstructionClassification.Count -eq 3 -and @($manifestConstructionClassification | Where-Object { [string]$_.layer -cne 'c2-capability' -or [bool]$_.tcb_included -or [string]$_.owner_candidate -cne 'engineering-validation' }).Count -eq 0) 'Manifest generator, constructor, and source consumer are C2 engineering components outside Runtime TCB' 'Manifest construction classification leaked into Runtime TCB or another owner'
-Check (@($classification.components | Where-Object { [string]$_.layer -ceq 'c2-capability' }).Count -eq 43) 'classification contains the earlier C2 paths plus the TK-07 validation-process helper' 'C2 classification count drifted'
+Check (@($classification.components | Where-Object { [string]$_.layer -ceq 'c2-capability' }).Count -eq 44) 'classification contains the earlier C2 paths plus the I03 manual diagnostic' 'C2 classification count drifted'
+$diagnosticClassification=@($classification.components | Where-Object { [string]$_.path -ceq 'scripts/diagnose-harness-host.ps1' })
+Check ($diagnosticClassification.Count -eq 1 -and $diagnosticClassification[0].layer -ceq 'c2-capability' -and -not [bool]$diagnosticClassification[0].tcb_included -and $diagnosticClassification[0].owner_candidate -ceq 'engineering-validation') 'I03 diagnostic remains a single C2 engineering component outside the Runtime TCB' 'I03 diagnostic classification leaked into Runtime or another owner'
 Check (@($classification.components | Where-Object { [string]$_.layer -ceq 'c2-capability' -and [bool]$_.tcb_included }).Count -eq 0) 'no C2 capability is included in the measured Kernel TCB' 'a C2 capability leaked into TCB inclusion'
 
 $entryContractPath = Join-Path $RepoRoot 'policies\entry-contract.md'
