@@ -238,7 +238,7 @@ $thinTokens = @(
     'active v1 Runtime reader = 0',
     'status writes = 0',
     '3068',
-    'Runtime transitive executable LOC < 3100',
+    'Runtime transitive executable LOC < 3142',
     'original below-3000 goal is not achieved'
 )
 $missingThinTokens = @($thinTokens | Where-Object { -not $thinText.Contains($_, [StringComparison]::Ordinal) })

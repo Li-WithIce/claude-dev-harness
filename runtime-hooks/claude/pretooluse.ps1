@@ -60,6 +60,56 @@ try {
     [Console]::Out.Write('{}')
     exit 0
 } catch {
-    [Console]::Error.WriteLine($_.Exception.Message)
+    # Only fixed categories cross the host boundary; never forward raw exception text.
+    $message=[string]$_.Exception.Message
+    $code=switch -Regex ($message) {
+        '^Codex PreToolUse input contains (?:a non-string|an unsupported) permission_mode' {
+            'permission-mode'
+            break
+        }
+        ('^(?:Codex PreToolUse (?:cwd conflicts with DEV_HARNESS_WORKSPACE_ROOT|input is missing cwd and DEV_HARNESS_WORKSPACE_ROOT|input contains a non-string cwd)|'+
+            'direct patch requires a bound host cwd|WorkspaceRoot is not a directory:|WorkspaceRoot must not be a reparse point)') {
+            'workspace-binding'
+            break
+        }
+        '^direct (?:\w+ input (?:contains an invalid target path|requires a relative target path)|patch target must be relative or a fully qualified Windows drive path)' {
+            'patch-path'
+            break
+        }
+        '^direct \w+ input (?:has an invalid patch envelope|contains (?:an invalid|an empty|content after|an unsupported)|is missing a file operation)' {
+            'patch-syntax'
+            break
+        }
+        '^(?:file mutation target (?:escapes WorkspaceRoot|crosses a reparse point:|has no existing contained parent|parent is not a directory|must not be a directory)|relative path target escapes WorkspaceRoot)' {
+            'path-boundary'
+            break
+        }
+        '^Bash shell-form \w+ is denied because' {
+            'shell-form'
+            break
+        }
+        '^read-only session cannot invoke a write tool$' {
+            'read-only'
+            break
+        }
+        '^protected (?:write requires|write task profile is insufficient|task version is stale)' {
+            'policy-requirement'
+            break
+        }
+        '^(?:protected action policy is (?:unavailable|invalid)|protected action overlay)' {
+            'policy-unavailable'
+            break
+        }
+        '^core safety hook module is unavailable$' {
+            'startup'
+            break
+        }
+        '^(?:Claude PreToolUse input|Codex PreToolUse input contains a non-string|HARNESS_SESSION_MODE must be|\w+ PreToolUse (?:input is missing|target path must be))' {
+            'input'
+            break
+        }
+        default { 'unknown' }
+    }
+    [Console]::Error.WriteLine("HARNESS_DENY:$code")
     exit 2
 }

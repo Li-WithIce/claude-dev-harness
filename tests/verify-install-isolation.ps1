@@ -80,7 +80,112 @@ New-Item -ItemType Directory -Path $scratchRoot | Out-Null
 $checks = New-Object System.Collections.Generic.List[string]
 $failures = New-Object System.Collections.Generic.List[string]
 
+function Invoke-H03HistoricalIdentityRegression {
+    param([string]$SourceRoot,[string]$FixtureRoot)
+    . (Join-Path $SourceRoot 'scripts/install-transaction-common.ps1')
+    $tokens=$null;$errors=$null
+    $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $SourceRoot 'install.ps1'),[ref]$tokens,[ref]$errors)
+    if($errors.Count){throw 'H03 installer parsing failed'}
+    $needed=@('ConvertFrom-JsonDocument','Read-JsonObject','New-InstallRegistry','Add-ManifestToRegistry','Refresh-InstallRegistryManifestDigests','Assert-RegisteredInstallManifestIdentity','Get-RegisteredManifestStatusUpgradePlan')
+    foreach($definition in $ast.FindAll({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst]},$false)){
+        if($definition.Name -in $needed){Set-Item -Path ("Function:local:"+$definition.Name) -Value $definition.Body.GetScriptBlock()}
+    }
+    $h03Checks=[Collections.Generic.List[string]]::new();$h03Failures=[Collections.Generic.List[string]]::new()
+    function H03-Check([bool]$Condition,[string]$Label,[string]$Detail='') {
+        if($Condition){$h03Checks.Add($Label)}else{$h03Failures.Add("$Label : $Detail")}
+    }
+    $usedDrives=@(Get-PSDrive -PSProvider FileSystem|ForEach-Object {$_.Name.ToUpperInvariant()})
+    $usedDrives+=@([IO.DriveInfo]::GetDrives()|ForEach-Object {$_.Name.Substring(0,1).ToUpperInvariant()})
+    $missingDrive=@(90..68|ForEach-Object {([char]$_).ToString()}|Where-Object {$_ -notin $usedDrives})[0]
+    if(-not $missingDrive){throw 'H03 fixture requires an unmapped drive letter'}
+    $offlineWorkspace='{0}:\{1}' -f $missingDrive,'h03-offline-workspace'
+    $offlineRepo='{0}:\{1}' -f $missingDrive,'h03-offline-repo'
+    $normalWorkspace=Join-Path $FixtureRoot 'online-workspace'
+    [void][IO.Directory]::CreateDirectory($normalWorkspace)
+    function New-H03Fixture([string]$Name,[string]$Workspace=$normalWorkspace,[string]$Source=$SourceRoot) {
+        $user=Join-Path $FixtureRoot $Name
+        $backup=Join-Path $user '.dev-harness/backups/fixture'
+        [void][IO.Directory]::CreateDirectory($backup)
+        $manifestPath=Join-Path $backup 'install-manifest.json'
+        $registryPath=Join-Path $user '.dev-harness/install-registry.json'
+        $manifest=[ordered]@{schema_version='install-manifest/v1.2';postimage_identity_contract='v1';workspace_root=$Workspace;repo_root=$Source;vault_path=[IO.Path]::Combine($Workspace,'.assistant');claude_home=[IO.Path]::Combine($user,'.claude');codex_home=[IO.Path]::Combine($user,'.codex');agents_home=[IO.Path]::Combine($user,'.agents');backup_root=$backup;registry_path=$registryPath;transaction_status='committed';backups=@()}
+        [IO.File]::WriteAllText($manifestPath,($manifest|ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false))
+        $registry=New-InstallRegistry
+        Add-ManifestToRegistry -Registry $registry -ManifestPath $manifestPath -WorkspaceRoot $Workspace -RepoRoot $Source -VaultProfile minimal -InstalledAt 'synthetic-fixture'
+        Refresh-InstallRegistryManifestDigests -Registry $registry
+        return @{User=$user;ManifestPath=$manifestPath;RegistryPath=$registryPath;Manifest=$manifest;Registry=$registry;Workspace=$Workspace}
+    }
+    function H03-Run($Fixture) {
+        $before=@(Get-ChildItem $Fixture.User -Recurse -Force|ForEach-Object {if($_.PSIsContainer){'D|'+$_.FullName}else{'F|'+$_.FullName+'|'+(Get-FileHash -LiteralPath $_.FullName).Hash}}|Sort-Object)
+        $message='';$errorId='';$jsonError=$false
+        try{$null=Get-RegisteredManifestStatusUpgradePlan -Registry $Fixture.Registry -RegistryPath $Fixture.RegistryPath -ExpectedUserProfile $Fixture.User -RequireManifestIntegrity $true}
+        catch{$message=$_.Exception.Message;$errorId=$_.FullyQualifiedErrorId;$exception=$_.Exception;while($exception){if($exception -is [Text.Json.JsonException]){$jsonError=$true};$exception=$exception.InnerException}}
+        $after=@(Get-ChildItem $Fixture.User -Recurse -Force|ForEach-Object {if($_.PSIsContainer){'D|'+$_.FullName}else{'F|'+$_.FullName+'|'+(Get-FileHash -LiteralPath $_.FullName).Hash}}|Sort-Object)
+        H03-Check (@(Compare-Object $before $after).Count -eq 0) 'H03 metadata validation leaves fixture files byte-identical'
+        return @{Error=$message;ErrorId=$errorId;JsonError=$jsonError}
+    }
+    foreach($candidate in @($normalWorkspace,($normalWorkspace+'\'),$normalWorkspace.Replace('\','/'))){
+        H03-Check ((Get-NormalizedPath ([IO.Path]::Combine($candidate,'.assistant'))) -ceq (Get-NormalizedPath (Join-Path $candidate '.assistant'))) 'H03 existing-drive normalized Join-Path and Combine identities agree'
+    }
+    $online=New-H03Fixture 'normal'
+    $result=H03-Run $online
+    H03-Check (-not $result.Error) 'H03 normal-drive manifest metadata validates' $result.Error
+    $offline=New-H03Fixture 'offline' $offlineWorkspace $offlineRepo
+    $result=H03-Run $offline
+    H03-Check (-not $result.Error) 'H03 local manifest with offline workspace/repo passes metadata validation' "$($result.ErrorId): $($result.Error)"
+    $cases=@(
+        @{Name='missing';Expected='^Registered install manifest is missing:'},
+        @{Name='corrupt';Expected='json'},
+        @{Name='digest';Expected='^Registered install manifest digest mismatch:'},
+        @{Name='vault';Expected='^Registered install manifest path or user identity is invalid:'},
+        @{Name='offline-vault';Expected='^Registered install manifest path or user identity is invalid:'},
+        @{Name='workspace';Expected='^Registered install manifest identity does not match its owner:'},
+        @{Name='repo';Expected='^Registered install manifest identity does not match its owner:'},
+        @{Name='user';Expected='^Registered install manifest path or user identity is invalid:'},
+        @{Name='registry';Expected='^Registered install manifest path or user identity is invalid:'},
+        @{Name='backup-root';Expected='^Registered install manifest path or user identity is invalid:'},
+        @{Name='backup-shape';Expected='^Install manifest backup record is missing expected postimage:'},
+        @{Name='committed';Expected='^Registered install manifest is not committed:'},
+        @{Name='duplicate-history';Expected='^Install registry global history contains a duplicate manifest:'},
+        @{Name='duplicate-owner';Expected='^Install manifest is registered by more than one workspace:'}
+    )
+    foreach($case in $cases){
+        $fixture=if($case.Name -ceq 'offline-vault'){New-H03Fixture $case.Name $offlineWorkspace $offlineRepo}else{New-H03Fixture $case.Name}
+        switch($case.Name){
+            missing{[IO.File]::Delete($fixture.ManifestPath)}
+            corrupt{[IO.File]::WriteAllText($fixture.ManifestPath,'{broken');Refresh-InstallRegistryManifestDigests $fixture.Registry}
+            digest{$fixture.Registry.manifest_digests[(Get-InstallManifestDigestRegistryKey $fixture.ManifestPath)]='0'*64}
+            vault{$fixture.Manifest.vault_path=[IO.Path]::Combine($fixture.Workspace,'wrong-vault')}
+            offline-vault{$fixture.Manifest.vault_path=[IO.Path]::Combine($fixture.Workspace,'wrong-vault')}
+            workspace{$fixture.Manifest.workspace_root=[IO.Path]::Combine($fixture.Workspace,'wrong-owner')}
+            repo{$fixture.Manifest.repo_root=[IO.Path]::Combine($SourceRoot,'wrong-repo')}
+            user{$fixture.Manifest.claude_home=[IO.Path]::Combine($fixture.User,'wrong-user')}
+            registry{$fixture.Manifest.registry_path=[IO.Path]::Combine($fixture.User,'wrong-registry.json')}
+            backup-root{$fixture.Manifest.backup_root=$FixtureRoot}
+            backup-shape{$fixture.Manifest.backups=@(@{path='fixture'})}
+            committed{$fixture.Manifest.transaction_status='in-progress'}
+            duplicate-history{$fixture.Registry.global_manifest_history+=@($fixture.ManifestPath)}
+            duplicate-owner{Add-ManifestToRegistry -Registry $fixture.Registry -ManifestPath $fixture.ManifestPath -WorkspaceRoot ([IO.Path]::Combine($normalWorkspace,'other-owner')) -RepoRoot $SourceRoot -VaultProfile minimal -InstalledAt 'synthetic-fixture'}
+        }
+        if($case.Name -in @('vault','offline-vault','workspace','repo','user','registry','backup-root','backup-shape','committed')){
+            [IO.File]::WriteAllText($fixture.ManifestPath,($fixture.Manifest|ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false))
+            Refresh-InstallRegistryManifestDigests $fixture.Registry
+        }
+        $result=H03-Run $fixture
+        $expected=if($case.Expected -ceq 'json'){$result.JsonError}else{$result.Error -match $case.Expected}
+        H03-Check $expected "H03 rejects $($case.Name) with its original specific validation reason" "$($result.ErrorId): $($result.Error)"
+    }
+    $targetRejected=$false
+    try{$null=Assert-InstallStatePathHasNoReparsePoint -Path $offlineWorkspace -Label 'Current operation target'}catch{$targetRejected=$_.FullyQualifiedErrorId -like 'DriveNotFound,*'}
+    H03-Check $targetRejected 'H03 inaccessible current operation target still fails filesystem validation'
+    H03-Check (-not (Get-PSDrive -Name $missingDrive -ErrorAction SilentlyContinue)) 'H03 never creates or maps the unavailable drive'
+    foreach($label in $h03Checks){Write-Output "[PASS] $label"}
+    foreach($label in $h03Failures){Write-Output "[FAIL] $label"}
+    if($h03Failures.Count){throw "H03 historical identity regression failed: $($h03Failures.Count)"}
+}
+
 try {
+Invoke-H03HistoricalIdentityRegression -SourceRoot $RepoRoot -FixtureRoot (Join-Path $scratchRoot 'h03-history')
 $installSource = Get-Content -LiteralPath (Join-Path $RepoRoot 'install.ps1') -Raw -Encoding utf8
 if ($installSource.Contains("if (`$pointerDigest -match '^[0-9a-f]{64}$' -and")) {
     $checks.Add('receipt retry skips pointer marker creation when both receipt and pointer are absent') | Out-Null

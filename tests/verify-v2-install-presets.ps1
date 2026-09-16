@@ -555,6 +555,160 @@ function Assert-InstalledCodexHook {
     }
 }
 
+function Invoke-H04NonActiveReleaseRegression {
+    $fixture=New-PresetFixture -Name 'h04-nonactive-release'
+    $a=$fixture;$b=[pscustomobject]@{Root=$fixture.Root;Workspace=(Join-Path $fixture.Root 'workspace-b');User=$fixture.User}
+    [void][IO.Directory]::CreateDirectory($b.Workspace)
+    Assert-InstallExit (Invoke-Install $a @('-Preset','full')) 'H04 nonactive full owner'
+    Assert-InstallExit (Invoke-Install $b @('-Preset','core')) 'H04 nonactive core owner'
+    $aManifest=Get-LatestManifest $a;$bManifest=Get-LatestManifest $b
+    $optional=@($aManifest.feature_ownership.hooks|Where-Object {$_ -notin $bManifest.feature_ownership.hooks})
+    Assert-UninstallExit (Invoke-Uninstall $a) 'H04 nonactive optional owner release'
+    $registryPath=Join-Path $fixture.User '.dev-harness/install-registry.json'
+    $registry=Get-Content $registryPath -Raw|ConvertFrom-Json -AsHashtable
+    $shared=Get-InstallSharedHookRequirements -Registry $registry -UserProfile $fixture.User
+    if(@($optional|Where-Object {$_ -in $shared.Required}).Count -eq 0){Add-Check 'H04 retired ownership is not counted as an active requirement'}else{Add-Failure 'H04 retained a retired demand'}
+    $verify=Invoke-ChildScript -UserProfile $fixture.User -ScriptPath (Join-Path $script:RepoRoot 'tests/verify-installation.ps1') -Arguments @('-WorkspaceRoot',$b.Workspace,'-RepoRoot',$script:RepoRoot,'-UserProfileRoot',$b.User,'-Scope','SharedHooks')
+    if($verify.ExitCode -eq 0){Add-Check 'H04 nonactive uninstall keeps only exact registry-bound restoration state'}else{Add-Failure "H04 restored shared state not traceable: $($verify.Output)"}
+    Assert-InstallExit (Invoke-Install $b) 'H04 core update after optional owner release'
+    foreach($name in $optional){if(Test-Path (Join-Path $fixture.User ('.claude/hooks-memory/'+$name))){Add-Failure 'H04 retired demand prevented normal cleanup'}else{Add-Check 'H04 next normal update drops restoration-only optional assets'}}
+    Assert-UninstallExit (Invoke-Uninstall $b) 'H04 last remaining owner release'
+}
+function Invoke-H04SharedHookFailureRegression {
+    $fixture=New-PresetFixture -Name 'h04-integrity'
+    $a=$fixture
+    $b=[pscustomobject]@{Root=$fixture.Root;Workspace=(Join-Path $fixture.Root 'workspace-b');User=$fixture.User}
+    [void][IO.Directory]::CreateDirectory($b.Workspace)
+    $run=Invoke-Install $a @('-Preset','full');Assert-InstallExit $run 'H04 integrity owner'
+    if($run.ExitCode){throw $run.Output}
+    $registryPath=Join-Path $fixture.User '.dev-harness/install-registry.json'
+    $registryBytes=[IO.File]::ReadAllBytes($registryPath)
+    $registry=Get-Content $registryPath -Raw|ConvertFrom-Json -AsHashtable
+    $manifestPath=@($registry.global_manifest_history)[-1]
+    $manifestBytes=[IO.File]::ReadAllBytes($manifestPath)
+    $manifest=Get-Content $manifestPath -Raw|ConvertFrom-Json -AsHashtable
+    $hookPath=Join-Path $fixture.User '.claude/hooks-memory/pretooluse.ps1'
+    $hookBytes=[IO.File]::ReadAllBytes($hookPath)
+    foreach($case in @('directory-drift','manifest-digest','ownership')){
+        switch($case){
+            directory-drift{[IO.File]::AppendAllText($hookPath,"`n# synthetic drift")}
+            manifest-digest{[IO.File]::AppendAllText($manifestPath,' ')}
+            ownership{
+                $m=$manifest|ConvertTo-Json -Depth 80|ConvertFrom-Json -AsHashtable
+                $record=@($m.backups|Where-Object {$_.path -eq (Join-Path $fixture.User '.claude/hooks-memory')})[0]
+                $record.ownership='user-owned'
+                [IO.File]::WriteAllText($manifestPath,($m|ConvertTo-Json -Depth 80),[Text.UTF8Encoding]::new($false))
+                $r=$registry|ConvertTo-Json -Depth 80|ConvertFrom-Json -AsHashtable
+                $r.manifest_digests[(Get-InstallManifestDigestRegistryKey $manifestPath)]=Get-InstallStateFileDigest $manifestPath
+                [IO.File]::WriteAllText($registryPath,($r|ConvertTo-Json -Depth 80),[Text.UTF8Encoding]::new($false))
+            }
+        }
+        $before=Get-TestFileSha256 $registryPath
+        $count=@(Get-ChildItem (Join-Path $fixture.User '.dev-harness/backups') -Directory).Count
+        $run=Invoke-Install $b @('-Preset','core')
+        $reason=switch($case){directory-drift{'Shared Hook directory differs from its registered identity'};manifest-digest{'Registered install manifest digest mismatch'};ownership{'Shared Hook directory has an unsupported ownership contract'}}
+        $normalizedOutput=($run.Output -replace '(?m)^\s*\| ?', '') -replace '\s+',' '
+        if($run.ExitCode -ne 0 -and $normalizedOutput.Contains($reason) -and (Get-TestFileSha256 $registryPath) -ceq $before -and @(Get-ChildItem (Join-Path $fixture.User '.dev-harness/backups') -Directory).Count -eq $count){Add-Check "H04 $case rejects before transaction publication"}else{Add-Failure "H04 $case did not preserve the specific prewrite rejection: $($run.Output)"}
+        [IO.File]::WriteAllBytes($hookPath,$hookBytes);[IO.File]::WriteAllBytes($manifestPath,$manifestBytes);[IO.File]::WriteAllBytes($registryPath,$registryBytes)
+    }
+    foreach($stage in @('directory','configuration')){
+        $settingsPath=Join-Path $fixture.User '.claude/settings.json'
+        $hookRoot=Join-Path $fixture.User '.claude/hooks-memory'
+        $directoryBefore=Get-InstallManagedPathIdentity $hookRoot
+        $settingsBefore=Get-TestFileSha256 $settingsPath
+        $lockedPath=if($stage -ceq 'directory'){$hookPath}else{$settingsPath}
+        $held=[IO.File]::Open($lockedPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+        try{$run=Invoke-Install $a @('-Preset','core')}finally{$held.Dispose()}
+        $journalPath=Join-Path $fixture.User '.dev-harness/install-transaction.json'
+        if($run.ExitCode -eq 0 -or -not(Test-Path $journalPath)){Add-Failure "H04 $stage injected lock did not create recoverable failure";continue}
+        $journal=Get-Content $journalPath -Raw|ConvertFrom-Json -AsHashtable
+        $recovery=Invoke-ChildScript -UserProfile $fixture.User -ScriptPath $script:UninstallScript -Arguments @('-RepoRoot',$script:RepoRoot,'-RecoveryManifestPath',$journal.manifest_path)
+        if($recovery.ExitCode -eq 0 -and (Test-InstallExactIdentityEqual -Left (Get-InstallManagedPathIdentity $hookRoot) -Right $directoryBefore) -and (Get-TestFileSha256 $settingsPath) -ceq $settingsBefore -and (Get-TestFileSha256 $registryPath) -ceq (Get-TestStringSha256 ([Text.UTF8Encoding]::new($false).GetString($registryBytes)))){Add-Check "H04 $stage failure restores directory, references and registry through normal recovery"}else{Add-Failure "H04 $stage recovery failed: $($recovery.Output)"}
+    }
+    Assert-UninstallExit (Invoke-Uninstall $a) 'H04 integrity final cleanup'
+}
+function Invoke-H04HistoricalMatcherVerification {
+    param($Owner,$Current)
+    $registryPath=Join-Path $Owner.User '.dev-harness/install-registry.json'
+    $registryBytes=[IO.File]::ReadAllBytes($registryPath)
+    $registry=Get-Content $registryPath -Raw|ConvertFrom-Json -AsHashtable
+    $manifestPath=@($registry.workspaces[(Get-WorkspaceRegistryKey $Owner.Workspace)].manifests)[-1]
+    if($manifestPath -eq @($registry.global_manifest_history)[-1]){throw 'Historical matcher fixture requires a later live owner'}
+    $manifestBytes=[IO.File]::ReadAllBytes($manifestPath)
+    $manifest=Get-Content $manifestPath -Raw|ConvertFrom-Json -AsHashtable
+    $record=@($manifest.backups|Where-Object path -eq (Join-Path $Owner.User '.codex/hooks.json'))[0]
+    $reference=@($record.expected_postimage.managed_hooks|Where-Object event -ceq 'PreToolUse')[0]
+    $literal=[regex]::Match($reference.section.matcher,'^\^\(([A-Za-z0-9_]+(?:\|[A-Za-z0-9_]+)*)\)\$$')
+    if(-not $literal.Success -or $literal.Groups[1].Value.Split('|').Count -lt 2){throw 'Historical matcher fixture requires the supported literal-alternative shape'}
+    # Synthetic older owner metadata only; current live bytes stay registered to the later real install.
+    $reference.section.matcher='^('+$literal.Groups[1].Value.Split('|')[0]+')$'
+    try {
+        [IO.File]::WriteAllText($manifestPath,($manifest|ConvertTo-Json -Depth 80),[Text.UTF8Encoding]::new($false))
+        $registry.manifest_digests[(Get-InstallManifestDigestRegistryKey $manifestPath)]=Get-InstallStateFileDigest $manifestPath
+        [IO.File]::WriteAllText($registryPath,($registry|ConvertTo-Json -Depth 80),[Text.UTF8Encoding]::new($false))
+        foreach($target in @($Owner,$Current)){
+            $verify=Invoke-ChildScript -UserProfile $target.User -ScriptPath (Join-Path $script:RepoRoot 'tests/verify-installation.ps1') -Arguments @('-WorkspaceRoot',$target.Workspace,'-RepoRoot',$script:RepoRoot,'-UserProfileRoot',$target.User,'-Scope','SharedHooks')
+            if($verify.ExitCode -eq 0){Add-Check 'H04 verifier uses the current coordinated upgrade contract for an older shared matcher'}else{Add-Failure "H04 historical matcher verification failed: $($verify.Output)"}
+        }
+    } finally {
+        [IO.File]::WriteAllBytes($manifestPath,$manifestBytes)
+        [IO.File]::WriteAllBytes($registryPath,$registryBytes)
+    }
+}
+
+function Invoke-H04SharedHookRegression {
+    foreach($order in @('full-first','core-first')) {
+        $fixture=New-PresetFixture -Name ('h04-'+$order)
+        $a=[pscustomobject]@{Root=$fixture.Root;Workspace=(Join-Path $fixture.Root 'workspace-a');User=$fixture.User}
+        $b=[pscustomobject]@{Root=$fixture.Root;Workspace=(Join-Path $fixture.Root 'workspace-b');User=$fixture.User}
+        [void][IO.Directory]::CreateDirectory($a.Workspace);[void][IO.Directory]::CreateDirectory($b.Workspace)
+        $config=Join-Path $fixture.User '.claude/settings.json'
+        [void][IO.Directory]::CreateDirectory((Split-Path $config))
+        [IO.File]::WriteAllText($config,'{"user_sentinel":{"keep":true},"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"echo foreign-sentinel"}]}]}}',[Text.UTF8Encoding]::new($false))
+        $sequence=if($order -ceq 'full-first'){@(@{Fixture=$a;Preset='full'},@{Fixture=$b;Preset='core'})}else{@(@{Fixture=$b;Preset='core'},@{Fixture=$a;Preset='full'})}
+        $aHookHashes=@{}
+        foreach($step in $sequence){
+            $run=Invoke-Install $step.Fixture @('-Preset',$step.Preset)
+            Assert-InstallExit $run "H04 $order $($step.Preset)"
+            if($run.ExitCode -ne 0){throw "H04 $order $($step.Preset) install failed: $($run.Output)"}
+            if($step.Fixture.Workspace -eq $a.Workspace){
+                foreach($name in (Get-LatestManifest $a).feature_ownership.hooks){$aHookHashes[$name]=Get-TestFileSha256 (Join-Path $fixture.User ('.claude/hooks-memory/'+$name))}
+            }
+        }
+        $aManifest=Get-LatestManifest $a;$bManifest=Get-LatestManifest $b
+        $required=@($aManifest.feature_ownership.hooks|Where-Object {$_ -notin @($bManifest.feature_ownership.hooks)})
+        foreach($name in $required){
+            $hookPath=Join-Path $fixture.User ('.claude/hooks-memory/'+$name)
+            if((Test-Path -LiteralPath $hookPath) -and (Get-TestFileSha256 $hookPath) -ceq $aHookHashes[$name]){Add-Check "H04 $order preserves the other owner's exact Hook bytes"}else{Add-Failure "H04 $order removed or changed required shared Hook $name"}
+        }
+        $settings=Get-Content $config -Raw|ConvertFrom-Json -AsHashtable
+        $commands=@($settings.hooks.Values|ForEach-Object {foreach($section in $_){foreach($hook in $section.hooks){$hook.command}}})
+        $aSettings=@($aManifest.backups|Where-Object path -eq $config)[0]
+        foreach($expected in $aSettings.expected_postimage.managed_hooks){
+            if(@($commands|Where-Object {$_ -ceq $expected.hook.command}).Count -eq 1){Add-Check 'H04 A managed reference remains exact and unique'}else{Add-Failure "H04 $order lost A managed configuration reference"}
+        }
+        if($settings.user_sentinel.keep -eq $true -and @($commands|Where-Object {$_ -ceq 'echo foreign-sentinel'}).Count -eq 1){Add-Check 'H04 preserves unrelated user settings and Hook'}else{Add-Failure 'H04 changed non-Harness configuration'}
+        if($bManifest.effective_preset -ceq 'core' -and (@($bManifest.feature_ownership.features)-join '|') -ceq 'core') {Add-Check 'H04 B remains its own core owner'}else{Add-Failure 'H04 changed B capability ownership'}
+        foreach($target in @($a,$b)){
+            $verify=Invoke-ChildScript -UserProfile $target.User -ScriptPath (Join-Path $script:RepoRoot 'tests/verify-installation.ps1') -Arguments @('-WorkspaceRoot',$target.Workspace,'-RepoRoot',$script:RepoRoot,'-UserProfileRoot',$target.User,'-Scope','SharedHooks')
+            if($verify.ExitCode -eq 0){Add-Check 'H04 installation verifier accepts each workspace with traced shared requirements'}else{Add-Failure "H04 shared verification failed: $($verify.Output)"}
+        }
+        if($order -ceq 'full-first'){Invoke-H04HistoricalMatcherVerification -Owner $a -Current $b}
+        $update=Invoke-Install $b
+        Assert-InstallExit $update "H04 $order repeated core update"
+        foreach($name in $required){$hookPath=Join-Path $fixture.User ('.claude/hooks-memory/'+$name);if(-not(Test-Path $hookPath) -or (Get-TestFileSha256 $hookPath) -cne $aHookHashes[$name]){Add-Failure 'H04 repeated core update trimmed another owner or changed its bytes'}else{Add-Check 'H04 repeated core update preserves exact other-owner bytes'}}
+        Assert-UninstallExit (Invoke-Uninstall $b) "H04 $order core uninstall"
+        foreach($name in $required){$hookPath=Join-Path $fixture.User ('.claude/hooks-memory/'+$name);if(-not(Test-Path $hookPath) -or (Get-TestFileSha256 $hookPath) -cne $aHookHashes[$name]){Add-Failure 'H04 core uninstall trimmed the remaining owner or changed its bytes'}else{Add-Check 'H04 core uninstall preserves exact other-owner bytes'}}
+        $downgrade=Invoke-Install $a @('-Preset','core')
+        Assert-InstallExit $downgrade 'H04 final optional requirement released by normal profile update'
+        foreach($name in $required){if(Test-Path (Join-Path $fixture.User ('.claude/hooks-memory/'+$name))){Add-Failure 'H04 target historical versions were incorrectly unioned forever'}else{Add-Check 'H04 replacing the target request releases its obsolete optional Hook'}}
+        Assert-UninstallExit (Invoke-Uninstall $a) "H04 $order final owner uninstall"
+        foreach($name in $required){if(Test-Path (Join-Path $fixture.User ('.claude/hooks-memory/'+$name))){Add-Failure 'H04 last release left an installation-owned optional Hook'}else{Add-Check 'H04 final release restores original absence'}}
+        $restored=Get-Content $config -Raw|ConvertFrom-Json -AsHashtable
+        if($restored.user_sentinel.keep -eq $true){Add-Check 'H04 final restoration preserves user preimage'}else{Add-Failure 'H04 final restoration lost user preimage'}
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent $PSScriptRoot
 }
@@ -576,6 +730,10 @@ $fullFeatures = @('core','governed','memory','md-html','adapters','provider-refe
 
 try {
     New-Item -ItemType Directory -Path $script:ScratchRoot -Force | Out-Null
+
+    Invoke-H04SharedHookRegression
+    Invoke-H04SharedHookFailureRegression
+    Invoke-H04NonActiveReleaseRegression
 
     $exactNumberToken = '0.1234567890123456789012345678'
     try {
@@ -874,7 +1032,7 @@ try {
             } | ConvertTo-Json -Depth 10 -Compress
             $protectedPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $protectedPatchInput -Environment @{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace}
             $protectedPatchOutput = [string]$protectedPatchResult.StdOut + [string]$protectedPatchResult.StdErr
-            if ($protectedPatchResult.ExitCode -eq 2 -and $protectedPatchResult.StdErr -match 'protected write requires TaskId and ExpectedVersion' -and
+            if ($protectedPatchResult.ExitCode -eq 2 -and $protectedPatchResult.StdErr -match '^HARNESS_DENY:policy-requirement\s*$' -and
                 -not $protectedPatchOutput.Contains($environmentIdentifier)) {
                 Add-Check "shared PreToolUse adapter extracts and preserves protected direct apply_patch targets: $($protectedPatchCase.Key)"
             } else {
@@ -912,7 +1070,7 @@ try {
         [System.IO.File]::WriteAllText($fakePwsh,"@echo off`r`necho hijacked>`"$fakePwshSentinel`"`r`nexit /b 0`r`n",[System.Text.UTF8Encoding]::new($false))
         foreach ($runner in @('cmd','pwsh','powershell')) {
             $runnerDeny = Invoke-CodexHookCommandWithInput -Runner $runner -Command $installedHookCommand -InputText $protectedPatchInput -WorkingDirectory $defaultFixture.Workspace
-            if (Test-CodexDenyOutput -Result $runnerDeny -ReasonPattern 'denied or failed closed') {
+            if (Test-CodexDenyOutput -Result $runnerDeny -ReasonPattern '^Harness PreToolUse denied: policy-requirement$') {
                 Add-Check "installed Codex Hook command fixture emits official deny JSON through the $runner parser"
             } else {
                 Add-Failure "installed Codex Hook command fixture did not emit deny JSON through the ${runner} parser: exit=$($runnerDeny.ExitCode) stdout=$($runnerDeny.StdOut) stderr=$($runnerDeny.StdErr)"
@@ -958,8 +1116,9 @@ try {
                 -InputText $unicodeProtectedPatchInput `
                 -WorkingDirectory $defaultFixture.Workspace `
                 -CodePage $legacyCodePage
+            # This legacy-code-page fixture proves denial, not which policy branch was reached.
             if ($unicodeProtectedPatchInput.Contains('auth/授权.ps1') -and
-                (Test-CodexDenyOutput -Result $legacyCodePageDeny -ReasonPattern 'denied or failed closed')) {
+                (Test-CodexDenyOutput -Result $legacyCodePageDeny -ReasonPattern '^Harness PreToolUse denied: (policy-requirement|patch-syntax)$')) {
                 Add-Check "installed Codex Hook exact command fails closed for a raw UTF-8 Unicode protected path under code page $legacyCodePage"
             } else {
                 Add-Failure "installed Codex Hook exact command did not fail closed for raw UTF-8 under code page ${legacyCodePage}: exit=$($legacyCodePageDeny.ExitCode) stdout=$($legacyCodePageDeny.StdOut) stderr=$($legacyCodePageDeny.StdErr)"
@@ -1006,7 +1165,7 @@ try {
             cwd = $defaultFixture.Workspace
         } | ConvertTo-Json -Depth 10 -Compress
         $shellPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $shellPatchInput -Environment @{ HARNESS_ENVIRONMENT='production' }
-        if ($shellPatchResult.ExitCode -eq 2 -and $shellPatchResult.StdErr -match 'effective tool workdir or environment identity') {
+        if ($shellPatchResult.ExitCode -eq 2 -and $shellPatchResult.StdErr -match '^HARNESS_DENY:shell-form\s*$') {
             Add-Check 'shared PreToolUse adapter fails closed for shell-form applypatch with an unbound tool workdir'
         } else {
             Add-Failure "shared PreToolUse adapter accepted shell-form applypatch without a bound tool workdir: $($shellPatchResult.StdErr)"
@@ -1028,7 +1187,7 @@ try {
             cwd = $defaultFixture.Workspace
         } | ConvertTo-Json -Depth 10 -Compress
         $protectedShellPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $protectedShellPatchInput
-        if ($protectedShellPatchResult.ExitCode -eq 2 -and $protectedShellPatchResult.StdErr -match 'effective tool workdir or environment identity') {
+        if ($protectedShellPatchResult.ExitCode -eq 2 -and $protectedShellPatchResult.StdErr -match '^HARNESS_DENY:shell-form\s*$') {
             Add-Check 'shared PreToolUse adapter fails closed for shell-form apply_patch even with command-local cd'
         } else {
             Add-Failure "shared PreToolUse adapter did not deny a protected Codex shell-form apply_patch path: $($protectedShellPatchResult.StdErr)"
@@ -1040,7 +1199,7 @@ try {
             cwd = $defaultFixture.Workspace
         } | ConvertTo-Json -Depth 10 -Compress
         $unsupportedShellPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $unsupportedShellPatchInput
-        if ($unsupportedShellPatchResult.ExitCode -eq 2 -and $unsupportedShellPatchResult.StdErr -match 'effective tool workdir or environment identity') {
+        if ($unsupportedShellPatchResult.ExitCode -eq 2 -and $unsupportedShellPatchResult.StdErr -match '^HARNESS_DENY:shell-form\s*$') {
             Add-Check 'shared PreToolUse adapter fails closed for composed shell apply_patch invocation'
         } else {
             Add-Failure 'shared PreToolUse adapter accepted a non-canonical shell apply_patch composition'
@@ -1060,7 +1219,7 @@ try {
                 cwd = $defaultFixture.Workspace
             } | ConvertTo-Json -Depth 10 -Compress
             $wrappedResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $wrappedInput
-            if ($wrappedResult.ExitCode -eq 2 -and $wrappedResult.StdErr -match 'effective tool workdir or environment identity') {
+            if ($wrappedResult.ExitCode -eq 2 -and $wrappedResult.StdErr -match '^HARNESS_DENY:shell-form\s*$') {
                 Add-Check "shared PreToolUse adapter fails closed for wrapped shell apply_patch: $($wrappedCase.Key)"
             } else {
                 Add-Failure "shared PreToolUse adapter accepted wrapped shell apply_patch: $($wrappedCase.Key)"
@@ -1085,7 +1244,7 @@ try {
             permission_mode = 'plan'
         } | ConvertTo-Json -Depth 10 -Compress
         $planPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $planPatchInput
-        if ($planPatchResult.ExitCode -eq 2 -and $planPatchResult.StdErr -match 'unsupported permission_mode: plan') {
+        if ($planPatchResult.ExitCode -eq 2 -and $planPatchResult.StdErr -match '^HARNESS_DENY:permission-mode\s*$') {
             Add-Check 'shared PreToolUse adapter rejects the non-existent Codex plan permission mode instead of inventing a host guarantee'
         } else {
             Add-Failure 'shared PreToolUse adapter accepted a permission mode outside the pinned Codex hook contract'
@@ -1098,7 +1257,7 @@ try {
                 cwd = $defaultFixture.Workspace
             } | ConvertTo-Json -Depth 10 -Compress
             $productionBashResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $productionBashInput -Environment @{HARNESS_ENVIRONMENT='production';DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace}
-            if ($productionBashResult.ExitCode -eq 2 -and $productionBashResult.StdErr -match 'protected write requires TaskId and ExpectedVersion') {
+            if ($productionBashResult.ExitCode -eq 2 -and $productionBashResult.StdErr -match '^HARNESS_DENY:policy-requirement\s*$') {
                 Add-Check "shared PreToolUse adapter forwards and protects production Bash command: $($productionCommand.Split(' ')[0])"
             } else {
                 Add-Failure "shared PreToolUse adapter allowed protected production Bash command: $($productionCommand.Split(' ')[0])"
@@ -1171,7 +1330,7 @@ try {
                 tool_name='apply_patch';permission_mode='default';tool_input=[ordered]@{command=[string]$invalidPatchCase.Value};cwd=$defaultFixture.Workspace
             } | ConvertTo-Json -Depth 10 -Compress
             $invalidPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $invalidPatchInput -Environment @{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace}
-            if ($invalidPatchResult.ExitCode -eq 2 -and $invalidPatchResult.StdErr -match '^direct apply_patch input') {
+            if ($invalidPatchResult.ExitCode -eq 2 -and $invalidPatchResult.StdErr -match '^HARNESS_DENY:(patch-path|patch-syntax|path-boundary)\s*$') {
                 Add-Check "shared PreToolUse adapter fails closed for malformed direct apply_patch: $($invalidPatchCase.Key)"
             } else {
                 Add-Failure "shared PreToolUse adapter accepted malformed direct apply_patch: $($invalidPatchCase.Key)"
@@ -1221,7 +1380,7 @@ try {
         }
 
         $rootCases = @(
-            [ordered]@{Name='environment-only root';Payload=[ordered]@{tool_name='apply_patch';permission_mode='default';tool_input=[ordered]@{command="*** Begin Patch`n*** Add File: env-root.txt`n+x`n*** End Patch"}};Environment=@{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace};Allowed=$true},
+            [ordered]@{Name='environment-only root';Payload=[ordered]@{tool_name='apply_patch';permission_mode='default';tool_input=[ordered]@{command="*** Begin Patch`n*** Add File: env-root.txt`n+x`n*** End Patch"}};Environment=@{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace};Allowed=$false},
             [ordered]@{Name='same normalized roots';Payload=[ordered]@{tool_name='apply_patch';permission_mode='default';tool_input=[ordered]@{command="*** Begin Patch`n*** Add File: same-root.txt`n+x`n*** End Patch"};cwd=$defaultFixture.Workspace};Environment=@{DEV_HARNESS_WORKSPACE_ROOT=($defaultFixture.Workspace + '\')};Allowed=$true},
             [ordered]@{Name='missing roots';Payload=[ordered]@{tool_name='apply_patch';permission_mode='default';tool_input=[ordered]@{command="*** Begin Patch`n*** Add File: missing-root.txt`n+x`n*** End Patch"}};Environment=@{};Allowed=$false},
             [ordered]@{Name='conflicting roots';Payload=[ordered]@{tool_name='apply_patch';permission_mode='default';tool_input=[ordered]@{command="*** Begin Patch`n*** Add File: conflict-root.txt`n+x`n*** End Patch"};cwd=$defaultFixture.Workspace};Environment=@{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.User};Allowed=$false},
@@ -1239,7 +1398,7 @@ try {
 
         $directoryPatchInput = [ordered]@{tool_name='apply_patch';permission_mode='default';tool_input=[ordered]@{command="*** Begin Patch`n*** Add File: .assistant`n+x`n*** End Patch"};cwd=$defaultFixture.Workspace} | ConvertTo-Json -Depth 10 -Compress
         $directoryPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $directoryPatchInput -Environment @{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace}
-        if ($directoryPatchResult.ExitCode -eq 2 -and $directoryPatchResult.StdErr -match 'must not be a directory') {
+        if ($directoryPatchResult.ExitCode -eq 2 -and $directoryPatchResult.StdErr -match '^HARNESS_DENY:path-boundary\s*$') {
             Add-Check 'shared PreToolUse adapter rejects a direct apply_patch directory target'
         } else {
             Add-Failure 'shared PreToolUse adapter accepted a direct apply_patch directory target'
@@ -1247,7 +1406,7 @@ try {
 
         $outsideWriteInput = [ordered]@{tool_name='Write';permission_mode='default';tool_input=[ordered]@{file_path=(Join-Path $defaultFixture.Workspace '..\outside.txt');content='fixture'};cwd=$defaultFixture.Workspace} | ConvertTo-Json -Depth 10 -Compress
         $outsideWriteResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $outsideWriteInput -Environment @{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace}
-        if ($outsideWriteResult.ExitCode -eq 2 -and $outsideWriteResult.StdErr -match 'escapes WorkspaceRoot') {
+        if ($outsideWriteResult.ExitCode -eq 2 -and $outsideWriteResult.StdErr -match '^HARNESS_DENY:path-boundary\s*$') {
             Add-Check 'shared PreToolUse adapter preserves Workspace containment for ordinary file tools'
         } else {
             Add-Failure 'shared PreToolUse adapter allowed an ordinary file-tool target outside the Workspace'
@@ -1259,7 +1418,7 @@ try {
         New-Item -ItemType Junction -Path $reparseLink -Target $reparseTarget | Out-Null
         $reparsePatchInput = [ordered]@{tool_name='apply_patch';permission_mode='default';tool_input=[ordered]@{command="*** Begin Patch`n*** Add File: config-link/production.yml`n+x`n*** End Patch"};cwd=$defaultFixture.Workspace} | ConvertTo-Json -Depth 10 -Compress
         $reparsePatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $reparsePatchInput -Environment @{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace}
-        if ($reparsePatchResult.ExitCode -eq 2 -and $reparsePatchResult.StdErr -match 'reparse point') {
+        if ($reparsePatchResult.ExitCode -eq 2 -and $reparsePatchResult.StdErr -match '^HARNESS_DENY:path-boundary\s*$') {
             Add-Check 'shared PreToolUse adapter preserves reparse, junction, and symlink ancestor protection'
         } else {
             Add-Failure 'shared PreToolUse adapter allowed a target through a reparse ancestor'
@@ -1287,7 +1446,7 @@ try {
             cwd = $defaultFixture.Workspace
         } | ConvertTo-Json -Depth 10 -Compress
         $missingPathResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $missingPathInput
-        if ($missingPathResult.ExitCode -eq 2 -and $missingPathResult.StdErr -match 'missing target path') {
+        if ($missingPathResult.ExitCode -eq 2 -and $missingPathResult.StdErr -match '^HARNESS_DENY:input\s*$') {
             Add-Check 'shared PreToolUse adapter fails closed when a file-write target is missing'
         } else {
             Add-Failure 'shared PreToolUse adapter allowed a file write without a target path'

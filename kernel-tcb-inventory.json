@@ -84,7 +84,7 @@
     },
     {
       "path": "install.ps1",
-      "sha256": "sha256:36f58b164ee1001a930bda48a1663c6bdb0af9064142d42066ed0b3aadf5c432",
+      "sha256": "sha256:63136303e53bcf92d55fc53bf8a9fc0a6bbd03c9da86b67df1b6697324585fa0",
       "layer": "d1-distribution",
       "trust_paths": [
         "distribution"
@@ -92,13 +92,13 @@
       "root_ids": [
         "workspace-bootstrap"
       ],
-      "physical_loc": 3402,
-      "nonblank_loc": 3135,
-      "executable_loc": 3103
+      "physical_loc": 3414,
+      "nonblank_loc": 3146,
+      "executable_loc": 3113
     },
     {
       "path": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",
-      "sha256": "sha256:8296881eaa5519b2647fe8fd698c8a8750fcfbb5e2c2b0e378bbb48199c30da0",
+      "sha256": "sha256:201f45568e829a1eb5d3ac03934796f5f229028ad6788b9b17a53af8b2896f22",
       "layer": "a3-adapter",
       "trust_paths": [
         "runtime"
@@ -106,13 +106,13 @@
       "root_ids": [
         "codex-pretooluse-launcher"
       ],
-      "physical_loc": 32,
-      "nonblank_loc": 29,
-      "executable_loc": 27
+      "physical_loc": 37,
+      "nonblank_loc": 34,
+      "executable_loc": 32
     },
     {
       "path": "runtime-hooks/claude/pretooluse.ps1",
-      "sha256": "sha256:6abcc1333b5a2bb732a9ca3a268f7ddd6c37824c10d89183b5af542bbd56ed58",
+      "sha256": "sha256:c86e4520c1d6f5f69ed2aa8331c3de650e352557a153a26674a0c3a0be5b4a6c",
       "layer": "a3-adapter",
       "trust_paths": [
         "runtime"
@@ -121,9 +121,9 @@
         "claude-pretooluse-adapter",
         "codex-pretooluse-launcher"
       ],
-      "physical_loc": 65,
-      "nonblank_loc": 60,
-      "executable_loc": 60
+      "physical_loc": 115,
+      "nonblank_loc": 110,
+      "executable_loc": 109
     },
     {
       "path": "scripts/generate-entry-contract.ps1",
@@ -171,7 +171,7 @@
     },
     {
       "path": "scripts/install-transaction-common.ps1",
-      "sha256": "sha256:765d438e4539db6c4adf9d80a1334a0c8b25af9a39a8db09fa55caede3f75b5f",
+      "sha256": "sha256:442b475ef9ef209cef8e5c9b94038f578411e38b40796b4d29c83cf537bae268",
       "layer": "d1-distribution",
       "trust_paths": [
         "distribution"
@@ -179,13 +179,13 @@
       "root_ids": [
         "workspace-bootstrap"
       ],
-      "physical_loc": 1368,
-      "nonblank_loc": 1251,
-      "executable_loc": 1250
+      "physical_loc": 1514,
+      "nonblank_loc": 1394,
+      "executable_loc": 1389
     },
     {
       "path": "scripts/lib/Harness.AdapterAction.psm1",
-      "sha256": "sha256:629fbc570710e76460f1c3bcc9f4e1760d2b7c88b128debdc7679f7196bf1532",
+      "sha256": "sha256:138cd8657da0e3a10bdb1be8e4efecdec64dcd88321fb5a49fa027007c366c15",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
@@ -195,9 +195,9 @@
         "codex-pretooluse-launcher",
         "controlled-write-adapter"
       ],
-      "physical_loc": 150,
-      "nonblank_loc": 137,
-      "executable_loc": 137
+      "physical_loc": 158,
+      "nonblank_loc": 145,
+      "executable_loc": 144
     },
     {
       "path": "scripts/lib/Harness.AtomicWrite.psm1",
@@ -420,7 +420,7 @@
     },
     {
       "path": "scripts/lib/Harness.Requirement.psm1",
-      "sha256": "sha256:7420a519af3caa8acd866b1564c5bb5314c9b4a5f817583fd4f28f3d342951e4",
+      "sha256": "sha256:49da5fa2d4a74ac9436e3ab14437ce9105713aceb0192afd82678b2759b844b4",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
@@ -428,9 +428,9 @@
       "root_ids": [
         "task-cli"
       ],
-      "physical_loc": 134,
-      "nonblank_loc": 125,
-      "executable_loc": 125
+      "physical_loc": 136,
+      "nonblank_loc": 127,
+      "executable_loc": 127
     },
     {
       "path": "scripts/lib/Harness.RuntimeDefaultReader.ps1",
@@ -533,7 +533,7 @@
     },
     {
       "path": "tests/verify-installation.ps1",
-      "sha256": "sha256:673d1479333343f3beba12f92d44d389c3e5ac703ab40632ad93e097b5d23e13",
+      "sha256": "sha256:ceaef79d7be65c64ada9d29500d7d220c1b4a0949d78172a7a48fa076ccafc85",
       "layer": "d1-distribution",
       "trust_paths": [
         "distribution"
@@ -541,9 +541,9 @@
       "root_ids": [
         "workspace-bootstrap"
       ],
-      "physical_loc": 811,
-      "nonblank_loc": 715,
-      "executable_loc": 711
+      "physical_loc": 833,
+      "nonblank_loc": 736,
+      "executable_loc": 731
     }
   ],
   "artifacts": [
@@ -1489,6 +1489,15 @@
     },
     {
       "from": "tests/verify-installation.ps1",
+      "to": "scripts/install-transaction-common.ps1",
+      "kind": "dot-source",
+      "resolution": "ast-static:. (Join-Path $RepoRoot 'scripts/install-transaction-common.ps1')",
+      "trust_paths": [
+        "distribution"
+      ]
+    },
+    {
+      "from": "tests/verify-installation.ps1",
       "to": "scripts/lib/Harness.Distribution.psm1",
       "kind": "import-module",
       "resolution": "ast-static:Import-Module (Join-Path $RepoRoot 'scripts/lib/Harness.Distribution.psm1') -PassThru",
@@ -1556,22 +1565,22 @@
   "unresolved_dependencies": [],
   "totals": {
     "file_count": 29,
-    "physical_loc": 10410,
-    "nonblank_loc": 9505,
-    "executable_loc": 9443,
+    "physical_loc": 10655,
+    "nonblank_loc": 9745,
+    "executable_loc": 9675,
     "runtime_file_count": 21,
-    "runtime_executable_loc": 3078,
+    "runtime_executable_loc": 3141,
     "distribution_file_count": 18,
-    "distribution_executable_loc": 7741,
+    "distribution_executable_loc": 7910,
     "duplicate_edge_count": 0,
     "artifact_count": 39,
     "artifact_bytes": 143030
   },
   "budget": {
     "baseline_executable_loc": 3068,
-    "current_executable_loc": 3078,
-    "delta": 10,
-    "covered_growth": 10,
+    "current_executable_loc": 3141,
+    "delta": 73,
+    "covered_growth": 73,
     "status": "covered-by-exception",
     "exceptions": [
       {
@@ -1586,6 +1595,31 @@
         ],
         "repayment_plan": "Retain the 3068 baseline and explicit positive delta. Reassess this 10-line allowance at the next explicitly authorized Runtime change; do not delete correctness checks or start extra compression in this repair.",
         "expires_at_milestone": "Next explicitly authorized Runtime budget review after TK-07 R1/R2 closure"
+      },
+      {
+        "id": "KTB-EX-003",
+        "added_lines": 2,
+        "reason": "Explicit user approval on 2026-09-14 covers H01 optional-array omission handling: +2 LOC, +13 executable tokens and +13 statement ASTs relative to the original HEAD. This does not reset baseline 3068 or repurpose KTB-EX-002.",
+        "new_trust_assumption": "None. Input Schema validation, requirement blockers and read-only behavior remain unchanged; no new dependency or permission.",
+        "alternatives": [
+          "Leaving omitted arrays as null elements rejects inputs already allowed by the existing Schema.",
+          "Relaxing the Schema, filtering null globally or packing source would change validation or defeat accounting."
+        ],
+        "repayment_plan": "Review continued necessity at the next explicitly authorized Runtime change. Do not mechanically delete two lines; only remove proven semantic redundancy without changing validation, accounting or trust boundaries.",
+        "expires_at_milestone": "Next explicitly authorized Runtime change after H01/H02 budget approval"
+      },
+      {
+        "id": "KTB-EX-004",
+        "added_lines": 61,
+        "reason": "Explicit user approval on 2026-09-14 covers final readable H02: +61 LOC, +210 tokens and +83 statement ASTs over HEAD plus H01. Combined HEAD growth is +63 LOC/+223 tokens/+96 ASTs; the Token checkpoint increases only 147 because its prior 76-token headroom already existed.",
+        "new_trust_assumption": "None beyond existing trusted host cwd and installation bindings. Absolute and relative paths share containment and policy checks; finite refusal categories do not grant authority or expose arbitrary stderr.",
+        "alternatives": [
+          "Duplicate target resolution was removed; retaining separate syntax, binding, containment and policy boundaries is necessary.",
+          "Blind native path normalization cannot replace ADS, reparse, device-path or all-target checks.",
+          "Forwarding arbitrary stderr, packing branches, moving accounting scope or refactoring unrelated state/process code is not an acceptable substitute."
+        ],
+        "repayment_plan": "Review continued necessity at the next explicitly authorized Runtime change. No immediate line-for-line repayment is required. Retain readable branches and only remove independently justified redundancy; do not loosen security or change measurement to repay this allowance.",
+        "expires_at_milestone": "Next explicitly authorized Runtime change after H01/H02 budget approval"
       }
     ]
   }

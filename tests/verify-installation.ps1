@@ -2,7 +2,7 @@
 param(
     [string]$WorkspaceRoot,
     [string]$RepoRoot = "",
-    [string]$Scope = "All",
+    [ValidateSet('All','SharedHooks')][string]$Scope = "All",
     [string]$CurrentFlowPath = "",
     [string]$UserProfileRoot = ""
 )
@@ -536,16 +536,38 @@ if (-not $hasFeatureOwnership -or
     Add-Check ("install manifest feature ownership matches preset: {0}" -f $effectivePreset)
 }
 
+$sharedHookNames=@($presetDefinition.hooks)
+try {
+    . (Join-Path $RepoRoot 'scripts/install-transaction-common.ps1')
+    $sharedRegistry=ConvertFrom-InstallJson -Json ([IO.File]::ReadAllText($InstallRegistryPath))
+    # Current-request assets use the live registered upgrade contract, as they do during install.
+    $sharedCoordination=Get-InstallSharedHookRequirements -Registry $sharedRegistry -UserProfile $effectiveUserProfile -RequestedHooks $presetDefinition.hooks
+    $sharedHookNames=@($sharedCoordination.Required)
+    $restorationHooks=@(Get-ChildItem -LiteralPath $ClaudeHooksPath -File|Where-Object {$_.Name -notin $sharedHookNames -and $sharedCoordination.RestorationOwners.Contains($_.Name)}|ForEach-Object Name)
+    if($restorationHooks.Count){Add-Check ('Shared Hook restoration-only assets have verified historical owners, not workspace feature ownership: '+($restorationHooks -join ', '))}
+    $sharedHookNames+=$restorationHooks
+    Assert-InstallSharedHookState -Coordination $sharedCoordination -UserProfile $effectiveUserProfile
+    Add-Check 'Shared Hook directory identity and active owner requirements are verified independently of workspace preset'
+} catch { Add-Error ('Shared Hook ownership verification failed: '+$_.Exception.Message) }
+
+if ($Scope -ceq 'SharedHooks') {
+    Write-Output 'Verification scope: SharedHooks (workspace ownership plus registered shared files and exact managed references only)'
+    foreach ($message in $script:Checks) { Write-Output ('[PASS] '+$message) }
+    foreach ($message in $script:Errors) { Write-Output ('[FAIL] '+$message) }
+    if ($script:Errors.Count) { exit 2 }
+    Write-Output 'STATUS: PASS'
+    exit 0
+}
 Assert-ManagedSkillLinks -HostLabel 'Claude' -HostSkillsPath $ClaudeSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
 Assert-ManagedSkillLinks -HostLabel 'Codex' -HostSkillsPath $CodexSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
 Assert-ManagedSkillLinks -HostLabel 'Agents' -HostSkillsPath $AgentsSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
 
 foreach ($hookName in @('pretooluse.ps1','codex-pretooluse-launcher.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js')) {
     $hookPath = Join-Path $ClaudeHooksPath $hookName
-    if (@($presetDefinition.hooks) -contains $hookName) {
+    if ($sharedHookNames -contains $hookName) {
         $templatePath = if ($hookName -eq 'userpromptsubmit.js') { Join-Path $RepoRoot 'runtime-hooks\memory\userpromptsubmit.js' } else { Join-Path $RepoRoot "runtime-hooks\claude\$hookName" }
         Assert-RenderedFile -Path $hookPath -ForbiddenTokens $ForbiddenTokens
-        Assert-TemplateFileMatches -Path $hookPath -TemplatePath $templatePath -Label "Claude hook $hookName" -EscapeForCode:($hookName.EndsWith('.js'))
+        if (-not (Test-Path -LiteralPath $hookPath -PathType Leaf)) { Add-Error "Required shared Hook missing: $hookName" }
     } elseif (Test-Path -LiteralPath $hookPath) {
         Add-Error ("Claude preset should not install hook: {0}" -f $hookPath)
     } else {
@@ -582,7 +604,7 @@ if (Test-Path -LiteralPath $ClaudeSettingsPath -PathType Leaf) {
         $eventByHook = [ordered]@{ 'pretooluse.ps1'='PreToolUse';'userpromptsubmit.js'='UserPromptSubmit';'stop.js'='Stop' }
         foreach ($hookName in $eventByHook.Keys) {
             $key = $eventByHook[$hookName]
-            if (@($presetDefinition.hooks) -notcontains $hookName) {
+            if ($sharedHookNames -notcontains $hookName) {
                 continue
             }
             $value = $claudeSettings.hooks.$key
@@ -601,7 +623,7 @@ if (Test-Path -LiteralPath $ClaudeSettingsPath -PathType Leaf) {
             })
         foreach ($hookName in $eventByHook.Keys) {
             $expectedHookPath = Join-Path $ClaudeHooksPath $hookName
-            $expectedCount = if (@($presetDefinition.hooks) -contains $hookName) { 1 } else { 0 }
+            $expectedCount = if ($sharedHookNames -contains $hookName) { 1 } else { 0 }
             if (@($registeredCommands | Where-Object { $_ -like "*$expectedHookPath*" }).Count -eq $expectedCount) {
                 Add-Check ("Claude settings.json 唯一注册真实 hook: {0}" -f $hookName)
             } else {

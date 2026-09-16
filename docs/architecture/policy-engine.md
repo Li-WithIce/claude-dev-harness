@@ -61,3 +61,13 @@ Ask is `requirement_state=blocked`, not a fifth profile. Legacy `quick` and `wor
 Rollback pauses new work and uses v2 recovery or a separately approved known-good
 v2 distribution. The [TK-03 contract](tk03-v2-only-transition.md) preserves
 legacy history but retires ordinary v1 lifecycle, install and recovery paths.
+
+## H02 local direct-patch path and denial contract
+
+Direct patch targets may be relative to the verified host cwd or fully qualified Windows drive-letter paths. Both forms go through the existing workspace containment and no-reparse checks, and the resulting normalized full target is passed to protected-action policy. Add, Update, Delete and both Move endpoints are checked as one preflight; no target is skipped. UNC, device paths, drive-relative/root-relative paths, ADS, dot segments, reserved DOS device names and ambiguous components are not added as supported forms.
+
+The host-supplied cwd is the path-resolution base; an installation environment binding is an authorization boundary. Current support requires these roots to normalize to the same directory when both are present. A direct patch without host cwd is rejected even if an environment workspace binding exists, because that binding alone does not establish the tool's relative-path base. Roots are never inferred from patch targets. The existing shell-form restriction is unchanged.
+
+The adapter emits only HARNESS_DENY followed by one fixed category: input, permission-mode, workspace-binding, patch-path, patch-syntax, path-boundary, read-only, shell-form, policy-requirement, policy-unavailable, startup, or unknown. The launcher accepts only an exact known category with adapter exit 2 and emits a fixed user-facing reason. Unknown exceptions, arbitrary stderr, mixed known-code plus extra text, or other exit codes remain a generic deny. No patch body, command body, credential or private path is forwarded. Missing startup dependencies are checked inside the guarded launcher path. The finite category is presentation only; it grants no authorization and does not introduce a state Schema.
+
+Offline fixture success is not evidence of active host loading or the historical first denial. Active hooks are not updated by this change.

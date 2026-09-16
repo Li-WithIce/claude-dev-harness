@@ -12,9 +12,11 @@ historical receipt bytes. TK-05 adds the strict four-operation Adapter Kernel
 API, makes the exact nine current A3 paths thin, and binds their raw source and
 executable LOC through `adapter-inventory/v1`. TK-07 removes duplicated Runtime
 validation, projection, and task-state machinery while keeping the same public
-contracts. Its frozen baseline is 3068 executable LOC; the bounded R1/R2 repair
-measures 3078 with explicit `KTB-EX-002` coverage for the positive 10-line delta,
-still below the user's 2026-09-07 revised strict 3100-line acceptance bound.
+contracts. Its frozen baseline remains 3068 executable LOC. The 2026-09-14
+H01/H02 authorization covers the current 3141-line implementation with the
+unchanged `KTB-EX-002` +10, `KTB-EX-003` H01 +2 and `KTB-EX-004` H02 +61.
+The current strict acceptance bound is <3142; historical TK-07 bounds remain
+recorded below and are not rewritten as current measurement results.
 The original below-3000 goal remains unmet; terminal task closure additionally
 requires all prescribed verification evidence. A later
 boundary change requires an explicit Architecture Decision or Change Contract
@@ -385,12 +387,49 @@ engineering guards, not newly attributed user thresholds. The exact-Base
 remain active. Exception repayment/expiry is an explicitly authorized future
 budget review, not additional compression work in this repair.
 
+### Explicit H01/H02 budget authorization, 2026-09-14
+
+The user approved this limited update for the reviewed final implementation:
+**Runtime transitive executable LOC < 3142**, executable Token checkpoint
+**35575**, and Statement AST checkpoint **10498**. The unchanged accounting
+algorithm measures **3141 LOC / 35575 tokens / 10498 statement ASTs** over the
+same 21 Runtime files. No extra headroom was authorized.
+
+The frozen LOC baseline stays **3068**. Existing `KTB-EX-002` still covers +10
+for R2 correctness; new `KTB-EX-003` covers H01 +2 and `KTB-EX-004` covers the
+final readable H02 +61. Total positive delta is 73, fully covered by 10+2+61.
+These are exceptions, not a new baseline or an expansion of write authority.
+
+Relative to the original HEAD after R2, actual source growth is **+63 LOC,
++223 tokens and +96 ASTs**. Original HEAD tokens measured 35352 while its
+checkpoint was 35428: the existing **76-token headroom is not new growth**.
+Therefore the checkpoint changes are **+147 tokens and +96 ASTs**, distinct
+from measured source growth. H01 contributes +13 tokens/+13 ASTs and H02
+contributes +210 tokens/+83 ASTs.
+
+This review also rechecked `KTB-EX-002` at its stated review milestone. Its
+original record and reason remain unchanged: asynchronous stdin delivery,
+one post-start I/O deadline and a separately bounded cleanup window are still
+needed, and no replacement of those correctness mechanisms is part of H01/H02.
+Retaining that +10 does not grant another +10 to the new changes.
+
+The new allowances must be reviewed for continued necessity at the next
+explicitly authorized Runtime change. No immediate mechanical line-for-line
+repayment is required; only proven semantic redundancy may be removed.
+The original exact-Base 35-percent Token/AST reductions, 300-character line
+limit, two-separator density, parameter-layout and sibling-statement guards,
+and each Adapter's <200 limit remain unchanged. Roots, dependency closure,
+classification, algorithms, permissions, path checks, failure refusal and
+unknown-error sanitization are unchanged. Test timeout budgets are unchanged.
+
+This is an engineering budget decision only. It does not establish installed
+Hook activation, host qualification, or B03 behavior acceptance.
 ## Terminal SLOs
 
 These are end-state directions, not TK-00 completion claims:
 
 - Runtime Kernel transitive executable LOC < 3000 as the original long-term goal;
-  TK-07 uses the explicitly revised < 3100 acceptance bound;
+  the current H01/H02 authorization uses the explicit <3142 acceptance bound;
 - Entry Contract <= 80 lines and <= 1200 tokens;
 - each Host Adapter < 200 executable LOC;
 - new module central-file modifications = 0 for discovery, validation, and

@@ -111,6 +111,7 @@ foreach ($case in @(
     @{}
 )) {
     try {
+        if ($case.ContainsKey('PatchText')) { $directPatchCase = $case }
         $response = Invoke-HarnessAdapterPreflightAction @readPreflight @case
         Check ($response.body.allowed -eq $true -and $response.body.protected -eq $false) 'valid preflight shape preserves case-insensitive routing and omitted ActionKind compatibility' 'valid preflight shape changed its read-only response'
     } catch { Check $false '' "valid preflight shape failed: $($_.Exception.Message)" }
@@ -135,6 +136,142 @@ foreach ($case in @(
     try { $inputArguments = $case.Input; $null = Invoke-HarnessAdapterPreflightAction @readPreflight @inputArguments }
     catch { $message = [string]$_.Exception.Message }
     Check ($message -ceq $case.Error) 'invalid preflight shape is denied before policy, including mixed-case ActionKind' "preflight shape guard changed: expected=[$($case.Error)] actual=[$message]"
+}
+
+# H02 local preflights never apply business patches.
+$h02Root=Join-Path ([IO.Path]::GetTempPath()) ('h02-paths-'+[guid]::NewGuid().ToString('N'))
+$h02Workspace=Join-Path $h02Root 'work';$h02Sibling=Join-Path $h02Root 'work-sibling'
+[void][IO.Directory]::CreateDirectory((Join-Path $h02Workspace 'src/auth'))
+[void][IO.Directory]::CreateDirectory($h02Sibling)
+[IO.File]::WriteAllText((Join-Path $h02Workspace 'src/records.mjs'),'offline fixture')
+function Invoke-H02Patch([string]$Patch,[hashtable]$Overrides=@{}) {
+    $arguments=@{RepoRoot=$RepoRoot;WorkspaceRoot=$h02Workspace;WorkspaceRootFallback=$h02Workspace;SessionMode='write';ActionMode='write';ActionKind=$directPatchCase.ActionKind;PatchText=$Patch}
+    foreach($key in $Overrides.Keys){$arguments[$key]=$Overrides[$key]}
+    try{$response=Invoke-HarnessAdapterPreflightAction @arguments;return @{Allowed=$response.body.allowed;Error='';Body=$response.body}}
+    catch{return @{Allowed=$false;Error=[string]$_.Exception.Message;Body=$null}}
+}
+function H02-Snapshot { @(Get-ChildItem $h02Root -Recurse -Force|Sort-Object FullName|ForEach-Object{if($_.PSIsContainer){'D|'+$_.FullName}else{'F|'+$_.FullName+'|'+(Get-FileHash -LiteralPath $_.FullName).Hash}}) }
+try {
+    $beforeH02=H02-Snapshot
+    $relative="*** Begin Patch`n*** Update File: src/records.mjs`n@@`n-offline fixture`n+changed fixture`n*** Add File: src/records.test.mjs`n+offline test fixture`n*** End Patch"
+    $absolute=$relative.Replace('src/records.mjs',(Join-Path $h02Workspace 'src/records.mjs')).Replace('src/records.test.mjs',(Join-Path $h02Workspace 'src/records.test.mjs'))
+    foreach($candidate in @($relative,$relative.Replace('/','\'),$absolute,$absolute.Replace('\','/'))){
+        $result=Invoke-H02Patch $candidate
+        Check $result.Allowed 'H02 relative/absolute slash variants allow the same local Update + Add' "H02 local equivalent patch denied: $($result.Error)"
+    }
+    foreach($operation in @('Add File','Delete File')){
+        $tail=if($operation -ceq 'Add File'){"`n+fixture"}else{''}
+        foreach($target in @('src/records.mjs',(Join-Path $h02Workspace 'src/records.mjs'))){
+            $result=Invoke-H02Patch ("*** Begin Patch`n*** ${operation}: $target$tail`n*** End Patch")
+            Check $result.Allowed 'H02 Add/Delete relative and absolute targets agree' "H02 Add/Delete target denied: $($result.Error)"
+        }
+    }
+    # Synthetic UNC components are test data only; never probe this share.
+    $uncFixture = '\\{0}\{1}\{2}' -f 'server', 'share', 'file'
+    Check (($uncFixture.Split([char]92) -join '|') -ceq '||server|share|file') 'H02 synthetic UNC preserves both leading slashes and all components' 'H02 synthetic UNC construction changed its shape'
+    $badTargets=@((Join-Path $h02Sibling 'outside.txt'),(Join-Path $h02Root 'outside.txt'),'C:relative.txt','/rooted.txt','\rooted.txt',$uncFixture,'\\?\C:\file','src/../outside.txt','src/file:stream','src/file.','src//file','src/CON','src/NUL.txt')
+    foreach($target in $badTargets){
+        $result=Invoke-H02Patch ("*** Begin Patch`n*** Add File: $target`n+x`n*** End Patch")
+        Check (-not $result.Allowed) 'H02 outside, sibling, ADS, device and ambiguous targets are rejected' 'H02 invalid target escaped boundary'
+        if ($target -ceq $uncFixture) {
+            Check ($result.Error -ceq 'direct patch target must be relative or a fully qualified Windows drive path') 'H02 synthetic UNC is rejected by the expected path guard' 'H02 synthetic UNC rejection was not the expected path error'
+        }
+    }
+    foreach($target in @('src/auth/canary.txt',(Join-Path $h02Workspace 'src/auth/canary.txt'))){
+        $result=Invoke-H02Patch ("*** Begin Patch`n*** Add File: $target`n+x`n*** End Patch")
+        Check (-not $result.Allowed -and $result.Error -match 'protected write requires TaskId and ExpectedVersion') 'H02 protected policy requirements survive target representation' "H02 protected target lost policy classification: $($result.Error)"
+    }
+    foreach($overrides in @(@{SessionMode='read-only'},@{WorkspaceRoot='';WorkspaceRootFallback=''},@{WorkspaceRootFallback=$h02Sibling},@{WorkspaceRoot=''})){
+        Check (-not (Invoke-H02Patch $relative $overrides).Allowed) 'H02 read-only, missing host cwd and conflicting bindings fail closed' 'H02 unbound or read-only patch was allowed'
+    }
+    Check (-not (Invoke-H02Patch ($relative.Replace('src/records.test.mjs',(Join-Path $h02Sibling 'outside.txt')))).Allowed) 'H02 bad second target rejects entire preflight' 'H02 ignored a bad second target'
+    $move="*** Begin Patch`n*** Update File: src/records.mjs`n*** Move to: src/renamed.mjs`n@@`n-offline fixture`n+x`n*** End Patch"
+    Check (Invoke-H02Patch $move).Allowed 'H02 local relative Move succeeds' 'H02 local relative Move denied'
+    $absoluteMove=$move.Replace('src/records.mjs',(Join-Path $h02Workspace 'src/records.mjs')).Replace('src/renamed.mjs',(Join-Path $h02Workspace 'src/renamed.mjs'))
+    Check (Invoke-H02Patch $absoluteMove).Allowed 'H02 local absolute Move succeeds' 'H02 local absolute Move denied'
+    foreach($badMove in @($move.Replace('src/renamed.mjs',(Join-Path $h02Sibling 'escaped.mjs')),$move.Replace('src/records.mjs',(Join-Path $h02Sibling 'source.mjs')))){
+        Check (-not (Invoke-H02Patch $badMove).Allowed) 'H02 Move source and destination enforce containment' 'H02 Move escaped containment'
+    }
+    $link=Join-Path $h02Workspace 'linked'
+    New-Item -ItemType Junction -Path $link -Target $h02Sibling -ErrorAction Stop|Out-Null
+    try{foreach($target in @('linked/a.txt',(Join-Path $link 'a.txt'))){Check (-not (Invoke-H02Patch ("*** Begin Patch`n*** Add File: $target`n+x`n*** End Patch")).Allowed) 'H02 reparse targets denied in both forms' 'H02 reparse target allowed'}}finally{[IO.Directory]::Delete($link)}
+    Check (@(Compare-Object (H02-Snapshot) $beforeH02).Count -eq 0) 'H02 all preflights preserve fixture tree' 'H02 preflight wrote files or state'
+} finally {
+    $resolved=[IO.Path]::GetFullPath($h02Root);$tempPrefix=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')+'\'
+    if(-not $resolved.StartsWith($tempPrefix,[StringComparison]::OrdinalIgnoreCase)){throw 'H02 cleanup escaped test root'}
+    [IO.Directory]::Delete($resolved,$true)
+}
+
+# H02 rendered-hook fixtures exercise classification, never host trust or real writes.
+. (Join-Path $RepoRoot 'scripts/lib/Harness.RuntimeKernel.ps1')
+$denyRoot=Join-Path ([IO.Path]::GetTempPath()) ('h02-deny-'+[guid]::NewGuid().ToString('N'))
+$denyWorkspace=Join-Path $denyRoot 'work';$denyHome=Join-Path $denyRoot 'user'
+[void][IO.Directory]::CreateDirectory($denyWorkspace)
+[void][IO.Directory]::CreateDirectory((Join-Path $denyHome 'hooks-memory'))
+$denyAdapter=Join-Path $denyHome 'hooks-memory/pretooluse.ps1'
+$denyLauncher=Join-Path $denyRoot 'launcher.ps1'
+$pwshPath=(Get-Process -Id $PID).Path
+function Render-H02Hook([string]$Relative,[string]$Target,[string]$SourceRoot=$RepoRoot) {
+    $text=Read-Text $Relative
+    $text=$text.Replace('{REPO_ROOT}',$SourceRoot).Replace('{PWSH_EXE}',$pwshPath).Replace('{CLAUDE_HOME}',$denyHome)
+    [IO.File]::WriteAllText($Target,$text,[Text.UTF8Encoding]::new($true))
+}
+function Run-H02Hook([string]$Script,[string]$InputJson){
+    Invoke-HarnessKernelProcess -FilePath $pwshPath -WorkingDirectory $denyWorkspace -TimeoutMilliseconds 30000 -Arguments @('-NoLogo','-NoProfile','-NonInteractive','-File',$Script) -StandardInput $InputJson
+}
+try {
+    Render-H02Hook 'runtime-hooks/claude/pretooluse.ps1' $denyAdapter
+    Render-H02Hook 'runtime-hooks/claude/codex-pretooluse-launcher.ps1' $denyLauncher
+    $marker='SYNTHETIC_H02_PRIVATE_MARKER'
+    $basePayload=[ordered]@{tool_name='Write';permission_mode='default';cwd=$denyWorkspace;tool_input=[ordered]@{file_path='ordinary.txt';content=$marker}}
+    foreach($case in @(
+        @{Name='permission-mode';Change='permission';Code='permission-mode'},
+        @{Name='missing-cwd';Change='cwd';Code='workspace-binding'},
+        @{Name='outside';Change='outside';Code='path-boundary'},
+        @{Name='protected';Change='protected';Code='policy-requirement'},
+        @{Name='read-only';Change='readonly';Code='read-only'},
+        @{Name='patch-syntax';Change='patchsyntax';Code='patch-syntax'},
+        @{Name='patch-path';Change='patchpath';Code='patch-path'},
+        @{Name='unknown';Change='unknown';Code='unknown'}
+    )){
+        $payload=$basePayload|ConvertTo-Json -Depth 10|ConvertFrom-Json -AsHashtable
+        switch($case.Change){
+            permission{$payload.permission_mode=$marker}
+            cwd{$payload.Remove('cwd')}
+            outside{$payload.tool_input.file_path=Join-Path $denyRoot "$marker.txt"}
+            protected{$payload.tool_input.file_path="auth/$marker.txt"}
+            readonly{$env:HARNESS_SESSION_MODE='read-only'}
+            patchsyntax{$payload.tool_name=$directPatchCase.ActionKind.ToLowerInvariant();$payload.tool_input=@{command=$marker}}
+            patchpath{$payload.tool_name=$directPatchCase.ActionKind.ToLowerInvariant();$payload.tool_input=@{command="*** Begin Patch`n*** Add File: C:invalid`n+$marker`n*** End Patch"}}
+        }
+        $inputJson=if($case.Change -ceq 'unknown'){$marker}else{$payload|ConvertTo-Json -Depth 10 -Compress}
+        try{$result=Run-H02Hook $denyAdapter $inputJson}finally{Remove-Item Env:HARNESS_SESSION_MODE -ErrorAction SilentlyContinue}
+        Check ($result.Complete -and $result.ExitCode -eq 2 -and $result.StdOut.Length -eq 0 -and $result.StdErr.Trim() -ceq "HARNESS_DENY:$($case.Code)") "H02 adapter reports finite $($case.Name) classification" "H02 adapter classification failed for $($case.Name)"
+        Check (-not ($result.StdOut+$result.StdErr).Contains($marker)) 'H02 adapter errors do not disclose synthetic private content' 'H02 adapter error disclosed synthetic content'
+    }
+    foreach($target in @('ordinary.txt',(Join-Path $denyWorkspace 'ordinary.txt'))){
+        $payload=$basePayload|ConvertTo-Json -Depth 10|ConvertFrom-Json -AsHashtable
+        $payload.tool_name=$directPatchCase.ActionKind.ToLowerInvariant()
+        $payload.tool_input=@{command="*** Begin Patch`n*** Add File: $target`n+$marker`n*** End Patch"}
+        $result=Run-H02Hook $denyLauncher ($payload|ConvertTo-Json -Depth 10 -Compress)
+        Check ($result.Complete -and $result.ExitCode -eq 0 -and $result.StdErr.Length -eq 0 -and $result.StdOut.Trim() -ceq '{}') 'H02 rendered launcher accepts equivalent direct local targets' 'H02 rendered launcher rejected a local target'
+    }
+    foreach($stderrText in @('HARNESS_DENY:path-boundary',"HARNESS_DENY:path-boundary`n$marker",$marker)){
+        [IO.File]::WriteAllText($denyAdapter,('[Console]::Error.WriteLine('''+$stderrText.Replace("'","''")+'''); exit 2'),[Text.UTF8Encoding]::new($true))
+        $result=Run-H02Hook $denyLauncher '{}'
+        $reason=try{($result.StdOut|ConvertFrom-Json -AsHashtable).hookSpecificOutput.permissionDecisionReason}catch{''}
+        $expected=if($stderrText -ceq 'HARNESS_DENY:path-boundary'){'Harness PreToolUse denied: path-boundary'}else{'Harness PreToolUse policy denied or failed closed'}
+        Check ($result.Complete -and $result.ExitCode -eq 0 -and $result.StdErr.Length -eq 0 -and $reason -ceq $expected) 'H02 launcher only forwards an exact recognized fixed code' 'H02 launcher classification/unknown fallback failed'
+        Check (-not ($result.StdOut+$result.StdErr).Contains($marker)) 'H02 launcher never forwards arbitrary stderr' 'H02 launcher leaked arbitrary stderr'
+    }
+    Render-H02Hook 'runtime-hooks/claude/codex-pretooluse-launcher.ps1' $denyLauncher (Join-Path $denyRoot $marker)
+    $result=Run-H02Hook $denyLauncher '{}'
+    Check ($result.Complete -and $result.ExitCode -eq 0 -and $result.StdErr.Length -eq 0 -and $result.StdOut.Contains('startup') -and -not $result.StdOut.Contains($marker)) 'H02 missing startup dependency denies without private paths' 'H02 startup rejection was not sanitized'
+    Check (@(Get-ChildItem $denyWorkspace -Recurse -Force).Count -eq 0) 'H02 rendered hook fixtures never apply patches or create state' 'H02 hook fixture wrote business or runtime files'
+} finally {
+    $resolved=[IO.Path]::GetFullPath($denyRoot);$prefix=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')+'\'
+    if(-not $resolved.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)){throw 'H02 cleanup outside test root'}
+    [IO.Directory]::Delete($resolved,$true)
 }
 
 $classification=Read-Text 'kernel-component-classification.json'|ConvertFrom-Json -Depth 100
@@ -173,7 +310,7 @@ Check ($checkExit-eq0-and$beforeHash-ceq(Get-FileHash -LiteralPath $inventoryPat
 $moduleV1=Read-Text 'schemas/module-manifest-v1.schema.json'|ConvertFrom-Json -Depth 100
 Check (($moduleV1.properties.kind.enum-join'|')-ceq'capability') 'harness-module/v1 remains capability-only' 'TK-05 broadened harness-module/v1 beyond capability packages'
 $tcb=Read-Text 'kernel-tcb-inventory.json'|ConvertFrom-Json -Depth 100
-Check ([int]$tcb.totals.runtime_executable_loc-lt3100-and@($tcb.unresolved_dependencies).Count-eq0) 'Runtime TCB stays below the user-authorized 3100 fallback with zero unresolved dependencies' 'Runtime TCB budget or dependency closure is invalid'
+Check ([int]$tcb.totals.runtime_executable_loc-lt3142-and@($tcb.unresolved_dependencies).Count-eq0) 'Runtime TCB stays below the user-authorized 3142 H01/H02 bound with zero unresolved dependencies' 'Runtime TCB budget or dependency closure is invalid'
 
 foreach($pass in $script:Passes){Write-Output "[PASS] $pass"}
 if($script:Failures.Count){foreach($failure in $script:Failures){Write-Output "[FAIL] $failure"};exit 1}

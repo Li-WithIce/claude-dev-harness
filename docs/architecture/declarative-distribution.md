@@ -147,3 +147,15 @@ Zero-install-write snapshots bind the entire isolated workspace and user tree
 apart from PowerShell's own exact `StartupProfileData-NonInteractive` JIT cache
 and its empty parent-directory bookkeeping; every other file under those
 parents is still included. Host startup cache activity is not installer state.
+
+## H04 shared Hook requirements
+
+The current install request replaces only the target workspace's latest Hook requirements. Other still-registered owners contribute their latest committed, digest-verified feature_ownership.hooks; older target revisions and retired owners are not active demands. Unavailable workspace drives do not retire owners. The result is derived from existing registry/manifests, not a new persisted ownership record.
+
+The same coordination object builds the complete user-global Hook directory and the managed Claude/Codex reference set. Current-plan files are rendered from the validated DistributionPlan. Other-owner-only assets use exact registered live directory bytes and checked local dependencies, never an offline historical source tree. Directory drift, malformed ownership, missing assets or conflicting registered command metadata fail before transaction publication. Staging copies retained files with exact identities and rechecks the live directory; the original mutex, CAS, backup and recovery mechanism remains authoritative.
+
+Workspace preset and feature_ownership remain request-local: a core workspace does not acquire Memory because another owner keeps an optional Hook. Installation verification checks the shared directory digest, explicit owner set and exact managed references separately. The explicit SharedHooks verification scope covers those assets plus this workspace's feature ownership; All retains all original skill/template checks and is not weakened. Existing cross-workspace Skills behavior is outside this change.
+
+Uninstall retains its existing ordered restoration and ownership handoff. An inactive owner's removal may leave exact registry-bound restoration bytes until the next install/update or final global restoration; these are reported as restoration-only, never unioned as active requirements. Only files tied to verified superseded/retired manifest requirements and the current exact directory identity qualify, not arbitrary disk extras. The next normal install computes current demands without them; the final owner release restores the original preimage. No garbage collector or permanent retention flag is introduced.
+
+H04 does not change Runtime Hook execution, permissions, trust, budgets, or Skills synchronization. Offline tests and normal-user preview are not deployment or proof of host loading.

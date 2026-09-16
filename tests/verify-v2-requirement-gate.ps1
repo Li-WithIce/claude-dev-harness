@@ -155,6 +155,73 @@ try {
         }
     }
 
+    # Optional string arrays retain JSON shape without relaxing input validation.
+    $arrayCases = @(
+        @{ Name='omitted'; Omit=$true; Value=@(); Valid=$true },
+        @{ Name='empty'; Value=@(); Valid=$true },
+        @{ Name='single'; Value=@('first'); Valid=$true },
+        @{ Name='multiple'; Value=@('first','second'); Valid=$true },
+        @{ Name='null'; Value=$null; Valid=$false },
+        @{ Name='scalar'; Value='first'; Valid=$false },
+        @{ Name='object'; Value=@{ value='first' }; Valid=$false },
+        @{ Name='null-element'; Value=@('first',$null); Valid=$false },
+        @{ Name='number-element'; Value=@('first',7); Valid=$false },
+        @{ Name='blank-element'; Value=@('first',' '); Valid=$false },
+        @{ Name='duplicate'; Value=@('first','first'); Valid=$false }
+    )
+    $arrayOutputs = @{}
+    foreach ($field in @('product_constraints','out_of_scope','options')) {
+        foreach ($arrayCase in $arrayCases) {
+            # Each case owns its nested decisions.
+            $request = (New-ScenarioRequest -Base $catalog.base_request -Case $catalog.cases[0]) |
+                ConvertTo-Json -Depth 30 | ConvertFrom-Json -AsHashtable
+            $target = $request
+            if ($field -ceq 'options') {
+                $request.decisions[0].sources = @()
+                $target = $request.decisions[0]
+            }
+            if ($arrayCase.ContainsKey('Omit')) { $target.Remove($field) } else { $target[$field] = $arrayCase.Value }
+            $label = "optional-array $field/$($arrayCase.Name)"
+            $path = Join-Path $scratchRoot ("array-{0}-{1}.json" -f $field,$arrayCase.Name)
+            Write-JsonRequest -Path $path -Value $request
+            $inputValid = Test-Json -Json (Get-Content -LiteralPath $path -Raw) -SchemaFile (Join-Path $RepoRoot 'schemas/requirement-inspection.schema.json') -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
+            Assert-True -Condition ($inputValid -eq $arrayCase.Valid) -Success "$label matches the existing input Schema" -Failure "$label input Schema expectation failed"
+            $before = @(Get-ChildItem -LiteralPath $scratchRoot -Force -Recurse | ForEach-Object {
+                if ($_.PSIsContainer) { 'D|' + $_.FullName } else { 'F|' + $_.FullName + '|' + (Get-FileHash -LiteralPath $_.FullName).Hash }
+            } | Sort-Object)
+            $run = Invoke-TaskProcess -TaskScript $taskScript -RequestFile $path -TaskRepoRoot $RepoRoot -WorkspaceRoot $scratchRoot -AsJson
+            $after = @(Get-ChildItem -LiteralPath $scratchRoot -Force -Recurse | ForEach-Object {
+                if ($_.PSIsContainer) { 'D|' + $_.FullName } else { 'F|' + $_.FullName + '|' + (Get-FileHash -LiteralPath $_.FullName).Hash }
+            } | Sort-Object)
+            Assert-True -Condition (@(Compare-Object $before $after).Count -eq 0) -Success "$label preserves every workspace path and file hash" -Failure "$label wrote workspace content"
+            if (-not $arrayCase.Valid) {
+                Assert-ErrorWire -Result $run -Label $label
+                Assert-True -Condition ($run.StdErr -match 'request envelope schema validation failed') -Success "$label is rejected at input validation" -Failure "$label escaped input validation"
+                continue
+            }
+            Assert-True -Condition ($run.Exited -and $run.ExitCode -eq 0 -and [string]::IsNullOrEmpty($run.StdErr)) -Success "$label succeeds" -Failure "$label failed: $($run.StdErr)"
+            if ($run.ExitCode -ne 0) { continue }
+            $result = $run.StdOut | ConvertFrom-Json -AsHashtable -Depth 50
+            $arrayOutputs["$field/$($arrayCase.Name)"] = $run.StdOut
+            # Read the stored object directly; pipeline enumeration loses empty/single arrays.
+            $container = if ($field -ceq 'options') { $result.ask_batch.questions[0] } else { $result.contract }
+            $shapeCorrect = $container[$field] -is [System.Collections.IList] -and
+                (ConvertTo-Json -InputObject $container[$field] -Compress) -ceq (ConvertTo-Json -InputObject $arrayCase.Value -Compress)
+            Assert-True -Condition $shapeCorrect -Success "$label preserves array shape, order and values" -Failure "$label returned the wrong array"
+            if ($field -ceq 'options') {
+                $question = $result.ask_batch.questions[0]
+                $askSafe = $result.requirement_state -ceq 'blocked' -and $null -eq $result.contract -and
+                    $result.blocking_decisions.Count -eq 1 -and $result.blocking_decisions[0].reason -ceq 'unresolved-decision' -and
+                    $result.ask_batch.questions.Count -eq 1 -and $question.key -ceq $request.decisions[0].key -and
+                    $question.recommendation_is_authorization -eq $false -and $question.recommended -ceq $request.decisions[0].recommended
+                Assert-True -Condition $askSafe -Success "$label retains the unresolved decision and non-authorizing Ask" -Failure "$label changed the requirement blocker or Ask authority"
+            } else {
+                $contractValid = Test-Json -Json ($result.contract | ConvertTo-Json -Depth 30) -SchemaFile $schemaPath -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
+                Assert-True -Condition ($result.requirement_state -ceq 'clear' -and $null -eq $result.ask_batch -and $contractValid) -Success "$label returns a valid clear Contract" -Failure "$label returned an invalid Contract"
+            }
+        }
+        Assert-True -Condition ($arrayOutputs.ContainsKey("$field/omitted") -and $arrayOutputs.ContainsKey("$field/empty") -and $arrayOutputs["$field/omitted"] -ceq $arrayOutputs["$field/empty"]) -Success "optional-array $field omission equals explicit empty output and digest" -Failure "optional-array $field omission differs from explicit empty"
+    }
     $deterministicFirst = Invoke-TaskProcess -TaskScript $taskScript -RequestFile $requestPaths['clear-explicit-product-decision'] -TaskRepoRoot $RepoRoot -WorkspaceRoot $scratchRoot -AsJson
     $deterministicSecond = Invoke-TaskProcess -TaskScript $taskScript -RequestFile $requestPaths['clear-explicit-product-decision'] -TaskRepoRoot $RepoRoot -WorkspaceRoot $scratchRoot -AsJson
     Assert-True -Condition ($deterministicFirst.StdOut -ceq $deterministicSecond.StdOut) -Success 'identical clear requests produce byte-identical JSON and digest' -Failure 'identical clear requests are nondeterministic'

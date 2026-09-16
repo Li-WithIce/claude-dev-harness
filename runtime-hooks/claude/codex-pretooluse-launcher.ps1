@@ -4,7 +4,6 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $kernel = '{REPO_ROOT}\scripts\lib\Harness.RuntimeKernel.ps1'
-. $kernel
 
 function Write-CodexDeny {
     param([string]$Reason)
@@ -15,6 +14,8 @@ function Write-CodexDeny {
 }
 
 try {
+    if (-not (Test-Path -LiteralPath $kernel -PathType Leaf) -or -not (Test-Path -LiteralPath '{PWSH_EXE}' -PathType Leaf)) { Write-CodexDeny -Reason 'Harness PreToolUse denied: startup' }
+    . $kernel
     # Codex writes raw UTF-8 to the hook process. Decode Console.In explicitly so
     # the active Windows console code page cannot corrupt non-ASCII target paths.
     [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -23,7 +24,11 @@ try {
     if ($inputText.Length -eq 0) { Write-CodexDeny -Reason 'Harness PreToolUse input is empty' }
     $result = Invoke-HarnessKernelProcess -FilePath '{PWSH_EXE}' -WorkingDirectory ([IO.Path]::GetTempPath()) -Arguments @('-NoProfile','-NonInteractive','-File','{CLAUDE_HOME}\hooks-memory\pretooluse.ps1') -TimeoutMilliseconds 9000 -StandardInput $inputText
     if (-not $result.Complete) { Write-CodexDeny -Reason 'Harness PreToolUse adapter timed out' }
-    elseif ($result.ExitCode -ne 0 -or -not [string]::IsNullOrWhiteSpace($result.StdErr)) { Write-CodexDeny -Reason 'Harness PreToolUse policy denied or failed closed' }
+    elseif ($result.ExitCode -ne 0 -or -not [string]::IsNullOrWhiteSpace($result.StdErr)) {
+        $known=[regex]::Match($result.StdErr.Trim(),'\AHARNESS_DENY:(input|permission-mode|workspace-binding|patch-path|patch-syntax|path-boundary|read-only|shell-form|policy-requirement|policy-unavailable|startup)\z')
+        if ($result.ExitCode -eq 2 -and $known.Success) { Write-CodexDeny -Reason ('Harness PreToolUse denied: '+$known.Groups[1].Value) }
+        Write-CodexDeny -Reason 'Harness PreToolUse policy denied or failed closed'
+    }
     elseif ($result.StdOut.Trim() -cne '{}') { Write-CodexDeny -Reason 'Harness PreToolUse adapter returned an unsupported decision' }
     [Console]::Out.Write('{}')
     exit 0

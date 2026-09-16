@@ -17,10 +17,10 @@
       "path": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",
       "layer": "a3-adapter",
       "language": "powershell",
-      "raw_sha256": "sha256:8296881eaa5519b2647fe8fd698c8a8750fcfbb5e2c2b0e378bbb48199c30da0",
-      "physical_loc": 32,
-      "nonblank_loc": 29,
-      "executable_loc": 27,
+      "raw_sha256": "sha256:201f45568e829a1eb5d3ac03934796f5f229028ad6788b9b17a53af8b2896f22",
+      "physical_loc": 37,
+      "nonblank_loc": 34,
+      "executable_loc": 32,
       "maximum_line_length": 258,
       "tcb_included": true,
       "kernel_api_operations": []
@@ -29,11 +29,11 @@
       "path": "runtime-hooks/claude/pretooluse.ps1",
       "layer": "a3-adapter",
       "language": "powershell",
-      "raw_sha256": "sha256:6abcc1333b5a2bb732a9ca3a268f7ddd6c37824c10d89183b5af542bbd56ed58",
-      "physical_loc": 65,
-      "nonblank_loc": 60,
-      "executable_loc": 60,
-      "maximum_line_length": 206,
+      "raw_sha256": "sha256:c86e4520c1d6f5f69ed2aa8331c3de650e352557a153a26674a0c3a0be5b4a6c",
+      "physical_loc": 115,
+      "nonblank_loc": 110,
+      "executable_loc": 109,
+      "maximum_line_length": 214,
       "tcb_included": true,
       "kernel_api_operations": [
         "preflight_action"
@@ -133,10 +133,10 @@
     "adapter_count": 9,
     "powershell_count": 6,
     "javascript_count": 3,
-    "executable_loc": 826,
+    "executable_loc": 880,
     "maximum_adapter_executable_loc": 196,
     "threshold_breaches": 0
   },
   "digest_algorithm": "canonical-json/v1",
-  "inventory_digest": "sha256:a01f594a02c83f567ec6f425723cc164d5b9b2c889192108426433a9b7f66ac5"
+  "inventory_digest": "sha256:5e051d42376e5a354b11fb10d8c3bc3980c9aa9cf132d995e360b543450f0d79"
 }

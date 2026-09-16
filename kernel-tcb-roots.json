@@ -214,6 +214,31 @@
         ],
         "repayment_plan": "Retain the 3068 baseline and explicit positive delta. Reassess this 10-line allowance at the next explicitly authorized Runtime change; do not delete correctness checks or start extra compression in this repair.",
         "expires_at_milestone": "Next explicitly authorized Runtime budget review after TK-07 R1/R2 closure"
+      },
+      {
+        "id": "KTB-EX-003",
+        "added_lines": 2,
+        "reason": "Explicit user approval on 2026-09-14 covers H01 optional-array omission handling: +2 LOC, +13 executable tokens and +13 statement ASTs relative to the original HEAD. This does not reset baseline 3068 or repurpose KTB-EX-002.",
+        "new_trust_assumption": "None. Input Schema validation, requirement blockers and read-only behavior remain unchanged; no new dependency or permission.",
+        "alternatives": [
+          "Leaving omitted arrays as null elements rejects inputs already allowed by the existing Schema.",
+          "Relaxing the Schema, filtering null globally or packing source would change validation or defeat accounting."
+        ],
+        "repayment_plan": "Review continued necessity at the next explicitly authorized Runtime change. Do not mechanically delete two lines; only remove proven semantic redundancy without changing validation, accounting or trust boundaries.",
+        "expires_at_milestone": "Next explicitly authorized Runtime change after H01/H02 budget approval"
+      },
+      {
+        "id": "KTB-EX-004",
+        "added_lines": 61,
+        "reason": "Explicit user approval on 2026-09-14 covers final readable H02: +61 LOC, +210 tokens and +83 statement ASTs over HEAD plus H01. Combined HEAD growth is +63 LOC/+223 tokens/+96 ASTs; the Token checkpoint increases only 147 because its prior 76-token headroom already existed.",
+        "new_trust_assumption": "None beyond existing trusted host cwd and installation bindings. Absolute and relative paths share containment and policy checks; finite refusal categories do not grant authority or expose arbitrary stderr.",
+        "alternatives": [
+          "Duplicate target resolution was removed; retaining separate syntax, binding, containment and policy boundaries is necessary.",
+          "Blind native path normalization cannot replace ADS, reparse, device-path or all-target checks.",
+          "Forwarding arbitrary stderr, packing branches, moving accounting scope or refactoring unrelated state/process code is not an acceptable substitute."
+        ],
+        "repayment_plan": "Review continued necessity at the next explicitly authorized Runtime change. No immediate line-for-line repayment is required. Retain readable branches and only remove independently justified redundancy; do not loosen security or change measurement to repay this allowance.",
+        "expires_at_milestone": "Next explicitly authorized Runtime change after H01/H02 budget approval"
       }
     ]
   }

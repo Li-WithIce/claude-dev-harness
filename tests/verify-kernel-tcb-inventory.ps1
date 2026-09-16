@@ -585,18 +585,20 @@ Check ($currentDensity.Tokens * 100 -le $baseDensity.Tokens * 65 -and $currentDe
 # Engineering checkpoints are not user LOC limits. KTB-EX-002 accounts for the
 # R2 function's measured +140 tokens/+16 statements without dropping old guards.
 $repairException = @($inventory.budget.exceptions | Where-Object { $_.id -ceq 'KTB-EX-002' -and $_.added_lines -eq 10 })
-$repairAllowance = if ($repairException.Count -eq 1) { @{Tokens=140;Statements=16} } else { @{Tokens=0;Statements=0} }
-Check ($currentDensity.Tokens -le 35288 + $repairAllowance.Tokens -and $currentDensity.Statements -le 10386 + $repairAllowance.Statements) 'TK-07 retains engineering density checkpoints with the explicit R2-only growth allowance' "TK-07 source density exceeded the accounted repair allowance: $($currentDensity | ConvertTo-Json -Compress)"
+$h01Exception = @($inventory.budget.exceptions | Where-Object { $_.id -ceq 'KTB-EX-003' -and $_.added_lines -eq 2 })
+$h02Exception = @($inventory.budget.exceptions | Where-Object { $_.id -ceq 'KTB-EX-004' -and $_.added_lines -eq 61 })
+# Approved HEAD growth is +223 tokens/+96 ASTs; the prior Token checkpoint had 76 tokens of headroom.
+Check ($currentDensity.Tokens -le 35575 -and $currentDensity.Statements -le 10498) 'Runtime retains the explicitly approved H01/H02 Token and AST checkpoints' "Runtime source density exceeded the approved H01/H02 checkpoints: $($currentDensity | ConvertTo-Json -Compress)"
 Check ($addedDensity.MaximumLineLength -le 300 -and $addedDensity.MaximumStatementSeparators -le 2) 'TK-07 changed Runtime lines stay reviewable and do not pack statement separators' "TK-07 changed Runtime source is packed: $($addedDensity | ConvertTo-Json -Compress)"
 Check ($layoutIntegrity.ParamBlockShrinkCount -eq 0 -and $layoutIntegrity.AmbiguousParamBlockCount -eq 0 -and $layoutIntegrity.PackedSiblingStatementLineCount -eq 0) 'TK-07 preserves unambiguous Base parameter layouts across file moves, including executable parameter lines, and keeps sibling statements on separate changed lines' "TK-07 Runtime layout compression detected: $($layoutIntegrity | ConvertTo-Json -Compress -Depth 5)"
 $distributionPaths = @($inventory.files | Where-Object { @($_.trust_paths) -ccontains 'distribution' } | ForEach-Object path)
 Check ($distributionPaths -ccontains 'scripts/lib/Harness.Distribution.psm1' -and $distributionPaths -ccontains 'scripts/lib/Harness.CanonicalJson.psm1' -and $runtimePaths -cnotcontains 'scripts/lib/Harness.Distribution.psm1' -and $distributionPaths -cnotcontains 'scripts/lib/Harness.ModuleManifest.psm1' -and $distributionPaths -cnotcontains 'scripts/lib/Harness.CapabilitySource.psm1') 'TK-06 adds only the D1 constructor and canonical primitive, without C2 imports or Runtime reachability' 'Distribution adoption crossed the Runtime or C2 boundary'
 Check (@($runtimePaths | Where-Object { $_ -match '(?i)RolloutEvidence|Qualification|release-(?:model|host|full)|generate-v2-rollout' }).Count -eq 0) 'Runtime TCB excludes Release and Qualification producers' 'Release or Qualification leaked into Runtime TCB'
 $budgetExceptions = @($inventory.budget.exceptions)
-Check ([int]$inventory.budget.baseline_executable_loc -eq 3068 -and [int]$inventory.budget.current_executable_loc -lt 3100 -and
+Check ([int]$inventory.budget.baseline_executable_loc -eq 3068 -and [int]$inventory.budget.current_executable_loc -lt 3142 -and
     [int]$inventory.budget.delta -eq ([int]$inventory.budget.current_executable_loc - 3068) -and [int]$inventory.budget.delta -gt 0 -and
-    [int]$inventory.budget.delta -le 10 -and [int]$inventory.budget.covered_growth -eq 10 -and
-    [string]$inventory.budget.status -ceq 'covered-by-exception' -and $budgetExceptions.Count -eq 1 -and $repairException.Count -eq 1) 'TK-07 retains the 3068 baseline, honest positive growth covered by KTB-EX-002, and strict user-authorized <3100 bound' 'Runtime budget, Adapter Action closure, or exception state drifted'
+    [int]$inventory.budget.delta -le 73 -and [int]$inventory.budget.covered_growth -eq 73 -and
+    [string]$inventory.budget.status -ceq 'covered-by-exception' -and $budgetExceptions.Count -eq 3 -and $repairException.Count -eq 1 -and $h01Exception.Count -eq 1 -and $h02Exception.Count -eq 1) 'Runtime retains baseline 3068, exact KTB-EX-002/003/004 coverage of 10/2/61 and the authorized strict <3142 bound' 'Runtime budget, Adapter Action closure, or exception state drifted'
 Check (@($inventory.edges | Where-Object kind -ceq 'manual').Count -eq @($roots.manual_edges).Count -and @($roots.manual_edges | Where-Object kind -ceq 'dynamic-import').Count -eq 2) 'manual edges are exact and the two rendered Adapter imports are explicit' 'manual edge count or dynamic-import boundary drifted'
 Check ([int]$inventory.totals.file_count -eq @($inventory.files).Count -and [int]$inventory.totals.artifact_count -eq @($inventory.artifacts).Count -and [int]$inventory.totals.runtime_executable_loc -eq [int]$inventory.budget.current_executable_loc) 'inventory totals bind the current TK-07 Runtime measurement' 'inventory totals or Runtime measurement drifted'
 

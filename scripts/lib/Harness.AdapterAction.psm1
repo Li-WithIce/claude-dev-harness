@@ -35,9 +35,13 @@ function Get-HarnessApplyPatchChangedPaths {
             }
             $path = $target.Groups['path'].Value
             if ([string]::IsNullOrEmpty($path) -or $path -cne $path.Trim() -or $path.IndexOfAny([char[]]@(0,10,13)) -ge 0) { throw 'direct apply_patch input contains an invalid target path' }
-            if ($path.StartsWith('/',[StringComparison]::Ordinal) -or $path.StartsWith('\',[StringComparison]::Ordinal) -or $path -cmatch '^[A-Za-z]:' -or $path.Contains(':')) { throw 'direct apply_patch input requires a relative target path' }
-            if (@([regex]::Split($path,'[\\/]') | Where-Object {
-                [string]::IsNullOrEmpty($_) -or $_ -cin @('.','..') -or $_.IndexOfAny([char[]](0..31 + @(60,62,34,124,63,42))) -ge 0 -or $_.EndsWith('.',[StringComparison]::Ordinal) -or $_.EndsWith(' ',[StringComparison]::Ordinal)
+            $driveAbsolute = [IO.Path]::IsPathFullyQualified($path) -and $path -cmatch '^[A-Za-z]:[\\/]'
+            if ((-not $driveAbsolute -and ($path.StartsWith('/',[StringComparison]::Ordinal) -or $path.StartsWith('\',[StringComparison]::Ordinal) -or $path.Contains(':'))) -or ($driveAbsolute -and $path.Substring(2).Contains(':'))) {
+                throw 'direct patch target must be relative or a fully qualified Windows drive path'
+            }
+            $componentPath = if ($driveAbsolute) { $path.Substring(3) } else { $path }
+            if (@([regex]::Split($componentPath,'[\\/]') | Where-Object {
+                [string]::IsNullOrEmpty($_) -or $_ -cin @('.','..') -or $_ -match '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)' -or $_.IndexOfAny([char[]](0..31 + @(60,62,34,124,63,42))) -ge 0 -or $_.EndsWith('.',[StringComparison]::Ordinal) -or $_.EndsWith(' ',[StringComparison]::Ordinal)
             } | Select-Object -First 1).Count) { throw 'direct apply_patch input contains an invalid target path' }
             if ($keys.Add($path.Replace('/','\'))) { $paths.Add($path) }
             continue
@@ -101,7 +105,10 @@ function Invoke-HarnessAdapterPreflightAction {
         Assert-HarnessKernelCondition (-not [string]::IsNullOrWhiteSpace($requiredText) -and -not $otherText -and -not $paths.Count) "$kind preflight action shape is invalid"
         if ($isShell) {
             Assert-HarnessKernelCondition (-not [regex]::IsMatch($commandText,'(?i)(?<![A-Za-z0-9_])(?:apply_patch|applypatch)(?![A-Za-z0-9_])')) 'Bash shell-form apply_patch is denied because Codex PreToolUse does not expose the effective tool workdir or environment identity'
-        } else { $paths = [string[]]@(Get-HarnessApplyPatchChangedPaths -PatchText $PatchText) }
+        } else {
+            if (-not $primaryRoot) { throw 'direct patch requires a bound host cwd' }
+            $paths = [string[]]@(Get-HarnessApplyPatchChangedPaths -PatchText $PatchText)
+        }
     } elseif ($kind -ceq 'file_mutation') {
         Assert-HarnessKernelCondition (-not $ShellText -and -not $PatchText -and $paths.Count -gt 0) 'file mutation preflight action shape is invalid'
     } elseif ($kind -ceq 'normalized_action' -and $PatchText) { throw 'normalized preflight action must not carry patch_text' }
@@ -109,9 +116,10 @@ function Invoke-HarnessAdapterPreflightAction {
         $identities = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         $paths = [string[]]@($paths | ForEach-Object {
             if ([string]::IsNullOrWhiteSpace($_)) { throw 'file mutation input is missing target path' }
+            # Direct host cwd equals the checked authorization root; the existing resolver performs the single resolution.
             $fullPath = Resolve-HarnessContainedPath -WorkspaceRoot $workspaceRoot -Path $_ -Label 'file mutation target' -AllowMissing
             Assert-HarnessKernelCondition (-not (Test-Path -LiteralPath $fullPath -PathType Container)) 'file mutation target must not be a directory'
-            if ($identities.Add($fullPath)) { [string]$_ }
+            if ($identities.Add($fullPath)) { $fullPath }
         })
     }
 
