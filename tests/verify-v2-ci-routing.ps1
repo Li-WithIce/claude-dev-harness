@@ -91,10 +91,54 @@ $codex = Get-Route @('skills/codex/SKILL.md')
 Check ((@($codex.modules) -join ',') -ceq 'codex-adapter' -and @($codex.tests) -ccontains 'verify-ask-codex.ps1') 'Codex adapter changes select adapter validation' 'Codex adapter changed-path routing is wrong'
 $providers = Get-Route @('scripts/audit-context-provider-usage.ps1')
 Check ((@($providers.modules) -join ',') -ceq 'providers' -and @($providers.tests).Count -eq 7) 'Provider changes select complete provider validation' 'Provider changed-path routing is wrong or incomplete'
+# Fixed expectations from the I03 Manifest registrations, independent of router output.
+$expectedMaintenanceTests = @(
+    'verify-capability-extraction.ps1',
+    'verify-change-contract.ps1',
+    'verify-host-diagnostics.ps1',
+    'verify-install-isolation.ps1',
+    'verify-runtime-hooks.ps1',
+    'verify-thin-adapters.ps1',
+    'verify-uninstall-isolation.ps1',
+    'verify-update-managed-assets.ps1',
+    'verify-v2-baseline-benchmark.ps1',
+    'verify-v2-policy-contracts.ps1'
+)
+$expectedOptionalModules = @('codex-adapter','harness-maintenance','legacy-v1','md-html','memory','providers','team','thin-trust-kernel')
+$expectedOptionalTests = $expectedMaintenanceTests + @(
+    'verify-adapter-transport.ps1',
+    'verify-archive-memory-candidates.ps1',
+    'verify-ask-codex.ps1',
+    'verify-canonical-json.ps1',
+    'verify-code-intel-provider-boundary.ps1',
+    'verify-codex-entry-autoload.ps1',
+    'verify-context-provider-boundary.ps1',
+    'verify-context-provider-install-isolation.ps1',
+    'verify-context-provider-vnext.ps1',
+    'verify-experimental-provider-docs.ps1',
+    'verify-hashing-module.ps1',
+    'verify-kernel-tcb-inventory.ps1',
+    'verify-md-html-review-renderer.ps1',
+    'verify-memory-health-report.ps1',
+    'verify-memory-maintain.ps1',
+    'verify-memory-provider-boundary.ps1',
+    'verify-module-manifest-catalog.ps1',
+    'verify-provider-routing-matrix.ps1',
+    'verify-provider-usage-recording.ps1',
+    'verify-render-review-html.ps1',
+    'verify-runtime-inbox.ps1',
+    'verify-team-preset.ps1',
+    'verify-thin-trust-kernel-contracts.ps1',
+    'verify-triage-runtime-inbox.ps1',
+    'verify-v1-manifest-marker.ps1',
+    'verify-v2-runtime-memory-decoupling.ps1'
+)
 $maintenance = Get-Route @('scripts/get-repo-inventory.ps1')
-Check ((@($maintenance.modules) -join ',') -ceq 'harness-maintenance' -and @($maintenance.tests).Count -eq 9 -and @($maintenance.tests) -ccontains 'verify-capability-extraction.ps1' -and @($maintenance.tests) -ccontains 'verify-thin-adapters.ps1') 'Harness maintenance changes select the complete construction verifier set' 'Harness maintenance routing is wrong or incomplete'
+Check ((@($maintenance.modules) -join ',') -ceq 'harness-maintenance' -and -not $maintenance.run_all_optional -and @($maintenance.tests).Count -eq 10 -and @($maintenance.tests) -ccontains 'verify-capability-extraction.ps1' -and @($maintenance.tests) -ccontains 'verify-thin-adapters.ps1') 'Harness maintenance changes select all ten registered construction and diagnostic verifiers' 'Harness maintenance routing is wrong or incomplete'
+Check (((@($maintenance.tests | Sort-Object -CaseSensitive) -join '|') -ceq (@($expectedMaintenanceTests | Sort-Object -CaseSensitive) -join '|')) -and @($maintenance.tests | Where-Object { $_ -ceq 'verify-host-diagnostics.ps1' }).Count -eq 1) 'maintenance routing preserves every fixed member and selects diagnostics exactly once' 'maintenance routing replaced, omitted, duplicated, or added a verifier'
 $routing = Get-Route @('.github/workflows/validation.yml')
-Check ($routing.run_all_optional -and @($routing.modules).Count -eq 8 -and @($routing.tests).Count -eq 35) 'routing-surface changes fail safe to every active optional verifier' 'routing-surface changes did not select all active optional verifiers'
+Check ($routing.run_all_optional -and @($routing.modules).Count -eq 8 -and @($routing.tests).Count -eq 36) 'routing-surface changes fail safe to all eight modules and thirty-six registered optional verifiers' 'routing-surface changes did not select all active optional verifiers'
+Check (((@($routing.modules | Sort-Object -CaseSensitive) -join '|') -ceq ($expectedOptionalModules -join '|')) -and ((@($routing.tests | Sort-Object -CaseSensitive) -join '|') -ceq (@($expectedOptionalTests | Sort-Object -CaseSensitive) -join '|')) -and @($routing.tests | Where-Object { $_ -ceq 'verify-host-diagnostics.ps1' }).Count -eq 1) 'all-optional routing preserves every fixed module and verifier with diagnostics exactly once' 'all-optional routing replaced, omitted, duplicated, or added a module or verifier'
 $legacy = Get-Route @('scripts/advance-stage.ps1')
 Check ((@($legacy.modules) -join ',') -ceq 'legacy-v1' -and (@($legacy.tests) -join ',') -ceq 'verify-v1-manifest-marker.ps1') 'legacy-v1 changes select only the explicit marker contract' 'legacy-v1 changed-path routing is wrong or expanded into Sunset'
 $fullValidationRouting = Get-Route @('.github/workflows/full-validation.yml')
