@@ -2591,7 +2591,9 @@ function Sync-SkillsDirectory {
     param(
         [string]$HostSkillsPath,
         [string]$RepoSkillsPath,
-        [string[]]$ManagedEntryNames
+        [string[]]$ManagedEntryNames,
+        [Collections.IDictionary]$EntryTargets,
+        [string[]]$RemoveEntryNames=@()
     )
 
     $hotSwapPreservedNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -2599,7 +2601,7 @@ function Sync-SkillsDirectory {
 
     $managedEntries = [ordered]@{}
     foreach ($name in $ManagedEntryNames) {
-        $entryPath = Join-Path $RepoSkillsPath $name
+        $entryPath = if($null -ne $EntryTargets){$EntryTargets[$name]}else{Join-Path $RepoSkillsPath $name}
         if (-not (Test-Path -LiteralPath $entryPath)) {
             throw "Preset skill entry is missing: $entryPath"
         }
@@ -2635,7 +2637,7 @@ function Sync-SkillsDirectory {
     foreach ($entry in Get-ChildItem -LiteralPath $HostSkillsPath -Force) {
         $currentTarget = Get-JunctionTarget -Path $entry.FullName
         $shouldPreserveForHotSwap = $hotSwapPreservedNames.Contains($entry.Name) -and ($null -eq $currentTarget)
-        if ($preservedNames.Contains($entry.Name) -or $shouldPreserveForHotSwap) {
+        if (($preservedNames.Contains($entry.Name) -and $entry.Name -notin $RemoveEntryNames) -or $shouldPreserveForHotSwap) {
             continue
         }
 
@@ -3148,6 +3150,7 @@ try {
 
     $sharedHooks = Get-InstallSharedHookRequirements -Registry $installRegistry -UserProfile $env:USERPROFILE -ReplacingWorkspaceKey $currentWorkspaceKey -RequestedHooks $presetDefinition.hooks
     Assert-InstallRetainedHookDependencies -Coordination $sharedHooks
+    $sharedSkills = Get-InstallSharedSkillPlan -Registry $installRegistry -HookCoordination $sharedHooks -UserProfile $env:USERPROFILE -RepoRoot $RepoRoot -RequestedSkills $presetDefinition.skills
     $claudeSharedSettingsJson = Render-JsonTemplateText -TemplatePath $templateSources['claude-settings'] -TargetPath $claudeSettingsPath
     $claudeSharedSettingsJson = Merge-InstallSharedHookSettings -RequestedJson $claudeSharedSettingsJson -References $sharedHooks.References['claude-settings']
     $codexHooksJson = Render-JsonTemplateText -TemplatePath $templateSources['codex-hooks'] -TargetPath $codexHooksPath
@@ -3338,9 +3341,10 @@ try {
         -ExpectedCurrentDigest $(if ([string]$codexHooksMerge.Identity['item_type'] -eq 'missing') { 'missing' } else { [string]$codexHooksMerge.Identity['sha256'] })
 
     Assert-HarnessDistributionSkillSourcesCurrent -RepoRoot $RepoRoot -Plan $script:DistributionPlan
-    Sync-SkillsDirectory -HostSkillsPath $claudeSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
-    Sync-SkillsDirectory -HostSkillsPath $codexSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
-    Sync-SkillsDirectory -HostSkillsPath $agentsSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
+    Assert-InstallSharedSkillPlanCurrent -Plan $sharedSkills
+    foreach ($hostPlan in $sharedSkills.Hosts.Values) {
+        Sync-SkillsDirectory -HostSkillsPath $hostPlan.Root -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($hostPlan.Targets.Keys) -EntryTargets $hostPlan.Targets -RemoveEntryNames $hostPlan.Obsolete
+    }
 
     Save-InstallManifestSnapshot
     Add-ManifestToRegistry `

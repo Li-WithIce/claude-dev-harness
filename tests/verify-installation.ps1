@@ -356,7 +356,9 @@ function Assert-ManagedSkillLinks {
         [string]$HostLabel,
         [string]$HostSkillsPath,
         [string]$RepoSkillsPath,
-        [string[]]$ManagedEntryNames
+        [string[]]$ManagedEntryNames,
+        [Collections.IDictionary]$EntryTargets,
+        [string[]]$RestorationNames=@()
     )
 
     $hotSwapPreservedNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -377,7 +379,7 @@ function Assert-ManagedSkillLinks {
     $expectedManagedEntryNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($name in $ManagedEntryNames) {
         [void]$expectedManagedEntryNames.Add($name)
-        $repoEntryPath = Join-Path $RepoSkillsPath $name
+        $repoEntryPath = if($null -ne $EntryTargets){$EntryTargets[$name]}else{Join-Path $RepoSkillsPath $name}
         $hostEntryPath = Join-Path $HostSkillsPath $name
         if (-not (Test-Path -LiteralPath $hostEntryPath)) {
             Add-Error ("{0} skills 缺少 managed 条目: {1}" -f $HostLabel, $hostEntryPath)
@@ -403,7 +405,7 @@ function Assert-ManagedSkillLinks {
 
     $normalizedRepoSkillsPath = Get-NormalizedPath -Path $RepoSkillsPath
     foreach ($entry in Get-ChildItem -LiteralPath $HostSkillsPath -Force) {
-        if ($expectedManagedEntryNames.Contains($entry.Name)) {
+        if ($expectedManagedEntryNames.Contains($entry.Name) -or $entry.Name -in $RestorationNames) {
             continue
         }
 
@@ -558,9 +560,14 @@ if ($Scope -ceq 'SharedHooks') {
     Write-Output 'STATUS: PASS'
     exit 0
 }
-Assert-ManagedSkillLinks -HostLabel 'Claude' -HostSkillsPath $ClaudeSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
-Assert-ManagedSkillLinks -HostLabel 'Codex' -HostSkillsPath $CodexSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
-Assert-ManagedSkillLinks -HostLabel 'Agents' -HostSkillsPath $AgentsSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
+try {
+    $skillPlan=Get-InstallSharedSkillPlan -Registry $sharedRegistry -HookCoordination $sharedCoordination -UserProfile $effectiveUserProfile -RepoRoot $RepoRoot -RequestedSkills $presetDefinition.skills -Verification
+    foreach($hostName in $skillPlan.Hosts.Keys){
+        $hostPlan=$skillPlan.Hosts[$hostName]
+        Assert-ManagedSkillLinks -HostLabel $hostName -HostSkillsPath $hostPlan.Root -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($hostPlan.Targets.Keys) -EntryTargets $hostPlan.Targets -RestorationNames $hostPlan.Obsolete
+        if($hostPlan.Obsolete.Count){Add-Check ('Registered restoration-only Skills, not active feature ownership: '+($hostPlan.Obsolete -join ', '))}
+    }
+} catch { Add-Error ('Shared Skill ownership verification failed: '+$_.Exception.Message) }
 
 foreach ($hookName in @('pretooluse.ps1','codex-pretooluse-launcher.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js')) {
     $hookPath = Join-Path $ClaudeHooksPath $hookName

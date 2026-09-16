@@ -555,6 +555,116 @@ function Assert-InstalledCodexHook {
     }
 }
 
+function Invoke-I02SkillIntegrityRegression {
+    $fixture=New-PresetFixture -Name 'i02-integrity'
+    $a=$fixture;$b=[pscustomobject]@{Root=$a.Root;Workspace=(Join-Path $a.Root 'workspace-b');User=$a.User}
+    [void][IO.Directory]::CreateDirectory($b.Workspace)
+    $external=Join-Path $a.Root 'external-skill';[void][IO.Directory]::CreateDirectory($external)
+    [IO.File]::WriteAllText((Join-Path $external 'sentinel.txt'),'user external fixture')
+    Assert-InstallExit (Invoke-Install $a @('-Preset','full')) 'I02 integrity full install'
+    $registryPath=Join-Path $a.User '.dev-harness/install-registry.json'
+    $registryBytes=[IO.File]::ReadAllBytes($registryPath)
+    $registry=Get-Content $registryPath -Raw|ConvertFrom-Json -AsHashtable
+    $manifestPath=@($registry.global_manifest_history)[-1]
+    $manifestBytes=[IO.File]::ReadAllBytes($manifestPath)
+    $link=Join-Path $a.User '.claude/skills/planning'
+    $target=Get-JunctionTarget $link
+    $sourceDigest=Get-InstallBackupPayloadDigest -Path $target -ItemType directory
+    foreach($case in @('link-drift','ownership','source-conflict','unowned-link')){
+        $unowned=Join-Path $a.User '.claude/skills/unowned-i02'
+        try {
+            if($case -in @('link-drift','source-conflict')){Remove-Item -LiteralPath $link -Force;[void](New-Item -ItemType Junction -Path $link -Target $external)}
+            if($case -ceq 'unowned-link'){[void](New-Item -ItemType Junction -Path $unowned -Target $target)}
+            if($case -in @('ownership','source-conflict')){
+                $m=[Text.Encoding]::UTF8.GetString($manifestBytes)|ConvertFrom-Json -AsHashtable
+                $record=@($m.backups|Where-Object path -eq $link)[0]
+                if($case -ceq 'ownership'){$record.ownership='user-owned'}else{$record.expected_postimage.link_target=$external}
+                [IO.File]::WriteAllText($manifestPath,($m|ConvertTo-Json -Depth 80),[Text.UTF8Encoding]::new($false))
+                $r=[Text.Encoding]::UTF8.GetString($registryBytes)|ConvertFrom-Json -AsHashtable
+                $r.manifest_digests[(Get-InstallManifestDigestRegistryKey $manifestPath)]=Get-InstallStateFileDigest $manifestPath
+                [IO.File]::WriteAllText($registryPath,($r|ConvertTo-Json -Depth 80),[Text.UTF8Encoding]::new($false))
+            }
+            $before=Get-TestFileSha256 $registryPath;$count=@(Get-ChildItem (Join-Path $a.User '.dev-harness/backups') -Directory).Count
+            $run=Invoke-Install $b @('-Preset','core')
+            $reason=switch($case){'link-drift'{'Shared Skill link differs from registered identity'};'ownership'{'Shared Skill has an unsupported ownership contract'};'source-conflict'{'Shared Skill source conflicts with registered owner'};'unowned-link'{'Unowned same-source Skill link requires explicit reconciliation'}}
+            $output=($run.Output -replace '(?m)^\s*\| ?', '') -replace '\s+',' '
+            if($run.ExitCode -ne 0 -and $output.Contains($reason) -and (Get-TestFileSha256 $registryPath) -ceq $before -and @(Get-ChildItem (Join-Path $a.User '.dev-harness/backups') -Directory).Count -eq $count){Add-Check "I02 $case rejects before transaction publication"}else{Add-Failure "I02 $case rejection incorrect: $($run.Output)"}
+        } finally {
+            if($case -in @('link-drift','source-conflict')){Remove-Item -LiteralPath $link -Force;[void](New-Item -ItemType Junction -Path $link -Target $target)}
+            if(Test-Path -LiteralPath $unowned){Remove-Item -LiteralPath $unowned -Force}
+            [IO.File]::WriteAllBytes($manifestPath,$manifestBytes);[IO.File]::WriteAllBytes($registryPath,$registryBytes)
+        }
+    }
+    $roots=@('.claude','.codex','.agents'|ForEach-Object {Join-Path $a.User ($_+'/skills')})
+    $beforeRoots=@($roots|ForEach-Object {Get-InstallManagedPathIdentity $_})
+    $held=[IO.File]::Open($registryPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+    try{$run=Invoke-Install $a @('-Preset','core')}finally{$held.Dispose()}
+    $journalPath=Join-Path $a.User '.dev-harness/install-transaction.json'
+    if($run.ExitCode -eq 0 -or -not(Test-Path $journalPath)){Add-Failure 'I02 registry fault did not retain recoverable transaction'}else{
+        $journal=Get-Content $journalPath -Raw|ConvertFrom-Json -AsHashtable
+        $restore=Invoke-ChildScript -UserProfile $a.User -ScriptPath $script:UninstallScript -Arguments @('-RepoRoot',$script:RepoRoot,'-RecoveryManifestPath',$journal.manifest_path)
+        $same=$restore.ExitCode -eq 0
+        for($i=0;$i -lt $roots.Count;$i++){$same=$same -and (Test-InstallExactIdentityEqual -Left (Get-InstallManagedPathIdentity $roots[$i]) -Right $beforeRoots[$i])}
+        if($same -and (Get-TestFileSha256 $registryPath) -ceq (Get-TestStringSha256 ([Text.Encoding]::UTF8.GetString($registryBytes)))){Add-Check 'I02 interrupted Skill removals recover exact links and registry'}else{Add-Failure "I02 recovery failed: $($restore.Output)"}
+    }
+    if((Get-InstallBackupPayloadDigest -Path $target -ItemType directory) -ceq $sourceDigest){Add-Check 'I02 link operations never delete source contents'}else{Add-Failure 'I02 link operation modified its source'}
+    Assert-UninstallExit (Invoke-Uninstall $a) 'I02 integrity cleanup'
+}
+
+function Invoke-I02RetiredSkillRegression {
+    $a=New-PresetFixture -Name 'i02-retired';$b=[pscustomobject]@{Root=$a.Root;Workspace=(Join-Path $a.Root 'workspace-b');User=$a.User}
+    [void][IO.Directory]::CreateDirectory($b.Workspace)
+    Assert-InstallExit (Invoke-Install $a @('-Preset','full')) 'I02 retired full install'
+    $optional=@((Get-LatestManifest $a).feature_ownership.skills|Where-Object {$_ -cne '.system'})
+    Assert-InstallExit (Invoke-Install $b @('-Preset','core')) 'I02 retired core install'
+    $holding=$a.Workspace+'.offline'
+    Move-Item -LiteralPath $a.Workspace -Destination $holding
+    try {
+        Assert-InstallExit (Invoke-Install $b) 'I02 offline owner retained on core update'
+        foreach($name in $optional){if((Get-JunctionTarget (Join-Path $a.User ('.claude/skills/'+$name))) -ne (Join-Path $script:RepoRoot ('skills/'+$name))){Add-Failure 'I02 offline workspace was treated as retired'}}
+    } finally {Move-Item -LiteralPath $holding -Destination $a.Workspace}
+    Assert-UninstallExit (Invoke-Uninstall $a) 'I02 nonactive last optional owner uninstall'
+    $verify=Invoke-ChildScript -UserProfile $b.User -ScriptPath (Join-Path $script:RepoRoot 'tests/verify-installation.ps1') -Arguments @('-WorkspaceRoot',$b.Workspace,'-RepoRoot',$script:RepoRoot,'-UserProfileRoot',$b.User,'-Scope','All')
+    if($verify.ExitCode -eq 0){Add-Check 'I02 verifier identifies registered restoration-only Skills'}else{Add-Failure "I02 retired state verifier failed: $($verify.Output)"}
+    Assert-InstallExit (Invoke-Install $b) 'I02 remove retired demand on next normal update'
+    foreach($hostName in @('.claude','.codex','.agents')){foreach($name in $optional){if(Test-Path (Join-Path $a.User ($hostName+'/skills/'+$name))){Add-Failure 'I02 retired history was unioned permanently'}else{Add-Check 'I02 retired optional Skill removed'}}}
+    Assert-UninstallExit (Invoke-Uninstall $b) 'I02 retired final cleanup'
+}
+function Invoke-I02SharedSkillsRegression {
+    foreach($order in @('full-first','core-first')) {
+        $fixture=New-PresetFixture -Name ('i02-'+$order)
+        $external=Join-Path $fixture.Root 'external-skill';[void][IO.Directory]::CreateDirectory($external)
+        [IO.File]::WriteAllText((Join-Path $external 'marker.txt'),'external fixture')
+        $userRoot=Join-Path $fixture.User '.claude/skills';[void][IO.Directory]::CreateDirectory($userRoot)
+        [void](New-Item -ItemType Junction -Path (Join-Path $userRoot 'external-i02') -Target $external)
+        $system=Join-Path $fixture.User '.codex/skills/.system';[void][IO.Directory]::CreateDirectory($system)
+        [IO.File]::WriteAllText((Join-Path $system 'host-marker.txt'),'host fixture')
+        $a=$fixture
+        $b=[pscustomobject]@{Root=$fixture.Root;Workspace=(Join-Path $fixture.Root 'workspace-b');User=$fixture.User}
+        [void][IO.Directory]::CreateDirectory($b.Workspace)
+        $sequence=if($order -ceq 'full-first'){@(@{Fixture=$a;Preset='full'},@{Fixture=$b;Preset='core'})}else{@(@{Fixture=$b;Preset='core'},@{Fixture=$a;Preset='full'})}
+        foreach($step in $sequence){$run=Invoke-Install $step.Fixture @('-Preset',$step.Preset);Assert-InstallExit $run "I02 $order $($step.Preset)";if($run.ExitCode){throw $run.Output}}
+        $full=Get-LatestManifest $a;$core=Get-LatestManifest $b
+        $optional=@($full.feature_ownership.skills|Where-Object {$_ -notin $core.feature_ownership.skills})
+        if(($core.feature_ownership.features -join '|') -ceq 'core' -and ($core.feature_ownership.skills -join '|') -ceq '.system'){Add-Check 'I02 core retains only its requested ownership'}else{Add-Failure 'I02 core claimed another owner skills'}
+        foreach($target in @($a,$b)){
+            $verify=Invoke-ChildScript -UserProfile $target.User -ScriptPath (Join-Path $script:RepoRoot 'tests/verify-installation.ps1') -Arguments @('-WorkspaceRoot',$target.Workspace,'-RepoRoot',$script:RepoRoot,'-UserProfileRoot',$target.User,'-Scope','All')
+            if($verify.ExitCode -eq 0){Add-Check "I02 $order All verifies $($target.Workspace)"}else{Add-Failure "I02 $order All failed: $($verify.Output)"}
+        }
+        Assert-InstallExit (Invoke-Install $b) "I02 $order repeated core update"
+        foreach($hostName in @('.claude','.codex','.agents')){foreach($name in $optional){
+            $path=Join-Path $fixture.User ($hostName+'/skills/'+$name)
+            if((Get-JunctionTarget $path) -eq (Join-Path $script:RepoRoot ('skills/'+$name))){Add-Check "I02 $order retains exact $hostName/$name target"}else{Add-Failure "I02 $order lost $hostName/$name"}
+        }}
+        Assert-UninstallExit (Invoke-Uninstall $b) "I02 $order core uninstall"
+        $verify=Invoke-ChildScript -UserProfile $a.User -ScriptPath (Join-Path $script:RepoRoot 'tests/verify-installation.ps1') -Arguments @('-WorkspaceRoot',$a.Workspace,'-RepoRoot',$script:RepoRoot,'-UserProfileRoot',$a.User,'-Scope','All')
+        if($verify.ExitCode -eq 0){Add-Check 'I02 full owner survives core uninstall'}else{Add-Failure "I02 full verification after uninstall failed: $($verify.Output)"}
+        Assert-InstallExit (Invoke-Install $a @('-Preset','core')) 'I02 release last optional demand'
+        foreach($hostName in @('.claude','.codex','.agents')){foreach($name in $optional){if(Test-Path (Join-Path $a.User ($hostName+'/skills/'+$name))){Add-Failure 'I02 released demand remained installed'}else{Add-Check 'I02 last optional demand is released'}}}
+        Assert-UninstallExit (Invoke-Uninstall $a) 'I02 last owner cleanup'
+        if((Get-JunctionTarget (Join-Path $userRoot 'external-i02')) -eq $external -and [IO.File]::ReadAllText((Join-Path $external 'marker.txt')) -ceq 'external fixture' -and -not(Get-JunctionTarget $system) -and [IO.File]::ReadAllText((Join-Path $system 'host-marker.txt')) -ceq 'host fixture'){Add-Check 'I02 external Skill and native system survive the entire lifecycle'}else{Add-Failure 'I02 changed external or native system Skill'}
+    }
+}
 function Invoke-H04NonActiveReleaseRegression {
     $fixture=New-PresetFixture -Name 'h04-nonactive-release'
     $a=$fixture;$b=[pscustomobject]@{Root=$fixture.Root;Workspace=(Join-Path $fixture.Root 'workspace-b');User=$fixture.User}
@@ -731,6 +841,9 @@ $fullFeatures = @('core','governed','memory','md-html','adapters','provider-refe
 try {
     New-Item -ItemType Directory -Path $script:ScratchRoot -Force | Out-Null
 
+    Invoke-I02SharedSkillsRegression
+    Invoke-I02SkillIntegrityRegression
+    Invoke-I02RetiredSkillRegression
     Invoke-H04SharedHookRegression
     Invoke-H04SharedHookFailureRegression
     Invoke-H04NonActiveReleaseRegression

@@ -84,7 +84,7 @@
     },
     {
       "path": "install.ps1",
-      "sha256": "sha256:63136303e53bcf92d55fc53bf8a9fc0a6bbd03c9da86b67df1b6697324585fa0",
+      "sha256": "sha256:a0d332c274c07af22639bfbbfa99447d9322b0b0e4a2f08de058a5f7f5559f29",
       "layer": "d1-distribution",
       "trust_paths": [
         "distribution"
@@ -92,9 +92,9 @@
       "root_ids": [
         "workspace-bootstrap"
       ],
-      "physical_loc": 3414,
-      "nonblank_loc": 3146,
-      "executable_loc": 3113
+      "physical_loc": 3418,
+      "nonblank_loc": 3150,
+      "executable_loc": 3117
     },
     {
       "path": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",
@@ -171,7 +171,7 @@
     },
     {
       "path": "scripts/install-transaction-common.ps1",
-      "sha256": "sha256:442b475ef9ef209cef8e5c9b94038f578411e38b40796b4d29c83cf537bae268",
+      "sha256": "sha256:99aec14c9c53531f81ac476869acd8c60dbce4a6e08c58a7575a19fa81e8a103",
       "layer": "d1-distribution",
       "trust_paths": [
         "distribution"
@@ -179,9 +179,9 @@
       "root_ids": [
         "workspace-bootstrap"
       ],
-      "physical_loc": 1514,
-      "nonblank_loc": 1394,
-      "executable_loc": 1389
+      "physical_loc": 1608,
+      "nonblank_loc": 1486,
+      "executable_loc": 1479
     },
     {
       "path": "scripts/lib/Harness.AdapterAction.psm1",
@@ -533,7 +533,7 @@
     },
     {
       "path": "tests/verify-installation.ps1",
-      "sha256": "sha256:ceaef79d7be65c64ada9d29500d7d220c1b4a0949d78172a7a48fa076ccafc85",
+      "sha256": "sha256:c210925912fe45cba57708dc9718fb1123b55b5f785b8c4a46f75b49496e5734",
       "layer": "d1-distribution",
       "trust_paths": [
         "distribution"
@@ -541,9 +541,9 @@
       "root_ids": [
         "workspace-bootstrap"
       ],
-      "physical_loc": 833,
-      "nonblank_loc": 736,
-      "executable_loc": 731
+      "physical_loc": 840,
+      "nonblank_loc": 743,
+      "executable_loc": 738
     }
   ],
   "artifacts": [
@@ -1565,13 +1565,13 @@
   "unresolved_dependencies": [],
   "totals": {
     "file_count": 29,
-    "physical_loc": 10655,
-    "nonblank_loc": 9745,
-    "executable_loc": 9675,
+    "physical_loc": 10760,
+    "nonblank_loc": 9848,
+    "executable_loc": 9776,
     "runtime_file_count": 21,
     "runtime_executable_loc": 3141,
     "distribution_file_count": 18,
-    "distribution_executable_loc": 7910,
+    "distribution_executable_loc": 8011,
     "duplicate_edge_count": 0,
     "artifact_count": 39,
     "artifact_bytes": 143030

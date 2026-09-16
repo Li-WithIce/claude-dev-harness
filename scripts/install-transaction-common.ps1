@@ -1512,3 +1512,97 @@ function Assert-InstallSharedHookState {
         }
     }
 }
+function Get-InstallSharedSkillPlan {
+    param($Registry,$HookCoordination,[string]$UserProfile,[string]$RepoRoot,[string[]]$RequestedSkills,[switch]$Verification)
+
+    $required=[ordered]@{}
+    foreach($name in $RequestedSkills){$required[$name]=@('current-request')}
+    foreach($owner in $HookCoordination.Owners){
+        Assert-InstallManifestRegistryDigest -Registry $Registry -ManifestPath $owner.manifest -RequireManifestIntegrity $true
+        $manifest=ConvertFrom-InstallJson -Json ([IO.File]::ReadAllText($owner.manifest))
+        if(-not $manifest.feature_ownership.Contains('skills') -or $manifest.feature_ownership.skills -isnot [Collections.IList]){throw 'Shared Skill owner has no explicit Skill requirements'}
+        foreach($name in $manifest.feature_ownership.skills){
+            if($name -isnot [string] -or $name -cnotmatch '^(?:\.system|[A-Za-z0-9][A-Za-z0-9._-]*)$' -or $name -ceq 'docs'){throw 'Shared Skill requirement is not a supported contained name'}
+            if(-not $required.Contains($name)){$required[$name]=@()}
+            $required[$name]=@($required[$name])+@($owner.workspace)
+        }
+    }
+    $hosts=[ordered]@{}
+    foreach($hostName in @('.claude','.codex','.agents')){
+        $root=[IO.Path]::Combine($UserProfile,$hostName,'skills')
+        $live=[ordered]@{}
+        foreach($manifestPath in @($Registry.global_manifest_history)){
+            Assert-InstallManifestRegistryDigest -Registry $Registry -ManifestPath $manifestPath -RequireManifestIntegrity $true
+            $manifest=ConvertFrom-InstallJson -Json ([IO.File]::ReadAllText($manifestPath))
+            foreach($record in $manifest.backups){
+                if([IO.Path]::GetDirectoryName([string]$record.path) -ne $root){continue}
+                $name=[IO.Path]::GetFileName([string]$record.path)
+                $live[$name]=[ordered]@{Record=$record;Manifest=$manifestPath;Repo=$manifest.repo_root}
+            }
+        }
+        $targets=[ordered]@{};$expected=[ordered]@{};$obsolete=[Collections.Generic.List[string]]::new()
+        $rootLink=Get-JunctionTarget $root
+        if($rootLink -and $HookCoordination.Owners.Count){throw "Shared Skill root became a link while other owners remain: $root"}
+        foreach($name in $required.Keys){
+            $path=[IO.Path]::Combine($root,$name)
+            $requested=$name -in $RequestedSkills
+            $desired=[IO.Path]::Combine($RepoRoot,'skills',$name)
+            # The existing host .system hot-swap/mirror contract is deliberately unchanged.
+            if($name -ceq '.system'){
+                if($Verification -and -not $rootLink -and (Get-JunctionTarget $path) -and $live.Contains($name)){
+                    $identity=Get-InstallManagedPathIdentity $path
+                    if(-not(Test-InstallExactIdentityEqual -Left $identity -Right $live[$name].Record.expected_postimage)){throw "Shared Skill link differs from registered identity: $path"}
+                    $desired=$identity.link_target
+                }
+                $targets[$name]=$desired
+                continue
+            }
+            $identity=if($rootLink){$null}else{Get-InstallManagedPathIdentity $path}
+            $record=if($live.Contains($name)){$live[$name].Record}else{$null}
+            if($null -ne $record){
+                if($record.ownership -cne 'managed' -or $record.expected_postimage.mode -cne 'exact' -or $record.expected_postimage.item_type -cnotin @('link','missing')){throw "Shared Skill has an unsupported ownership contract: $path"}
+                if($null -eq $identity -or -not(Test-InstallExactIdentityEqual -Left $identity -Right $record.expected_postimage)){throw "Shared Skill link differs from registered identity: $path"}
+                if($identity.item_type -ceq 'link' -and $identity.link_target -ne [IO.Path]::Combine($live[$name].Repo,'skills',$name)){throw "Shared Skill source conflicts with registered owner: $path"}
+            }
+            if(-not $requested -or $Verification){
+                if($null -eq $record -or $identity.item_type -cne 'link'){throw "Required shared Skill lacks registered live link: $path"}
+                $desired=$identity.link_target
+            }elseif($null -ne $identity -and $identity.item_type -cne 'missing' -and ($identity.item_type -cne 'link' -or $identity.link_target -ne $desired)){
+                if($null -eq $record){throw "Shared Skill target has no managed upgrade identity: $path"}
+                # Preserve the normal cross-source upgrade/restoration chain only for equivalent content.
+                if(@($required[$name]|Where-Object {$_ -cne 'current-request'}).Count){
+                    [void](Assert-InstallStatePathHasNoReparsePoint -Path $identity.link_target -Label 'Shared Skill upgrade source')
+                    [void](Assert-InstallStatePathHasNoReparsePoint -Path $desired -Label 'Shared Skill upgrade target')
+                    if((Get-InstallBackupPayloadDigest -Path $identity.link_target -ItemType directory) -cne (Get-InstallBackupPayloadDigest -Path $desired -ItemType directory)){throw "Shared Skill sources conflict for active owners: $path"}
+                }
+            }
+            if(-not $rootLink){$expected[$name]=$identity}
+            $targets[$name]=$desired
+        }
+        if(-not $rootLink -and (Test-Path -LiteralPath $root -PathType Container)){
+            foreach($entry in Get-ChildItem -LiteralPath $root -Force){
+                $name=$entry.Name
+                if($required.Contains($name)){continue}
+                $linkTarget=Get-JunctionTarget $entry.FullName
+                if($live.Contains($name) -and $live[$name].Record.expected_postimage.item_type -ceq 'link'){
+                    $identity=Get-InstallManagedPathIdentity $entry.FullName
+                    $record=$live[$name].Record
+                    if($record.ownership -cne 'managed' -or -not(Test-InstallExactIdentityEqual -Left $identity -Right $record.expected_postimage)){throw "Released shared Skill differs from registered identity: $($entry.FullName)"}
+                    $obsolete.Add($name);$expected[$name]=$identity
+                }elseif($name -cne 'docs' -and $linkTarget -and (Test-PathWithinRoot -Path $linkTarget -RootPath ([IO.Path]::Combine($RepoRoot,'skills')))){
+                    throw "Unowned same-source Skill link requires explicit reconciliation: $($entry.FullName)"
+                }
+            }
+        }
+        $hosts[$hostName]=[pscustomobject]@{Root=$root;Targets=$targets;Expected=$expected;Obsolete=$obsolete.ToArray()}
+    }
+    return [pscustomobject]@{Required=$required;Hosts=$hosts}
+}
+
+function Assert-InstallSharedSkillPlanCurrent {
+    param($Plan)
+    foreach($hostPlan in $Plan.Hosts.Values){foreach($name in $hostPlan.Expected.Keys){
+        $path=[IO.Path]::Combine($hostPlan.Root,$name)
+        if(-not(Test-InstallExactIdentityEqual -Left (Get-InstallManagedPathIdentity $path) -Right $hostPlan.Expected[$name])){throw "Shared Skill changed after coordination: $path"}
+    }}
+}
