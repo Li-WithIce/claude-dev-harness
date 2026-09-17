@@ -1463,6 +1463,59 @@ if ($legacyRetryResult.ExitCode -eq 0 -and
     $failures.Add(("repeating a committed rebaseline digest should safely retry without duplicating its receipt or reactivating legacy history; exit={0}; receipt_count={1}; prefix={2}; history={3}; legacy={4}; output={5}" -f $legacyRetryResult.ExitCode,$retryReceiptCount,$retryPreservesActivePrefix,$retryHistoryValid,$retryContainsLegacy,($legacyRetryResult.Output -replace '\r?\n',' | '))) | Out-Null
 }
 
+# The native warm-up is deliberately outside the consumable history. Do not
+# invent leaf records: prove the legacy boundary and the real restore write set.
+$legacyUninstallAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $legacyRepoRoot 'uninstall.ps1'),[ref]$null,[ref]$null)
+$legacyDefinitions=@($legacyUninstallAst.FindAll({param($n)$n-is[Management.Automation.Language.FunctionDefinitionAst]},$false)|ForEach-Object {$_.Extent.Text})
+$legacyReadOnlyProbe={
+    param($Definitions,$User,$RegistryPath,$Workspace,$ManifestPaths,[switch]$CorruptRegistryDigest)
+    . ([scriptblock]::Create($Definitions-join"`n"))
+    $previousUser=$env:USERPROFILE;$env:USERPROFILE=$User
+    try{
+        $registry=Read-JsonObject $RegistryPath
+        if($CorruptRegistryDigest){$key=Get-InstallManifestDigestRegistryKey -ManifestPath $ManifestPaths[-1];$registry.manifest_digests[$key]='0'*64}
+        $null=Assert-GlobalHistoryState -GlobalHistory @($registry.global_manifest_history) -Workspaces $registry.workspaces -Registry $registry -RegistryPath $RegistryPath -RequireManifestIntegrity $true -RetiredManifestHistory @($registry.retired_manifest_history)
+        $preserved=@(Get-UninstallHistoricalSkillState -Registry $registry)
+        $cache=@{};foreach($path in $ManifestPaths){$cache[$path]=Read-InstallManifest $path}
+        $plan=@(Get-InstallRestorePlan -WorkspaceManifestPaths $ManifestPaths -GlobalManifestPaths @($registry.global_manifest_history) -RestoreUserGlobal $true -ManifestCache $cache -ReleasedTargetHistory (Get-InstallRegistryReleasedTargetHistoryMap -Registry $registry -ExpectedUserProfile $User))
+        Assert-UninstallPreservedSkillWriteSet -Preserved $preserved -Plan $plan -Manifests @($cache.Values)
+        $probes=@()
+        foreach($item in $preserved){
+            foreach($ancestor in @((Split-Path $item.Path -Parent),$item.Target)){
+                $reason='';try{Assert-UninstallPreservedSkillWriteSet -Preserved @($item) -Plan @([pscustomobject]@{Record=@{path=$ancestor}}) -Manifests @()}catch{$reason=$_.Exception.Message}
+                $probes+=@($reason -match 'restore or cleanup would affect unowned legacy Skill')
+            }
+        }
+        return [pscustomobject]@{Preserved=$preserved;PlanPaths=@($plan|ForEach-Object {$_.Record.path});ParentRejects=$probes}
+    }finally{$env:USERPROFILE=$previousUser}
+}
+$legacyPreservationProbe=& $legacyReadOnlyProbe $legacyDefinitions $legacyUserProfile $legacyRegistryPath $legacyWorkspace $retryActiveManifestPaths
+$legacyAudit=Get-NormalizedPath (Join-Path $legacyUserProfile '.claude/skills/audit')
+$legacyAuditRecords=@($retryActiveManifests|ForEach-Object {$_.backups}|Where-Object {(Get-NormalizedPath $_.path)-eq$legacyAudit})
+$legacyPreservedLinks=@($legacyPreservationProbe.Preserved)
+$legacyRestoreRecordsBefore=@($retryActiveManifestPaths|ForEach-Object { $value=Get-Content $_ -Raw|ConvertFrom-Json -AsHashtable; [ordered]@{path=$_;backups=$value.backups;managed_backup_targets=$value.managed_backup_targets} })
+$legacyPreservedBefore=@($legacyPreservedLinks|ForEach-Object {[ordered]@{path=$_.Path;identity=(Get-InstallManagedPathIdentity $_.Path);target_digest=(Get-InstallBackupPayloadDigest -Path $_.Target -ItemType directory)}})
+$legacyHistoryBeforeProbe=Get-InstallStateFileDigest $legacyRegistryPath
+if($legacyAuditRecords.Count-eq0-and$legacyWarmupManifestPath-notin$retryActiveManifestPaths-and@($legacyPreservedLinks|Where-Object Path -eq $legacyAudit).Count-eq1-and@($legacyPreservationProbe.ParentRejects|Where-Object {-not$_}).Count-eq0){$checks.Add('legacy preexisting Skills have no consumable leaf ownership and are disjoint from native restore/cleanup; parent or target writes reject')|Out-Null}else{$failures.Add('legacy preservation boundary or write-set guard is not distinguished')|Out-Null}
+# A legacy receipt is not a blanket exemption for an extra Harness-source link.
+$legacyExtra=Join-Path $legacyUserProfile '.claude/skills/unowned-extra'
+[void](New-Item -ItemType Junction -Path $legacyExtra -Target (Join-Path $legacyRepoRoot 'skills/audit'))
+$legacyExtraReason=''
+try{$null=& $legacyReadOnlyProbe $legacyDefinitions $legacyUserProfile $legacyRegistryPath $legacyWorkspace $retryActiveManifestPaths}catch{$legacyExtraReason=$_.Exception.Message}finally{Remove-Item -LiteralPath $legacyExtra -Force}
+if($legacyExtraReason-match'no registered ownership or untouched legacy boundary'){$checks.Add('valid legacy receipt does not exempt an unowned extra Skill')|Out-Null}else{$failures.Add('legacy extra Skill did not reject for exact preservation boundary: '+$legacyExtraReason)|Out-Null}
+# The same warm-up left .system unowned; an unrelated target cannot use that boundary.
+$legacySystem=Join-Path $legacyUserProfile '.claude/skills/.system';$legacySystemTarget=Get-JunctionTarget $legacySystem
+$legacyDrift=Join-Path $legacyCaseRoot 'drift';[void][IO.Directory]::CreateDirectory($legacyDrift)
+Remove-Item -LiteralPath $legacySystem -Force;[void](New-Item -ItemType Junction -Path $legacySystem -Target $legacyDrift)
+$legacyDriftReason=''
+try{$null=& $legacyReadOnlyProbe $legacyDefinitions $legacyUserProfile $legacyRegistryPath $legacyWorkspace $retryActiveManifestPaths}catch{$legacyDriftReason=$_.Exception.Message}finally{Remove-Item -LiteralPath $legacySystem -Force;[void](New-Item -ItemType Junction -Path $legacySystem -Target $legacySystemTarget)}
+if(@($legacyPreservedLinks|Where-Object Path -eq $legacySystem).Count-eq1-and$legacyDriftReason-match'no registered ownership or untouched legacy boundary'){$checks.Add('unowned legacy system link with unrelated target cannot use preservation boundary')|Out-Null}else{$failures.Add('legacy system boundary rejected for wrong reason: '+$legacyDriftReason)|Out-Null}
+$legacyDigestReason=''
+try{$null=& $legacyReadOnlyProbe $legacyDefinitions $legacyUserProfile $legacyRegistryPath $legacyWorkspace $retryActiveManifestPaths -CorruptRegistryDigest}catch{$legacyDigestReason=$_.Exception.Message}
+if($legacyDigestReason-match'Registered install manifest digest mismatch'){$checks.Add('legacy history digest conflict never falls back to missing-record preservation')|Out-Null}else{$failures.Add('legacy digest conflict wrong rejection: '+$legacyDigestReason)|Out-Null}
+if((Get-InstallStateFileDigest $legacyRegistryPath)-eq$legacyHistoryBeforeProbe){$checks.Add('legacy preservation probes grant no new registry or backup ownership')|Out-Null}else{$failures.Add('legacy probes modified registry')|Out-Null}
+if($env:DEV_HARNESS_COMPAT_LOG_ROOT){$legacyPreservationProbe|ConvertTo-Json -Depth 20|Set-Content (Join-Path $env:DEV_HARNESS_COMPAT_LOG_ROOT 'legacy-preservation-boundary.json')}
+
 $legacyClaudeSettingsPath = Join-Path $legacyUserProfile '.claude\settings.json'
 $legacyClaudeSettings = Get-Content -LiteralPath $legacyClaudeSettingsPath -Raw -Encoding utf8 | ConvertFrom-Json
 $legacyClaudeSettings | Add-Member -NotePropertyName 'lifecycle_user_sentinel' -NotePropertyValue 'preserve-me' -Force
@@ -1531,6 +1584,10 @@ if ($legacyUninstallResult.ExitCode -eq 0 -and
     $failures.Add(("synthetic full uninstall should remove Codex hooks, preserve released managed_config, restore its oldest safe baseline, and leave a reusable pointer marker; exit={0}; exact={1}; missing={2}; hooks={3}; managed_config={4}; semantic={5}; registry={6}; install_journal={7}; uninstall_journal={8}; marker={9}; output={10}" -f $legacyUninstallResult.ExitCode,($legacyExactAfterUninstall -ceq $legacyEarliestExactContent),(-not (Test-Path -LiteralPath $legacyEarliestMissingPath)),(-not (Test-Path -LiteralPath $legacyCodexHooksPath)),($legacyManagedConfigAfterUninstall -ceq $legacyManagedConfigUserContent),($null -ne $legacySettingsAfterUninstall -and [string]$legacySettingsAfterUninstall.lifecycle_user_sentinel -eq 'preserve-me'),(Test-Path -LiteralPath $legacyRegistryPath),(Test-Path -LiteralPath $legacyInstallJournalPath),(Test-Path -LiteralPath $legacyUninstallJournalPath),($legacyMarkerContentAfterUninstall -eq $legacyPointerDigestAfterApply),($legacyUninstallResult.Output -replace '\r?\n',' | '))) | Out-Null
 }
 
+$legacyRestoreRecordsAfter=@($retryActiveManifestPaths|ForEach-Object { $value=Get-Content $_ -Raw|ConvertFrom-Json -AsHashtable; [ordered]@{path=$_;backups=$value.backups;managed_backup_targets=$value.managed_backup_targets} })
+if(($legacyRestoreRecordsBefore|ConvertTo-Json -Depth 100 -Compress)-ceq($legacyRestoreRecordsAfter|ConvertTo-Json -Depth 100 -Compress)){$checks.Add('legacy consumption changes status without adding ownership, backups or expected postimages')|Out-Null}else{$failures.Add('legacy consumption fabricated or changed restore records')|Out-Null}
+$legacyPreservedAfter=@($legacyPreservedLinks|ForEach-Object {[ordered]@{path=$_.Path;identity=(Get-InstallManagedPathIdentity $_.Path);target_digest=(Get-InstallBackupPayloadDigest -Path $_.Target -ItemType directory)}})
+if(($legacyPreservedBefore|ConvertTo-Json -Depth 12 -Compress)-ceq($legacyPreservedAfter|ConvertTo-Json -Depth 12 -Compress)){$checks.Add('native legacy uninstall leaves unowned links and target bytes unchanged, without acquiring ownership')|Out-Null}else{$failures.Add('legacy unowned preserved assets changed during uninstall')|Out-Null}
 $legacyFreshInstallResult = Invoke-RepoScriptProcess `
     -UserProfile $legacyUserProfile `
     -ScriptPath $legacyInstallScript `

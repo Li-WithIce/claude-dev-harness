@@ -894,7 +894,7 @@ function Mark-LegacyPointerIfConsumed {
         if ([string]::IsNullOrWhiteSpace($manifestRepoRoot)) {
             throw "Consumed legacy rebaseline receipt manifest has no RepoRoot: $manifestPath"
         }
-        $expectedReceiptPointerPath = Get-NormalizedPath -Path (Join-Path $manifestRepoRoot 'backups\active-install.json')
+        $expectedReceiptPointerPath = Get-NormalizedPath -Path ([IO.Path]::Combine($manifestRepoRoot, 'backups', 'active-install.json'))
         $receiptPointerPath = Get-NormalizedPath -Path $receipt['legacy_pointer_path']
         if ($receiptPointerPath -ne $expectedReceiptPointerPath) {
             throw "Consumed legacy rebaseline receipt pointer path does not match its manifest RepoRoot: $manifestPath"
@@ -1267,8 +1267,15 @@ function Assert-WorkspaceManifestIdentity {
         (Get-NormalizedPath -Path $ManifestPath) -ne (Get-NormalizedPath -Path (Join-Path $manifestBackupRoot 'install-manifest.json'))) {
         throw "Install manifest backup ownership is outside the current USERPROFILE: $ManifestPath"
     }
-    if ((Get-NormalizedPath -Path $Manifest['vault_path']) -ne (Get-NormalizedPath -Path (Join-Path $ExpectedWorkspaceRoot '.assistant'))) {
+    if ((Get-NormalizedPath -Path $Manifest['vault_path']) -ne (Get-NormalizedPath -Path ([IO.Path]::Combine($ExpectedWorkspaceRoot, '.assistant')))) {
         throw "Install manifest vault path does not match workspace: $ManifestPath"
+    }
+    # Historical user identities are lexical; actual restore paths remain checked separately.
+    foreach ($hostName in @('.claude','.codex','.agents')) {
+        $field = @{ '.claude'='claude_home'; '.codex'='codex_home'; '.agents'='agents_home' }[$hostName]
+        if ((Get-NormalizedPath -Path $Manifest[$field]) -ne (Get-NormalizedPath -Path ([IO.Path]::Combine($env:USERPROFILE,$hostName)))) {
+            throw "Install manifest user-global root does not match current USERPROFILE: $ManifestPath"
+        }
     }
     [void](Get-InstallReleasedBackupTargetPaths -Manifest $Manifest)
 }
@@ -1396,6 +1403,116 @@ function Refresh-InstallRegistryManifestDigests {
     $Registry['manifest_integrity_contract'] = 'sha256-v1'
 }
 
+function Get-UninstallHistoricalSkillState {
+    param($Registry,[object[]]$RestorePlan=@())
+    $history = @()
+    foreach ($manifestPath in @($Registry.global_manifest_history)) {
+        Assert-InstallManifestRegistryDigest -Registry $Registry -ManifestPath $manifestPath -RequireManifestIntegrity $true
+        $manifest = Read-InstallManifest -Path $manifestPath
+        $history += [pscustomobject]@{ Path=$manifestPath; Manifest=$manifest }
+    }
+    $required = [ordered]@{}
+    foreach ($key in $Registry.workspaces.Keys) {
+        $entry = $Registry.workspaces[$key]
+        $latest = @($entry.manifests)[-1]
+        $owner = @($history | Where-Object Path -eq $latest)
+        if ($owner.Count -ne 1 -or $latest -in @($Registry.retired_manifest_history)) { throw 'Shared Skill owner is outside active registry history' }
+        $manifest = $owner[0].Manifest
+        if (-not $manifest.Contains('feature_ownership')) { continue } # synthetic receipt owns only its recorded restore targets
+        if ($manifest.feature_ownership.schema_version -cne 'feature-ownership/v1' -or $manifest.feature_ownership.skills -isnot [Collections.IList]) { throw 'Shared Skill owner has no explicit Skill requirements' }
+        foreach ($name in $manifest.feature_ownership.skills) {
+            if ($name -isnot [string] -or $name -cnotmatch '^(?:\.system|[A-Za-z0-9][A-Za-z0-9._-]*)$' -or $name -ceq 'docs') { throw 'Shared Skill requirement is not a supported contained name' }
+            if (-not $required.Contains($name)) { $required[$name] = @() }
+            $required[$name] += @($owner[0])
+        }
+    }
+    $preserved = [Collections.Generic.List[object]]::new()
+    $checkedParents = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($hostName in @('.claude','.codex','.agents')) {
+        $root = [IO.Path]::Combine($env:USERPROFILE,$hostName,'skills')
+        $names = @($required.Keys)
+        if (Test-Path -LiteralPath $root -PathType Container) { $names += @(Get-ChildItem -LiteralPath $root -Force | ForEach-Object Name) }
+        foreach ($item in $history) { foreach ($record in $item.Manifest.backups) {
+            if ([IO.Path]::GetDirectoryName([string]$record.path) -eq $root) { $names += @([IO.Path]::GetFileName([string]$record.path)) }
+        }}
+        foreach ($name in @($names | Sort-Object -Unique)) {
+            $path = [IO.Path]::Combine($root,$name)
+            $cover = $null
+            foreach ($item in $history) { foreach ($record in $item.Manifest.backups) {
+                $recordPath = Get-NormalizedPath $record.path
+                if ($path -eq $recordPath -or (Test-PathWithinRoot -Path $path -RootPath $recordPath)) { $cover = [pscustomobject]@{ Record=$record; Owner=$item; Path=$recordPath } }
+            }}
+            if ($null -ne $cover) {
+                $record = $cover.Record
+                if ($record.ownership -cne 'managed' -or $record.expected_postimage.mode -cne 'exact') { throw "Shared Skill has an unsupported ownership contract: $path" }
+                # During native resume, the journal-derived chain/prefix validates
+                # already restored targets; comparing only the original install
+                # postimage would reject legitimate partial restoration.
+                $restoring = @($RestorePlan | Where-Object { $_.Record.path -eq $cover.Path -or (Test-PathWithinRoot -Path $cover.Path -RootPath $_.Record.path) }).Count -gt 0
+                if (-not $restoring -and $checkedParents.Add($cover.Path)) {
+                    if (-not (Test-InstallExactIdentityEqual -Left (Get-InstallManagedPathIdentity $cover.Path) -Right $record.expected_postimage)) { throw "Shared Skill link differs from registered identity: $path" }
+                }
+                if ($cover.Path -eq $path -and $record.expected_postimage.item_type -ceq 'link' -and $record.expected_postimage.link_target -ne [IO.Path]::Combine([string]$cover.Owner.Manifest.repo_root,'skills',$name)) { throw "Shared Skill source conflicts with registered owner: $path" }
+                continue # parent identities authorize their original restore contract; no invented leaf postimage
+            }
+            $identity = Get-InstallManagedPathIdentity $path
+            if ($identity.item_type -cne 'link') {
+                if ($required.Contains($name) -and $name -cne '.system') { throw "Required shared Skill lacks registered live link: $path" }
+                continue # host-native .system or unrelated external physical content
+            }
+            $target = Get-NormalizedPath $identity.link_target
+            $registeredSource = @($Registry.workspaces.Values | Where-Object { Test-PathWithinRoot -Path $target -RootPath ([IO.Path]::Combine([string]$_.repo_root,'skills')) }).Count -gt 0
+            if (-not $required.Contains($name) -and -not $registeredSource) { continue }
+            $legacy = @()
+            if ($required.Contains($name)) {
+                foreach ($owner in $required[$name]) {
+                    if ($target -ne [IO.Path]::Combine([string]$owner.Manifest.repo_root,'skills',$name)) { continue }
+                    $ownerKey = Get-WorkspaceRegistryKey $owner.Manifest.workspace_root
+                    foreach ($candidate in $history) {
+                        $m = $candidate.Manifest
+                        if ($candidate.Path -notin @($Registry.workspaces[$ownerKey].manifests) -or -not $m.Contains('legacy_rebaseline_receipt') -or $m.repo_root -ne $owner.Manifest.repo_root) { continue }
+                        $receipt = $m.legacy_rebaseline_receipt
+                        if ($receipt.contract -cne 'legacy_rebaseline/v1' -or
+                            $receipt.plan_digest -notmatch '^[0-9a-f]{64}$' -or
+                            $receipt.source_registry_sha256 -notmatch '^[0-9a-f]{64}$' -or
+                            $receipt.source_payload_set_sha256 -notmatch '^[0-9a-f]{64}$' -or
+                            $receipt.source_registry_path -ne $m.registry_path -or
+                            $receipt.legacy_pointer_path -ne [IO.Path]::Combine([string]$m.repo_root,'backups','active-install.json') -or
+                            $receipt.legacy_pointer_sha256 -notmatch '^(missing|[0-9a-f]{64})$' -or
+                            $receipt.source_manifest_digests -isnot [Collections.IList] -or
+                            $receipt.source_manifest_count -ne @($receipt.source_manifest_digests).Count -or
+                            $receipt.source_manifest_count -lt 1 -or
+                            $receipt.synthetic_backup_record_count -ne @($m.backups).Count) { throw "Legacy Skill preservation boundary is invalid: $path" }
+                        foreach ($source in $receipt.source_manifest_digests) {
+                            if ($source.sha256 -notmatch '^[0-9a-f]{64}$' -or -not ((Test-PathWithinRoot -Path $source.path -RootPath ([IO.Path]::Combine($env:USERPROFILE,'.dev-harness','backups'))) -or ($source.path -eq $receipt.legacy_pointer_manifest_path -and $source.sha256 -eq $receipt.legacy_pointer_manifest_sha256 -and (Test-PathWithinRoot -Path $source.path -RootPath ([IO.Path]::Combine([string]$m.repo_root,'backups')))))) { throw "Legacy Skill source history is invalid: $path" }
+                            [void](Assert-InstallStatePathHasNoReparsePoint -Path $source.path -Label 'Legacy Skill source history')
+                            if ((Get-InstallStateFileDigest $source.path) -ne $source.sha256) { throw "Legacy Skill source history digest mismatch: $path" }
+                        }
+                        $legacy += @($candidate.Path)
+                    }
+                }
+            }
+            if ($legacy.Count -ne 1) { throw "User-global managed Skill has no registered ownership or untouched legacy boundary: $path" }
+            $preserved.Add([pscustomobject]@{Path=$path;Target=$target;Identity=$identity;Receipt=$legacy[0]})
+        }
+    }
+    return $preserved.ToArray()
+}
+
+function Assert-UninstallPreservedSkillWriteSet {
+    param([object[]]$Preserved,[object[]]$Plan,$Manifests)
+    $writes = @($Plan | ForEach-Object { [string]$_.Record.path })
+    $writes += @($Manifests | ForEach-Object { if ($_.generated_repo_system_path) { [string]$_.generated_repo_system_path } })
+    foreach ($item in $Preserved) {
+        if (-not (Test-InstallExactIdentityEqual -Left (Get-InstallManagedPathIdentity $item.Path) -Right $item.Identity)) { throw "Preserved legacy Skill changed during planning: $($item.Path)" }
+        foreach ($write in $writes) {
+            foreach ($protected in @($item.Path,$item.Target)) {
+                if ($write -eq $protected -or (Test-PathWithinRoot -Path $protected -RootPath $write) -or (Test-PathWithinRoot -Path $write -RootPath $protected)) { throw "Uninstall restore or cleanup would affect unowned legacy Skill: $($item.Path)" }
+            }
+        }
+    }
+}
+
 function Assert-GlobalHistoryState {
     param(
         [string[]]$GlobalHistory,
@@ -1459,7 +1576,7 @@ function Assert-GlobalHistoryState {
                 -RegistryPath $RegistryPath
             $manifestOwners[$entryManifestPath] = [string]$workspaceEntry.Key
         }
-        $registeredRepoSkillRoots += Get-NormalizedPath -Path (Join-Path $entry['repo_root'] 'skills')
+        $registeredRepoSkillRoots += Get-NormalizedPath -Path ([IO.Path]::Combine([string]$entry['repo_root'], 'skills'))
     }
 
     $previousRetiredHistoryIndex = -1
@@ -1504,26 +1621,7 @@ function Assert-GlobalHistoryState {
     }
 
     $activeOwner = Get-RegisteredManifestOwner -ManifestPath $GlobalHistory[-1] -Workspaces $Workspaces -RegistryPath $RegistryPath
-    $activeRepoSkills = Get-NormalizedPath -Path (Join-Path $activeOwner.RepoRoot 'skills')
-    foreach ($hostSkillsRoot in @(
-        Join-Path $activeOwner.Manifest['claude_home'] 'skills'
-        Join-Path $activeOwner.Manifest['codex_home'] 'skills'
-        Join-Path $activeOwner.Manifest['agents_home'] 'skills'
-    )) {
-        if (-not (Test-Path -LiteralPath $hostSkillsRoot -PathType Container)) {
-            continue
-        }
-        foreach ($entry in Get-ChildItem -LiteralPath $hostSkillsRoot -Force) {
-            $target = Get-JunctionTarget -Path $entry.FullName
-            if ([string]::IsNullOrWhiteSpace($target)) {
-                continue
-            }
-            $isRegisteredHarnessLink = @($registeredRepoSkillRoots | Where-Object { Test-PathWithinRoot -Path $target -RootPath $_ }).Count -gt 0
-            if ($isRegisteredHarnessLink -and -not (Test-PathWithinRoot -Path $target -RootPath $activeRepoSkills)) {
-                throw "User-global managed link disagrees with registry active owner: $($entry.FullName)"
-            }
-        }
-    }
+    [void](Get-UninstallHistoricalSkillState -Registry $Registry)
     return $activeOwner
 }
 
@@ -2203,6 +2301,8 @@ function Resume-UninstallTransaction {
         -RestoreUserGlobal $restoreUserGlobal `
         -ManifestCache $manifestCache `
         -ReleasedTargetHistory (Get-InstallRegistryReleasedTargetHistoryMap -Registry $resumeRegistry -ExpectedUserProfile $env:USERPROFILE))
+    $preservedSkills = @(if ($null -ne $resumeRegistry) { Get-UninstallHistoricalSkillState -Registry $resumeRegistry -RestorePlan $restorePlan })
+    Assert-UninstallPreservedSkillWriteSet -Preserved $preservedSkills -Plan $restorePlan -Manifests @($manifestCache.Values)
     $resumeProjectionValidator = { param($Projected, $ProjectedPlan) [void](Get-InstallRestorePlanPrefix -Plan $ProjectedPlan -ProjectedExactIdentities $Projected) }
     Repair-InstallRestorePlanTransitions -Plan $restorePlan -ValidateProjectedPlan $resumeProjectionValidator
     $restorePrefix = Get-InstallRestorePlanPrefix -Plan $restorePlan
@@ -2710,6 +2810,8 @@ $restorePlan = @(Get-InstallRestorePlan `
     -ManifestCache $manifestCache `
     -ReleasedTargetHistory $releasedTargetHistory)
 [void](Get-InstallRestorePlanPrefix -Plan $restorePlan -RequireInitial)
+$preservedSkills = @(if ($registered) { Get-UninstallHistoricalSkillState -Registry $registry })
+Assert-UninstallPreservedSkillWriteSet -Preserved $preservedSkills -Plan $restorePlan -Manifests @($manifestCache.Values)
 
 $legacyActiveInstallPath = Join-Path $RepoRoot 'backups\active-install.json'
 $registryAction = 'none'

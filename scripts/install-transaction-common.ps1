@@ -1551,7 +1551,11 @@ function Get-InstallSharedSkillPlan {
             if($name -ceq '.system'){
                 if($Verification -and -not $rootLink -and (Get-JunctionTarget $path) -and $live.Contains($name)){
                     $identity=Get-InstallManagedPathIdentity $path
+                    $record=$live[$name].Record
+                    if($record.ownership -cne 'managed' -or $record.expected_postimage.mode -cne 'exact' -or $record.expected_postimage.item_type -cne 'link'){throw "Shared Skill has an unsupported ownership contract: $path"}
                     if(-not(Test-InstallExactIdentityEqual -Left $identity -Right $live[$name].Record.expected_postimage)){throw "Shared Skill link differs from registered identity: $path"}
+                    if($identity.link_target -ne [IO.Path]::Combine($live[$name].Repo,'skills',$name)){throw "Shared Skill source conflicts with registered owner: $path"}
+                    $expected[$name]=$identity
                     $desired=$identity.link_target
                 }
                 $targets[$name]=$desired

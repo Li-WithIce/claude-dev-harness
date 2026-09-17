@@ -171,7 +171,7 @@
     },
     {
       "path": "scripts/install-transaction-common.ps1",
-      "sha256": "sha256:99aec14c9c53531f81ac476869acd8c60dbce4a6e08c58a7575a19fa81e8a103",
+      "sha256": "sha256:81c83ae6a0cba5cb6ac9b5d2c3a2be7ed8a90ffb0dc6f9184171cc14bc402d8e",
       "layer": "d1-distribution",
       "trust_paths": [
         "distribution"
@@ -179,9 +179,9 @@
       "root_ids": [
         "workspace-bootstrap"
       ],
-      "physical_loc": 1608,
-      "nonblank_loc": 1486,
-      "executable_loc": 1479
+      "physical_loc": 1612,
+      "nonblank_loc": 1490,
+      "executable_loc": 1483
     },
     {
       "path": "scripts/lib/Harness.AdapterAction.psm1",
@@ -1565,13 +1565,13 @@
   "unresolved_dependencies": [],
   "totals": {
     "file_count": 29,
-    "physical_loc": 10760,
-    "nonblank_loc": 9848,
-    "executable_loc": 9776,
+    "physical_loc": 10764,
+    "nonblank_loc": 9852,
+    "executable_loc": 9780,
     "runtime_file_count": 21,
     "runtime_executable_loc": 3141,
     "distribution_file_count": 18,
-    "distribution_executable_loc": 8011,
+    "distribution_executable_loc": 8015,
     "duplicate_edge_count": 0,
     "artifact_count": 39,
     "artifact_bytes": 143030
