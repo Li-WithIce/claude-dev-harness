@@ -15,7 +15,9 @@ validation, projection, and task-state machinery while keeping the same public
 contracts. Its frozen baseline remains 3068 executable LOC. The 2026-09-14
 H01/H02 authorization covers the current 3141-line implementation with the
 unchanged `KTB-EX-002` +10, `KTB-EX-003` H01 +2 and `KTB-EX-004` H02 +61.
-The current strict acceptance bound is <3142; historical TK-07 bounds remain
+The 2026-09-20 limited Hook authorization adds `KTB-EX-005` +51 for the reviewed
+converged implementation, without changing baseline 3068 or those prior exceptions.
+The current strict acceptance bound is <3193; historical TK-07 bounds remain
 recorded below and are not rewritten as current measurement results.
 The original below-3000 goal remains unmet; terminal task closure additionally
 requires all prescribed verification evidence. A later
@@ -424,12 +426,33 @@ unknown-error sanitization are unchanged. Test timeout budgets are unchanged.
 
 This is an engineering budget decision only. It does not establish installed
 Hook activation, host qualification, or B03 behavior acceptance.
+### Limited Hook usability budget authorization, 2026-09-20
+
+The approved converged source diff has SHA256
+`0120ec9d18750fee44d029847c84f16da6063156c6576bce36440099b338c0e7`.
+Its final measurements are **3192 LOC / 35979 tokens / 10628 statement ASTs**.
+The authorized limits are **Runtime transitive executable LOC < 3193**, Token
+checkpoint **35979**, and Statement AST checkpoint **10628**, with no spare
+growth authorization beyond this reviewed implementation.
+
+Baseline **3068** and `KTB-EX-002/003/004` coverage **+10/+2/+61** remain intact.
+`KTB-EX-005` adds **+51**, making total covered growth **124**. Diagnostics account
+for **+29 LOC / +186 tokens / +70 ASTs**, including both A3 Hook entry points;
+bounded literal-data recognition accounts for **+22 / +218 / +60**. Both costs
+use the existing accounting and the same Runtime closure, not a baseline reset.
+
+This approval does not authorize further Runtime implementation changes for I03.
+The direct diagnostic consumer remains C2 and preserves evidence provenance.
+Roots, classification, file inclusion, accounting algorithms, exact-Base 35-percent
+reduction, line/statement density, parameter layout, and each Adapter's <200 limit
+are unchanged. No deployment or real Hook execution acceptance is implied.
+
 ## Terminal SLOs
 
 These are end-state directions, not TK-00 completion claims:
 
 - Runtime Kernel transitive executable LOC < 3000 as the original long-term goal;
-  the current H01/H02 authorization uses the explicit <3142 acceptance bound;
+  the current limited Hook authorization uses the explicit <3193 acceptance bound;
 - Entry Contract <= 80 lines and <= 1200 tokens;
 - each Host Adapter < 200 executable LOC;
 - new module central-file modifications = 0 for discovery, validation, and

@@ -138,6 +138,10 @@ try {
     Check ($result.Code -eq 0 -and $result.Report.evidence.hook_process_observed.value -eq $true -and $result.Report.evidence.host_tool_event_observed.value -eq $true -and $result.Report.evidence.decision_observed.value -ceq 'deny' -and $result.Report.evidence.fixed_error_category -ceq 'policy-requirement') 'supplied fixture projection separates process, tool and exact fixed decision'
     Check ($result.Report.evidence.ids.tool_use_id -ceq 'copied-tool-id' -and $result.Report.evidence.ids.hook_run_id -ceq 'copied-hook-run' -and $null -eq $result.Report.evidence.loaded.value) 'native metadata does not invent loaded status or missing IDs'
     Check ($result.Report.evidence.correlation.observed_configuration_matches -eq $true -and $result.Report.evidence.correlation.harness_handler_attribution -ceq 'unknown' -and $result.Report.evidence.correlation.tool_to_hook_attribution -ceq 'unknown') 'shared config path does not prove Harness attribution or tool-decision linkage'
+    $record.hookSpecificOutput.permissionDecisionReason='Harness PreToolUse denied: policy-requirement; stage=policy; action=file_mutation'
+    $result = Diagnose $record
+    Check ($result.Code -eq 0 -and $result.Report.evidence.fixed_error_category -ceq 'policy-requirement') 'new canonical reason preserves known host-record category classification'
+    Check ($result.Report.evidence.correlation.harness_handler_attribution -ceq 'unknown' -and $result.Report.evidence.correlation.tool_to_hook_attribution -ceq 'unknown' -and -not $result.Report.authorizes_writes) 'new reason classification never authenticates the handler, decision linkage or writes'
     $record.hook_metadata.trustStatus='modified'
     $record.hook_metadata.enabled=$false
     $result = Diagnose $record
@@ -145,6 +149,41 @@ try {
     $record.source_kind='synthetic-process'
     $result = Diagnose $record
     Check ($result.Code -eq 0 -and $result.Report.evidence.synthetic_process_observed -and $result.Report.evidence.synthetic_decision -ceq 'deny' -and $null -eq $result.Report.evidence.hook_process_observed.value -and $null -eq $result.Report.evidence.host_tool_event_observed.value -and $null -eq $result.Report.session.cwd) 'synthetic process receipt never becomes real host or session evidence'
+    foreach ($code in @('input','permission-mode','workspace-binding','patch-path','patch-syntax','path-boundary','read-only','shell-form','policy-requirement','policy-unavailable','startup')) {
+        foreach ($suffix in @('','; stage=unknown; action=unknown','; stage=target; action=apply_patch')) {
+            $record.hookSpecificOutput.permissionDecisionReason='Harness PreToolUse denied: '+$code+$suffix
+            $result = Diagnose $record
+            Check ($result.Code -eq 0 -and $result.Report.evidence.fixed_error_category -ceq $code) 'legacy and contextual reason formats preserve the finite known category set'
+            Check ($null -eq $result.Report.evidence.decision_observed.value -and $null -eq $result.Report.evidence.hook_process_observed.value -and $result.Report.evidence.synthetic_decision -ceq 'deny' -and $result.Report.evidence.correlation.harness_handler_attribution -ceq 'unknown') 'known synthetic reason does not upgrade observation provenance'
+        }
+    }
+    foreach ($invalidReason in @(
+        'Harness PreToolUse denied: unknown',
+        'Harness PreToolUse denied: invented',
+        "Harness PreToolUse denied: policy-requirement; stage=$marker; action=file_mutation",
+        "Harness PreToolUse denied: policy-requirement; stage=policy; action=$marker",
+        'Harness PreToolUse denied: policy-requirement; stage=policy',
+        'Harness PreToolUse denied: policy-requirement; action=file_mutation; stage=policy',
+        'Harness PreToolUse denied: policy-requirement; stage=policy; action=file_mutation; stage=policy',
+        "Harness PreToolUse denied: policy-requirement; stage=policy; action=file_mutation; detail=$marker",
+        "Harness PreToolUse denied: policy-requirement`n$marker",
+        "Harness PreToolUse denied: policy-requirement`n",
+        'Harness PreToolUse denied: policy-requirement; stage=Policy; action=file_mutation',
+        'HARNESS_DENY:policy-requirement;stage=policy;action=file_mutation',
+        'Harness PreToolUse unclassified adapter exception; stage=preflight; action=file_mutation',
+        'Harness PreToolUse adapter returned invalid error output',
+        'Harness PreToolUse launcher exception; stage=startup',
+        12
+    )) {
+        $record.hookSpecificOutput.permissionDecisionReason=$invalidReason
+        $result = Diagnose $record
+        Check ($result.Code -eq 0 -and $result.Report.evidence.fixed_error_category -ceq 'unknown' -and $result.Report.evidence.synthetic_decision -ceq 'deny') 'unknown categories, invalid context and mixed content remain unclassified denials'
+    }
+    $record.hookSpecificOutput.permissionDecisionReason='Harness PreToolUse denied: policy-requirement; stage=policy; action=file_mutation'
+    $record.hookSpecificOutput.permissionDecision='allow'
+    $result = Diagnose $record
+    Check ($result.Code -eq 0 -and $result.Report.evidence.fixed_error_category -ceq 'unknown' -and $result.Report.evidence.synthetic_decision -ceq 'allow') 'known denial text cannot override an explicit different decision'
+    $record.hookSpecificOutput.permissionDecision='deny'
     $record.hookSpecificOutput.permissionDecisionReason=$marker
     $result = Diagnose $record
     Check ($result.Code -eq 0 -and $result.Report.evidence.fixed_error_category -ceq 'unknown' -and $result.Report.evidence.synthetic_decision -ceq 'deny') 'unknown denial stays unknown and denied without copying or hashing its text'

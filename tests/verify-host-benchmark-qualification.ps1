@@ -1,5 +1,5 @@
 ﻿[CmdletBinding()]
-param([string]$RepoRoot = '')
+param([string]$RepoRoot = '',[switch]$PhysicalIdentityOnly,[switch]$GitOnly,[switch]$RepositoryOnly,[string]$ResultDirectory = '')
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
@@ -12,6 +12,9 @@ $script:hostBenchmarkTemplateRoot = ''
 $script:hostBenchmarkCognitiveHome = ''
 function Check([bool]$Condition,[string]$Message) {
     if ($Condition) { $script:checks++ } else { $script:failures.Add($Message) }
+    if ($ResultDirectory) {
+        [IO.File]::AppendAllText((Join-Path $ResultDirectory 'checks.jsonl'),(@{passed=$Condition;assertion=$Message}|ConvertTo-Json -Compress)+"`n")
+    }
 }
 function Invoke-Git {
     param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)][string[]]$Arguments)
@@ -19,14 +22,249 @@ function Invoke-Git {
     if ($LASTEXITCODE -ne 0) { throw "git $($Arguments -join ' ') failed: $($output -join ' | ')" }
     return $output
 }
-function Invoke-HostGit {
-    param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)][string[]]$Arguments)
-    return @(Invoke-Git -Root $Root -Arguments $Arguments)
+# Exercise the runner's actual Git transport and enumeration, without starting it.
+$runnerTokens=$null; $runnerErrors=$null
+$runnerAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $RepoRoot 'scripts/run-host-benchmark.ps1'),[ref]$runnerTokens,[ref]$runnerErrors)
+if ($runnerErrors.Count) { throw 'host runner parse failed' }
+foreach ($functionName in @('Invoke-HostGitProcess','Invoke-HostGit','Get-HostRunnerWorkspaceChanges','Get-HostGitState','Test-HostGitFilesMatchRevision','Test-HostRunnerExactUtf8File','Test-HostRunnerTrialEvidence')) {
+    $definition=@($runnerAst.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq $functionName},$true))
+    if ($definition.Count -ne 1) { throw "Host runner function not unique: $functionName" }
+    . ([scriptblock]::Create($definition[0].Extent.Text))
+}
+if ($ResultDirectory) { [void][IO.Directory]::CreateDirectory($ResultDirectory) }
+trap {
+    if ($ResultDirectory) {
+        $detail=[ordered]@{message=$_.Exception.Message;stack=$_.ScriptStackTrace;data=@{}}
+        foreach ($key in $_.Exception.Data.Keys) { $detail.data[[string]$key]=$_.Exception.Data[$key] }
+        [IO.File]::WriteAllText((Join-Path $ResultDirectory 'exception.json'),($detail|ConvertTo-Json -Depth 6))
+    }
+    throw
 }
 function Write-Utf8 {
     param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$Text)
     [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Path))
     [IO.File]::WriteAllText($Path,$Text,[Text.UTF8Encoding]::new($false))
+}
+function Invoke-SeparateRepositoryChecks {
+    param([string]$ScratchRoot)
+    $parent = Join-Path $ScratchRoot 'runner-source'
+    Initialize-GitFixture $parent
+    Write-Utf8 (Join-Path $parent 'parent.txt') 'parent must remain unchanged'
+    Commit-GitFixture $parent
+    $parentHead = (@(Invoke-HostGit $parent @('rev-parse','HEAD')) -join '').Trim()
+    $parentIndex = (Get-FileHash -LiteralPath (Join-Path $parent '.git/index')).Hash
+    $trial = Join-Path $parent '.assistant/运行时/release-qualification/thin-v2-host-benchmark-631271e5cf62447ca457dfb3238a87ec/group-1-5e1fbe597bd74dba811896588244e7c7/bare-1'
+    $workspace = Join-Path $trial 'workspace'
+    $metadataRoot = Join-Path $ScratchRoot 'git-metadata'
+    $binding = New-HostTrialRepository -Workspace $workspace -MetadataRoot $metadataRoot
+    Write-Utf8 (Join-Path $workspace 'src/value.txt') 'alpha'
+    Write-Utf8 (Join-Path $workspace 'staged.txt') 'baseline'
+    Write-Utf8 (Join-Path $workspace '.gitignore') "ignored/`n"
+    $baseline = Initialize-HostWorkspaceBaseline $workspace
+    Check ($binding.baseline_revision -ceq $baseline -and $baseline -cne $parentHead) 'separate repository baseline must belong to its independently constructed workspace'
+    Check (Test-HostGitFilesMatchRevision -Root $workspace -Paths @((Join-Path $workspace 'src/value.txt'),(Join-Path $workspace 'staged.txt')) -Revision $baseline) 'batched native blob checks must match all clean execution inputs'
+    $gitNames=@('GIT_DIR','GIT_WORK_TREE','GIT_INDEX_FILE','GIT_COMMON_DIR','GIT_OBJECT_DIRECTORY','GIT_ALTERNATE_OBJECT_DIRECTORIES')
+    $beforeEnvironment=@($gitNames|ForEach-Object{[Environment]::GetEnvironmentVariable($_,'Process')})
+    $childCode='[IO.File]::WriteAllText((Join-Path $env:GIT_WORK_TREE ''src/value.txt''),''beta''); & git rev-parse --show-toplevel --absolute-git-dir --git-common-dir --git-path index HEAD; exit $LASTEXITCODE'
+    $child=Invoke-HostTrialWrapper -Binding $binding -Arguments @('-NoLogo','-NoProfile','-NonInteractive','-Command',$childCode)
+    Check ($child.ExitCode -eq 0 -and $child.Output.Count -eq 5 -and $child.Output[4] -ceq $baseline -and [IO.Path]::GetFullPath($child.Output[0]) -ieq $workspace -and [IO.Path]::GetFullPath($child.Output[1]) -ieq $binding.git_directory -and [IO.Path]::GetFullPath($child.Output[2]) -ieq $binding.git_directory -and [IO.Path]::GetFullPath($child.Output[3]) -ieq (Join-Path $binding.git_directory 'index')) 'trial child must execute the business change against the recorded worktree, Git directory, common directory, index and baseline'
+    $afterEnvironment=@($gitNames|ForEach-Object{[Environment]::GetEnvironmentVariable($_,'Process')})
+    Check (($beforeEnvironment|ConvertTo-Json -Compress) -ceq ($afterEnvironment|ConvertTo-Json -Compress)) 'trial binding environment must not leak to source checks or another trial'
+    $changes = @(Get-HostRunnerWorkspaceChanges $workspace $baseline)
+    Check (-not (Test-HostGitFilesMatchRevision -Root $workspace -Paths @((Join-Path $workspace 'src/value.txt'),(Join-Path $workspace 'staged.txt')) -Revision $baseline)) 'batched native blob checks must reject one changed input without hiding it behind a clean sibling'
+    Check ($changes.Count -eq 1 -and $changes[0] -ceq 'src/value.txt') 'minimal separate trial must have exactly its intended business change'
+    $record = @{workspace_baseline_revision=$baseline;artifact_writes=0;runtime_writes=0}
+    Check (Test-HostRunnerTrialEvidence -Protocol bare -TrialRoot $trial -Record $record -SourceRevision $parentHead -SourceCommitTree ('0'*40)) 'minimal separate trial must produce valid disk Evidence'
+    $source = Join-Path $trial 'source'
+    $sourceBinding = New-HostTrialRepository -Workspace $source -MetadataRoot $metadataRoot -SourceRepository $parent -Revision $parentHead
+    $tree = (@(Invoke-HostGit $parent @('rev-parse','HEAD^{tree}')) -join '').Trim()
+    Check (Test-HostRunnerTrialEvidence -Protocol bare -TrialRoot $trial -Record $record -SourceRevision $parentHead -SourceCommitTree $tree -RequireSourceBinding) 'separate workspace and independent source clone must pass the same Evidence path'
+    Check ($binding.git_directory -cne $sourceBinding.git_directory -and $binding.observed_paths[3] -cne $sourceBinding.observed_paths[3]) 'trials and source clones must not share metadata or index'
+    $template = Join-Path $ScratchRoot 'separate-template'
+    Initialize-GitFixture $template
+    Write-Utf8 (Join-Path $template 'template.txt') 'independent template'
+    Commit-GitFixture $template
+    $null = Invoke-HostGit $template @('config','core.longpaths','true')
+    $null = Invoke-HostGit $template @('config','core.hooksPath','NUL')
+    $templateHead = (@(Invoke-HostGit $template @('rev-parse','HEAD')) -join '').Trim()
+    $copiedWorkspace = Join-Path (Split-Path $trial -Parent) 'bare-2/workspace'
+    $copiedBinding = New-HostTrialRepository -Workspace $copiedWorkspace -MetadataRoot $metadataRoot -SourceRepository $template -Revision $templateHead -CopyTemplate
+    Check ($copiedBinding.baseline_revision -ceq $templateHead -and $copiedBinding.git_directory -cne $sourceBinding.git_directory) 'copied qualification template must use native Git relocation with its independent recorded baseline'
+    $longRelative='deep/' + ('segment-' + ('x'*32) + '/')*3 + '证据.txt'
+    Write-Utf8 (Join-Path $workspace $longRelative) 'untracked'
+    Write-Utf8 (Join-Path $workspace 'staged.txt') 'index-only'
+    $null = Invoke-HostGit $workspace @('add','--','staged.txt')
+    Write-Utf8 (Join-Path $workspace 'staged.txt') 'baseline'
+    Write-Utf8 (Join-Path $workspace 'ignored/evidence.txt') 'ignored'
+    $changes = @(Get-HostRunnerWorkspaceChanges $workspace $baseline)
+    Check (@(Compare-Object @('src/value.txt','staged.txt','ignored/evidence.txt',$longRelative) $changes).Count -eq 0) 'separate repository must retain staged, unstaged, ignored and long untracked changes'
+    $null = Invoke-HostGit $workspace @('update-index','--assume-unchanged','staged.txt')
+    Check (@(Get-HostRunnerWorkspaceChanges $workspace $baseline) -ccontains '__git_index_flag__/staged.txt') 'separate repository must retain index-flag rejection'
+    $wrongBinding = @{}
+    foreach ($entry in $binding.GetEnumerator()) { $wrongBinding[$entry.Key]=$entry.Value }
+    $wrongBinding.git_directory = $sourceBinding.git_directory
+    $rejected=$false
+    try { Assert-HostTrialGitPointer $wrongBinding } catch { $rejected=$_.Exception.Message -ceq 'host-benchmark-git-pointer-mismatch' }
+    Check $rejected 'separate repository pointer cannot bind another trial metadata directory'
+    $null = Invoke-HostGit $workspace @('config','core.worktree',$parent)
+    try {
+        $rejected=$false
+        try { $null=Assert-HostTrialGitBinding $binding } catch { $rejected=$_.Exception.Message -ceq 'host-benchmark-git-binding-mismatch' }
+        Check $rejected 'binding check must detect persisted worktree tampering without forcing --work-tree'
+    } finally { $null=Invoke-HostGit $workspace @('config','core.worktree',$workspace) }
+    Check ((@(Invoke-HostGit $parent @('rev-parse','HEAD')) -join '').Trim() -ceq $parentHead -and (Get-FileHash -LiteralPath (Join-Path $parent '.git/index')).Hash -ceq $parentIndex) 'parent HEAD and index must remain unchanged throughout separate trial execution'
+    if ($ResultDirectory) {
+        [IO.File]::WriteAllText((Join-Path $ResultDirectory 'repository-bindings.json'),(@{workspace=$binding;source=$sourceBinding;workspace_length=$workspace.Length;old_metadata_path=(Join-Path $workspace '.git');parent_head=$parentHead;parent_index_sha256=$parentIndex}|ConvertTo-Json -Depth 6))
+    }
+}
+function Invoke-GitRegressionChecks {
+    param([string]$ScratchRoot)
+    $gitRoot=Join-Path $ScratchRoot 'git-long-path'
+    Initialize-GitFixture $gitRoot
+    Write-Utf8 (Join-Path $gitRoot 'tracked.txt') 'baseline'
+    Commit-GitFixture $gitRoot
+    $baseline=(@(Invoke-HostGit $gitRoot @('rev-parse','HEAD')) -join '').Trim()
+    $relative='.assistant/运行时/release-qualification/' + ('segment-' + ('x'*32) + '/')*5 + 'evidence.txt'
+    $target=Join-Path $gitRoot $relative
+    Write-Utf8 $target 'long path evidence'
+    Check ($target.Length -gt 277) 'Git fixture must retain the failing long-path boundary'
+    $changes=@(Get-HostRunnerWorkspaceChanges $gitRoot $baseline)
+    Check ($changes.Count -eq 1 -and $changes[0] -ceq $relative) 'command-level longpaths must enumerate the exact long Unicode path'
+    $state=Get-HostGitState $gitRoot
+    Check ($state.dirty -and $state.status_entry_count -eq 1) 'long untracked file must not become a clean Git state'
+    $incomplete=$null
+    try { $null=Invoke-HostGit $gitRoot @('-c','core.longpaths=false','ls-files','--others','--exclude-standard','--') } catch { $incomplete=$_.Exception }
+    Check ($null -ne $incomplete -and $incomplete.Data['exit_code'] -eq 0 -and [string]$incomplete.Data['stderr'] -match 'Filename too long') 'exit-zero incomplete enumeration must fail with stderr retained'
+    $failed=$null
+    try { $null=Get-HostRunnerWorkspaceChanges $gitRoot 'refs/heads/missing-benchmark-baseline' } catch { $failed=$_.Exception }
+    Check ($null -ne $failed -and $failed.Data['exit_code'] -ne 0 -and [string]$failed.Data['stderr'] -ne '') 'nonzero enumeration must fail rather than return empty changes'
+    $warning=@(Invoke-HostGit $gitRoot @('-c','alias.benchmark-warning=!echo warning-fixture >&2; echo actual-output','benchmark-warning') -WarningVariable warningRecords -WarningAction SilentlyContinue)
+    Check ($warning.Count -eq 1 -and $warning[0] -ceq 'actual-output' -and ($warningRecords -join '') -match 'warning-fixture') 'stderr warning must remain separate from Git stdout'
+    $partial=$null
+    try { $null=Invoke-HostGit $gitRoot @('-c','alias.benchmark-failure=!echo partial-output; echo failure-fixture >&2; exit 7','benchmark-failure') } catch { $partial=$_.Exception }
+    Check ($null -ne $partial -and $partial.Data['exit_code'] -eq 7 -and [string]$partial.Data['stdout'] -match 'partial-output' -and [string]$partial.Data['stderr'] -match 'failure-fixture') 'failed Git invocation must retain both streams without returning partial stdout'
+    $template=Join-Path $ScratchRoot 'git-binding-template'
+    Initialize-GitFixture $template
+    Write-Utf8 (Join-Path $template 'nested.txt') 'nested baseline'
+    Commit-GitFixture $template
+    $expectedHead=(@(Invoke-HostGit $template @('rev-parse','HEAD')) -join '').Trim()
+    $deepRoot=Join-Path ([IO.Path]::GetDirectoryName($target)) 'workspace'
+    Copy-Item -LiteralPath $template -Destination $deepRoot -Recurse -Force
+    $parentConfig=[IO.File]::ReadAllText((Join-Path $gitRoot '.git/config'))
+    $bindingSafe=$false
+    try {
+        $actualHead=(@(Invoke-HostGit $deepRoot @('rev-parse','HEAD')) -join '').Trim()
+        $bindingSafe=$actualHead -ceq $expectedHead
+    } catch {
+        $bindingSafe=$_.Exception.Message -ceq 'host-benchmark-git-command-failed' -and $_.Exception.Data['exit_code'] -ne 0
+    }
+    Check $bindingSafe 'deep Git discovery must bind the requested repository or fail, never return the parent HEAD'
+    try { $null=Invoke-HostGit $deepRoot @('config','benchmark.binding','nested-only') } catch {
+        Check ($_.Exception.Message -ceq 'host-benchmark-git-command-failed' -and $_.Exception.Data['exit_code'] -ne 0) 'unavailable deep repository writes must fail explicitly'
+    }
+    Check ([IO.File]::ReadAllText((Join-Path $gitRoot '.git/config')) -ceq $parentConfig) 'deep repository invocation must not write parent repository configuration'
+}
+function Invoke-PhysicalIdentityRegressionChecks {
+    param([Parameter(Mandatory)][string]$ScratchRoot)
+    $identityRoot = Join-Path $ScratchRoot 'physical-identity'
+    $identityFile = Join-Path $identityRoot 'same-file.txt'
+    Write-Utf8 $identityFile 'identity-fixture'
+    foreach ($identityPath in @($identityRoot,$identityFile)) {
+        $ordinaryIdentity = Get-HostFileSystemIdentity -Path $identityPath
+        $extendedIdentity = Get-HostFileSystemIdentity -Path ('\\?\' + $identityPath)
+        foreach ($field in @('volume','file_id','physical_path')) {
+            Check ([string]$ordinaryIdentity[$field] -ceq [string]$extendedIdentity[$field]) "ordinary and extended path $field differed for the same fixture object"
+        }
+        Check (-not ([string]$extendedIdentity.physical_path).StartsWith('\\?\',[StringComparison]::Ordinal)) 'extended input retained or duplicated its namespace prefix in the physical path'
+    }
+
+    $missingIdentityPath = Join-Path $identityRoot 'missing.txt'
+    foreach ($missingInput in @($missingIdentityPath,('\\?\' + $missingIdentityPath))) {
+        $missingFailure = $null
+        try { $null = Get-HostFileSystemIdentity -Path $missingInput } catch { $missingFailure = $_.Exception }
+        Check ($null -ne $missingFailure -and $missingFailure.Message -ceq 'host-benchmark-path-physical-identity-unavailable') 'a missing ordinary or extended identity target did not fail closed'
+        if ($null -ne $missingFailure) {
+            $missingData = $missingFailure.Data
+            Check ([string]$missingData['stage'] -ceq 'path' -and [int]$missingData['path_length'] -eq $missingInput.Length -and [string]$missingData['path_type'] -ceq 'unavailable' -and [string]$missingData['target_ref'] -ceq (Get-HarnessUtf8TextSha256 -Text $missingInput) -and $null -eq $missingData['native_exit_code'] -and [string]$missingData['error_summary'] -ceq 'target-unavailable') 'missing-target diagnostics omitted the stage or opaque target reference'
+            Check (-not (($missingData.Values | ForEach-Object { [string]$_ }) -join "`n").Contains($missingInput)) 'missing-target diagnostics retained the full target path'
+        }
+    }
+
+    $nativeFailureFixture = New-HostFileSystemIdentityError -Path $identityFile -Stage 'queryFileID' -Reason 'native-command-failed' -ExecutablePath 'fsutil.exe' -NativeExitCode 1 -NativeOutput @("Error 3: private-native-output $identityFile",'sensitive-fixture-value')
+    $nativeFailureException = $nativeFailureFixture.Exception
+    Check ($nativeFailureException.Message -ceq 'host-benchmark-path-physical-identity-unavailable' -and [string]$nativeFailureException.Data['stage'] -ceq 'queryFileID' -and [string]$nativeFailureException.Data['path_type'] -ceq 'file' -and [int]$nativeFailureException.Data['path_length'] -eq $identityFile.Length -and [string]$nativeFailureException.Data['target_ref'] -ceq (Get-HarnessUtf8TextSha256 -Text $identityFile) -and [string]$nativeFailureException.Data['executable_path'] -ceq 'fsutil.exe' -and [int]$nativeFailureException.Data['native_exit_code'] -eq 1 -and [string]$nativeFailureException.Data['error_summary'] -ceq 'native-command-failed:win32-error-3') 'native failure diagnostics changed the error code or omitted sanitized failure context'
+    $nativeFailureData = ($nativeFailureException.Data.Values | ForEach-Object { [string]$_ }) -join "`n"
+    Check (-not $nativeFailureData.Contains($identityFile) -and -not $nativeFailureData.Contains('private-native-output') -and -not $nativeFailureData.Contains('sensitive-fixture-value')) 'native failure diagnostics retained a full target path or arbitrary native output'
+    $nativeFailureDetails = [string]$nativeFailureFixture.ErrorDetails.Message
+    Check ($nativeFailureDetails.Contains([string]$nativeFailureException.Data['target_ref']) -and $nativeFailureDetails.Contains('queryFileID') -and -not $nativeFailureDetails.Contains($identityFile) -and -not $nativeFailureDetails.Contains('private-native-output') -and -not $nativeFailureDetails.Contains('sensitive-fixture-value')) 'native failure error-stream details omitted the target reference or exposed target/native output text'
+
+    & {
+        # These rejected namespaces must never reach a filesystem or network probe.
+        function Test-Path { throw 'unsupported namespace reached a filesystem probe' }
+        foreach ($unsupportedInput in @('\\host-identity.invalid\fixture\missing.txt','\\?\UNC\host-identity.invalid\fixture\missing.txt',('\\.\' + $identityFile))) {
+            $unsupportedFailure = $null
+            try { $null = Get-HostFileSystemIdentity -Path $unsupportedInput } catch { $unsupportedFailure = $_.Exception }
+            Check ($null -ne $unsupportedFailure -and $unsupportedFailure.Message -ceq 'host-benchmark-path-physical-identity-unavailable' -and [string]$unsupportedFailure.Data['stage'] -ceq 'path' -and [string]$unsupportedFailure.Data['path_type'] -ceq 'unsupported' -and [string]$unsupportedFailure.Data['error_summary'] -ceq 'unsupported-root') 'an unsupported namespace was accepted or reached a filesystem probe'
+        }
+    }
+
+    $identityLongHome = Join-Path $identityRoot 'long-sentinel-home'
+    while ($identityLongHome.Length -lt 150) { $identityLongHome = Join-Path $identityLongHome ('segment-' + ('x' * 32)) }
+    $identityLongAuth = Join-Path $identityLongHome 'auth.json'
+    Write-Utf8 $identityLongAuth '{}'
+    $longSentinel = Initialize-HostIsolatedConfigSentinel -Path $identityLongHome
+    $longConfigPath = Join-Path $identityLongHome 'config.toml'
+    $longIdentityBeforeMove = Get-HostFileSystemIdentity -Path $longConfigPath
+    Check ([string]$longIdentityBeforeMove.volume -ceq [string]$longSentinel.volume -and [string]$longIdentityBeforeMove.file_id -ceq [string]$longSentinel.file_id) 'long-path fixture sentinel did not match its initialized identity'
+    $longStagedPath = Join-Path ([string]$longSentinel.owner_path) $script:HostIsolatedConfigStagedLeaf
+    Check ($longStagedPath.Length -ge 262) 'long-path sentinel fixture did not exceed the legacy native path boundary'
+    [IO.File]::Move($longConfigPath,$longStagedPath,$false)
+    $longOrdinaryIdentity = Get-HostFileSystemIdentity -Path $longStagedPath
+    $longExtendedIdentity = Get-HostFileSystemIdentity -Path ('\\?\' + $longStagedPath)
+    foreach ($field in @('volume','file_id')) {
+        Check ([string]$longIdentityBeforeMove[$field] -ceq [string]$longOrdinaryIdentity[$field] -and [string]$longOrdinaryIdentity[$field] -ceq [string]$longExtendedIdentity[$field]) "sentinel $field changed across the long-path move or extended-path query"
+    }
+    Check ([string]$longOrdinaryIdentity.physical_path -ceq [string]$longExtendedIdentity.physical_path -and ([string]$longExtendedIdentity.physical_path).Equals($longStagedPath,[StringComparison]::OrdinalIgnoreCase)) 'long-path sentinel queries did not return the same unprefixed physical path'
+    Check ((Get-Item -LiteralPath $longStagedPath -Force).Attributes.HasFlag([IO.FileAttributes]::ReadOnly)) 'physical identity queries changed the long-path sentinel read-only attribute'
+    $longRecovered = Recover-HostIsolatedConfigSentinel -Path $identityLongHome
+    Check ($longRecovered -and -not (Test-Path -LiteralPath $longStagedPath) -and -not (Test-Path -LiteralPath $longSentinel.owner_path) -and (Test-HostExactUtf8File -Path $identityLongAuth -ExpectedText '{}') -and (Assert-HostCodexHomeLayout -Path $identityLongHome -AllowNativeSystemSkills)) 'the real long-path staged sentinel was not safely recovered'
+
+    $wrongIdentitySentinel = Initialize-HostIsolatedConfigSentinel -Path $identityLongHome
+    $wrongIdentityStagedPath = Join-Path ([string]$wrongIdentitySentinel.owner_path) $script:HostIsolatedConfigStagedLeaf
+    $wrongIdentityReplacement = Join-Path $identityRoot 'same-byte-replacement.toml'
+    Write-Utf8 $wrongIdentityReplacement $script:HostIsolatedConfigSentinelText
+    $replacementIdentity = Get-HostFileSystemIdentity -Path $wrongIdentityReplacement
+    Check ([string]$replacementIdentity.file_id -cne [string]$wrongIdentitySentinel.file_id) 'long-path replacement fixture did not have a distinct physical identity'
+    [IO.File]::SetAttributes($longConfigPath,[IO.FileAttributes]::Normal)
+    [IO.File]::Delete($longConfigPath)
+    [IO.File]::Move($wrongIdentityReplacement,$wrongIdentityStagedPath,$false)
+    [IO.File]::SetAttributes($wrongIdentityStagedPath,([IO.File]::GetAttributes($wrongIdentityStagedPath) -bor [IO.FileAttributes]::ReadOnly))
+    $wrongIdentityRejected = $false
+    try { $null = Recover-HostIsolatedConfigSentinel -Path $identityLongHome } catch { $wrongIdentityRejected = $_.Exception.Message -ceq 'host-benchmark-auth-home-config-sentinel-recovery-failed' }
+    $replacementIdentityAfter = Get-HostFileSystemIdentity -Path $wrongIdentityStagedPath
+    Check ($wrongIdentityStagedPath.Length -ge 262 -and $wrongIdentityRejected -and [string]$replacementIdentityAfter.volume -ceq [string]$replacementIdentity.volume -and [string]$replacementIdentityAfter.file_id -ceq [string]$replacementIdentity.file_id -and (Test-HostExactUtf8File -Path $wrongIdentityStagedPath -ExpectedText $script:HostIsolatedConfigSentinelText) -and (Get-Item -LiteralPath $wrongIdentityStagedPath -Force).Attributes.HasFlag([IO.FileAttributes]::ReadOnly) -and (Test-Path -LiteralPath $wrongIdentitySentinel.owner_path -PathType Container)) 'long-path recovery accepted or modified a same-byte foreign identity or its owner evidence'
+
+    $junctionTarget = Join-Path $identityRoot 'junction-target'
+    $junctionAlias = Join-Path $identityRoot 'junction-alias'
+    Write-Utf8 (Join-Path $junctionTarget 'preserve.txt') 'preserve'
+    [void](New-Item -ItemType Junction -Path $junctionAlias -Target $junctionTarget -ErrorAction Stop)
+    try {
+        $junctionIdentityRejected = $false
+        try { $null = Get-HostPhysicalPathInfo -Path $junctionAlias -RejectLinks } catch { $junctionIdentityRejected = $_.Exception.Message -ceq 'host-benchmark-path-link-alias-rejected' }
+        Check ($junctionIdentityRejected -and (Test-Path -LiteralPath $junctionAlias -PathType Container) -and (Test-HostExactUtf8File -Path (Join-Path $junctionTarget 'preserve.txt') -ExpectedText 'preserve')) 'physical identity lookup accepted or modified a rejected junction alias'
+    } finally {
+        Remove-Item -LiteralPath $junctionAlias -Force
+    }
+
+    $hardlinkIdentityHome = Join-Path $identityRoot 'hardlink-home'
+    Write-Utf8 (Join-Path $hardlinkIdentityHome 'auth.json') '{}'
+    $hardlinkIdentitySentinel = Initialize-HostIsolatedConfigSentinel -Path $hardlinkIdentityHome
+    $hardlinkIdentityConfig = Join-Path $hardlinkIdentityHome 'config.toml'
+    $hardlinkIdentityAlias = Join-Path $identityRoot 'hardlink-alias.toml'
+    [void](New-Item -ItemType HardLink -Path $hardlinkIdentityAlias -Target $hardlinkIdentityConfig -ErrorAction Stop)
+    $hardlinkIdentityRejected = $false
+    try { $null = Recover-HostIsolatedConfigSentinel -Path $hardlinkIdentityHome } catch { $hardlinkIdentityRejected = $_.Exception.Message -ceq 'host-benchmark-auth-home-config-sentinel-recovery-failed' }
+    Check ($hardlinkIdentityRejected -and (Test-Path -LiteralPath $hardlinkIdentityConfig -PathType Leaf) -and (Test-Path -LiteralPath $hardlinkIdentityAlias -PathType Leaf) -and (Test-Path -LiteralPath $hardlinkIdentitySentinel.owner_path -PathType Container) -and (Test-HostExactUtf8File -Path $hardlinkIdentityAlias -ExpectedText $script:HostIsolatedConfigSentinelText)) 'physical identity handling accepted a hard-linked sentinel or modified its alias/owner evidence'
 }
 function Get-DirectoryContentDigest {
     param([Parameter(Mandatory)][string]$Root)
@@ -83,15 +321,49 @@ function Invoke-FixtureRunner {
     }
     $report = if (Test-Path -LiteralPath $outputPath -PathType Leaf) { [IO.File]::ReadAllText($outputPath,[Text.UTF8Encoding]::new($false,$true)) | ConvertFrom-Json -Depth 80 } else { $null }
     $order = if (Test-Path -LiteralPath $logPath -PathType Leaf) { @([IO.File]::ReadAllLines($logPath,[Text.UTF8Encoding]::new($false,$true))) } else { @() }
+    if ($ResultDirectory) {
+        if ($null -ne $report) { [IO.File]::Copy($outputPath,(Join-Path $ResultDirectory ([IO.Path]::GetFileName($outputPath))),$false) }
+        [IO.File]::WriteAllText((Join-Path $ResultDirectory ("result-$Mode-$Groups-$Trials.json")),(@{mode=$Mode;exit_code=$exitCode;output=$lines;order=$order}|ConvertTo-Json -Depth 6))
+    }
     return [pscustomobject]@{ExitCode=$exitCode;Output=$lines;Report=$report;Order=$order}
 }
 
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ('hbq-' + [guid]::NewGuid().ToString('N').Substring(0,8))
 try {
     [void][IO.Directory]::CreateDirectory($scratch)
+    Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.AtomicWrite.psm1') -Force -ErrorAction Stop
     Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Path.psm1') -Force -ErrorAction Stop
     . (Join-Path $RepoRoot 'scripts\host-benchmark\HostBenchmark.Trial.ps1')
     . (Join-Path $RepoRoot 'skills\obsidian-memory\scripts\runtime-state-common.ps1')
+
+    if ($RepositoryOnly) {
+        Invoke-GitRegressionChecks -ScratchRoot $scratch
+        Invoke-SeparateRepositoryChecks -ScratchRoot $scratch
+        Invoke-PhysicalIdentityRegressionChecks -ScratchRoot $scratch
+        if ($failures.Count) { $failures | ForEach-Object { Write-Output "- FAIL: $_" }; exit 1 }
+        Write-Output "STATUS: PASS ($checks repository and identity checks)"
+        exit 0
+    }
+    if ($GitOnly) {
+        Invoke-GitRegressionChecks -ScratchRoot $scratch
+        if ($failures.Count) { $failures | ForEach-Object { Write-Output "- FAIL: $_" }; exit 1 }
+        Write-Output "STATUS: PASS ($checks Git checks)"
+        exit 0
+    }
+    Invoke-PhysicalIdentityRegressionChecks -ScratchRoot $scratch
+    if ($PhysicalIdentityOnly) {
+        Write-Output "Host benchmark physical identity checks: $checks"
+        if ($failures.Count) { $failures | ForEach-Object { Write-Output "- FAIL: $_" }; exit 1 }
+        Write-Output "STATUS: PASS ($checks checks)"
+        exit 0
+    }
+    Invoke-GitRegressionChecks -ScratchRoot $scratch
+
+    $repositoryChecksScratch = Join-Path ([IO.Path]::GetTempPath()) ('hbr-' + [guid]::NewGuid().ToString('N').Substring(0,8))
+    try { Invoke-SeparateRepositoryChecks -ScratchRoot $repositoryChecksScratch }
+    finally {
+        if (Test-Path -LiteralPath $repositoryChecksScratch -PathType Container) { Remove-Item -LiteralPath $repositoryChecksScratch -Recurse -Force }
+    }
 
     $emptyChangeWorkspace = Join-Path $scratch 'workspace-empty-change-set'
     [void][IO.Directory]::CreateDirectory($emptyChangeWorkspace)
@@ -869,7 +1141,8 @@ function Initialize-StubTrialEvidence {
     [void][IO.Directory]::CreateDirectory($trialRoot)
     $templateName = if ($Protocol -ceq 'v1') { 'workspace-v1' } else { 'workspace-direct' }
     $workspaceTemplate = Join-Path $env:HOST_BENCHMARK_TEST_TEMPLATE_ROOT $templateName
-    Copy-Item -LiteralPath $workspaceTemplate -Destination $workspace -Recurse -Force -ErrorAction Stop
+    $expectedBaseline = (@(Invoke-HostGit -Root $workspaceTemplate -Arguments @('rev-parse','HEAD')) -join '').Trim()
+    $null = New-HostTrialRepository -Workspace $workspace -MetadataRoot $script:HostTrialGitMetadataRoot -SourceRepository $workspaceTemplate -Revision $expectedBaseline -CopyTemplate
     $baseline = (@(Invoke-HostGit -Root $workspace -Arguments @('rev-parse','HEAD')) -join '').Trim()
     Write-StubUtf8 (Join-Path $workspace 'src\value.txt') 'beta'
     if ($Mode -ceq 'wrong-target-bytes' -and $Protocol -ceq 'v2' -and $Trial -eq 1) {
@@ -921,7 +1194,7 @@ function Initialize-StubTrialEvidence {
     }
     if ([Convert]::ToBoolean($Named.SourceBindingRequired)) {
         $sourceRoot = Join-Path $trialRoot 'source'
-        Copy-Item -LiteralPath (Join-Path $env:HOST_BENCHMARK_TEST_TEMPLATE_ROOT 'source') -Destination $sourceRoot -Recurse -Force -ErrorAction Stop
+        $null = New-HostTrialRepository -Workspace $sourceRoot -MetadataRoot $script:HostTrialGitMetadataRoot -SourceRepository (Join-Path $env:HOST_BENCHMARK_TEST_TEMPLATE_ROOT 'source') -Revision ([string]$Named.SourceRevision) -CopyTemplate
         $templateRevision = (@(Invoke-HostGit -Root $sourceRoot -Arguments @('rev-parse','HEAD')) -join '').Trim()
         if ($templateRevision -cne [string]$Named.SourceRevision) { throw 'fixture source template revision mismatch' }
         if ($Mode -ceq 'ignored-source' -and $Protocol -ceq 'v2' -and $Trial -eq 1) {
@@ -1030,6 +1303,7 @@ function Invoke-HostTrial {
     $templateCloneOutput = @(& git -c core.longpaths=true clone --no-local --no-checkout --quiet -- $fixture $sourceTemplate 2>&1 | ForEach-Object { [string]$_ })
     if ($LASTEXITCODE -ne 0) { throw "fixture source template clone failed: $($templateCloneOutput -join ' | ')" }
     [void](Invoke-Git $sourceTemplate @('config','core.longpaths','true'))
+    [void](Invoke-Git $sourceTemplate @('config','core.hooksPath','NUL'))
     $fixtureRevision = (@(Invoke-Git $fixture @('rev-parse','HEAD')) -join '').Trim()
     [void](Invoke-Git $sourceTemplate @('-c','core.hooksPath=NUL','checkout','--quiet','--detach',$fixtureRevision,'--'))
     $script:hostBenchmarkTemplateRoot = $templateRoot

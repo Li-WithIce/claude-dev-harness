@@ -19,6 +19,10 @@ The first integration commit records one verified tree, without reconstructing f
 
 Approved Runtime budget remains baseline 3068 LOC with explicit exceptions of +10 (KTB-EX-002), +2 (H01), and +61 (H02). Strict total limit is <3142; observed Runtime is 3141 LOC, 35575 tokens and 10498 statement ASTs. Token/AST checkpoints are 35575/10498. Growth against historical HEAD was +63 LOC, +223 tokens and +96 ASTs; checkpoint growth was +147 tokens and +96 ASTs because the prior token checkpoint already had 76 tokens of headroom. The original +10 correctness allowance and all review conditions remain in `kernel-tcb-roots.json`. No measurement, dependency, readability, safety or timeout rule changed in I01.
 
+These figures describe historical I01, not the current allowance. The separate
+2026-09-20 limited Hook approval is recorded in `thin-trust-kernel.md` and
+`KTB-EX-005`; it does not rewrite this integration result or imply deployment.
+
 ## Daily checkout changes not imported
 
 The daily HEAD still matches the historical parent. Its five unstaged files, empty staged diff and absence of untracked files were observed, not cleaned or merged.

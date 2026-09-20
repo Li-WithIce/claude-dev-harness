@@ -3,6 +3,8 @@ param()
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$stage = 'input'
+$actionKind = 'unknown'
 
 try {
     $raw = [Console]::In.ReadToEnd()
@@ -11,6 +13,8 @@ try {
     $payload = $raw | ConvertFrom-Json -AsHashtable -ErrorAction Stop
     if ($payload -isnot [Collections.IDictionary]) { throw 'Claude PreToolUse input must be a JSON object' }
     if (-not $payload.Contains('tool_name')) { throw 'Claude PreToolUse input is missing tool_name' }
+    if ($payload.tool_name -isnot [string]) { throw 'Codex PreToolUse input contains a non-string tool_name' }
+    $stage = 'tool'
     $permissionMode = if ($payload.Contains('permission_mode')) { [string]$payload.permission_mode } else { '' }
     if ($payload.Contains('permission_mode') -and $payload.permission_mode -isnot [string])
     { throw 'Codex PreToolUse input contains a non-string permission_mode' }
@@ -39,14 +43,17 @@ try {
         if ($changedPaths.Count -eq 0) { throw "$toolName PreToolUse input is missing target path" }
     }
 
+    $stage = 'workspace'
     if ($payload.Contains('cwd') -and $payload.cwd -isnot [string]) { throw 'Codex PreToolUse input contains a non-string cwd' }
     if (-not [string]::IsNullOrWhiteSpace($env:HARNESS_SESSION_MODE) -and $env:HARNESS_SESSION_MODE -cnotin @('read-only','write')) {
         throw "HARNESS_SESSION_MODE must be read-only or write: $env:HARNESS_SESSION_MODE"
     }
     $expectedVersion = 0
+    $stage = 'module'
     $module = '{REPO_ROOT}\scripts\lib\Harness.AdapterAction.psm1'
     if (-not (Test-Path -LiteralPath $module -PathType Leaf)) { throw 'core safety hook module is unavailable' }
     Import-Module $module -Force -ErrorAction Stop
+    $stage = 'preflight'
     [void](Invoke-HarnessAdapterPreflightAction -RepoRoot '{REPO_ROOT}' `
         -WorkspaceRoot $(if ($payload.Contains('cwd')) { [string]$payload.cwd } else { '' }) -WorkspaceRootFallback ([Environment]::GetEnvironmentVariable('DEV_HARNESS_WORKSPACE_ROOT','Process')) `
         -PermissionMode $permissionMode -SessionMode $(if ($env:HARNESS_SESSION_MODE -ceq 'read-only') { 'read-only' } else { 'write' }) `
@@ -61,6 +68,8 @@ try {
     exit 0
 } catch {
     # Only fixed categories cross the host boundary; never forward raw exception text.
+    $preflightStage = [string]$_.Exception.Data['harness_preflight_stage']
+    if ($preflightStage -cin @('workspace','action-input','target','policy')) { $stage = $preflightStage }
     $message=[string]$_.Exception.Message
     $code=switch -Regex ($message) {
         '^Codex PreToolUse input contains (?:a non-string|an unsupported) permission_mode' {
@@ -110,6 +119,6 @@ try {
         }
         default { 'unknown' }
     }
-    [Console]::Error.WriteLine("HARNESS_DENY:$code")
+    [Console]::Error.WriteLine("HARNESS_DENY:$code;stage=$stage;action=$actionKind")
     exit 2
 }

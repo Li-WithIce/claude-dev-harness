@@ -174,13 +174,15 @@ try {
     }
     $report.session=[ordered]@{cwd=$sessionCwd;relation=$relation;source=$(if($fromHost){'supplied host record; authenticity not independently established'}else{'unknown; coordinator cwd is not substituted'})}
     $run=Value $obs 'run';$metadata=Value $obs 'hook_metadata';$tool=Value $obs 'tool_event';$decision=Value $obs 'hookSpecificOutput'
-    $categoriesText=[IO.File]::ReadAllText((Join-Path $PSScriptRoot '../runtime-hooks/claude/codex-pretooluse-launcher.ps1'))
-    $categoryMatch=[regex]::Match($categoriesText,'\\AHARNESS_DENY:\((?<codes>[a-z|\-]+)\)\\z')
-    $categories=@($categoryMatch.Groups['codes'].Value.Split('|'))
+    # Consume the finite reason contract, not the launcher's source-code layout.
+    # Context is validated but not projected; classification is not authentication.
+    $reasonPattern='\AHarness PreToolUse denied: (?<category>input|permission-mode|workspace-binding|patch-path|patch-syntax|path-boundary|read-only|shell-form|policy-requirement|policy-unavailable|startup)'
+    $reasonPattern+='(?:; stage=(?:unknown|input|tool|workspace|module|preflight|action-input|target|policy);'
+    $reasonPattern+=' action=(?:unknown|shell|apply_patch|file_mutation))?\z'
     $reason=Value $decision 'permissionDecisionReason';$category='unknown'
-    if($reason -is [string] -and $reason.StartsWith('Harness PreToolUse denied: ',[StringComparison]::Ordinal)){
-        $candidate=$reason.Substring('Harness PreToolUse denied: '.Length)
-        if($candidate -cin $categories){$category=$candidate}
+    if($reason -is [string]){
+        $categoryMatch=[regex]::Match($reason,$reasonPattern)
+        if($categoryMatch.Success){$category=$categoryMatch.Groups['category'].Value}
     }
     $decisionValue=Value $decision 'permissionDecision'
     if($decisionValue -cnotin @('allow','deny')){$decisionValue=$null}

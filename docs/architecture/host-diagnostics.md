@@ -57,7 +57,11 @@ source_kind 只接受 host-record 或 synthetic-process，source_reference 是�
 
 ## 拒绝分类与验证范围
 
-已有 H02 adapter 以退出 2 和精确 `HARNESS_DENY:<code>` 报告已知类别。launcher 仅转发现有允许表中的精确类别为 `Harness PreToolUse denied: <code>`，向宿主输出 deny JSON；launcher 退出 0 不等于允许。诊断从该现有允许表识别已知类别，不新增政策引擎。input、permission-mode、workspace-binding、patch-path、patch-syntax、path-boundary、read-only、shell-form、policy-requirement、policy-unavailable、startup 沿原契约解释。
+I03 消费明确的有限 reason 契约，不再从 launcher 源码中的单行正则提取类别。兼容旧格式 `Harness PreToolUse denied: <code>` 和新格式 `Harness PreToolUse denied: <code>; stage=<stage>; action=<action>`；两者都必须完整、精确匹配，且 permissionDecision 必须为 deny。已知类别仍为 input、permission-mode、workspace-binding、patch-path、patch-syntax、path-boundary、read-only、shell-form、policy-requirement、policy-unavailable、startup。
+
+新格式的 stage 仅接受 unknown、input、tool、workspace、module、preflight、action-input、target、policy；action 仅接受 unknown、shell、apply_patch、file_mutation。缺失、重复、乱序或非法字段、未知类别、额外文本及混杂多行都保持 unknown。上下文仅用于严格验证，不新增投影字段或公共 Schema，也不输出原 reason、正文或 stderr。裸 `HARNESS_DENY:` 是 adapter 传输层内容，不当作宿主 reason。
+
+新 adapter 以退出 2 和有限的类别/阶段/动作报告失败；launcher 区分已分类拒绝、未分类 adapter 异常、非法输出及自身启动异常。未分类异常和 launcher 自身故障不伪装为已知政策命中。launcher 退出 0 不等于允许；I03 成功识别类别也不等于认证了真实 Hook 执行或工具关联，原 synthetic/host-record 观察边界不变。
 
 未知或混杂 stderr、异常、超时保持通用拒绝或原有固定启动诊断，不透传正文，不把 unknown 归为政策命中。当前 adapter 的 permission_mode 仅支持 default/bypassPermissions；官方文档还有其他模式，出现 permission-mode 必须如实记录输入兼容缺口，本次不扩大 Runtime 接受范围。policy-requirement 也不能单凭类别解释为“一定缺生产 Approval”；具体条件需核对原政策与已确认任务。
 

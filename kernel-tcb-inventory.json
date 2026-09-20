@@ -98,7 +98,7 @@
     },
     {
       "path": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",
-      "sha256": "sha256:201f45568e829a1eb5d3ac03934796f5f229028ad6788b9b17a53af8b2896f22",
+      "sha256": "sha256:ae65b6ebc430ab3b59af707abdcc349136e2e24056d6c9ad92d2b229365f22ed",
       "layer": "a3-adapter",
       "trust_paths": [
         "runtime"
@@ -106,13 +106,13 @@
       "root_ids": [
         "codex-pretooluse-launcher"
       ],
-      "physical_loc": 37,
-      "nonblank_loc": 34,
-      "executable_loc": 32
+      "physical_loc": 48,
+      "nonblank_loc": 45,
+      "executable_loc": 43
     },
     {
       "path": "runtime-hooks/claude/pretooluse.ps1",
-      "sha256": "sha256:c86e4520c1d6f5f69ed2aa8331c3de650e352557a153a26674a0c3a0be5b4a6c",
+      "sha256": "sha256:03dbb6da6e7dbf7d2002a4ca6ab7dbcb543f3aa475cbcfaebf4fdff1ebc9860f",
       "layer": "a3-adapter",
       "trust_paths": [
         "runtime"
@@ -121,9 +121,9 @@
         "claude-pretooluse-adapter",
         "codex-pretooluse-launcher"
       ],
-      "physical_loc": 115,
-      "nonblank_loc": 110,
-      "executable_loc": 109
+      "physical_loc": 124,
+      "nonblank_loc": 119,
+      "executable_loc": 118
     },
     {
       "path": "scripts/generate-entry-contract.ps1",
@@ -185,7 +185,7 @@
     },
     {
       "path": "scripts/lib/Harness.AdapterAction.psm1",
-      "sha256": "sha256:138cd8657da0e3a10bdb1be8e4efecdec64dcd88321fb5a49fa027007c366c15",
+      "sha256": "sha256:e5eed11153d2f976cdc8b9d75c02752a8fc13cb3f3acf692bfd76805fa6dbd23",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
@@ -195,9 +195,9 @@
         "codex-pretooluse-launcher",
         "controlled-write-adapter"
       ],
-      "physical_loc": 158,
-      "nonblank_loc": 145,
-      "executable_loc": 144
+      "physical_loc": 199,
+      "nonblank_loc": 182,
+      "executable_loc": 175
     },
     {
       "path": "scripts/lib/Harness.AtomicWrite.psm1",
@@ -1565,11 +1565,11 @@
   "unresolved_dependencies": [],
   "totals": {
     "file_count": 29,
-    "physical_loc": 10764,
-    "nonblank_loc": 9852,
-    "executable_loc": 9780,
+    "physical_loc": 10825,
+    "nonblank_loc": 9909,
+    "executable_loc": 9831,
     "runtime_file_count": 21,
-    "runtime_executable_loc": 3141,
+    "runtime_executable_loc": 3192,
     "distribution_file_count": 18,
     "distribution_executable_loc": 8015,
     "duplicate_edge_count": 0,
@@ -1578,9 +1578,9 @@
   },
   "budget": {
     "baseline_executable_loc": 3068,
-    "current_executable_loc": 3141,
-    "delta": 73,
-    "covered_growth": 73,
+    "current_executable_loc": 3192,
+    "delta": 124,
+    "covered_growth": 124,
     "status": "covered-by-exception",
     "exceptions": [
       {
@@ -1620,6 +1620,19 @@
         ],
         "repayment_plan": "Review continued necessity at the next explicitly authorized Runtime change. No immediate line-for-line repayment is required. Retain readable branches and only remove independently justified redundancy; do not loosen security or change measurement to repay this allowance.",
         "expires_at_milestone": "Next explicitly authorized Runtime change after H01/H02 budget approval"
+      },
+      {
+        "id": "KTB-EX-005",
+        "added_lines": 51,
+        "reason": "Explicit user approval on 2026-09-20 binds the converged Hook diff SHA256 0120ec9d18750fee44d029847c84f16da6063156c6576bce36440099b338c0e7. Diagnostics cost +29 LOC/+186 tokens/+70 statement ASTs; bounded literal-data recognition costs +22 LOC/+218 tokens/+60 statement ASTs. Total growth is +51/+404/+130 over 3141/35575/10498, yielding 3192/35979/10628. Baseline remains 3068, covered growth becomes 124, strict LOC bound is <3193, and Token/Statement AST checkpoints are 35979/10628.",
+        "new_trust_assumption": "None. No shell dialect is inferred, ambiguous keyword use remains denied, and the original policy still checks the untouched command. Finite refusal context does not authenticate Hook execution or grant permission.",
+        "alternatives": [
+          "The prior cross-shell parser was removed; only bounded static data forms retain a keyword exemption.",
+          "Dropping refusal context, denying every literal search, assuming a shell dialect, or allowing unknown results would not meet the approved scope.",
+          "Resetting the baseline, changing roots or accounting, packing source, or relaxing readability, single-adapter and 35-percent reduction checks is not authorized."
+        ],
+        "repayment_plan": "Review the continued necessity of this exact 29+22 split at the next explicitly authorized Runtime budget review. This allowance covers only the approved converged diff, not further Runtime growth or I03 consumer changes.",
+        "expires_at_milestone": "Next explicitly authorized Runtime budget review after the 2026-09-20 limited Hook approval"
       }
     ]
   }
