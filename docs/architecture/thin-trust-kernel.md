@@ -17,7 +17,8 @@ H01/H02 authorization covers the current 3141-line implementation with the
 unchanged `KTB-EX-002` +10, `KTB-EX-003` H01 +2 and `KTB-EX-004` H02 +61.
 The 2026-09-20 limited Hook authorization adds `KTB-EX-005` +51 for the reviewed
 converged implementation, without changing baseline 3068 or those prior exceptions.
-The current strict acceptance bound is <3193; historical TK-07 bounds remain
+The 2026-09-23 process cleanup authorization adds `KTB-EX-006` +15, retaining
+the prior allowances. The current strict acceptance bound is <3208; historical TK-07 bounds remain
 recorded below and are not rewritten as current measurement results.
 The original below-3000 goal remains unmet; terminal task closure additionally
 requires all prescribed verification evidence. A later
@@ -360,7 +361,7 @@ wait and EOF only after successful delivery. A single stopwatch starts after
 successful process start; stdin, exit, and stdout/stderr drains receive only the
 remaining `TimeoutMilliseconds`. Failed delivery or completion returns the
 unchanged fail-closed result (`Complete=false`, `ExitCode=-1`, empty outputs).
-Cleanup has a separate 2250 ms wait budget. Windows PowerShell 5.1 keeps its
+Cleanup has a separate 2250 ms wait budget. At R2, Windows PowerShell 5.1 used its
 single absolute-system `taskkill` hop (at most 1000 ms execution, 250 ms inner
 cleanup); recursive tree cleanup is disabled for that hop. PowerShell 7 keeps
 owned-tree `Kill(true)`. Synchronous native process start, OS termination and
@@ -374,6 +375,29 @@ Both supported first-hop hosts exercise full Unicode stdin/stdout/stderr, an
 post-input wait must not receive a fresh full timeout. Existing child/grandchild
 cleanup tests still observe receipt-bound process identities before fixture
 safety cleanup. This does not broaden all Runtime support to PowerShell 5.1.
+
+The 2026-09-23 process correction preserves the execution deadline, the 2250 ms
+total cleanup budget, and the 15-second owner assertion. The native tree-cleanup
+hop receives the remaining cleanup time less its existing 250 ms reserve,
+instead of an independent 1000 ms cap that can abandon tree cleanup while time
+remains. Only this private native-cleanup hop uses replacement decoding for
+localized non-protocol output; ordinary child stdout/stderr remain strict UTF-8.
+Neither a native exit code nor the outer safety cleanup proves tree termination.
+The probe checks PID, creation time and `HasExited`, and propagates unexpected
+query errors. A bounded 1.2-second cleanup-launch fixture contrasts the old and
+new deadline allocation without changing the production thresholds. The original
+September 20 failure lacks native details and is not claimed to be conclusively
+the same event. A separate exited-root regression demonstrated that the 5.1
+native utility cannot locate an already exited root although its pipe-holding
+child remains alive. The fallback therefore queries only that retained root's
+direct children, validates creation time at CIM's microsecond precision against
+held process handles, and cleans each proven subtree within the same deadline.
+Unknown identities are not terminated. Explicit user approval on 2026-09-23
+covers up to 3207 LOC, 36165 tokens and 10685 statement ASTs through
+`KTB-EX-006` (+15/+186/+57). Baseline 3068, all prior exceptions, readability,
+single-adapter and reduction constraints remain unchanged. Current acceptance
+requires Runtime transitive executable LOC < 3208; lower measurements do not
+reset the baseline or authorize unrelated growth.
 
 The unchanged closure algorithm measures 21 Runtime files, **3078 executable
 LOC**, **35352 executable tokens**, and **10402 statement ASTs**. Growth relative

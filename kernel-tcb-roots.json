@@ -252,6 +252,19 @@
         ],
         "repayment_plan": "Review the continued necessity of this exact 29+22 split at the next explicitly authorized Runtime budget review. This allowance covers only the approved converged diff, not further Runtime growth or I03 consumer changes.",
         "expires_at_milestone": "Next explicitly authorized Runtime budget review after the 2026-09-20 limited Hook approval"
+      },
+      {
+        "id": "KTB-EX-006",
+        "added_lines": 15,
+        "reason": "Explicit user approval on 2026-09-23 authorizes the owned-process cleanup correction: up to +15 LOC/+186 tokens/+57 Statement ASTs over 3192/35979/10628, with strict LOC <3208 and checkpoints 36165/10685. Baseline 3068 and prior allowances 10/2/61/51 remain unchanged; total covered growth is 139.",
+        "new_trust_assumption": "The local Windows CIM process provider supplies parent PID and microsecond creation timestamps. Only children of the retained invocation root are queried, and native process handles independently verify creation time before an owned subtree is terminated. No command lines or unrelated sessions are collected.",
+        "alternatives": [
+          "A native exit code alone does not prove tree cleanup; the independent receipt checks remain required.",
+          "Killing only an exited root cannot terminate pipe-holding descendants, and broad process-name scans cannot prove ownership.",
+          "Increasing execution deadlines, disabling 5.1, packing source or moving code out of accounting does not fix the demonstrated ownership and cleanup defects."
+        ],
+        "repayment_plan": "Review necessity at the next explicitly authorized Runtime budget review. Preserve identity validation, bounded waits, readable branches, existing adapter limits and reduction constraints; do not require mechanical line deletion.",
+        "expires_at_milestone": "Next explicitly authorized Runtime budget review after the 2026-09-23 owned-process cleanup correction"
       }
     ]
   }

@@ -238,7 +238,8 @@ $thinTokens = @(
     'active v1 Runtime reader = 0',
     'status writes = 0',
     '3068',
-    'Runtime transitive executable LOC < 3193',
+    'Runtime transitive executable LOC < 3208',
+    'KTB-EX-006',
     'KTB-EX-005',
     '0120ec9d18750fee44d029847c84f16da6063156c6576bce36440099b338c0e7',
     'original below-3000 goal is not achieved'

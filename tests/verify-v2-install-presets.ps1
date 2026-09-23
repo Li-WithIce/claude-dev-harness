@@ -176,7 +176,7 @@ function Test-CodexDenyOutput {
             @($document.hookSpecificOutput.Keys).Count -eq 3 -and
             [string]$document.hookSpecificOutput.hookEventName -ceq 'PreToolUse' -and
             [string]$document.hookSpecificOutput.permissionDecision -ceq 'deny' -and
-            [string]$document.hookSpecificOutput.permissionDecisionReason -match $ReasonPattern
+            [string]$document.hookSpecificOutput.permissionDecisionReason -cmatch $ReasonPattern
     } catch {
         return $false
     }
@@ -1145,7 +1145,7 @@ try {
             } | ConvertTo-Json -Depth 10 -Compress
             $protectedPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $protectedPatchInput -Environment @{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace}
             $protectedPatchOutput = [string]$protectedPatchResult.StdOut + [string]$protectedPatchResult.StdErr
-            if ($protectedPatchResult.ExitCode -eq 2 -and $protectedPatchResult.StdErr -match '^HARNESS_DENY:policy-requirement\s*$' -and
+            if ($protectedPatchResult.ExitCode -eq 2 -and [string]::IsNullOrWhiteSpace($protectedPatchResult.StdOut) -and $protectedPatchResult.StdErr -cmatch '\AHARNESS_DENY:policy-requirement;stage=policy;action=apply_patch(?:\r?\n)?\z' -and
                 -not $protectedPatchOutput.Contains($environmentIdentifier)) {
                 Add-Check "shared PreToolUse adapter extracts and preserves protected direct apply_patch targets: $($protectedPatchCase.Key)"
             } else {
@@ -1183,7 +1183,7 @@ try {
         [System.IO.File]::WriteAllText($fakePwsh,"@echo off`r`necho hijacked>`"$fakePwshSentinel`"`r`nexit /b 0`r`n",[System.Text.UTF8Encoding]::new($false))
         foreach ($runner in @('cmd','pwsh','powershell')) {
             $runnerDeny = Invoke-CodexHookCommandWithInput -Runner $runner -Command $installedHookCommand -InputText $protectedPatchInput -WorkingDirectory $defaultFixture.Workspace
-            if (Test-CodexDenyOutput -Result $runnerDeny -ReasonPattern '^Harness PreToolUse denied: policy-requirement$') {
+            if (Test-CodexDenyOutput -Result $runnerDeny -ReasonPattern '\AHarness PreToolUse denied: policy-requirement; stage=policy; action=apply_patch\z') {
                 Add-Check "installed Codex Hook command fixture emits official deny JSON through the $runner parser"
             } else {
                 Add-Failure "installed Codex Hook command fixture did not emit deny JSON through the ${runner} parser: exit=$($runnerDeny.ExitCode) stdout=$($runnerDeny.StdOut) stderr=$($runnerDeny.StdErr)"
@@ -1231,7 +1231,7 @@ try {
                 -CodePage $legacyCodePage
             # This legacy-code-page fixture proves denial, not which policy branch was reached.
             if ($unicodeProtectedPatchInput.Contains('auth/授权.ps1') -and
-                (Test-CodexDenyOutput -Result $legacyCodePageDeny -ReasonPattern '^Harness PreToolUse denied: (policy-requirement|patch-syntax)$')) {
+                (Test-CodexDenyOutput -Result $legacyCodePageDeny -ReasonPattern '\AHarness PreToolUse denied: (?:policy-requirement; stage=policy|patch-syntax; stage=action-input); action=apply_patch\z')) {
                 Add-Check "installed Codex Hook exact command fails closed for a raw UTF-8 Unicode protected path under code page $legacyCodePage"
             } else {
                 Add-Failure "installed Codex Hook exact command did not fail closed for raw UTF-8 under code page ${legacyCodePage}: exit=$($legacyCodePageDeny.ExitCode) stdout=$($legacyCodePageDeny.StdOut) stderr=$($legacyCodePageDeny.StdErr)"
@@ -1278,7 +1278,7 @@ try {
             cwd = $defaultFixture.Workspace
         } | ConvertTo-Json -Depth 10 -Compress
         $shellPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $shellPatchInput -Environment @{ HARNESS_ENVIRONMENT='production' }
-        if ($shellPatchResult.ExitCode -eq 2 -and $shellPatchResult.StdErr -match '^HARNESS_DENY:shell-form\s*$') {
+        if ($shellPatchResult.ExitCode -eq 2 -and [string]::IsNullOrWhiteSpace($shellPatchResult.StdOut) -and $shellPatchResult.StdErr -cmatch '\AHARNESS_DENY:shell-form;stage=action-input;action=shell(?:\r?\n)?\z') {
             Add-Check 'shared PreToolUse adapter fails closed for shell-form applypatch with an unbound tool workdir'
         } else {
             Add-Failure "shared PreToolUse adapter accepted shell-form applypatch without a bound tool workdir: $($shellPatchResult.StdErr)"
@@ -1300,7 +1300,7 @@ try {
             cwd = $defaultFixture.Workspace
         } | ConvertTo-Json -Depth 10 -Compress
         $protectedShellPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $protectedShellPatchInput
-        if ($protectedShellPatchResult.ExitCode -eq 2 -and $protectedShellPatchResult.StdErr -match '^HARNESS_DENY:shell-form\s*$') {
+        if ($protectedShellPatchResult.ExitCode -eq 2 -and [string]::IsNullOrWhiteSpace($protectedShellPatchResult.StdOut) -and $protectedShellPatchResult.StdErr -cmatch '\AHARNESS_DENY:shell-form;stage=action-input;action=shell(?:\r?\n)?\z') {
             Add-Check 'shared PreToolUse adapter fails closed for shell-form apply_patch even with command-local cd'
         } else {
             Add-Failure "shared PreToolUse adapter did not deny a protected Codex shell-form apply_patch path: $($protectedShellPatchResult.StdErr)"
@@ -1312,7 +1312,7 @@ try {
             cwd = $defaultFixture.Workspace
         } | ConvertTo-Json -Depth 10 -Compress
         $unsupportedShellPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $unsupportedShellPatchInput
-        if ($unsupportedShellPatchResult.ExitCode -eq 2 -and $unsupportedShellPatchResult.StdErr -match '^HARNESS_DENY:shell-form\s*$') {
+        if ($unsupportedShellPatchResult.ExitCode -eq 2 -and [string]::IsNullOrWhiteSpace($unsupportedShellPatchResult.StdOut) -and $unsupportedShellPatchResult.StdErr -cmatch '\AHARNESS_DENY:shell-form;stage=action-input;action=shell(?:\r?\n)?\z') {
             Add-Check 'shared PreToolUse adapter fails closed for composed shell apply_patch invocation'
         } else {
             Add-Failure 'shared PreToolUse adapter accepted a non-canonical shell apply_patch composition'
@@ -1332,7 +1332,7 @@ try {
                 cwd = $defaultFixture.Workspace
             } | ConvertTo-Json -Depth 10 -Compress
             $wrappedResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $wrappedInput
-            if ($wrappedResult.ExitCode -eq 2 -and $wrappedResult.StdErr -match '^HARNESS_DENY:shell-form\s*$') {
+            if ($wrappedResult.ExitCode -eq 2 -and [string]::IsNullOrWhiteSpace($wrappedResult.StdOut) -and $wrappedResult.StdErr -cmatch '\AHARNESS_DENY:shell-form;stage=action-input;action=shell(?:\r?\n)?\z') {
                 Add-Check "shared PreToolUse adapter fails closed for wrapped shell apply_patch: $($wrappedCase.Key)"
             } else {
                 Add-Failure "shared PreToolUse adapter accepted wrapped shell apply_patch: $($wrappedCase.Key)"
@@ -1357,7 +1357,7 @@ try {
             permission_mode = 'plan'
         } | ConvertTo-Json -Depth 10 -Compress
         $planPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $planPatchInput
-        if ($planPatchResult.ExitCode -eq 2 -and $planPatchResult.StdErr -match '^HARNESS_DENY:permission-mode\s*$') {
+        if ($planPatchResult.ExitCode -eq 2 -and [string]::IsNullOrWhiteSpace($planPatchResult.StdOut) -and $planPatchResult.StdErr -cmatch '\AHARNESS_DENY:permission-mode;stage=tool;action=unknown(?:\r?\n)?\z') {
             Add-Check 'shared PreToolUse adapter rejects the non-existent Codex plan permission mode instead of inventing a host guarantee'
         } else {
             Add-Failure 'shared PreToolUse adapter accepted a permission mode outside the pinned Codex hook contract'
@@ -1370,7 +1370,7 @@ try {
                 cwd = $defaultFixture.Workspace
             } | ConvertTo-Json -Depth 10 -Compress
             $productionBashResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $productionBashInput -Environment @{HARNESS_ENVIRONMENT='production';DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace}
-            if ($productionBashResult.ExitCode -eq 2 -and $productionBashResult.StdErr -match '^HARNESS_DENY:policy-requirement\s*$') {
+            if ($productionBashResult.ExitCode -eq 2 -and [string]::IsNullOrWhiteSpace($productionBashResult.StdOut) -and $productionBashResult.StdErr -cmatch '\AHARNESS_DENY:policy-requirement;stage=policy;action=shell(?:\r?\n)?\z') {
                 Add-Check "shared PreToolUse adapter forwards and protects production Bash command: $($productionCommand.Split(' ')[0])"
             } else {
                 Add-Failure "shared PreToolUse adapter allowed protected production Bash command: $($productionCommand.Split(' ')[0])"
@@ -1443,7 +1443,7 @@ try {
                 tool_name='apply_patch';permission_mode='default';tool_input=[ordered]@{command=[string]$invalidPatchCase.Value};cwd=$defaultFixture.Workspace
             } | ConvertTo-Json -Depth 10 -Compress
             $invalidPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $invalidPatchInput -Environment @{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace}
-            if ($invalidPatchResult.ExitCode -eq 2 -and $invalidPatchResult.StdErr -match '^HARNESS_DENY:(patch-path|patch-syntax|path-boundary)\s*$') {
+            if ($invalidPatchResult.ExitCode -eq 2 -and [string]::IsNullOrWhiteSpace($invalidPatchResult.StdOut) -and $invalidPatchResult.StdErr -cmatch '\AHARNESS_DENY:(?:(?:patch-path|patch-syntax);stage=action-input|path-boundary;stage=target);action=apply_patch(?:\r?\n)?\z') {
                 Add-Check "shared PreToolUse adapter fails closed for malformed direct apply_patch: $($invalidPatchCase.Key)"
             } else {
                 Add-Failure "shared PreToolUse adapter accepted malformed direct apply_patch: $($invalidPatchCase.Key)"
@@ -1511,7 +1511,7 @@ try {
 
         $directoryPatchInput = [ordered]@{tool_name='apply_patch';permission_mode='default';tool_input=[ordered]@{command="*** Begin Patch`n*** Add File: .assistant`n+x`n*** End Patch"};cwd=$defaultFixture.Workspace} | ConvertTo-Json -Depth 10 -Compress
         $directoryPatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $directoryPatchInput -Environment @{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace}
-        if ($directoryPatchResult.ExitCode -eq 2 -and $directoryPatchResult.StdErr -match '^HARNESS_DENY:path-boundary\s*$') {
+        if ($directoryPatchResult.ExitCode -eq 2 -and [string]::IsNullOrWhiteSpace($directoryPatchResult.StdOut) -and $directoryPatchResult.StdErr -cmatch '\AHARNESS_DENY:path-boundary;stage=target;action=apply_patch(?:\r?\n)?\z') {
             Add-Check 'shared PreToolUse adapter rejects a direct apply_patch directory target'
         } else {
             Add-Failure 'shared PreToolUse adapter accepted a direct apply_patch directory target'
@@ -1519,7 +1519,7 @@ try {
 
         $outsideWriteInput = [ordered]@{tool_name='Write';permission_mode='default';tool_input=[ordered]@{file_path=(Join-Path $defaultFixture.Workspace '..\outside.txt');content='fixture'};cwd=$defaultFixture.Workspace} | ConvertTo-Json -Depth 10 -Compress
         $outsideWriteResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $outsideWriteInput -Environment @{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace}
-        if ($outsideWriteResult.ExitCode -eq 2 -and $outsideWriteResult.StdErr -match '^HARNESS_DENY:path-boundary\s*$') {
+        if ($outsideWriteResult.ExitCode -eq 2 -and [string]::IsNullOrWhiteSpace($outsideWriteResult.StdOut) -and $outsideWriteResult.StdErr -cmatch '\AHARNESS_DENY:path-boundary;stage=target;action=file_mutation(?:\r?\n)?\z') {
             Add-Check 'shared PreToolUse adapter preserves Workspace containment for ordinary file tools'
         } else {
             Add-Failure 'shared PreToolUse adapter allowed an ordinary file-tool target outside the Workspace'
@@ -1531,7 +1531,7 @@ try {
         New-Item -ItemType Junction -Path $reparseLink -Target $reparseTarget | Out-Null
         $reparsePatchInput = [ordered]@{tool_name='apply_patch';permission_mode='default';tool_input=[ordered]@{command="*** Begin Patch`n*** Add File: config-link/production.yml`n+x`n*** End Patch"};cwd=$defaultFixture.Workspace} | ConvertTo-Json -Depth 10 -Compress
         $reparsePatchResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $reparsePatchInput -Environment @{DEV_HARNESS_WORKSPACE_ROOT=$defaultFixture.Workspace}
-        if ($reparsePatchResult.ExitCode -eq 2 -and $reparsePatchResult.StdErr -match '^HARNESS_DENY:path-boundary\s*$') {
+        if ($reparsePatchResult.ExitCode -eq 2 -and [string]::IsNullOrWhiteSpace($reparsePatchResult.StdOut) -and $reparsePatchResult.StdErr -cmatch '\AHARNESS_DENY:path-boundary;stage=target;action=apply_patch(?:\r?\n)?\z') {
             Add-Check 'shared PreToolUse adapter preserves reparse, junction, and symlink ancestor protection'
         } else {
             Add-Failure 'shared PreToolUse adapter allowed a target through a reparse ancestor'
@@ -1559,7 +1559,7 @@ try {
             cwd = $defaultFixture.Workspace
         } | ConvertTo-Json -Depth 10 -Compress
         $missingPathResult = Invoke-ChildScriptWithInput -ScriptPath $installedPreToolHook -InputText $missingPathInput
-        if ($missingPathResult.ExitCode -eq 2 -and $missingPathResult.StdErr -match '^HARNESS_DENY:input\s*$') {
+        if ($missingPathResult.ExitCode -eq 2 -and [string]::IsNullOrWhiteSpace($missingPathResult.StdOut) -and $missingPathResult.StdErr -cmatch '\AHARNESS_DENY:input;stage=tool;action=file_mutation(?:\r?\n)?\z') {
             Add-Check 'shared PreToolUse adapter fails closed when a file-write target is missing'
         } else {
             Add-Failure 'shared PreToolUse adapter allowed a file write without a target path'

@@ -1,10 +1,13 @@
 ﻿[CmdletBinding()]
 param(
-    [string]$RepoRoot = ""
+    [string]$RepoRoot = "",
+    [string]$ProcessObservationDirectory = ''
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+if (-not $ProcessObservationDirectory) { $ProcessObservationDirectory = [Environment]::GetEnvironmentVariable('HARNESS_PROCESS_OBSERVATION_ROOT','Process') }
+if ($ProcessObservationDirectory) { [void][IO.Directory]::CreateDirectory($ProcessObservationDirectory) }
 
 . (Join-Path $PSScriptRoot 'fixture-test-common.ps1')
 
@@ -206,12 +209,15 @@ try {
 $processHosts = [ordered]@{pwsh=(Get-Process -Id $PID).Path}
 if ($IsWindows) { $processHosts.windows_powershell = Join-Path ([Environment]::GetFolderPath('System')) 'WindowsPowerShell/v1.0/powershell.exe' }
 foreach ($hostName in $processHosts.Keys) {
+    $observationPath = if ($ProcessObservationDirectory) { Join-Path $ProcessObservationDirectory ($hostName+'-'+[guid]::NewGuid().ToString('N')+'.jsonl') } else { '' }
     $hostProbe = & $processModule {
-        param($Root,$Scratch,$HostPath,$PwshPath)
-        Invoke-HarnessKernelProcess -FilePath $HostPath -WorkingDirectory $Root -TimeoutMilliseconds 90000 -Arguments @(
+        param($Root,$Scratch,$HostPath,$PwshPath,$ObservationPath)
+        $arguments = @(
             '-NoLogo','-NoProfile','-NonInteractive','-File',(Join-Path $Root 'tests/fixtures/tk07-kernel-process-host.ps1'),
             '-RepoRoot',$Root,'-ReceiptRoot',$Scratch,'-PwshPath',$PwshPath)
-    } $RepoRoot (Join-Path $scratchRoot ('process-'+$hostName)) $processHosts[$hostName] $processHosts.pwsh
+        if ($ObservationPath) { $arguments += @('-ObservationPath',$ObservationPath) }
+        Invoke-HarnessKernelProcess -FilePath $HostPath -WorkingDirectory $Root -TimeoutMilliseconds 90000 -Arguments $arguments
+    } $RepoRoot (Join-Path $scratchRoot ('process-'+$hostName)) $processHosts[$hostName] $processHosts.pwsh $observationPath
     if ($hostProbe.Complete -and $hostProbe.ExitCode -eq 0 -and -not $hostProbe.StdErr) {
         $hostResult = $hostProbe.StdOut | ConvertFrom-Json
         if ($hostResult.argv_preserved -and $hostResult.git_child_isolated -and $hostResult.caller_unchanged -and $hostResult.hash_vectors_pass) {
@@ -222,6 +228,32 @@ foreach ($hostName in $processHosts.Keys) {
             Add-Check "$hostName fails closed on timeout and independently confirms owned child/grandchild cleanup within the Hook deadline"
         } else { Add-Failure "$hostName timeout or owned process-tree cleanup failed: $($hostProbe.StdOut)" }
     } else { Add-Failure "$hostName process characterization did not complete: $($hostProbe.StdErr)" }
+
+    if ($hostName -ceq 'windows_powershell') {
+        $delayObservation = Join-Path $(if($ProcessObservationDirectory){$ProcessObservationDirectory}else{[IO.Path]::GetTempPath()}) ('cleanup-window-'+[guid]::NewGuid().ToString('N')+'.jsonl')
+        $delayProbe = & $processModule {
+            param($Root,$Scratch,$HostPath,$PwshPath,$ObservationPath)
+            Invoke-HarnessKernelProcess -FilePath $HostPath -WorkingDirectory $Root -TimeoutMilliseconds 90000 -Arguments @(
+                '-NoLogo','-NoProfile','-NonInteractive','-File',(Join-Path $Root 'tests/fixtures/tk07-kernel-process-host.ps1'),
+                '-RepoRoot',$Root,'-ReceiptRoot',$Scratch,'-PwshPath',$PwshPath,'-ObservationPath',$ObservationPath,'-TaskkillDelayMilliseconds','1200')
+        } $RepoRoot (Join-Path $scratchRoot 'process-cleanup-window') $processHosts[$hostName] $processHosts.pwsh $delayObservation
+        $delayResult = if($delayProbe.Complete -and $delayProbe.ExitCode -eq 0 -and -not $delayProbe.StdErr){$delayProbe.StdOut|ConvertFrom-Json}else{$null}
+        if ($null -ne $delayResult -and $delayResult.timeout_incomplete -and $delayResult.timeout_exit_code -eq -1 -and $delayResult.receipt_count -eq 2 -and $delayResult.root_exited -and $delayResult.tree_cleanup_confirmed -and $delayResult.cleanup_seconds -lt 15) {
+            Add-Check '5.1 uses the unchanged total cleanup deadline for a bounded slow utility launch without relying on safety cleanup'
+        } else { Add-Failure "5.1 bounded cleanup window failed: stdout=$($delayProbe.StdOut) stderr=$($delayProbe.StdErr)" }
+    }
+
+    $pipeObservation = Join-Path $(if($ProcessObservationDirectory){$ProcessObservationDirectory}else{[IO.Path]::GetTempPath()}) ('exited-root-'+[guid]::NewGuid().ToString('N')+'.jsonl')
+    $pipeProbe = & $processModule {
+        param($Root,$Scratch,$HostPath,$PwshPath,$ObservationPath)
+        Invoke-HarnessKernelProcess -FilePath $HostPath -WorkingDirectory $Root -TimeoutMilliseconds 90000 -Arguments @(
+            '-NoLogo','-NoProfile','-NonInteractive','-File',(Join-Path $Root 'tests/fixtures/tk07-kernel-process-host.ps1'),
+            '-RepoRoot',$Root,'-ReceiptRoot',$Scratch,'-PwshPath',$PwshPath,'-ObservationPath',$ObservationPath,'-ExitParentAfterSpawn')
+    } $RepoRoot (Join-Path $scratchRoot ('process-exited-root-'+$hostName)) $processHosts[$hostName] $processHosts.pwsh $pipeObservation
+    $pipeResult = if($pipeProbe.Complete -and $pipeProbe.ExitCode -eq 0 -and -not $pipeProbe.StdErr){$pipeProbe.StdOut|ConvertFrom-Json}else{$null}
+    if ($null -ne $pipeResult -and $pipeResult.timeout_incomplete -and $pipeResult.timeout_exit_code -eq -1 -and $pipeResult.receipt_count -eq 2 -and $pipeResult.root_exited -and $pipeResult.tree_cleanup_confirmed -and $pipeResult.cleanup_seconds -lt 15) {
+        Add-Check "$hostName clears owned descendants holding inherited pipes after their root exits"
+    } else { Add-Failure "$hostName exited-root cleanup failed: stdout=$($pipeProbe.StdOut) stderr=$($pipeProbe.StdErr)" }
 
     # The outer watchdog does not call the process primitive under test. Its cleanup is failure, not evidence of product cleanup.
     foreach ($mode in @('normal','no-read','early-close','shared-deadline')) {
