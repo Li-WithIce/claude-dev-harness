@@ -391,6 +391,11 @@ instead incorrectly added uncontrolled native startup/execution to the injected
 duration and failed the first fixed-candidate all run. This completion regression
 tests the old 1000 ms cap without changing production thresholds; it does not
 promise success for arbitrary utility latency beyond the cleanup budget. The original
+proxy used a separate CLR executable; a later run showed that its startup plus
+native startup alone could consume the window. The fixture now uses the native
+Windows Script Host, retains the caller's creation-checked root handle, forwards
+both real taskkill streams and preserves the same minimum duration and assertions.
+The original
 September 20 failure lacks native details and is not claimed to be conclusively
 the same event. A separate exited-root regression demonstrated that the 5.1
 native utility cannot locate an already exited root although its pipe-holding

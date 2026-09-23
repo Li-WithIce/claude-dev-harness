@@ -53,22 +53,24 @@ if ($ObservationPath) {
     $script:DelayedCleanupCompleted = $false
     Write-ProcessObservation 'kernel-under-test' @{function_sha256=(Get-HarnessUtf8TextSha256 $script:OriginalKernelProcess.ToString())}
     if ($TaskkillDelayMilliseconds -gt 0) {
-        [void][IO.Directory]::CreateDirectory($ReceiptRoot)
-        $script:CleanupProxy = Join-Path $ReceiptRoot 'cleanup-delay.exe'
-        Add-Type -Path (Join-Path $RepoRoot 'tests/fixtures/tk07-cleanup-delay.cs') -OutputAssembly $script:CleanupProxy -OutputType ConsoleApplication
+        $script:CleanupProxy = Join-Path $RepoRoot 'tests/fixtures/tk07-cleanup-delay.js'
     }
     function Invoke-HarnessKernelProcess {
         param([string]$FilePath,[string]$WorkingDirectory,[string[]]$Arguments,[int]$TimeoutMilliseconds,[switch]$CleanGitEnvironment,[AllowNull()][string]$StandardInput=$null,[switch]$SkipTreeCleanup)
         $isTaskkill = [IO.Path]::GetFileName($FilePath) -ieq 'taskkill.exe'
         Write-ProcessObservation 'product-call' @{file=$FilePath;arguments=$(if($isTaskkill){$Arguments}else{@()});timeout_ms=$TimeoutMilliseconds;skip_tree_cleanup=[bool]$SkipTreeCleanup;owned=@(Get-ReceiptObservations)}
+        $proxyRoot = $null
         try {
             $forward = @{}; foreach ($entry in $PSBoundParameters.GetEnumerator()) { $forward[$entry.Key] = $entry.Value }
             if ($isTaskkill -and $TaskkillDelayMilliseconds -gt 0) {
                 $rootReceipt = Get-Content -LiteralPath (Join-Path $ReceiptRoot 'parent.json') -Raw | ConvertFrom-Json
                 if ([int]$Arguments[1] -ne [int]$rootReceipt.pid) { throw 'Cleanup proxy root identity mismatch' }
-                $forward.FilePath = $script:CleanupProxy
+                $proxyRoot = Get-Process -Id ([int]$rootReceipt.pid) -ErrorAction Stop
+                $null = $proxyRoot.Handle
+                if ($proxyRoot.StartTime.ToUniversalTime().Ticks -ne [long]$rootReceipt.start_ticks -or $proxyRoot.HasExited) { throw 'Cleanup proxy root creation identity mismatch' }
+                $forward.FilePath = Join-Path ([Environment]::GetFolderPath('System')) 'cscript.exe'
                 $completeNotBefore = [DateTime]::UtcNow.AddMilliseconds($TaskkillDelayMilliseconds).Ticks
-                $forward.Arguments = @($Arguments[1],[string]$rootReceipt.start_ticks,[string]$TaskkillDelayMilliseconds,($ObservationPath+'.native.log'))
+                $forward.Arguments = @('//B','//NoLogo','//E:JScript',$script:CleanupProxy,$Arguments[1],[string]$TaskkillDelayMilliseconds,($ObservationPath+'.native.log'),$FilePath)
                 Write-ProcessObservation 'controlled-cleanup-delay' @{delay_ms=$TaskkillDelayMilliseconds;executable=$forward.FilePath;arguments=$forward.Arguments}
             }
             $observedResult = & $script:OriginalKernelProcess @forward
@@ -85,7 +87,7 @@ if ($ObservationPath) {
         } catch {
             Write-ProcessObservation 'product-exception' @{type=$_.Exception.GetType().FullName;id=$_.FullyQualifiedErrorId}
             throw
-        }
+        } finally { if ($null -ne $proxyRoot) { $proxyRoot.Dispose() } }
     }
 }
 
