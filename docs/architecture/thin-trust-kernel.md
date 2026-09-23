@@ -384,8 +384,13 @@ remains. Only this private native-cleanup hop uses replacement decoding for
 localized non-protocol output; ordinary child stdout/stderr remain strict UTF-8.
 Neither a native exit code nor the outer safety cleanup proves tree termination.
 The probe checks PID, creation time and `HasExited`, and propagates unexpected
-query errors. A bounded 1.2-second cleanup-launch fixture contrasts the old and
-new deadline allocation without changing the production thresholds. The original
+query errors. A native cleanup proxy holds its completion until at least 1.2
+seconds after entry and must return completely with exit zero, in addition to
+the owned-tree checks. Native work runs inside that interval: delaying its launch
+instead incorrectly added uncontrolled native startup/execution to the injected
+duration and failed the first fixed-candidate all run. This completion regression
+tests the old 1000 ms cap without changing production thresholds; it does not
+promise success for arbitrary utility latency beyond the cleanup budget. The original
 September 20 failure lacks native details and is not claimed to be conclusively
 the same event. A separate exited-root regression demonstrated that the 5.1
 native utility cannot locate an already exited root although its pipe-holding

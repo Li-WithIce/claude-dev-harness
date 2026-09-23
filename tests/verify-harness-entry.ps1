@@ -238,8 +238,8 @@ foreach ($hostName in $processHosts.Keys) {
                 '-RepoRoot',$Root,'-ReceiptRoot',$Scratch,'-PwshPath',$PwshPath,'-ObservationPath',$ObservationPath,'-TaskkillDelayMilliseconds','1200')
         } $RepoRoot (Join-Path $scratchRoot 'process-cleanup-window') $processHosts[$hostName] $processHosts.pwsh $delayObservation
         $delayResult = if($delayProbe.Complete -and $delayProbe.ExitCode -eq 0 -and -not $delayProbe.StdErr){$delayProbe.StdOut|ConvertFrom-Json}else{$null}
-        if ($null -ne $delayResult -and $delayResult.timeout_incomplete -and $delayResult.timeout_exit_code -eq -1 -and $delayResult.receipt_count -eq 2 -and $delayResult.root_exited -and $delayResult.tree_cleanup_confirmed -and $delayResult.cleanup_seconds -lt 15) {
-            Add-Check '5.1 uses the unchanged total cleanup deadline for a bounded slow utility launch without relying on safety cleanup'
+        if ($null -ne $delayResult -and $delayResult.cleanup_call_completed -and $delayResult.timeout_incomplete -and $delayResult.timeout_exit_code -eq -1 -and $delayResult.receipt_count -eq 2 -and $delayResult.root_exited -and $delayResult.tree_cleanup_confirmed -and $delayResult.cleanup_seconds -lt 15) {
+            Add-Check '5.1 completes the native cleanup call beyond the old 1000ms cap within the unchanged total deadline, without safety cleanup'
         } else { Add-Failure "5.1 bounded cleanup window failed: stdout=$($delayProbe.StdOut) stderr=$($delayProbe.StdErr)" }
     }
 

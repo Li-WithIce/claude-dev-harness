@@ -50,6 +50,7 @@ if ($ObservationPath) {
     # Call the current implementation unchanged. Observation never supplies the
     # cleanup result; PID/creation-time checks below remain authoritative.
     $script:OriginalKernelProcess = (Get-Command Invoke-HarnessKernelProcess).ScriptBlock
+    $script:DelayedCleanupCompleted = $false
     Write-ProcessObservation 'kernel-under-test' @{function_sha256=(Get-HarnessUtf8TextSha256 $script:OriginalKernelProcess.ToString())}
     if ($TaskkillDelayMilliseconds -gt 0) {
         [void][IO.Directory]::CreateDirectory($ReceiptRoot)
@@ -66,11 +67,14 @@ if ($ObservationPath) {
                 $rootReceipt = Get-Content -LiteralPath (Join-Path $ReceiptRoot 'parent.json') -Raw | ConvertFrom-Json
                 if ([int]$Arguments[1] -ne [int]$rootReceipt.pid) { throw 'Cleanup proxy root identity mismatch' }
                 $forward.FilePath = $script:CleanupProxy
-                $launchNotBefore = [DateTime]::UtcNow.AddMilliseconds($TaskkillDelayMilliseconds).Ticks
-                $forward.Arguments = @($Arguments[1],[string]$rootReceipt.start_ticks,[string]$launchNotBefore)
+                $completeNotBefore = [DateTime]::UtcNow.AddMilliseconds($TaskkillDelayMilliseconds).Ticks
+                $forward.Arguments = @($Arguments[1],[string]$rootReceipt.start_ticks,[string]$TaskkillDelayMilliseconds,($ObservationPath+'.native.log'))
                 Write-ProcessObservation 'controlled-cleanup-delay' @{delay_ms=$TaskkillDelayMilliseconds;executable=$forward.FilePath;arguments=$forward.Arguments}
             }
             $observedResult = & $script:OriginalKernelProcess @forward
+            if ($isTaskkill -and $TaskkillDelayMilliseconds -gt 0) {
+                $script:DelayedCleanupCompleted = $observedResult.Complete -and $observedResult.ExitCode -eq 0 -and [DateTime]::UtcNow.Ticks -ge $completeNotBefore
+            }
             $streams = @{}
             foreach ($name in @('StdOut','StdErr')) {
                 $value = ([string]$observedResult.$name).Replace($RepoRoot,'<repo>').Replace($ReceiptRoot,'<receipts>')
@@ -131,6 +135,7 @@ try {
     $result.cleanup_seconds = [Math]::Round($timer.Elapsed.TotalSeconds,3)
     $result.timeout_incomplete = -not $timeout.Complete -and -not $timeout.StdOut -and -not $timeout.StdErr
     $result.timeout_exit_code = $timeout.ExitCode
+    if ($TaskkillDelayMilliseconds -gt 0) { $result.cleanup_call_completed = $script:DelayedCleanupCompleted }
     foreach ($role in @('parent','leaf')) {
         $path = Join-Path $ReceiptRoot ($role+'.json')
         if (Test-Path -LiteralPath $path -PathType Leaf) { $receipts += Get-Content -LiteralPath $path -Raw | ConvertFrom-Json }
