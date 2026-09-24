@@ -112,7 +112,7 @@
     },
     {
       "path": "runtime-hooks/claude/pretooluse.ps1",
-      "sha256": "sha256:03dbb6da6e7dbf7d2002a4ca6ab7dbcb543f3aa475cbcfaebf4fdff1ebc9860f",
+      "sha256": "sha256:ae3574d4bddd3ce64303584819ac0da8bec972a913b1076557671a3b75ba52a6",
       "layer": "a3-adapter",
       "trust_paths": [
         "runtime"
@@ -121,9 +121,9 @@
         "claude-pretooluse-adapter",
         "codex-pretooluse-launcher"
       ],
-      "physical_loc": 124,
-      "nonblank_loc": 119,
-      "executable_loc": 118
+      "physical_loc": 126,
+      "nonblank_loc": 121,
+      "executable_loc": 119
     },
     {
       "path": "scripts/generate-entry-contract.ps1",
@@ -1565,11 +1565,11 @@
   "unresolved_dependencies": [],
   "totals": {
     "file_count": 29,
-    "physical_loc": 10858,
-    "nonblank_loc": 9942,
-    "executable_loc": 9857,
+    "physical_loc": 10860,
+    "nonblank_loc": 9944,
+    "executable_loc": 9858,
     "runtime_file_count": 21,
-    "runtime_executable_loc": 3206,
+    "runtime_executable_loc": 3207,
     "distribution_file_count": 18,
     "distribution_executable_loc": 8041,
     "duplicate_edge_count": 0,
@@ -1578,8 +1578,8 @@
   },
   "budget": {
     "baseline_executable_loc": 3068,
-    "current_executable_loc": 3206,
-    "delta": 138,
+    "current_executable_loc": 3207,
+    "delta": 139,
     "covered_growth": 139,
     "status": "covered-by-exception",
     "exceptions": [
@@ -1637,7 +1637,7 @@
       {
         "id": "KTB-EX-006",
         "added_lines": 15,
-        "reason": "Explicit user approval on 2026-09-23 authorizes the owned-process cleanup correction: up to +15 LOC/+186 tokens/+57 Statement ASTs over 3192/35979/10628, with strict LOC <3208 and checkpoints 36165/10685. Baseline 3068 and prior allowances 10/2/61/51 remain unchanged; total covered growth is 139.",
+        "reason": "Explicit user approval on 2026-09-23 authorizes the owned-process cleanup correction: up to +15 LOC/+186 tokens/+57 Statement ASTs over 3192/35979/10628, with strict LOC <3208 and checkpoints 36165/10685. On 2026-09-24 the user approved only +8 to the Token ceiling, to 36173, for explicit UTF-8 adapter stdin decoding; LOC <3208 and Statement AST <=10685 remain unchanged. Baseline 3068 and prior allowances 10/2/61/51 remain unchanged; total covered growth is 139.",
         "new_trust_assumption": "The local Windows CIM process provider supplies parent PID and microsecond creation timestamps. Only children of the retained invocation root are queried, and native process handles independently verify creation time before an owned subtree is terminated. No command lines or unrelated sessions are collected.",
         "alternatives": [
           "A native exit code alone does not prove tree cleanup; the independent receipt checks remain required.",

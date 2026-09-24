@@ -29,10 +29,10 @@
       "path": "runtime-hooks/claude/pretooluse.ps1",
       "layer": "a3-adapter",
       "language": "powershell",
-      "raw_sha256": "sha256:03dbb6da6e7dbf7d2002a4ca6ab7dbcb543f3aa475cbcfaebf4fdff1ebc9860f",
-      "physical_loc": 124,
-      "nonblank_loc": 119,
-      "executable_loc": 118,
+      "raw_sha256": "sha256:ae3574d4bddd3ce64303584819ac0da8bec972a913b1076557671a3b75ba52a6",
+      "physical_loc": 126,
+      "nonblank_loc": 121,
+      "executable_loc": 119,
       "maximum_line_length": 214,
       "tcb_included": true,
       "kernel_api_operations": [
@@ -133,10 +133,10 @@
     "adapter_count": 9,
     "powershell_count": 6,
     "javascript_count": 3,
-    "executable_loc": 900,
+    "executable_loc": 901,
     "maximum_adapter_executable_loc": 196,
     "threshold_breaches": 0
   },
   "digest_algorithm": "canonical-json/v1",
-  "inventory_digest": "sha256:18840b56d49d25f69f9dc692e9f30cbe7895fbc54f28c85507e501566399f031"
+  "inventory_digest": "sha256:5e2e2db84f2e5fb9a0c1b7e86de94c1e360c73d06decb03eda8063a10332291c"
 }

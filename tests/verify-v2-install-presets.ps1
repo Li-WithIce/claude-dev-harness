@@ -1,5 +1,5 @@
 ﻿[CmdletBinding()]
-param([string]$RepoRoot = '',[switch]$OfflineSkillSourceOnly)
+param([string]$RepoRoot = '',[switch]$OfflineSkillSourceOnly,[switch]$InputTransportOnly)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -875,6 +875,13 @@ $fullFeatures = @('core','governed','memory','md-html','adapters','provider-refe
 
 try {
     New-Item -ItemType Directory -Path $script:ScratchRoot -Force | Out-Null
+
+    $inputTransport=Invoke-ChildScript -UserProfile (Join-Path $script:ScratchRoot 'transport-user') -ScriptPath (Join-Path $script:RepoRoot 'tests/fixtures/hook-input-transport.ps1') -Arguments @('-RepoRoot',$script:RepoRoot,'-OutputRoot',([IO.Path]::GetTempPath()))
+    if($inputTransport.ExitCode-eq0){Add-Check 'Hook two-hop UTF-8 input preserves packet identity and policy boundaries'}else{Add-Failure ('Hook UTF-8 transport failed: '+$inputTransport.Output)}
+    if($InputTransportOnly){
+        Write-Output $inputTransport.Output
+        if($script:Failures.Count){exit 1};exit 0
+    }
 
     if($OfflineSkillSourceOnly){
         Invoke-I02OfflineSkillSourceRegression

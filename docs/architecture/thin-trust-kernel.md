@@ -409,6 +409,15 @@ single-adapter and reduction constraints remain unchanged. Current acceptance
 requires Runtime transitive executable LOC < 3208; lower measurements do not
 reset the baseline or authorize unrelated growth.
 
+On 2026-09-24, a redirected adapter process was shown to default to CP936 even
+though the launcher writes UTF-8. An odd-length Chinese string before an escaped
+quote reproduced an input-stage JSON failure with changed packet identity.
+The adapter now selects UTF-8 before reading stdin. The user approved only eight
+additional tokens of ceiling (36165 to 36173); LOC <3208 and AST <=10685 stay
+unchanged. The resulting measurements are 3207 LOC, 36173 tokens and 10683 ASTs.
+Regression packets cover BOMs, Chinese, backslashes, multiline input, invalid
+input and unchanged policy denials without recording business patch bodies.
+
 The unchanged closure algorithm measures 21 Runtime files, **3078 executable
 LOC**, **35352 executable tokens**, and **10402 statement ASTs**. Growth relative
 to the sealed baseline is **+10 LOC / +140 tokens / +16 statements**, entirely

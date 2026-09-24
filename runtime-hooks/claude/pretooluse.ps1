@@ -7,6 +7,8 @@ $stage = 'input'
 $actionKind = 'unknown'
 
 try {
+    # The launcher writes UTF-8; a redirected child can otherwise default to CP936.
+    [Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
     $raw = [Console]::In.ReadToEnd()
     if ($raw.Length -gt 0 -and [int]$raw[0] -eq 0xFEFF) { $raw = $raw.Substring(1) }
     if ([string]::IsNullOrWhiteSpace($raw)) { throw 'Claude PreToolUse input is empty' }
