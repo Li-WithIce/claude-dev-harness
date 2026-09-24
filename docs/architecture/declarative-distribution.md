@@ -162,6 +162,8 @@ H04 does not change Runtime Hook execution, permissions, trust, budgets, or Skil
 
 ## I02 shared Skill requirements
 
+Synchronization keeps a retained-only link after rechecking its registered identity, without probing or recreating its target. The target may be offline; retention does not certify that Skill as usable. Current-request sources still require normal availability checks. The regression removes an isolated owner's Skill source directory while installing core for another owner and verifies all retained link identities.
+
 Installation and All verification use one transient Skill plan derived from the same digest-verified active owners as H04. Each owner contributes only its latest explicit feature_ownership.skills; the current request replaces the target's old demand. Workspace availability is not a retirement signal. No additional registry, public state field or reference-count service is introduced.
 
 The plan binds each required name to the exact registered live link. Current-request assets still come from the validated source plan. An upgrade to another source keeps the original backup/restoration mechanism only after the current link is registered and the two source directories have matching content identities; otherwise it fails before transaction publication. Retained-only Skills never materialize unverified historical source contents. A missing or drifted owned link, unsupported ownership or unowned same-source extra is an explicit conflict, not a reason to overwrite or silently retain arbitrary data.

@@ -84,7 +84,7 @@
     },
     {
       "path": "install.ps1",
-      "sha256": "sha256:a0d332c274c07af22639bfbbfa99447d9322b0b0e4a2f08de058a5f7f5559f29",
+      "sha256": "sha256:49e95768667b4aded055fcec59d1d888e1e086cbf18a4eaaa009e1220a9a48f5",
       "layer": "d1-distribution",
       "trust_paths": [
         "distribution"
@@ -92,9 +92,9 @@
       "root_ids": [
         "workspace-bootstrap"
       ],
-      "physical_loc": 3418,
-      "nonblank_loc": 3150,
-      "executable_loc": 3117
+      "physical_loc": 3432,
+      "nonblank_loc": 3164,
+      "executable_loc": 3129
     },
     {
       "path": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",
@@ -1565,13 +1565,13 @@
   "unresolved_dependencies": [],
   "totals": {
     "file_count": 29,
-    "physical_loc": 10844,
-    "nonblank_loc": 9928,
-    "executable_loc": 9845,
+    "physical_loc": 10858,
+    "nonblank_loc": 9942,
+    "executable_loc": 9857,
     "runtime_file_count": 21,
     "runtime_executable_loc": 3206,
     "distribution_file_count": 18,
-    "distribution_executable_loc": 8029,
+    "distribution_executable_loc": 8041,
     "duplicate_edge_count": 0,
     "artifact_count": 39,
     "artifact_bytes": 143030

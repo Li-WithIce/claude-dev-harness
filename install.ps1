@@ -2593,6 +2593,7 @@ function Sync-SkillsDirectory {
         [string]$RepoSkillsPath,
         [string[]]$ManagedEntryNames,
         [Collections.IDictionary]$EntryTargets,
+        [Collections.IDictionary]$RetainedEntryIdentities,
         [string[]]$RemoveEntryNames=@()
     )
 
@@ -2602,6 +2603,15 @@ function Sync-SkillsDirectory {
     $managedEntries = [ordered]@{}
     foreach ($name in $ManagedEntryNames) {
         $entryPath = if($null -ne $EntryTargets){$EntryTargets[$name]}else{Join-Path $RepoSkillsPath $name}
+        if($null -ne $RetainedEntryIdentities -and $RetainedEntryIdentities.Contains($name)){
+            $expected=$RetainedEntryIdentities[$name]
+            $linkPath=Join-Path $HostSkillsPath $name
+            if($expected.item_type -cne 'link' -or $expected.link_target -ine $entryPath -or -not(Test-InstallExactIdentityEqual -Left (Get-InstallManagedPathIdentity $linkPath) -Right $expected)){throw "Retained shared Skill changed after coordination: $linkPath"}
+            # Retain the registered link itself; an offline owner's target is
+            # neither a source to install nor authority to replace that link.
+            $managedEntries[$name]=$entryPath
+            continue
+        }
         if (-not (Test-Path -LiteralPath $entryPath)) {
             throw "Preset skill entry is missing: $entryPath"
         }
@@ -2635,6 +2645,7 @@ function Sync-SkillsDirectory {
     $preservedNames = Get-PreservedSkillEntryNames -SkillsRoot $HostSkillsPath -ManagedEntryNames $managedEntries.Keys -RepoSkillsPath $RepoSkillsPath
 
     foreach ($entry in Get-ChildItem -LiteralPath $HostSkillsPath -Force) {
+        if($null -ne $RetainedEntryIdentities -and $RetainedEntryIdentities.Contains($entry.Name)){continue}
         $currentTarget = Get-JunctionTarget -Path $entry.FullName
         $shouldPreserveForHotSwap = $hotSwapPreservedNames.Contains($entry.Name) -and ($null -eq $currentTarget)
         if (($preservedNames.Contains($entry.Name) -and $entry.Name -notin $RemoveEntryNames) -or $shouldPreserveForHotSwap) {
@@ -2661,6 +2672,7 @@ function Sync-SkillsDirectory {
     }
 
     foreach ($name in $managedEntries.Keys) {
+        if($null -ne $RetainedEntryIdentities -and $RetainedEntryIdentities.Contains($name)){continue}
         $linkPath = Join-Path $HostSkillsPath $name
         if ($hotSwapPreservedNames.Contains($name) -and (Test-Path -LiteralPath $linkPath) -and ($null -eq (Get-JunctionTarget -Path $linkPath))) {
             if ($name -eq '.system') {
@@ -3343,7 +3355,9 @@ try {
     Assert-HarnessDistributionSkillSourcesCurrent -RepoRoot $RepoRoot -Plan $script:DistributionPlan
     Assert-InstallSharedSkillPlanCurrent -Plan $sharedSkills
     foreach ($hostPlan in $sharedSkills.Hosts.Values) {
-        Sync-SkillsDirectory -HostSkillsPath $hostPlan.Root -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($hostPlan.Targets.Keys) -EntryTargets $hostPlan.Targets -RemoveEntryNames $hostPlan.Obsolete
+        $retained=[ordered]@{}
+        foreach($name in $hostPlan.Targets.Keys){if($name -notin $presetDefinition.skills){$retained[$name]=$hostPlan.Expected[$name]}}
+        Sync-SkillsDirectory -HostSkillsPath $hostPlan.Root -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($hostPlan.Targets.Keys) -EntryTargets $hostPlan.Targets -RetainedEntryIdentities $retained -RemoveEntryNames $hostPlan.Obsolete
     }
 
     Save-InstallManifestSnapshot

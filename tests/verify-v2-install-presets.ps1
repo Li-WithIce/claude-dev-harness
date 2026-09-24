@@ -1,5 +1,5 @@
 ﻿[CmdletBinding()]
-param([string]$RepoRoot = '')
+param([string]$RepoRoot = '',[switch]$OfflineSkillSourceOnly)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -630,6 +630,41 @@ function Invoke-I02RetiredSkillRegression {
     foreach($hostName in @('.claude','.codex','.agents')){foreach($name in $optional){if(Test-Path (Join-Path $a.User ($hostName+'/skills/'+$name))){Add-Failure 'I02 retired history was unioned permanently'}else{Add-Check 'I02 retired optional Skill removed'}}}
     Assert-UninstallExit (Invoke-Uninstall $b) 'I02 retired final cleanup'
 }
+function Invoke-I02OfflineSkillSourceRegression {
+    $a=New-PresetFixture -Name 'i02-offline-skill-source'
+    $b=[pscustomobject]@{Root=$a.Root;Workspace=(Join-Path $a.Root 'workspace-b');User=$a.User}
+    [void][IO.Directory]::CreateDirectory($b.Workspace)
+    $source=Join-Path $a.Root 'owner-source';[void][IO.Directory]::CreateDirectory($source)
+    foreach($name in @('agent-configs','runtime-hooks','vault-template','skills','scripts','modules','schemas','module-manifest-catalog.json','install.ps1','uninstall.ps1')){
+        Copy-Item -LiteralPath (Join-Path $script:RepoRoot $name) -Destination (Join-Path $source $name) -Recurse -Force
+    }
+    $ownerArgs=@('-WorkspaceRoot',$a.Workspace,'-RepoRoot',$source)
+    Assert-InstallExit (Invoke-ChildScript -UserProfile $a.User -ScriptPath (Join-Path $source 'install.ps1') -Arguments ($ownerArgs+@('-Preset','full'))) 'I02 offline Skill source full baseline'
+    $optional=@((Get-LatestManifest $a).feature_ownership.skills|Where-Object {$_ -cne '.system'})
+    $identities=@(foreach($hostName in @('.claude','.codex','.agents')){foreach($name in $optional){
+        $path=Join-Path $a.User ($hostName+'/skills/'+$name)
+        [pscustomobject]@{Path=$path;Identity=(Get-InstallManagedPathIdentity $path)}
+    }})
+    $skills=Join-Path $source 'skills';$holding=Join-Path $source 'skills.offline'
+    Move-Item -LiteralPath $skills -Destination $holding
+    try {
+        Assert-InstallExit (Invoke-Install $b @('-Preset','core')) 'I02 core install retains registered links while optional source is unavailable'
+        $verify=Invoke-ChildScript -UserProfile $b.User -ScriptPath (Join-Path $script:RepoRoot 'tests/verify-installation.ps1') -Arguments @('-WorkspaceRoot',$b.Workspace,'-RepoRoot',$script:RepoRoot,'-UserProfileRoot',$b.User,'-Scope','All')
+        if($verify.ExitCode -eq 0){Add-Check 'I02 All verifies retained-only offline Skill link identities'}else{Add-Failure "I02 offline Skill source All verification failed: $($verify.Output)"}
+        foreach($entry in $identities){
+            if(Test-InstallExactIdentityEqual -Left (Get-InstallManagedPathIdentity $entry.Path) -Right $entry.Identity){Add-Check 'I02 unavailable retained Skill keeps exact link identity'}else{Add-Failure ('I02 unavailable retained Skill changed: '+$entry.Path)}
+        }
+        $journal=Join-Path $a.User '.dev-harness/install-transaction.json'
+        if(Test-Path $journal){Add-Failure 'I02 unavailable retained Skill left a pending install'}
+    } finally {
+        Move-Item -LiteralPath $holding -Destination $skills
+        $journal=Join-Path $a.User '.dev-harness/install-transaction.json'
+        if(Test-Path $journal){$pending=Get-Content $journal -Raw|ConvertFrom-Json;[void](Invoke-ChildScript -UserProfile $a.User -ScriptPath $script:UninstallScript -Arguments @('-RecoveryManifestPath',$pending.manifest_path))}
+    }
+    Assert-UninstallExit (Invoke-Uninstall $b) 'I02 offline Skill source core cleanup'
+    Assert-UninstallExit (Invoke-ChildScript -UserProfile $a.User -ScriptPath $script:UninstallScript -Arguments $ownerArgs) 'I02 offline Skill source full cleanup'
+}
+
 function Invoke-I02SharedSkillsRegression {
     foreach($order in @('full-first','core-first')) {
         $fixture=New-PresetFixture -Name ('i02-'+$order)
@@ -841,9 +876,17 @@ $fullFeatures = @('core','governed','memory','md-html','adapters','provider-refe
 try {
     New-Item -ItemType Directory -Path $script:ScratchRoot -Force | Out-Null
 
+    if($OfflineSkillSourceOnly){
+        Invoke-I02OfflineSkillSourceRegression
+        foreach($check in $script:Checks){Write-Output ('[PASS] '+$check)}
+        foreach($failure in $script:Failures){Write-Output ('[FAIL] '+$failure)}
+        if($script:Failures.Count){exit 1};exit 0
+    }
+
     Invoke-I02SharedSkillsRegression
     Invoke-I02SkillIntegrityRegression
     Invoke-I02RetiredSkillRegression
+    Invoke-I02OfflineSkillSourceRegression
     Invoke-H04SharedHookRegression
     Invoke-H04SharedHookFailureRegression
     Invoke-H04NonActiveReleaseRegression
