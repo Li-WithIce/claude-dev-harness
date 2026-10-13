@@ -47,6 +47,7 @@ try {
 
     $stage = 'workspace'
     if ($payload.Contains('cwd') -and $payload.cwd -isnot [string]) { throw 'Codex PreToolUse input contains a non-string cwd' }
+    if ($payload.Contains('session_id') -and $payload.session_id -isnot [string]) { throw 'Codex PreToolUse input contains a non-string session_id' }
     if (-not [string]::IsNullOrWhiteSpace($env:HARNESS_SESSION_MODE) -and $env:HARNESS_SESSION_MODE -cnotin @('read-only','write')) {
         throw "HARNESS_SESSION_MODE must be read-only or write: $env:HARNESS_SESSION_MODE"
     }
@@ -58,6 +59,7 @@ try {
     $stage = 'preflight'
     [void](Invoke-HarnessAdapterPreflightAction -RepoRoot '{REPO_ROOT}' `
         -WorkspaceRoot $(if ($payload.Contains('cwd')) { [string]$payload.cwd } else { '' }) -WorkspaceRootFallback ([Environment]::GetEnvironmentVariable('DEV_HARNESS_WORKSPACE_ROOT','Process')) `
+        -SessionId $(if ($payload.Contains('session_id')) { [string]$payload.session_id } else { '' }) `
         -PermissionMode $permissionMode -SessionMode $(if ($env:HARNESS_SESSION_MODE -ceq 'read-only') { 'read-only' } else { 'write' }) `
         -ActionMode write -ActionKind $actionKind `
         -ShellText $(if($toolName-ceq'Bash'){[string]$toolInput.command}else{''}) `
@@ -101,6 +103,10 @@ try {
         }
         '^read-only session cannot invoke a write tool$' {
             'read-only'
+            break
+        }
+        '^session workspace' {
+            'workspace-binding'
             break
         }
         '^protected (?:write requires|write task profile is insufficient|task version is stale)' {

@@ -148,6 +148,7 @@ $expectedSchemaFiles = @(
     'runtime-default-admission.schema.json',
     'runtime-default-decision.schema.json',
     'runtime-policies.schema.json',
+    'session-workspaces.schema.json',
     'task-state.schema.json',
     'task-step-claim.schema.json',
     'task-transaction-operations.schema.json',

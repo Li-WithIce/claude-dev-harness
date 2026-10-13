@@ -622,6 +622,16 @@
       "legacy_status": "not-legacy"
     },
     {
+      "path": "scripts/lib/Harness.SessionWorkspace.psm1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Session-bound workspace grant validation and registration",
+      "owner_candidate": "task-governance",
+      "tcb_included": true,
+      "reason": "Additional roots are explicit authorization inputs checked by the counted Runtime.",
+      "migration_target": "runtime-kernel",
+      "legacy_status": "not-legacy"
+    },
+    {
       "path": "scripts/lib/Harness.TaskMigration.psm1",
       "layer": "k1-runtime-kernel",
       "current_role": "K1 task-state publication seam used only by the explicit v1-to-v2 migration maintenance command.",
@@ -729,6 +739,16 @@
       "tcb_included": false,
       "reason": "Benchmark telemetry is outside Runtime Kernel.",
       "migration_target": "benchmark-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/register-session-workspaces.ps1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Session-bound workspace grant validation and registration",
+      "owner_candidate": "task-governance",
+      "tcb_included": true,
+      "reason": "Additional roots are explicit authorization inputs checked by the counted Runtime.",
+      "migration_target": "runtime-kernel",
       "legacy_status": "not-legacy"
     },
     {

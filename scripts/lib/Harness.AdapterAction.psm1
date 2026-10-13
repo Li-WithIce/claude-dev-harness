@@ -1,5 +1,6 @@
 ﻿Import-Module (Join-Path $PSScriptRoot 'Harness.ProtectedAction.psm1') -Force -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot 'Harness.ControlledWrite.psm1') -Force -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot 'Harness.SessionWorkspace.psm1') -Force -ErrorAction Stop
 . (Join-Path $PSScriptRoot 'Harness.RuntimeKernel.ps1')
 
 function Get-HarnessApplyPatchChangedPaths {
@@ -111,6 +112,7 @@ function Invoke-HarnessAdapterPreflightAction {
         [Parameter(Mandatory)][string]$RepoRoot,
         [AllowEmptyString()][string]$WorkspaceRoot='',
         [AllowEmptyString()][string]$WorkspaceRootFallback='',
+        [AllowEmptyString()][string]$SessionId='',
         [ValidateSet('','default','bypassPermissions')][string]$PermissionMode='',
         [ValidateSet('read-only','write')][string]$SessionMode='write',
         [ValidateSet('read','write')][string]$ActionMode='write',
@@ -148,22 +150,54 @@ function Invoke-HarnessAdapterPreflightAction {
             Assert-HarnessKernelCondition (-not $ShellText -and -not $PatchText -and $paths.Count -gt 0) 'file mutation preflight action shape is invalid'
         } elseif ($kind -ceq 'normalized_action' -and $PatchText) { throw 'normalized preflight action must not carry patch_text' }
         $preflightStage = 'target'
+        $workspacePaths = [ordered]@{}
         if ($ActionKind -cne 'shell') {
             $identities = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+            $additionalRoots = $null
             $paths = [string[]]@($paths | ForEach-Object {
                 if ([string]::IsNullOrWhiteSpace($_)) { throw 'file mutation input is missing target path' }
-                # Direct host cwd equals the checked authorization root; the existing resolver performs the single resolution.
-                $fullPath = Resolve-HarnessContainedPath -WorkspaceRoot $workspaceRoot -Path $_ -Label 'file mutation target' -AllowMissing
+                $targetRoot = $workspaceRoot
+                $fullPath = [IO.Path]::GetFullPath($_,$workspaceRoot)
+                $prefix = $workspaceRoot.TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+                if (-not ($fullPath.Equals($workspaceRoot,[StringComparison]::OrdinalIgnoreCase) -or $fullPath.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase))) {
+                    if (-not $primaryRoot -or -not [IO.Path]::IsPathFullyQualified($_)) { throw 'file mutation target escapes WorkspaceRoot' }
+                    if ($null -eq $additionalRoots) { $additionalRoots = @(Get-HarnessSessionWorkspaceRoots -RepoRoot $repoRoot -WorkspaceRoot $workspaceRoot -SessionId $SessionId) }
+                    $matches = @($additionalRoots | Where-Object { $fullPath.Equals($_,[StringComparison]::OrdinalIgnoreCase) -or $fullPath.StartsWith($_.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) })
+                    if ($matches.Count -ne 1) { throw 'file mutation target escapes WorkspaceRoot' }
+                    $targetRoot = $matches[0]
+                }
+                $fullPath = Resolve-HarnessContainedPath -WorkspaceRoot $targetRoot -Path $fullPath -Label 'file mutation target' -AllowMissing
                 Assert-HarnessKernelCondition (-not (Test-Path -LiteralPath $fullPath -PathType Container)) 'file mutation target must not be a directory'
-                if ($identities.Add($fullPath)) { $fullPath }
+                if ($identities.Add($fullPath)) {
+                    if (-not $workspacePaths.Contains($targetRoot)) { $workspacePaths[$targetRoot] = [Collections.Generic.List[string]]::new() }
+                    $workspacePaths[$targetRoot].Add($fullPath)
+                    $fullPath
+                }
             })
         }
 
         $preflightStage = 'policy'
-        return New-HarnessAdapterResponse -Operation preflight_action -Value (Assert-HarnessProtectedAction -RepoRoot $repoRoot -WorkspaceRoot $workspaceRoot `
-            -SessionMode $SessionMode -ActionMode $ActionMode -TaskId $TaskId -ExpectedVersion $ExpectedVersion `
-            -CommandText $commandText -ChangedPaths $paths -Environment $Environment `
-            -DryRun:$DryRun -UserInstruction $UserInstruction) -Keys @('allowed','protected','matched_rules','required_scopes','approval_id','operation_identity','protected_operation')
+        if (-not $workspacePaths.Count) { $workspacePaths[$workspaceRoot] = @() }
+        $checks = @(foreach ($root in $workspacePaths.Keys) {
+            $guard = Assert-HarnessProtectedAction -RepoRoot $repoRoot -WorkspaceRoot $root `
+                -SessionMode $SessionMode -ActionMode $ActionMode -TaskId $TaskId -ExpectedVersion $ExpectedVersion `
+                -CommandText $commandText -ChangedPaths @($workspacePaths[$root]) -Environment $Environment `
+                -DryRun:$DryRun -UserInstruction $UserInstruction
+            $check = [ordered]@{workspace_root=$root}
+            foreach ($key in $guard.Keys) { $check[$key] = $guard[$key] }
+            $check
+        })
+        $result = Select-HarnessKernelKeys -Value $checks[0] -Keys @('allowed','protected','matched_rules','required_scopes','approval_id','operation_identity','protected_operation')
+        if ($checks.Count -gt 1 -or $checks[0].workspace_root -cne $workspaceRoot) {
+            $result.workspace_checks = $checks
+            $result.protected = @($checks | Where-Object protected -eq $true).Count -gt 0
+            $result.matched_rules = @($checks | ForEach-Object { $_.matched_rules } | Sort-Object -Unique)
+            $result.required_scopes = @($checks | ForEach-Object { $_.required_scopes } | Sort-Object -Unique)
+            $result.approval_id = $null
+            $result.operation_identity = $null
+            $result.protected_operation = $null
+        }
+        return New-HarnessAdapterResponse -Operation preflight_action -Value $result -Keys @('allowed','protected','matched_rules','required_scopes','approval_id','operation_identity','protected_operation','workspace_checks')
     } catch {
         $_.Exception.Data['harness_preflight_stage'] = $preflightStage
         throw

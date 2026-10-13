@@ -59,6 +59,14 @@
       "reason": "Risk Routing is an irreducible Harness trust responsibility even though host prose performs the first inline classification hop."
     },
     {
+      "id": "session-workspace-registration",
+      "path": "scripts/register-session-workspaces.ps1",
+      "trust_path": "runtime",
+      "role": "Register exact session-bound workspace roots using current scoped Approval and CAS.",
+      "layer": "k1-runtime-kernel",
+      "reason": "Workspace grants extend the authorization boundary and use the same counted Runtime primitives."
+    },
+    {
       "id": "task-cli",
       "path": "scripts/task.ps1",
       "trust_path": "runtime",
@@ -112,7 +120,7 @@
     },
     {
       "path": "runtime-hooks/claude/pretooluse.ps1",
-      "sha256": "sha256:ae3574d4bddd3ce64303584819ac0da8bec972a913b1076557671a3b75ba52a6",
+      "sha256": "sha256:836c0d6cf309763eadbd0b92ead39dc78fc81ae1ab6a6a99303053d44529d242",
       "layer": "a3-adapter",
       "trust_paths": [
         "runtime"
@@ -121,9 +129,9 @@
         "claude-pretooluse-adapter",
         "codex-pretooluse-launcher"
       ],
-      "physical_loc": 126,
-      "nonblank_loc": 121,
-      "executable_loc": 119
+      "physical_loc": 132,
+      "nonblank_loc": 127,
+      "executable_loc": 125
     },
     {
       "path": "scripts/generate-entry-contract.ps1",
@@ -185,7 +193,7 @@
     },
     {
       "path": "scripts/lib/Harness.AdapterAction.psm1",
-      "sha256": "sha256:e5eed11153d2f976cdc8b9d75c02752a8fc13cb3f3acf692bfd76805fa6dbd23",
+      "sha256": "sha256:fbf72a89b33dbc1154cb2dc7b60f348b0d44853387f8579ee0c13640ed400ed3",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
@@ -195,9 +203,9 @@
         "codex-pretooluse-launcher",
         "controlled-write-adapter"
       ],
-      "physical_loc": 199,
-      "nonblank_loc": 182,
-      "executable_loc": 175
+      "physical_loc": 233,
+      "nonblank_loc": 216,
+      "executable_loc": 210
     },
     {
       "path": "scripts/lib/Harness.AtomicWrite.psm1",
@@ -213,6 +221,7 @@
         "controlled-write-adapter",
         "entry-contract-compiler",
         "risk-policy-evaluator",
+        "session-workspace-registration",
         "status-cli",
         "task-cli",
         "workspace-bootstrap"
@@ -293,6 +302,7 @@
         "controlled-write-adapter",
         "entry-contract-compiler",
         "risk-policy-evaluator",
+        "session-workspace-registration",
         "status-cli",
         "task-cli",
         "workspace-bootstrap"
@@ -314,6 +324,7 @@
         "codex-pretooluse-launcher",
         "controlled-write-adapter",
         "risk-policy-evaluator",
+        "session-workspace-registration",
         "status-cli",
         "task-cli",
         "workspace-bootstrap"
@@ -336,6 +347,7 @@
         "controlled-write-adapter",
         "entry-contract-compiler",
         "risk-policy-evaluator",
+        "session-workspace-registration",
         "status-cli",
         "task-cli",
         "workspace-bootstrap"
@@ -357,6 +369,7 @@
         "codex-pretooluse-launcher",
         "controlled-write-adapter",
         "risk-policy-evaluator",
+        "session-workspace-registration",
         "status-cli",
         "workspace-bootstrap"
       ],
@@ -366,7 +379,7 @@
     },
     {
       "path": "scripts/lib/Harness.ProtectedAction.psm1",
-      "sha256": "sha256:10004f24af12a6820a57ca7095b3485ac29eb3d8fb073603593a29f50d481ff8",
+      "sha256": "sha256:84092da8e42f4e9db2024528a83fba6dac224bdee9e97c522962d4b7b88e9a2f",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "distribution",
@@ -376,12 +389,13 @@
         "claude-pretooluse-adapter",
         "codex-pretooluse-launcher",
         "controlled-write-adapter",
+        "session-workspace-registration",
         "status-cli",
         "workspace-bootstrap"
       ],
-      "physical_loc": 91,
-      "nonblank_loc": 86,
-      "executable_loc": 86
+      "physical_loc": 92,
+      "nonblank_loc": 87,
+      "executable_loc": 87
     },
     {
       "path": "scripts/lib/Harness.Protocol.psm1",
@@ -396,6 +410,7 @@
         "codex-pretooluse-launcher",
         "controlled-write-adapter",
         "risk-policy-evaluator",
+        "session-workspace-registration",
         "status-cli",
         "task-cli",
         "workspace-bootstrap"
@@ -445,6 +460,7 @@
         "codex-pretooluse-launcher",
         "controlled-write-adapter",
         "risk-policy-evaluator",
+        "session-workspace-registration",
         "status-cli",
         "task-cli",
         "workspace-bootstrap"
@@ -467,6 +483,7 @@
         "controlled-write-adapter",
         "entry-contract-compiler",
         "risk-policy-evaluator",
+        "session-workspace-registration",
         "status-cli",
         "task-cli",
         "workspace-bootstrap"
@@ -474,6 +491,23 @@
       "physical_loc": 598,
       "nonblank_loc": 561,
       "executable_loc": 551
+    },
+    {
+      "path": "scripts/lib/Harness.SessionWorkspace.psm1",
+      "sha256": "sha256:7b3ece57366e8a0ba9686a0a9d898d8faa91928d74a79b81107f6e00db6a6e76",
+      "layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "root_ids": [
+        "claude-pretooluse-adapter",
+        "codex-pretooluse-launcher",
+        "controlled-write-adapter",
+        "session-workspace-registration"
+      ],
+      "physical_loc": 121,
+      "nonblank_loc": 116,
+      "executable_loc": 116
     },
     {
       "path": "scripts/lib/Harness.TaskState.psm1",
@@ -488,6 +522,20 @@
       "physical_loc": 844,
       "nonblank_loc": 803,
       "executable_loc": 803
+    },
+    {
+      "path": "scripts/register-session-workspaces.ps1",
+      "sha256": "sha256:082f4c15648e599fb6a44074b51e712456f40f8c83ccc7ab1af14ffb5d08369c",
+      "layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "root_ids": [
+        "session-workspace-registration"
+      ],
+      "physical_loc": 26,
+      "nonblank_loc": 26,
+      "executable_loc": 26
     },
     {
       "path": "scripts/task.ps1",
@@ -672,15 +720,15 @@
     },
     {
       "path": "schemas/adapter-kernel-api.schema.json",
-      "sha256": "sha256:847ecff3df6dd2f4fde8abffa7c87e650ef51c761d839b12bd22f0854a18f015",
+      "sha256": "sha256:880991eb550cb91dc332be856db4fe45e206898e7eee5af22e5a83eed41b7a46",
       "kind": "schema",
       "owner_layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
       ],
       "reason": "The strict four-operation Adapter request and response contract binds the public K1 boundary.",
-      "physical_loc": 225,
-      "bytes": 10864
+      "physical_loc": 241,
+      "bytes": 11926
     },
     {
       "path": "schemas/approval.schema.json",
@@ -947,6 +995,18 @@
       "bytes": 8593
     },
     {
+      "path": "schemas/session-workspaces.schema.json",
+      "sha256": "sha256:984f1e87bf7f566208a591c3fb6f5366831fb1c78a45aa46693f0c69783afd73",
+      "kind": "schema",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "reason": "Session workspace grants strictly bind session, primary and target physical identities and registration provenance.",
+      "physical_loc": 25,
+      "bytes": 1369
+    },
+    {
       "path": "schemas/task-state.schema.json",
       "sha256": "sha256:59df09dfbb77127efdfe5943b26c167cfe9a29ece82c9ed07022f275964aefa7",
       "kind": "schema",
@@ -1178,6 +1238,15 @@
       ]
     },
     {
+      "from": "scripts/lib/Harness.AdapterAction.psm1",
+      "to": "scripts/lib/Harness.SessionWorkspace.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.SessionWorkspace.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
       "from": "scripts/lib/Harness.AtomicWrite.psm1",
       "to": "scripts/lib/Harness.Hashing.psm1",
       "kind": "import-module",
@@ -1398,6 +1467,33 @@
       ]
     },
     {
+      "from": "scripts/lib/Harness.SessionWorkspace.psm1",
+      "to": "scripts/lib/Harness.ProtectedAction.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.ProtectedAction.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.SessionWorkspace.psm1",
+      "to": "scripts/lib/Harness.Protocol.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Protocol.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.SessionWorkspace.psm1",
+      "to": "scripts/lib/Harness.RuntimeKernel.ps1",
+      "kind": "dot-source",
+      "resolution": "ast-static:. (Join-Path $PSScriptRoot 'Harness.RuntimeKernel.ps1')",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
       "from": "scripts/lib/Harness.TaskState.psm1",
       "to": "scripts/lib/Harness.Governance.psm1",
       "kind": "import-module",
@@ -1420,6 +1516,15 @@
       "to": "scripts/lib/Harness.RuntimeKernel.ps1",
       "kind": "dot-source",
       "resolution": "ast-static:. (Join-Path $PSScriptRoot 'Harness.RuntimeKernel.ps1')",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/register-session-workspaces.ps1",
+      "to": "scripts/lib/Harness.SessionWorkspace.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $RepoRoot 'scripts/lib/Harness.SessionWorkspace.psm1') -Force -ErrorAction Stop",
       "trust_paths": [
         "runtime"
       ]
@@ -1564,23 +1669,23 @@
   ],
   "unresolved_dependencies": [],
   "totals": {
-    "file_count": 29,
-    "physical_loc": 10860,
-    "nonblank_loc": 9944,
-    "executable_loc": 9858,
-    "runtime_file_count": 21,
-    "runtime_executable_loc": 3207,
+    "file_count": 31,
+    "physical_loc": 11048,
+    "nonblank_loc": 10127,
+    "executable_loc": 10042,
+    "runtime_file_count": 23,
+    "runtime_executable_loc": 3391,
     "distribution_file_count": 18,
-    "distribution_executable_loc": 8041,
+    "distribution_executable_loc": 8042,
     "duplicate_edge_count": 0,
-    "artifact_count": 39,
-    "artifact_bytes": 143030
+    "artifact_count": 40,
+    "artifact_bytes": 145461
   },
   "budget": {
     "baseline_executable_loc": 3068,
-    "current_executable_loc": 3207,
-    "delta": 139,
-    "covered_growth": 139,
+    "current_executable_loc": 3391,
+    "delta": 323,
+    "covered_growth": 323,
     "status": "covered-by-exception",
     "exceptions": [
       {
@@ -1646,6 +1751,19 @@
         ],
         "repayment_plan": "Review necessity at the next explicitly authorized Runtime budget review. Preserve identity validation, bounded waits, readable branches, existing adapter limits and reduction constraints; do not require mechanical line deletion.",
         "expires_at_milestone": "Next explicitly authorized Runtime budget review after the 2026-09-23 owned-process cleanup correction"
+      },
+      {
+        "id": "KTB-EX-011",
+        "added_lines": 184,
+        "reason": "Candidate allowance for the user-authorized 2026-10-13 multi-workspace boundary repair: +184 LOC/+1670 tokens/+481 statement ASTs over c4faeb6, yielding 3391/37843/11164. Baseline 3068 and previous 139-line coverage remain. Exact candidate deployment approval is pending.",
+        "new_trust_assumption": "The documented host session_id and an operator-maintained session grant bind additional installed workspace roots. Hostile same-account control-file replacement remains outside the cooperative Hook contract.",
+        "alternatives": [
+          "A parent-directory grant or cwd rewrite would discard workspace-local policy boundaries.",
+          "Guessing host payload roots or parsing transcripts supplies no stable authorization contract.",
+          "The existing K0 physical identity, K1 schema/Approval and atomic CAS primitives avoid a new dependency."
+        ],
+        "repayment_plan": "Review the session-grant cost at the next explicitly authorized Runtime change; preserve the original baseline, closure accounting, all-target checks and readable source.",
+        "expires_at_milestone": "Next authorized Runtime budget review after multi-workspace boundary closure"
       }
     ]
   }

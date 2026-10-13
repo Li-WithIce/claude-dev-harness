@@ -4,7 +4,7 @@
   "source_basis": "git-index-blob/v1",
   "classification": {
     "path": "kernel-component-classification.json",
-    "sha256": "sha256:f52ec72c3898b1447c780281b82bedc781dc0760c6c5b06bdecb22108b56b56e"
+    "sha256": "sha256:43340a0055ecd51ec0b9b53c211ec1bbe77040458842fa34aceea2bc7d351c12"
   },
   "metric_contract": {
     "powershell": "powershell-token-lines/v1",
@@ -29,10 +29,10 @@
       "path": "runtime-hooks/claude/pretooluse.ps1",
       "layer": "a3-adapter",
       "language": "powershell",
-      "raw_sha256": "sha256:ae3574d4bddd3ce64303584819ac0da8bec972a913b1076557671a3b75ba52a6",
-      "physical_loc": 126,
-      "nonblank_loc": 121,
-      "executable_loc": 119,
+      "raw_sha256": "sha256:836c0d6cf309763eadbd0b92ead39dc78fc81ae1ab6a6a99303053d44529d242",
+      "physical_loc": 132,
+      "nonblank_loc": 127,
+      "executable_loc": 125,
       "maximum_line_length": 214,
       "tcb_included": true,
       "kernel_api_operations": [
@@ -133,10 +133,10 @@
     "adapter_count": 9,
     "powershell_count": 6,
     "javascript_count": 3,
-    "executable_loc": 901,
+    "executable_loc": 907,
     "maximum_adapter_executable_loc": 196,
     "threshold_breaches": 0
   },
   "digest_algorithm": "canonical-json/v1",
-  "inventory_digest": "sha256:5e2e2db84f2e5fb9a0c1b7e86de94c1e360c73d06decb03eda8063a10332291c"
+  "inventory_digest": "sha256:e3f3a6ad7616ea99d82f0e8c95a36b82b462b1eb31497dd9aed9ca081e0377c4"
 }

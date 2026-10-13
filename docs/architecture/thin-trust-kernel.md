@@ -18,8 +18,13 @@ unchanged `KTB-EX-002` +10, `KTB-EX-003` H01 +2 and `KTB-EX-004` H02 +61.
 The 2026-09-20 limited Hook authorization adds `KTB-EX-005` +51 for the reviewed
 converged implementation, without changing baseline 3068 or those prior exceptions.
 The 2026-09-23 process cleanup authorization adds `KTB-EX-006` +15, retaining
-the prior allowances. The current strict acceptance bound is <3208; historical TK-07 bounds remain
-recorded below and are not rewritten as current measurement results.
+the prior allowances. That version's strict acceptance bound is <3208; historical TK-07 bounds remain
+recorded below and are not rewritten as current measurement results. The multi-workspace repair
+candidate proposes `KTB-EX-011` +184 LOC (+1670 tokens/+481 statement ASTs over c4faeb6),
+giving Runtime transitive executable LOC < 3392 and density ceilings 37843/11164.
+The exact candidate's deployment approval is pending; this accounting is not an installation grant.
+See [session-workspaces.md](session-workspaces.md) for the additional session-grant trust assumption,
+alternatives, migration and verification boundary.
 The original below-3000 goal remains unmet; terminal task closure additionally
 requires all prescribed verification evidence. A later
 boundary change requires an explicit Architecture Decision or Change Contract

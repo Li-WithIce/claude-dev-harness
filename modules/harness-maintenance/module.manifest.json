@@ -46,6 +46,7 @@
       "tests/verify-installation.ps1",
       "tests/verify-host-diagnostics.ps1",
       "tests/verify-runtime-hooks.ps1",
+      "tests/verify-session-workspaces.ps1",
       "tests/verify-thin-adapters.ps1",
       "tests/verify-uninstall-isolation.ps1",
       "tests/verify-update-managed-assets.ps1",
@@ -112,6 +113,7 @@
       "tests/verify-installation.ps1",
       "tests/verify-host-diagnostics.ps1",
       "tests/verify-runtime-hooks.ps1",
+      "tests/verify-session-workspaces.ps1",
       "tests/verify-thin-adapters.ps1",
       "tests/verify-uninstall-isolation.ps1",
       "tests/verify-update-managed-assets.ps1",
@@ -145,6 +147,7 @@
       "tests/verify-installation.ps1",
       "tests/verify-host-diagnostics.ps1",
       "tests/verify-runtime-hooks.ps1",
+      "tests/verify-session-workspaces.ps1",
       "tests/verify-thin-adapters.ps1",
       "tests/verify-uninstall-isolation.ps1",
       "tests/verify-update-managed-assets.ps1",
@@ -153,7 +156,7 @@
     ],
     "quick": [],
     "core_groups": {
-      "harness-contracts": ["tests/verify-thin-adapters.ps1"]
+      "harness-contracts": ["tests/verify-thin-adapters.ps1", "tests/verify-session-workspaces.ps1"]
     },
     "changed": [
       "tests/verify-capability-extraction.ps1",
@@ -161,6 +164,7 @@
       "tests/verify-install-isolation.ps1",
       "tests/verify-host-diagnostics.ps1",
       "tests/verify-runtime-hooks.ps1",
+      "tests/verify-session-workspaces.ps1",
       "tests/verify-thin-adapters.ps1",
       "tests/verify-uninstall-isolation.ps1",
       "tests/verify-update-managed-assets.ps1",
@@ -173,6 +177,7 @@
       "tests/verify-install-isolation.ps1",
       "tests/verify-host-diagnostics.ps1",
       "tests/verify-runtime-hooks.ps1",
+      "tests/verify-session-workspaces.ps1",
       "tests/verify-thin-adapters.ps1",
       "tests/verify-uninstall-isolation.ps1",
       "tests/verify-update-managed-assets.ps1",

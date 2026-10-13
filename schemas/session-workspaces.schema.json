@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Session Workspaces v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "session_id", "primary", "workspaces", "task_id", "task_version", "contract_digest", "approval_id", "registered_at", "expires_at"],
+  "properties": {
+    "schema_version": {"const": "session-workspaces/v1"},
+    "session_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+    "primary": {"$ref": "#/definitions/workspace"},
+    "workspaces": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/definitions/workspace"}},
+    "task_id": {"type": "string", "pattern": "^(?!(?:none|idle|unknown)$)[a-z0-9][a-z0-9-]{0,63}$"},
+    "task_version": {"type": "integer", "minimum": 1},
+    "contract_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "approval_id": {"type": "string", "pattern": "^apr_[A-Za-z0-9._-]+$"},
+    "registered_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"oneOf": [{"type": "null"}, {"type": "string", "format": "date-time"}]}
+  },
+  "definitions": {
+    "workspace": {
+      "type": "object", "additionalProperties": false, "required": ["path", "identity"],
+      "properties": {"path": {"type": "string", "minLength": 1}, "identity": {"type": "string", "minLength": 1}}
+    }
+  }
+}
