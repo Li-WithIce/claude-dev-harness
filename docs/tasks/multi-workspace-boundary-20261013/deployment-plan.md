@@ -5,7 +5,7 @@
 - candidate commit: a24f86f580af45bd0cbb28dc242b74e2ff8bbc3a
 - candidate tree: 1febaaddfae1478043302c8a800f6174046ea3f0
 - deployment plan: deployment-plan.json
-- deployment plan SHA256: 67051f2a30613dc1bcde61fccce9dcc0c57ab48fe266bf954956a8ca5a76c405
+- deployment plan SHA256: a6a9cb928853ac9a257d47e020dbc8542d02b40adf51c4ff72a0884a5cee1757
 - exact actions: deployment-actions.json，15 条固定命令
 - actions SHA256: af1d05e1d4411b666d8792c88d311dd131f8ffecef30c6b2ff028b0a5edfb844
 - task_id: multi-workspace-boundary-20261013

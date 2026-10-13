@@ -3,8 +3,10 @@
 - task_id: multi-workspace-boundary-20261013
 - contract_digest: sha256:9f572e778018fc32dfe71a0f12c2bcf336108ffde5e7aeda00837d2c10be151a
 - baseline: c4faeb66eaf78bc52cf69259c5207f6fe2348ac6
-- detailed_record: .assistant/runtime/multi-workspace-validation-report.json
-- detailed_record_digest: sha256:181c33b0aef439e9685b15b454146afc6fa3968f17a258a288f629e706e4b811
+- detailed_record: .assistant/runtime/multi-workspace-validation-report-final.json
+- detailed_record_digest: sha256:6f1fbdb39d9625f5e9145e6d497ef247363f4f6f00931e1f08c6beb1aedb8d21
+
+The final detailed record corrects the earlier phrase "approved deployment plan" to "prepared deployment plan"; exact execution and budget approval remain pending. The original report is retained at `.assistant/runtime/multi-workspace-validation-report.json` with digest `sha256:181c33b0aef439e9685b15b454146afc6fa3968f17a258a288f629e706e4b811`. Test outcomes and failure history are unchanged.
 
 The candidate implementation is ready for exact deployment review. All 75 active owners have passing coverage from the retained initial run and complete native reruns. The initial `run-validation.ps1 -Suite all -IncludeCachedDiff` command remains **exit 1: 67 pass, 8 fail**; it is not reported as a passing Suite all invocation. Both Git diff checks passed. Fourteen archived verifiers remain `not_run`.
 

@@ -139,9 +139,9 @@
   ],
   "validation": {
     "maintained_report": "docs/tasks/multi-workspace-boundary-20261013/validation-report.md",
-    "maintained_report_digest": "sha256:1025e18cff928beb188aba86460cf98434f61793387b8cdccfed83c0bf7b0d2b",
-    "detailed_record": ".assistant/runtime/multi-workspace-validation-report.json",
-    "detailed_record_digest": "sha256:181c33b0aef439e9685b15b454146afc6fa3968f17a258a288f629e706e4b811",
+    "maintained_report_digest": "sha256:3d2eb137d71409bb793923ca571a5e3e00f264c163187a987ce31853fd737c3e",
+    "detailed_record": ".assistant/runtime/multi-workspace-validation-report-final.json",
+    "detailed_record_digest": "sha256:6f1fbdb39d9625f5e9145e6d497ef247363f4f6f00931e1f08c6beb1aedb8d21",
     "initial_suite_all_exit_code": 1,
     "initial_owners_passed": 67,
     "initial_owners_failed": 8,
