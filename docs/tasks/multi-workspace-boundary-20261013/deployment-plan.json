@@ -1,0 +1,189 @@
+{
+  "format": "managed-session-workspace-deployment/1",
+  "status": "fixed-prepared-awaiting-exact-approval",
+  "task_id": "multi-workspace-boundary-20261013",
+  "current_task_version": 2,
+  "approval_target_task_version": 3,
+  "contract_digest": "sha256:9f572e778018fc32dfe71a0f12c2bcf336108ffde5e7aeda00837d2c10be151a",
+  "candidate": {
+    "commit": "a24f86f580af45bd0cbb28dc242b74e2ff8bbc3a",
+    "tree": "1febaaddfae1478043302c8a800f6174046ea3f0",
+    "branch": "codex/multi-workspace-boundary",
+    "baseline_commit": "c4faeb66eaf78bc52cf69259c5207f6fe2348ac6",
+    "distribution_source": "D:\\data\\dev-harness",
+    "source_expected_clean": true,
+    "source_expected_baseline_head": "c4faeb66eaf78bc52cf69259c5207f6fe2348ac6"
+  },
+  "installation_targets": [
+    {
+      "workspace_root": "D:\\GVPP",
+      "preset": "core",
+      "distribution_digest": "sha256:c447d5e269710b1049d9a29fa15f1858b2c0447fd2baff5ea05682f5708e5a4d"
+    },
+    {
+      "workspace_root": "D:\\energy\\base-service",
+      "preset": "full",
+      "distribution_digest": "sha256:20360811c6ded7ad75985916f8b00d45f67d29b77101c902ff888e8170c29cd8"
+    },
+    {
+      "workspace_root": "D:\\energy\\base-front",
+      "preset": "full",
+      "distribution_digest": "sha256:20360811c6ded7ad75985916f8b00d45f67d29b77101c902ff888e8170c29cd8"
+    }
+  ],
+  "existing_shared_hook_consumers": [
+    {
+      "workspace_root": "D:\\data\\dev-harness",
+      "repo_root": "D:\\data\\dev-harness",
+      "effective_vault_profile": "full"
+    },
+    {
+      "workspace_root": "D:\\data\\dev-harness-next",
+      "repo_root": "D:\\data\\dev-harness",
+      "effective_vault_profile": "minimal"
+    },
+    {
+      "workspace_root": "D:\\data\\harness-b01-20260914-30eb4767\\workspace",
+      "repo_root": "D:\\data\\harness-integration-v2\\source",
+      "effective_vault_profile": "minimal"
+    },
+    {
+      "workspace_root": "D:\\energy\\base-front",
+      "repo_root": "D:\\data\\dev-harness",
+      "effective_vault_profile": "full"
+    },
+    {
+      "workspace_root": "D:\\energy\\base-service",
+      "repo_root": "D:\\data\\dev-harness",
+      "effective_vault_profile": "full"
+    },
+    {
+      "workspace_root": "D:\\GVPP",
+      "repo_root": "D:\\data\\dev-harness",
+      "effective_vault_profile": "minimal"
+    }
+  ],
+  "shared_impact": "The global shared Hook is updated for all six existing consumers; only the named session receives the two additional roots. Non-target entry/policy/protocol/current and protected worktree assets must match retained preimages.",
+  "registration_intent": {
+    "session_id": "01a0d718-c8dc-7671-a61a-e28bd31d74e6",
+    "primary": {
+      "path": "D:\\GVPP",
+      "identity": "volume:\\\\?\\volume{7c584811-cff5-4750-bc6b-ca7bc7a69019}\\|file:0x0000000000000000000300000017eca5"
+    },
+    "workspaces": [
+      {
+        "path": "D:\\energy\\base-service",
+        "identity": "volume:\\\\?\\volume{7c584811-cff5-4750-bc6b-ca7bc7a69019}\\|file:0x0000000000000000001f0000000eda65"
+      },
+      {
+        "path": "D:\\energy\\base-front",
+        "identity": "volume:\\\\?\\volume{7c584811-cff5-4750-bc6b-ca7bc7a69019}\\|file:0x000000000000000000150000000f250a"
+      }
+    ],
+    "expected_current_digest": "missing"
+  },
+  "registration_operation": {
+    "schema_version": "protected-operation/v1",
+    "environment": "workspace",
+    "action_category": "protected-write",
+    "targets": [
+      ".assistant/runtime/session-workspaces/7f9d07fd8312d4d34da1091394d9ce7ac8929486597749a1027cb9be6e6656f6.json"
+    ],
+    "approval_type": "architecture",
+    "approval_scope": [
+      "command_digest:sha256:2cd86cd48b96aafbc2858a28c7ec088bb5b4ea4b030b8e47c6194f6d3cdafd24",
+      "path:.assistant/runtime/session-workspaces/7f9d07fd8312d4d34da1091394d9ce7ac8929486597749a1027cb9be6e6656f6.json",
+      "rule:session-workspace-registration"
+    ],
+    "identity": "sha256:cd4e84b49cb5544f3f2f4f55e39565b81166eb176d6b25fe7738121f6bfe8f43"
+  },
+  "grant_expires_at": null,
+  "grant_expiry_policy": "No automatic expiry for this explicitly named session; empty-root registration revokes it.",
+  "budget": {
+    "exception": "KTB-EX-011",
+    "status": "candidate-proposal-exact-acceptance-pending",
+    "baseline_loc": 3068,
+    "prior_covered_growth": 139,
+    "candidate_delta_loc": 184,
+    "candidate_delta_tokens": 1670,
+    "candidate_delta_statement_asts": 481,
+    "candidate_measurement": {
+      "loc": 3391,
+      "tokens": 37843,
+      "statement_asts": 11164
+    },
+    "strict_loc_upper_bound": 3392,
+    "token_ceiling": 37843,
+    "statement_ast_ceiling": 11164,
+    "accounting_and_other_guards": "unchanged; each Adapter remains <200 LOC"
+  },
+  "actions": {
+    "path": "docs/tasks/multi-workspace-boundary-20261013/deployment-actions.json",
+    "digest": "sha256:af1d05e1d4411b666d8792c88d311dd131f8ffecef30c6b2ff028b0a5edfb844",
+    "step_count": 15,
+    "cwd": "D:\\data\\harness-integration-v2\\work\\maintenance-boundary"
+  },
+  "preimages": [
+    {
+      "path": ".assistant/runtime/multi-workspace-install-preimage.json",
+      "digest": "sha256:8837f306b05f0b5d2effd1a1ab666fb6d237b895ee6cd57dce272729c3fea795"
+    },
+    {
+      "path": ".assistant/runtime/multi-workspace-install-preimage-supplement.json",
+      "digest": "sha256:26e9bd8e9be82956d13c9c6c16c8ad7ee6552639bc2fdb57f0b18b4fe73dd5ce"
+    },
+    {
+      "path": ".assistant/runtime/multi-workspace-managed-install-baselines.json",
+      "digest": "sha256:009b7a5227a51b0a5b8609d62ce4f4cad9287b14eb1f714c4f4bc848e4b34323"
+    }
+  ],
+  "validation": {
+    "maintained_report": "docs/tasks/multi-workspace-boundary-20261013/validation-report.md",
+    "maintained_report_digest": "sha256:1025e18cff928beb188aba86460cf98434f61793387b8cdccfed83c0bf7b0d2b",
+    "detailed_record": ".assistant/runtime/multi-workspace-validation-report.json",
+    "detailed_record_digest": "sha256:181c33b0aef439e9685b15b454146afc6fa3968f17a258a288f629e706e4b811",
+    "initial_suite_all_exit_code": 1,
+    "initial_owners_passed": 67,
+    "initial_owners_failed": 8,
+    "native_retries_passed": 8,
+    "active_owner_passing_coverage": 75,
+    "archived_not_run": 14,
+    "readonly_log_outside_repository": true
+  },
+  "required_exact_approval": [
+    "fixed candidate commit/tree and this deployment plan file digest",
+    "KTB-EX-011 measured 3391/37843/11164 with +184/+1670/+481",
+    "normal managed source checkout and core/full/full installation including six-consumer shared Hook impact",
+    "fresh architecture Approval imported for Task 2→3 and exact registration operation identity",
+    "no automatic expiry for this exact named session; empty-root API revocation",
+    "CAS registry preimage missing; stop on drift; preserve user fragments and all protected/history assets"
+  ],
+  "readback": [
+    "Verify each normal installation manifest and All-scope asset ownership check.",
+    "Compare every preexisting business-file, task-record, current-pointer and failed-write digest against the retained preimage; explain only managed installation asset changes.",
+    "Read the exact session grant and compare session, physical workspace identities, architecture Approval provenance and expiry.",
+    "Report installed/rendered Hook alignment separately from unobserved desktop Hook loading and real business writes.",
+    "Check all six existing shared Hook consumers; preserve non-target workspace entry, local policy/protocol, current-pointer and protected-worktree staged/untracked asset snapshots.",
+    "Compare normal installer managed-block/config preimages to preserve user fragments in the four supplementary global files."
+  ],
+  "stop_conditions": [
+    "Any candidate source, tree, Task version/Contract, physical root identity or registry-preimage mismatch.",
+    "Any unexpected protected/user asset drift, missing matching architecture Approval, failed normal installer or failed installation/protocol/readback check.",
+    "No force checkout, safe.directory change, Hook disabling, inherited Approval or manual registry write is permitted as recovery."
+  ],
+  "rollback": [
+    "revoke the exact session grant with empty roots through a fresh scoped Approval and CAS if registration occurred",
+    "restore retained c4faeb66eaf78bc52cf69259c5207f6fe2348ac6 source and normally reinstall core/full/full",
+    "preserve existing install backups, business files, current pointers, failed-write evidence and task records"
+  ],
+  "cleanup": "Retain normal installer backups and failed validation fixtures; no manual deletion, rollback of user business files, or history cleanup.",
+  "remaining_evidence": [
+    "independent successful actual registration DryRun after approval",
+    "actual registration and readback",
+    "All-scope installed verification and protocol on three targets",
+    "installed native K1 positive and negative preflight, no target file created",
+    "desktop Hook loading and actual business writes remain NOT_VERIFIED until separately observed"
+  ],
+  "shell_limit": "Additional roots authorize file tools and direct patches; Shell retains existing cwd-based policy.",
+  "execution_authorized": false
+}
