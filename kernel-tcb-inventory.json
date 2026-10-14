@@ -193,7 +193,7 @@
     },
     {
       "path": "scripts/lib/Harness.AdapterAction.psm1",
-      "sha256": "sha256:fbf72a89b33dbc1154cb2dc7b60f348b0d44853387f8579ee0c13640ed400ed3",
+      "sha256": "sha256:cbf1779a1688e7dd99ebd453b816a6082302507a73fae28cf42f7d6b18ae48b2",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
@@ -203,9 +203,9 @@
         "codex-pretooluse-launcher",
         "controlled-write-adapter"
       ],
-      "physical_loc": 233,
-      "nonblank_loc": 216,
-      "executable_loc": 210
+      "physical_loc": 229,
+      "nonblank_loc": 212,
+      "executable_loc": 206
     },
     {
       "path": "scripts/lib/Harness.AtomicWrite.psm1",
@@ -471,7 +471,7 @@
     },
     {
       "path": "scripts/lib/Harness.RuntimeKernel.ps1",
-      "sha256": "sha256:3ede96839c5fa97592a8682d14b59b92a507486ca36dd901fa43a510d070e8f8",
+      "sha256": "sha256:a4dfd83d9d30785f72e11b86314a0e678069f50068557c9c6c80d185d709549e",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "distribution",
@@ -488,9 +488,9 @@
         "task-cli",
         "workspace-bootstrap"
       ],
-      "physical_loc": 598,
-      "nonblank_loc": 561,
-      "executable_loc": 551
+      "physical_loc": 603,
+      "nonblank_loc": 566,
+      "executable_loc": 555
     },
     {
       "path": "scripts/lib/Harness.SessionWorkspace.psm1",
@@ -1670,13 +1670,13 @@
   "unresolved_dependencies": [],
   "totals": {
     "file_count": 31,
-    "physical_loc": 11048,
-    "nonblank_loc": 10127,
+    "physical_loc": 11049,
+    "nonblank_loc": 10128,
     "executable_loc": 10042,
     "runtime_file_count": 23,
     "runtime_executable_loc": 3391,
     "distribution_file_count": 18,
-    "distribution_executable_loc": 8042,
+    "distribution_executable_loc": 8046,
     "duplicate_edge_count": 0,
     "artifact_count": 40,
     "artifact_bytes": 145461

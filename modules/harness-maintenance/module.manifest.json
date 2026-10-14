@@ -36,6 +36,7 @@
       "scripts/run-changed-optional-validation.ps1",
       "scripts/run-validation.ps1",
       "scripts/write-ordinary-ci-receipt.ps1",
+      "tests/fixtures/hook-policy-search.ps1",
       "tests/fixtures/tk02/**",
       "tests/fixtures/tk03/**",
       "tests/fixtures/tk04/**",
@@ -103,6 +104,7 @@
       "schemas/ordinary-ci-receipt.schema.json"
     ],
     "tests": [
+      "tests/fixtures/hook-policy-search.ps1",
       "tests/fixtures/tk02/**",
       "tests/fixtures/tk03/**",
       "tests/fixtures/tk04/**",

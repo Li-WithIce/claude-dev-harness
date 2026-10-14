@@ -480,6 +480,9 @@ try {
     [IO.Directory]::Delete($resolved,$true)
 }
 
+$policySearch=Invoke-HarnessKernelProcess -FilePath $pwshPath -WorkingDirectory ([IO.Path]::GetTempPath()) -Arguments @('-NoProfile','-NonInteractive','-File',(Join-Path $RepoRoot 'tests/fixtures/hook-policy-search.ps1'),'-RepoRoot',$RepoRoot) -TimeoutMilliseconds 300000
+Check ($policySearch.Complete -and $policySearch.ExitCode -eq 0 -and $policySearch.StdErr.Length -eq 0) 'bounded SQL search and finite policy denials pass native preflight regressions' ('policy search regression failed: '+$policySearch.StdOut+$policySearch.StdErr)
+
 $classification=Read-Text 'kernel-component-classification.json'|ConvertFrom-Json -Depth 100
 $a3=@($classification.components|Where-Object layer -CEQ 'a3-adapter')
 if ($HookOnly) {

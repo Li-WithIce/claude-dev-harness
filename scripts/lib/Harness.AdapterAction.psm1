@@ -88,23 +88,19 @@ function Test-HarnessShellPatchInvocation {
     # or dialect-dependent escaping. Quotes never hide executable-looking syntax.
     $argument = '''[A-Za-z0-9_./:\\#-]*''|"[A-Za-z0-9_./:#-]*"|[A-Za-z0-9_./:-]+'
     $command = '(?<command>rg|grep|Select-String|echo|printf|Write-Output|Write-Host|Get-Content|cat|type|Out-String)'
-    $shape = '\A[ \t]*' + $command + '(?:[ \t]+(?<data>' + $argument + '))+[ \t]*(?:\r?\n)?\z'
-    $literal = [regex]::Match($Text,$shape)
+    $literal = [regex]::Match($Text,'\A[ \t]*' + $command + '(?:[ \t]+(?<data>' + $argument + '))+[ \t]*(?:\r?\n)?\z')
     if (-not $literal.Success) { return $true }
 
-    $remaining = $Text
-    $data = $literal.Groups['data'].Captures
-    for ($index = $data.Count - 1; $index -ge 0; $index--) {
-        $value = $data[$index].Value
+    foreach ($capture in $literal.Groups['data'].Captures) {
+        $value = $capture.Value
         if ($value[0] -in @([char]39,[char]34)) { $value = $value.Substring(1,$value.Length - 2) }
         # Only known data options; e.g. a search preprocessor is not a data argument.
         if ($value.StartsWith('-') -and $value -cnotin @('--','-n','-i','-F','-e','--fixed-strings','--line-number','-Pattern','-Path','-LiteralPath')) {
             return $true
         }
-        $remaining = $remaining.Remove($data[$index].Index,$data[$index].Length).Insert($data[$index].Index,' ')
     }
     # This removes only the keyword refusal. The untouched command still reaches policy.
-    return $remaining -match $keyword
+    return $false
 }
 
 function Invoke-HarnessAdapterPreflightAction {
