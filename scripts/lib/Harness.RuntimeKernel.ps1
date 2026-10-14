@@ -160,8 +160,8 @@ function Exit-HarnessKernelMutex {
 function Resolve-HarnessProtectedRuleMatch {
     param([Collections.IDictionary]$Rule,[string]$CommandText,[string[]]$Paths,[string]$Environment,[switch]$RequireTrustedEnvironment)
     if ($Rule.match.Contains('command_regex') -and $CommandText -notmatch [string]$Rule.match.command_regex) { return $null }
-    $searchData = '''(?!-)[A-Za-z0-9_./:\\#-]*''|"(?!-)[A-Za-z0-9_./:# -]*"|[A-Za-z0-9_./:#][A-Za-z0-9_./:#-]*'
-    $searchOptions = '-n|-i|-F|-e|--fixed-strings|--line-number|--'
+    $searchData = '''(?!-)[A-Za-z0-9_./:\\#-]*''|"(?!-)(?:[A-Za-z0-9_./:# \[\]()^*+?| -]|\\(?:s|\.|x60))*"|[A-Za-z0-9_./:#][A-Za-z0-9_./:#-]*'
+    $searchOptions = '-n|-i|-F|-e|--fixed-strings|--line-number|--count|--'
     # Static search data is not executable SQL; unknown options and shell syntax keep the original policy.
     $literalSearch = '\A[ \t]*rg[ \t]+--no-config(?:[ \t]+(?:' + $searchOptions + '|' + $searchData + '))+[ \t]*(?:\r?\n)?\z'
     if ($Rule.id -ceq 'production-database-destructive' -and $CommandText -cmatch $literalSearch) { return $null }

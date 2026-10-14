@@ -22,6 +22,13 @@ $marker='SYNTHETIC_POLICY_SEARCH_PRIVATE_MARKER'
 $cases=@(
     @{name='literal-sql-search';command='rg --no-config -n -F -e "DROP DATABASE" -e "CREATE DATABASE" -e "DELETE FROM" before.sql';allow=$true},
     @{name='double-quoted-data';command='rg --no-config --fixed-strings -e "TRUNCATE" before.sql';allow=$true},
+    @{name='static-regex-count';command='rg --no-config --count -e "(?i)^\s*(USE\s|CREATE DATABASE|DROP DATABASE)|\x60synthetic_lab\x60\." before.sql';allow=$true},
+    @{name='static-keyword-count';command='rg --no-config --count -e "DROP DATABASE" before.sql';allow=$true},
+    @{name='original-count-form';command='rg --count ''(?i)^\s*(USE\s|CREATE DATABASE|DROP DATABASE)|`synthetic_lab`\.'' before.sql';allow=$false;code='policy-requirement'},
+    @{name='single-quoted-regex-count';command='rg --no-config --count -e ''(?i)^\s*(USE\s|CREATE DATABASE|DROP DATABASE)'' before.sql';allow=$false;code='policy-requirement'},
+    @{name='count-backtick-substitution';command='rg --no-config --count -e "DROP `mysql`" before.sql';allow=$false;code='policy-requirement'},
+    @{name='count-escaped-quote';command='rg --no-config --count -e "DROP\" --pre mysql before.sql';allow=$false;code='policy-requirement'},
+    @{name='count-read-only-session';command='rg --no-config --count -e "(?i)^\s*(DROP DATABASE)" before.sql';allow=$false;readonly=$true;code='read-only'},
     @{name='direct-write-missing-environment';command='mysql -e "DELETE FROM synthetic"';allow=$false;mode='';code='policy-requirement'},
     @{name='production-write';command='mysql -e "DELETE FROM synthetic"';allow=$false;mode='production';code='policy-requirement'},
     @{name='compound-write';command='rg --no-config -F ''DROP'' before.sql; mysql -e "DELETE FROM synthetic"';allow=$false;code='policy-requirement'},
@@ -37,7 +44,8 @@ $cases=@(
     @{name='cmd-expansion';command='rg --no-config -F "%QUERY%DROP" before.sql';allow=$false;code='policy-requirement'},
     @{name='delayed-expansion';command='rg --no-config -F "!QUERY!DROP" before.sql';allow=$false;code='policy-requirement'},
     @{name='read-only-session';command='rg --no-config -F ''DROP'' before.sql';allow=$false;readonly=$true;code='read-only'},
-    @{name='custom-overlay';command='rg --no-config -F ''DROP'' before.sql';allow=$false;overlay=$true;code='policy-requirement'}
+    @{name='custom-overlay';command='rg --no-config -F ''DROP'' before.sql';allow=$false;overlay=$true;code='policy-requirement'},
+    @{name='count-custom-overlay';command='rg --no-config --count -e "(?i)^\s*(DROP DATABASE)" before.sql';allow=$false;overlay=$true;code='policy-requirement'}
 )
 $saved=@{}
 foreach ($key in @('DEV_HARNESS_WORKSPACE_ROOT','HARNESS_SESSION_MODE','HARNESS_ENVIRONMENT','HARNESS_TASK_ID','HARNESS_EXPECTED_VERSION','HARNESS_DRY_RUN')) {

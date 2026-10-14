@@ -4,7 +4,7 @@
 
 原有内置 `production-database-destructive` 规则直接对 shell 文本匹配 SQL 关键词。只读搜索中的 `DROP DATABASE`、`DELETE FROM` 等数据参数因此触发受保护写入检查；缺少可信 Environment 时，其异常文本又未匹配 adapter 的有限错误分类，桌面 Hook 显示 `unknown; stage=policy; action=shell`。
 
-部署候选为 `edbdfc71a81c65878998cb866fa4915c0afbfc77`，核心修复位于其 parent `b179f7137c639a80e07dc096a92cf942d61e0785`。共享 matcher 仅为该内置规则识别直接 `rg --no-config` 的有限静态参数；缺少 Environment 的异常采用现有 `protected write requires` 前缀，映射为 `policy-requirement`。匹配原破坏性规则的 SQL 命令仍按原有环境、任务和审批要求检查。
+首轮部署候选为 `edbdfc71a81c65878998cb866fa4915c0afbfc77`，核心修复位于其 parent `b179f7137c639a80e07dc096a92cf942d61e0785`。共享 matcher 仅为该内置规则识别直接 `rg --no-config` 的有限静态参数；缺少 Environment 的异常采用现有 `protected write requires` 前缀，映射为 `policy-requirement`。匹配原破坏性规则的 SQL 命令仍按原有环境、任务和审批要求检查。
 
 ## 有限支持范围
 
@@ -14,7 +14,21 @@
 rg --no-config -n -F -e "DROP DATABASE" -e "DELETE FROM" .assistant/runtime/hook-policy-search-witness.txt
 ```
 
-选项限定为 `-n`、`-i`、`-F`、`-e`、`--fixed-strings`、`--line-number`、`--`。双引号内允许有限 ASCII 静态文本及空格，排除变量展开、命令替换、控制字符及反斜线；单引号参数不允许空格，未引号参数不允许反斜线，quoted 参数不得以 `-` 开头。未知选项、预处理器、复合命令、管道及 shell 展开继续进入原策略。custom rules 和 read-only session 限制仍单独生效；shell ActionMode 未改为 read。
+选项限定为 `-n`、`-i`、`-F`、`-e`、`--fixed-strings`、`--line-number`、`--count`、`--`。双引号内允许有限 ASCII 静态文本、空格和正则字符 `[]()^*+?|`，以及仅有的 `\s`、`\.`、`\x60` 转义；排除变量展开、命令替换、控制字符、任意反斜线和可转义闭合引号的形式。单引号参数仍不允许空格或复杂正则，未引号参数不允许反斜线，quoted 参数不得以 `-` 开头。未知选项、预处理器、复合命令、管道及 shell 展开继续进入原策略。custom rules 和 read-only session 限制仍单独生效；shell ActionMode 未改为 read。
+
+## 实际计数调用的补修
+
+后续 GVPP 重试仍被拒的原始调用是 `rg --count` 加单引号复杂正则，没有 `--no-config`。原始工具记录给出了 `policy-requirement; stage=policy; action=shell`，聊天最终答复仅引用了分类。此前的 18 个向量和真实读取只证明有限字面量搜索，没有覆盖该计数形式。
+
+计数查询必须改为直接 `rg --no-config --count`，用双引号保护静态正则。SQL 标识符中的反引号用正则 `\x60` 表示，避免 shell 的反引号解释。与原查询语义相同的合成示例为：
+
+```text
+rg --no-config --count -e "(?i)^\s*(USE\s|CREATE DATABASE|DROP DATABASE)|\x60synthetic_lab\x60\." .assistant/runtime/hook-policy-count-witness-20261014.txt
+```
+
+实际业务聊天应保留它自己的隔离库名及输入路径，并只调整上述搜索形式。本修复不搜索备份内容、不执行业务 SQL，也不自行继续该业务聊天。旧命令缺少 `--no-config`，以及单引号复杂正则、插值、反引号、闭合引号注入等形式继续保留原策略。新增向量在修复前为 24 pass / 2 fail，准确复现两项计数能力缺口；原任务及其 Evidence 保留，补修另用 `hook-policy-count-repair-20261014` 记录。
+
+独立审查发现早期新增 overlay 向量会影响后续否定测试，现已把两种 overlay 放到最后。原 18 个向量完整保留；修正后的完整专项为 26 pass / 0 fail、exit 0。此前同一 Runtime/Adapter 字节的 thin Hook owner 为 228 checks PASS、exit 0；完整 standalone fixture 的新结果覆盖仅有的测试顺序调整，独立审查接受该验证组合。TCB 和 adapter inventory Check 均为 exit 0，Runtime executable LOC 保持 3391。此次没有重跑完整 core，其首轮真实失败及局限仍保留于下文。正常源码更新与安装后验证另由 count 任务记录；本轮回退使用首轮已部署的 edbdfc revision 及正常受管重装。
 
 原有 shell literal patch recognizer 仅删除了已经由完整形状与参数检查证明冗余的 masking。两个共享调用方仍为 `Harness.ProtectedAction.psm1` 与 `Harness.Policy.psm1`。变更同步覆盖专项 fixture、thin adapter 调用、旧异常断言、maintenance ownership 和生成的 trust catalogs/inventory。Runtime executable LOC 仍为 3391，预算未扩大。
 
