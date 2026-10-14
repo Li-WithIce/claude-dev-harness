@@ -45,3 +45,5 @@ rg --no-config -n -F -e "DROP DATABASE" -e "DELETE FROM" .assistant/runtime/hook
 安装后的普通工具调用直接执行上述有界 rg 搜索，实际 exit 0，并返回合成 witness 的两行匹配；备份只核对文件摘要，未检索或输出数据库备份内容，也未执行业务 SQL。保存结果时的一个含 SQL 数据参数的 inline PowerShell 复合命令被真实 PreToolUse 拒绝，显示 `policy-requirement; stage=policy; action=shell`；拒绝记录保留在内部 failed-writes，结果改用结构化文件写入保存。该真实拒绝与成功工具执行分别记录，直接搜索的独立 desktop Hook event correlation 仍为 **NOT_VERIFIED**。
 
 回退保留旧 revision 和正常安装 manifest，通过正常源码路径及受管重装恢复。整个任务未执行数据库清理、备份恢复、数据库权限修改或新增 workspace grant；未使用 Hook disabling、force、rebaseline 或继承旧 Approval。用户既有 staged 文档、数据库备份、清理范围文档和 shared current pointer 已逐项核对并保留。
+
+任务 CLI 的最后收尾另遇既有生命周期缺陷：本任务曾正常发布 v3 partial Evidence，当前事务 Schema 却要求 verify 的 Evidence before_digest 为 null，因此第二次发布被拒，原生 CLI exit 2，错误为 `transaction journal format is unknown or hybrid`。错误发生在 journal 写盘前；只读回读为 v4/verifying、pending transactions 0、current null。原 Schema 与 TaskState 在本次修复前后均未修改，纯内存对照及独立审查确认根因。Hook 验收、正常安装及真实读取均已完成，机器任务状态仍为 verifying；旧 Evidence、原始失败及精确最终 resolved Evidence 均保留，未删除旧记录或强制改状态。该额外 Schema 缺陷未纳入本次 Hook 修复。
