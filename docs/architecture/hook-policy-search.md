@@ -42,6 +42,6 @@ rg --no-config -n -F -e "DROP DATABASE" -e "DELETE FROM" .assistant/runtime/hook
 
 新安装 manifest 为 `C:\Users\28796\.dev-harness\backups\install-20261014-120003-467-19144\install-manifest.json`，状态 committed、preset core、8 个受管 targets。12 个展开受管文件字节保持不变；实际 source 的 RuntimeKernel、AdapterAction 和 TCB inventory 更新为冻结候选的精确字节。11 个既有保护资产、两份用户 staged 文件及其 index objects、两处 shared current pointer 和工作区 grant 集合均保持不变。
 
-安装后的普通工具调用直接执行上述有界 rg 搜索，实际 exit 0，并返回合成 witness 的两行匹配；未读取数据库备份内容，也未执行业务 SQL。保存结果时的一个含 SQL 数据参数的 inline PowerShell 复合命令被真实 PreToolUse 拒绝，显示 `policy-requirement; stage=policy; action=shell`；拒绝记录保留在内部 failed-writes，结果改用结构化文件写入保存。该真实拒绝与成功工具执行分别记录，直接搜索的独立 desktop Hook event correlation 仍为 **NOT_VERIFIED**。
+安装后的普通工具调用直接执行上述有界 rg 搜索，实际 exit 0，并返回合成 witness 的两行匹配；备份只核对文件摘要，未检索或输出数据库备份内容，也未执行业务 SQL。保存结果时的一个含 SQL 数据参数的 inline PowerShell 复合命令被真实 PreToolUse 拒绝，显示 `policy-requirement; stage=policy; action=shell`；拒绝记录保留在内部 failed-writes，结果改用结构化文件写入保存。该真实拒绝与成功工具执行分别记录，直接搜索的独立 desktop Hook event correlation 仍为 **NOT_VERIFIED**。
 
 回退保留旧 revision 和正常安装 manifest，通过正常源码路径及受管重装恢复。整个任务未执行数据库清理、备份恢复、数据库权限修改或新增 workspace grant；未使用 Hook disabling、force、rebaseline 或继承旧 Approval。用户既有 staged 文档、数据库备份、清理范围文档和 shared current pointer 已逐项核对并保留。
