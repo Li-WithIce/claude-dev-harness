@@ -30,6 +30,10 @@ rg --no-config --count -e "(?i)^\s*(USE\s|CREATE DATABASE|DROP DATABASE)|\x60syn
 
 独立审查发现早期新增 overlay 向量会影响后续否定测试，现已把两种 overlay 放到最后。原 18 个向量完整保留；修正后的完整专项为 26 pass / 0 fail、exit 0。此前同一 Runtime/Adapter 字节的 thin Hook owner 为 228 checks PASS、exit 0；完整 standalone fixture 的新结果覆盖仅有的测试顺序调整，独立审查接受该验证组合。TCB 和 adapter inventory Check 均为 exit 0，Runtime executable LOC 保持 3391。此次没有重跑完整 core，其首轮真实失败及局限仍保留于下文。正常源码更新与安装后验证另由 count 任务记录；本轮回退使用首轮已部署的 edbdfc revision 及正常受管重装。
 
+计数补修候选 `9b678a1233c2f8bbe9ec3bdaa13dee2a2357620d` 已获独立代码审查通过，并正常安装到现有分发源 `D:\data\dev-harness`；分发源保持 clean，四个冻结文件摘要逐项一致。switch、core install、安装后 verifier 和 v2 protocol 的实际 exit 均为 0；verifier 为 42 checks PASS、warnings/errors 均为 none，protocol 的 runtime_writes 为 0。新 manifest 位于 `C:\Users\28796\.dev-harness\backups\install-20261014-142744-995-52196\install-manifest.json`，状态 committed、8 个受管 targets。
+
+安装后的普通工具调用执行上述 canonical count，合成 witness 实际返回 `4`、exit 0，工具 chunk 为 `f77e2f`。25 个保护资产、用户原 staged 文件及 index objects、workspace grant 集合和两处 current pointer 均保持原值；备份仅核对摘要，没有检索其内容或执行业务 SQL。新任务的独立审查、安装回执、保留性核对与实际读取分别记录于 `.assistant/runtime/hook-policy-count-*-20261014.*`；desktop Hook event correlation 仍为 **NOT_VERIFIED**，完整 core 为 **not_run**。旧 read-repair 任务及其 Evidence 保留为 v4/verifying；本轮未修复其重复 Evidence 的生命周期 Schema 缺陷。
+
 原有 shell literal patch recognizer 仅删除了已经由完整形状与参数检查证明冗余的 masking。两个共享调用方仍为 `Harness.ProtectedAction.psm1` 与 `Harness.Policy.psm1`。变更同步覆盖专项 fixture、thin adapter 调用、旧异常断言、maintenance ownership 和生成的 trust catalogs/inventory。Runtime executable LOC 仍为 3391，预算未扩大。
 
 ## 验证约定
