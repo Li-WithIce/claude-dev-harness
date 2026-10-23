@@ -151,6 +151,7 @@ foreach($updateTask in @('update-crash-task','update-conflict-task')){
     $initialResult=Invoke-Cli $workspace @('verify','-TaskId',$updateTask,'-ExpectedVersion','3','-Evidence',$initial.Path,'-AsJson')
     $updateArtifact=Join-Path $workspace "docs/tasks/$updateTask/evidence.json"
     $originalBytes=[IO.File]::ReadAllBytes($updateArtifact)
+    $originalDigest='sha256:'+([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($originalBytes))).ToLowerInvariant()
     $final=New-EvidenceFixture $workspace $updateTask $contracts[$updateTask].Digest 'pass' -TaskVersion 4
     $conflict=$updateTask-ceq'update-conflict-task'
     $faultResult=Invoke-Cli $workspace @('verify','-TaskId',$updateTask,'-ExpectedVersion','4','-Evidence',$final.Path,'-AsJson') $(if($conflict){''}else{'1'}) $(if($conflict){'1'}else{''})
@@ -160,7 +161,7 @@ foreach($updateTask in @('update-crash-task','update-conflict-task')){
     $updateId=$faultMatch.Groups[1].Value
     $updateJournal=Get-Content -LiteralPath (Join-Path $workspace ".assistant/runtime/failed-writes/$updateId.json") -Raw | ConvertFrom-Json
     $updateStep=@($updateJournal.steps|Where-Object id -CEQ 'evidence')[0]
-    Check ($updateStep.before_content_base64-ceq[Convert]::ToBase64String($originalBytes)) "$updateTask preserves the prior Evidence in its journal" "$updateTask lost its Evidence preimage"
+    Check ($updateStep.before_digest-ceq$originalDigest) "$updateTask binds the prior Evidence digest in its journal" "$updateTask lost its prior Evidence digest"
     if($conflict){
         [IO.File]::WriteAllBytes($updateArtifact,($originalBytes+[byte[]]@(10)))
         $conflictSnapshot=Snapshot $workspace
