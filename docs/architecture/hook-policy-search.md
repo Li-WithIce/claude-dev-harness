@@ -65,3 +65,15 @@ rg --no-config --count -e "(?i)^\s*(USE\s|CREATE DATABASE|DROP DATABASE)|\x60syn
 回退保留旧 revision 和正常安装 manifest，通过正常源码路径及受管重装恢复。整个任务未执行数据库清理、备份恢复、数据库权限修改或新增 workspace grant；未使用 Hook disabling、force、rebaseline 或继承旧 Approval。用户既有 staged 文档、数据库备份、清理范围文档和 shared current pointer 已逐项核对并保留。
 
 任务 CLI 的最后收尾另遇既有生命周期缺陷：本任务曾正常发布 v3 partial Evidence，当前事务 Schema 却要求 verify 的 Evidence before_digest 为 null，因此第二次发布被拒，原生 CLI exit 2，错误为 `transaction journal format is unknown or hybrid`。错误发生在 journal 写盘前；只读回读为 v4/verifying、pending transactions 0、current null。原 Schema 与 TaskState 在本次修复前后均未修改，纯内存对照及独立审查确认根因。Hook 验收、正常安装及真实读取均已完成，机器任务状态仍为 verifying；旧 Evidence、原始失败及精确最终 resolved Evidence 均保留，未删除旧记录或强制改状态。该额外 Schema 缺陷未纳入本次 Hook 修复。
+
+## 2026-10-23 工作流修复与收尾
+
+上述生命周期缺陷已在后续维护任务 `harness-workflow-repair-20261023` 中修复。事务 Schema 允许 Evidence 步骤携带已有文件的 `before_digest`，继续使用现有摘要核对、CAS 写入和恢复流程。Runtime 没有增加旧 Evidence 全文恢复机制；旧全文由版本化归档保留。正常 partial → final、内容冲突拒绝、中断恢复和重复恢复均已覆盖，完整 Evidence owner 为 **99/0、exit 0**。此前两项新增断言误要求日志保存旧全文的失败记录保留，断言修正为核对发布前旧字节的 SHA256 后完成了完整复验。
+
+实际分发源 `D:\data\dev-harness` 已正常更新到 `7432785960b5b0216eba56495d55b8f21bc2bec3`，保持 clean。`D:\GVPP` 和 `D:\data` 的正常 core 安装、安装 verifier 和各自入口 protocol 均为 exit 0；两处入口与安装记录统一指向该分发源，Bootstrap 均为 v2-only，new task admission 为 enabled。安装 manifest 分别位于用户备份目录的 `install-20261023-153804-365-55112` 和 `install-20261023-153836-379-37220`，状态均为 committed。
+
+用户明确要求关闭 PreToolUse 后，其偏好保存为 `C:\Users\28796\.dev-harness\preferences.json` 中的 `pretooluse_enabled: false`。安装和更新读取该偏好，保持 Codex、Claude 均无 PreToolUse 注册。Codex `features.hooks=false` 和用户 `AGENTS.md` 字节保留；安装器对已有用户级规则采用 create-if-missing，不再覆盖。其他 Hook 事件、原两份用户 staged 文件及 index、`dev-harness-next` 的 index 与既有修改、三个 current pointer 和 workspace grants 均经回读保持原值。
+
+完整安装回归为 **460/0、exit 0**，分发检查为 **68/0、exit 0**；TCB、module catalog 和 adapter inventory 检查通过，Runtime executable LOC 仍为 3391。安装回归在 `e288edc` 完成，最终 child `7432785` 仅修正上述 Evidence 测试断言，生产代码字节完全相同。未重跑完整 core，上文原 core 失败、C 盘隐私输出和时间预算局限继续保留。当前普通工具读取合成 witness 返回计数 `4`、exit 0；没有读取真实数据库备份或执行业务 SQL，desktop Hook event correlation 仍为 **NOT_VERIFIED**。
+
+旧任务 `hook-policy-read-repair-20261014` 经独立审查后，已通过正常 `verify -ExpectedVersion 4` 发布精确 Evidence `sha256:3c520ea54198d9093c83bdbc85ad1df4ccfbf85825b472332e859b0337cc68b1`，正常进入 **v5/done**，pointer_action 为 unchanged。原 partial Evidence、旧 audit 和历史最终 resolved Evidence 的精确副本位于 `.assistant/runtime/harness-workflow-repair-20261023/old-task-archive/`。新旧日志、安装回执和保留性核对位于同一维护记录目录；本次任务的 Contract 与最终 Evidence 位于 `docs/tasks/harness-workflow-repair-20261023/`。另外两个未完成任务保持原状态。
