@@ -2401,6 +2401,10 @@ function Assert-RegisteredHookSettingsPostimage {
     if ([string]$identity['mode'] -ne 'semantic' -or [string]$identity['contract'] -ne 'claude-settings/v1') {
         throw "Registered hook settings have an invalid postimage contract: $TargetPath"
     }
+    if(-not(Test-InstallPreToolUseEnabled -UserProfile $env:USERPROFILE)){
+        $identity=ConvertTo-NormalizedObject -Value $identity
+        $identity.managed_hooks=@($identity.managed_hooks|Where-Object event -CNE 'PreToolUse')
+    }
     if (-not (Test-HookSettingsPostimage -Path $TargetPath -Identity $identity)) {
         throw "Hook settings changed from their registered Harness postimage; restore or uninstall before updating: $TargetPath"
     }
@@ -3167,6 +3171,14 @@ try {
     $claudeSharedSettingsJson = Merge-InstallSharedHookSettings -RequestedJson $claudeSharedSettingsJson -References $sharedHooks.References['claude-settings']
     $codexHooksJson = Render-JsonTemplateText -TemplatePath $templateSources['codex-hooks'] -TargetPath $codexHooksPath
     $codexHooksJson = Merge-InstallSharedHookSettings -RequestedJson $codexHooksJson -References $sharedHooks.References['codex-hooks']
+    if(-not(Test-InstallPreToolUseEnabled -UserProfile $env:USERPROFILE)){
+        $claudeHooks=ConvertFrom-JsonDocument -Json $claudeSharedSettingsJson
+        $claudeHooks.Remove('PreToolUse')
+        $claudeSharedSettingsJson=ConvertTo-JsonDocument -Value $claudeHooks
+        $codexHooks=ConvertFrom-JsonDocument -Json $codexHooksJson
+        $codexHooks.Remove('PreToolUse')
+        $codexHooksJson=ConvertTo-JsonDocument -Value $codexHooks
+    }
     # Preview exact managed merges before publishing the transaction or any shared asset.
     $null = Merge-ClaudeSettingsJsonText -RenderedHooksJson $claudeSharedSettingsJson -ExistingPath $claudeSettingsPath -HookHome $ClaudeHome -ExpectedSourcePostimage $registeredClaudeSettingsPostimage
     $null = Merge-ClaudeSettingsJsonText -RenderedHooksJson $codexHooksJson -ExistingPath $codexHooksPath -HookHome $ClaudeHome -ExpectedSourcePostimage $registeredCodexHooksPostimage
@@ -3298,7 +3310,7 @@ try {
 
     Install-RenderedFile -SourcePath $templateSources['claude-global'] -TargetPath $claudeGlobalPath -RecordBackup
 
-    Install-RenderedFile -SourcePath $templateSources['codex-global'] -TargetPath $codexGlobalPath -RecordBackup
+    Install-RenderedFile -SourcePath $templateSources['codex-global'] -TargetPath $codexGlobalPath -SkipIfExists -Ownership 'create-if-missing'
 
     Install-RenderedFile -SourcePath $templateSources['workspace-global'] -TargetPath $workspaceAgentsPath -RecordBackup
 

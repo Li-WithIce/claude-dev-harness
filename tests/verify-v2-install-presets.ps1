@@ -1,5 +1,5 @@
 ﻿[CmdletBinding()]
-param([string]$RepoRoot = '',[switch]$OfflineSkillSourceOnly,[switch]$InputTransportOnly)
+param([string]$RepoRoot = '',[switch]$OfflineSkillSourceOnly,[switch]$InputTransportOnly,[switch]$PreToolUsePreferenceOnly)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -801,6 +801,56 @@ function Invoke-H04HistoricalMatcherVerification {
     }
 }
 
+function Invoke-PreToolUsePreferenceRegression {
+    $fixture=New-PresetFixture -Name 'pretooluse-preference'
+    $initial=Invoke-Install $fixture @('-Preset','core')
+    Assert-InstallExit $initial 'PreToolUse default install'
+    if($initial.ExitCode-ne0){return}
+    $codexPath=Join-Path $fixture.User '.codex/hooks.json'
+    $claudePath=Join-Path $fixture.User '.claude/settings.json'
+    $preferencePath=Join-Path $fixture.User '.dev-harness/preferences.json'
+    $configPath=Join-Path $fixture.User '.codex/config.toml'
+    $rulesPath=Join-Path $fixture.User '.codex/AGENTS.md'
+    $rules=[IO.File]::ReadAllText($rulesPath)+"`nUser development rule: minimum implementation.`n"
+    [IO.File]::WriteAllText($rulesPath,$rules,[Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($configPath,"[features]`nhooks = false`n",[Text.UTF8Encoding]::new($false))
+    $configDigest=Get-TestFileSha256 $configPath
+    foreach($path in @($codexPath,$claudePath)){
+        $settings=ConvertFrom-InstallJson -Json ([IO.File]::ReadAllText($path))
+        if(-not $settings.hooks.Contains('PreToolUse')){Add-Failure 'Default install omitted PreToolUse'}else{Add-Check 'Default install still registers PreToolUse without an opt-out'}
+        $settings.hooks.Remove('PreToolUse')
+        $settings['user_sentinel']='preserve'
+        [IO.File]::WriteAllText($path,(ConvertTo-InstallJson -Value $settings),[Text.UTF8Encoding]::new($false))
+    }
+    $claudeBefore=ConvertFrom-InstallJson -Json ([IO.File]::ReadAllText($claudePath))
+    $stopBefore=ConvertTo-InstallJson -Value $claudeBefore.hooks.Stop -Compress
+    [IO.File]::WriteAllText($preferencePath,'{"pretooluse_enabled":false}',[Text.UTF8Encoding]::new($false))
+    $other=[pscustomobject]@{Root=$fixture.Root;Workspace=(Join-Path $fixture.Root 'workspace-b');User=$fixture.User}
+    [void][IO.Directory]::CreateDirectory($other.Workspace)
+    foreach($target in @($fixture,$fixture,$other)){
+        $update=Invoke-Install $target @('-Preset','core')
+        Assert-InstallExit $update 'PreToolUse disabled install/update'
+        if($update.ExitCode-ne0){continue}
+        foreach($path in @($codexPath,$claudePath)){
+            $settings=ConvertFrom-InstallJson -Json ([IO.File]::ReadAllText($path))
+            if(-not $settings.hooks.Contains('PreToolUse') -and $settings.user_sentinel-ceq'preserve'){Add-Check 'Install preserves disabled PreToolUse and user settings'}else{Add-Failure 'Install restored PreToolUse or changed user settings'}
+        }
+        $verify=Invoke-ChildScript -UserProfile $target.User -ScriptPath (Join-Path $script:RepoRoot 'tests/verify-installation.ps1') -Arguments @('-WorkspaceRoot',$target.Workspace,'-RepoRoot',$script:RepoRoot,'-UserProfileRoot',$target.User)
+        if($verify.ExitCode-eq0){Add-Check 'Installation verifier accepts explicit PreToolUse opt-out'}else{Add-Failure "Disabled Hook verification failed: $($verify.Output)"}
+    }
+    $claudeAfter=ConvertFrom-InstallJson -Json ([IO.File]::ReadAllText($claudePath))
+    if((ConvertTo-InstallJson -Value $claudeAfter.hooks.Stop -Compress)-ceq$stopBefore -and [IO.File]::ReadAllText($rulesPath)-ceq$rules -and (Get-TestFileSha256 $configPath)-ceq$configDigest){Add-Check 'Other hooks, development rules and Codex hooks=false remain unchanged'}else{Add-Failure 'Disabled Hook update changed unrelated user state'}
+    $claudeBytes=[IO.File]::ReadAllBytes($claudePath)
+    $claudeAfter.hooks.Stop[0].hooks[0].command='changed stop command'
+    [IO.File]::WriteAllText($claudePath,(ConvertTo-InstallJson -Value $claudeAfter),[Text.UTF8Encoding]::new($false))
+    $drift=Invoke-Install $fixture @('-Preset','core')
+    if($drift.ExitCode-ne0 -and $drift.Output-match'Hook settings changed'){Add-Check 'PreToolUse opt-out does not hide unrelated hook drift'}else{Add-Failure 'PreToolUse opt-out accepted unrelated hook drift'}
+    [IO.File]::WriteAllBytes($claudePath,$claudeBytes)
+    [IO.File]::WriteAllText($preferencePath,'{"pretooluse_enabled":"false"}',[Text.UTF8Encoding]::new($false))
+    $invalid=Invoke-Install $fixture @('-Preset','core')
+    if($invalid.ExitCode-ne0 -and $invalid.Output-match'pretooluse_enabled' -and $invalid.Output-match'Boolean'){Add-Check 'Hook preference rejects a non-Boolean value'}else{Add-Failure "Hook preference rejection failed: exit=$($invalid.ExitCode) $($invalid.Output)"}
+}
+
 function Invoke-H04SharedHookRegression {
     foreach($order in @('full-first','core-first')) {
         $fixture=New-PresetFixture -Name ('h04-'+$order)
@@ -876,6 +926,13 @@ $fullFeatures = @('core','governed','memory','md-html','adapters','provider-refe
 try {
     New-Item -ItemType Directory -Path $script:ScratchRoot -Force | Out-Null
 
+    if($PreToolUsePreferenceOnly){
+        Invoke-PreToolUsePreferenceRegression
+        foreach($check in $script:Checks){Write-Output ('[PASS] '+$check)}
+        foreach($failure in $script:Failures){Write-Output ('[FAIL] '+$failure)}
+        if($script:Failures.Count){exit 1};exit 0
+    }
+
     $inputTransport=Invoke-ChildScript -UserProfile (Join-Path $script:ScratchRoot 'transport-user') -ScriptPath (Join-Path $script:RepoRoot 'tests/fixtures/hook-input-transport.ps1') -Arguments @('-RepoRoot',$script:RepoRoot,'-OutputRoot',([IO.Path]::GetTempPath()))
     if($inputTransport.ExitCode-eq0){Add-Check 'Hook two-hop UTF-8 input preserves packet identity and policy boundaries'}else{Add-Failure ('Hook UTF-8 transport failed: '+$inputTransport.Output)}
     if($InputTransportOnly){
@@ -897,6 +954,7 @@ try {
     Invoke-H04SharedHookRegression
     Invoke-H04SharedHookFailureRegression
     Invoke-H04NonActiveReleaseRegression
+    Invoke-PreToolUsePreferenceRegression
 
     $exactNumberToken = '0.1234567890123456789012345678'
     try {

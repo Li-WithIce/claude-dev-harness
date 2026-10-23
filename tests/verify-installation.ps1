@@ -538,9 +538,10 @@ if (-not $hasFeatureOwnership -or
     Add-Check ("install manifest feature ownership matches preset: {0}" -f $effectivePreset)
 }
 
+. (Join-Path $RepoRoot 'scripts/install-transaction-common.ps1')
+$preToolUseEnabled=Test-InstallPreToolUseEnabled -UserProfile $effectiveUserProfile
 $sharedHookNames=@($presetDefinition.hooks)
 try {
-    . (Join-Path $RepoRoot 'scripts/install-transaction-common.ps1')
     $sharedRegistry=ConvertFrom-InstallJson -Json ([IO.File]::ReadAllText($InstallRegistryPath))
     # Current-request assets use the live registered upgrade contract, as they do during install.
     $sharedCoordination=Get-InstallSharedHookRequirements -Registry $sharedRegistry -UserProfile $effectiveUserProfile -RequestedHooks $presetDefinition.hooks
@@ -591,7 +592,7 @@ if (Test-Path -LiteralPath $retiredPostToolHookPath) {
 Assert-RenderedFile -Path $ClaudeGlobalPath -ForbiddenTokens $ForbiddenTokens
 Assert-TemplateFileMatches -Path $ClaudeGlobalPath -TemplatePath (Join-Path $RepoRoot 'agent-configs\claude\CLAUDE.md.template') -Label 'Claude CLAUDE.md'
 Assert-RenderedFile -Path $CodexAgentsPath -ForbiddenTokens $ForbiddenTokens
-Assert-TemplateFileMatches -Path $CodexAgentsPath -TemplatePath (Join-Path $RepoRoot 'agent-configs\codex\AGENTS.md.template') -Label 'Codex AGENTS.md' -RolloutMarker 'codex-agents-template-drift'
+if(Test-Path -LiteralPath $CodexAgentsPath -PathType Leaf){Add-Check 'Codex AGENTS.md is preserved as user-owned instructions'}else{Add-Error 'Codex AGENTS.md is missing'}
 Assert-RenderedFile -Path $WorkspaceAgentsPath -ForbiddenTokens $ForbiddenTokens
 Assert-TemplateFileMatches -Path $WorkspaceAgentsPath -TemplatePath (Join-Path $RepoRoot 'agent-configs\workspace\AGENTS.md.template') -Label 'workspace AGENTS.md' -RolloutMarker 'workspace-agents-template-drift'
 Assert-GitIgnoreManagedEntries -Path $WorkspaceGitIgnorePath
@@ -611,7 +612,7 @@ if (Test-Path -LiteralPath $ClaudeSettingsPath -PathType Leaf) {
         $eventByHook = [ordered]@{ 'pretooluse.ps1'='PreToolUse';'userpromptsubmit.js'='UserPromptSubmit';'stop.js'='Stop' }
         foreach ($hookName in $eventByHook.Keys) {
             $key = $eventByHook[$hookName]
-            if ($sharedHookNames -notcontains $hookName) {
+            if ($sharedHookNames -notcontains $hookName -or ($key -ceq 'PreToolUse' -and -not $preToolUseEnabled)) {
                 continue
             }
             $value = $claudeSettings.hooks.$key
@@ -630,7 +631,7 @@ if (Test-Path -LiteralPath $ClaudeSettingsPath -PathType Leaf) {
             })
         foreach ($hookName in $eventByHook.Keys) {
             $expectedHookPath = Join-Path $ClaudeHooksPath $hookName
-            $expectedCount = if ($sharedHookNames -contains $hookName) { 1 } else { 0 }
+            $expectedCount = if ($sharedHookNames -contains $hookName -and ($eventByHook[$hookName] -cne 'PreToolUse' -or $preToolUseEnabled)) { 1 } else { 0 }
             if (@($registeredCommands | Where-Object { $_ -like "*$expectedHookPath*" }).Count -eq $expectedCount) {
                 Add-Check ("Claude settings.json 唯一注册真实 hook: {0}" -f $hookName)
             } else {
@@ -764,7 +765,9 @@ if (Test-Path -LiteralPath $CodexHooksPath -PathType Leaf) {
                 }
             }
         )
-        if ($matches.Count -eq 1 -and
+        if (-not $preToolUseEnabled -and $matches.Count -eq 0) {
+            Add-Check 'Codex Harness PreToolUse remains disabled by user preference'
+        } elseif ($preToolUseEnabled -and $matches.Count -eq 1 -and
             [string]$matches[0].Event -ceq 'PreToolUse' -and
             [string]$matches[0].Section.matcher -ceq '^(Bash|apply_patch|Write|Edit|MultiEdit|NotebookEdit)$' -and
             [string]$matches[0].Hook.type -ceq 'command' -and

@@ -149,7 +149,7 @@
         },
         {
           "if": { "properties": { "operation": { "const": "verify" } } },
-          "then": { "properties": { "steps": { "contains": { "properties": { "id": { "const": "evidence" }, "before_digest": { "type": "null" }, "before_content_base64": { "type": "null" } } } } } }
+          "then": { "properties": { "steps": { "contains": { "properties": { "id": { "const": "evidence" } } } } } }
         }
       ]
     },

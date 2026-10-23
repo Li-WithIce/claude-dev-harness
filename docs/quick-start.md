@@ -15,6 +15,8 @@ pwsh -File .\install.ps1 `
 
 `core` 适合普通开发。需要持久规划与审计工具时使用 `governed`；只有确实需要可选共享记忆、md-html 和 Provider 参考时才使用 `full`。三个 preset 均不安装退役的 v1 生命周期或 workflow-team。对同一工作区再次运行安装命令就是 update；省略 `-Preset` 时会保留已安装 preset。
 
+需要停用 Harness 的 PreToolUse 时，在用户目录 `.dev-harness/preferences.json` 写入 `{"pretooluse_enabled":false}`。安装和更新都会遵守此选择，不向 Codex 或 Claude 重新注册 Harness PreToolUse；其他 Hook 事件保留。该文件由用户持有，安装器不修改它，也不修改 Codex 的 `features.hooks` 设置。用户级 Codex `AGENTS.md` 仅在缺失时创建，已有开发规则不会被更新覆盖。
+
 ## 使用
 
 用 Codex 打开目标工作区，直接描述目标、验收、范围与限制。新任务的 `auto` 只准入 v2；没有配置和 Runtime Decision 时默认准入，有无效 Decision 时阻断。可以用工作区级命令查看、启用或暂停新工作：

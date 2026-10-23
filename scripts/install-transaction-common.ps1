@@ -869,7 +869,7 @@ function Assert-InstallExpectedPostimageShape {
         return
     }
     if ($contract -eq 'claude-settings/v1') {
-        if (-not ($Identity['managed_hooks'] -is [System.Collections.IList]) -or @($Identity['managed_hooks']).Count -eq 0) {
+        if (-not ($Identity['managed_hooks'] -is [System.Collections.IList])) {
             throw "$Label is missing its Claude managed hooks"
         }
         foreach ($managedHook in @($Identity['managed_hooks'])) {
@@ -1368,6 +1368,16 @@ function Exit-InstallTransactionMutex {
 }
 
 # Shared Hook requirements are derived, never persisted as a second owner registry.
+function Test-InstallPreToolUseEnabled {
+    param([string]$UserProfile)
+    $path=Join-Path $UserProfile '.dev-harness/preferences.json'
+    if(-not(Test-Path -LiteralPath $path)){return $true}
+    $preferences=ConvertFrom-InstallJson -Json ([IO.File]::ReadAllText($path))
+    if(-not $preferences.Contains('pretooluse_enabled')){return $true}
+    if($preferences.pretooluse_enabled -isnot [bool]){throw 'pretooluse_enabled must be a Boolean'}
+    return $preferences.pretooluse_enabled
+}
+
 function Get-InstallSharedHookRequirements {
     param($Registry,[string]$UserProfile,[string]$ReplacingWorkspaceKey='',[string[]]$RequestedHooks=@())
     $hookRoot=[IO.Path]::Combine($UserProfile,'.claude','hooks-memory')
@@ -1445,6 +1455,12 @@ function Get-InstallSharedHookRequirements {
         if(-not(Test-Path -LiteralPath $path -PathType Leaf)){throw 'Required shared Hook is absent'}
         [void](Assert-InstallStatePathHasNoReparsePoint -Path $path -Label 'Retained shared Hook')
         $retainedIdentities[$name]=Get-InstallManagedPathIdentity $path
+    }
+    if(-not(Test-InstallPreToolUseEnabled -UserProfile $UserProfile)){
+        foreach($hostKey in @('claude-settings','codex-hooks')){
+            $references[$hostKey]=@($references[$hostKey]|Where-Object event -CNE 'PreToolUse')
+            $liveReferences[$hostKey]=@($liveReferences[$hostKey]|Where-Object event -CNE 'PreToolUse')
+        }
     }
     return [pscustomobject]@{Directory=$hookRoot;Required=@($required.Keys);Retained=$retained;RetainedIdentities=$retainedIdentities;Owners=$owners.ToArray();References=$references;LiveReferences=$liveReferences;RestorationOwners=$restorationOwners;DirectoryIdentity=$(if($null -ne $latestDirectory){$latestDirectory.expected_postimage}else{$null})}
 }

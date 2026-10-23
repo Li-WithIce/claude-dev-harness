@@ -92,7 +92,7 @@
     },
     {
       "path": "install.ps1",
-      "sha256": "sha256:49e95768667b4aded055fcec59d1d888e1e086cbf18a4eaaa009e1220a9a48f5",
+      "sha256": "sha256:985665bdfedd29b75ae96786f62ccbba096fa913d05005b12438112ccbc7f33a",
       "layer": "d1-distribution",
       "trust_paths": [
         "distribution"
@@ -100,9 +100,9 @@
       "root_ids": [
         "workspace-bootstrap"
       ],
-      "physical_loc": 3432,
-      "nonblank_loc": 3164,
-      "executable_loc": 3129
+      "physical_loc": 3444,
+      "nonblank_loc": 3176,
+      "executable_loc": 3141
     },
     {
       "path": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",
@@ -179,7 +179,7 @@
     },
     {
       "path": "scripts/install-transaction-common.ps1",
-      "sha256": "sha256:81c83ae6a0cba5cb6ac9b5d2c3a2be7ed8a90ffb0dc6f9184171cc14bc402d8e",
+      "sha256": "sha256:1e314da851862a011a9788afb42c483ee7cb629641d9b1400738f7b00a3d6a0c",
       "layer": "d1-distribution",
       "trust_paths": [
         "distribution"
@@ -187,9 +187,9 @@
       "root_ids": [
         "workspace-bootstrap"
       ],
-      "physical_loc": 1612,
-      "nonblank_loc": 1490,
-      "executable_loc": 1483
+      "physical_loc": 1628,
+      "nonblank_loc": 1505,
+      "executable_loc": 1498
     },
     {
       "path": "scripts/lib/Harness.AdapterAction.psm1",
@@ -262,7 +262,7 @@
     },
     {
       "path": "scripts/lib/Harness.Distribution.psm1",
-      "sha256": "sha256:8b38dcae3835e00aac7c1c5575ebc53595b01953140962f80dfec85339d9b930",
+      "sha256": "sha256:307c42a9d58fbe9b01058fa78e8759ec28416305f4a38783ccadf75336ca3939",
       "layer": "d1-distribution",
       "trust_paths": [
         "distribution"
@@ -581,7 +581,7 @@
     },
     {
       "path": "tests/verify-installation.ps1",
-      "sha256": "sha256:c210925912fe45cba57708dc9718fb1123b55b5f785b8c4a46f75b49496e5734",
+      "sha256": "sha256:ac1c0884d294ed103bc9a7cdb5c95590d2c5a801a46272d09151c88b4000baa9",
       "layer": "d1-distribution",
       "trust_paths": [
         "distribution"
@@ -589,9 +589,9 @@
       "root_ids": [
         "workspace-bootstrap"
       ],
-      "physical_loc": 840,
-      "nonblank_loc": 743,
-      "executable_loc": 738
+      "physical_loc": 843,
+      "nonblank_loc": 746,
+      "executable_loc": 741
     }
   ],
   "artifacts": [
@@ -623,7 +623,7 @@
     },
     {
       "path": "modules/distribution/profiles/core.json",
-      "sha256": "sha256:15c81eb0993f57b5d158ab4864311933556c8255b8831e7e775e0e815930d6f1",
+      "sha256": "sha256:e10b7e1146d37e41e089a82f9a35af38741a2b27d7c5a36720a690c8c20f389f",
       "kind": "policy",
       "owner_layer": "d1-distribution",
       "trust_paths": [
@@ -631,11 +631,11 @@
       ],
       "reason": "TK-06 central core installation allowlist; grants Distribution transport only, never Runtime authority.",
       "physical_loc": 28,
-      "bytes": 3691
+      "bytes": 3701
     },
     {
       "path": "modules/distribution/profiles/full.json",
-      "sha256": "sha256:46667f0460f6c03da34b4e2aa0d931a2772ce2ef131b6256994b172b344bdbff",
+      "sha256": "sha256:7b2ebe93f3deda56768f7f13202b361e4b3df91b6330da9c6736afb5e6a5b31e",
       "kind": "policy",
       "owner_layer": "d1-distribution",
       "trust_paths": [
@@ -643,11 +643,11 @@
       ],
       "reason": "TK-06 central full installation allowlist; module requests cannot expand this grant.",
       "physical_loc": 52,
-      "bytes": 10170
+      "bytes": 10180
     },
     {
       "path": "modules/distribution/profiles/governed.json",
-      "sha256": "sha256:9f748a8f7eff4c05b587dd7fcf3e07472d033c18f8c67ef45521561f5d5b1a78",
+      "sha256": "sha256:679f30b7edc5d9f0c9d6fc54a314685e7904ae692306fa39df1a54fd4c1a686b",
       "kind": "policy",
       "owner_layer": "d1-distribution",
       "trust_paths": [
@@ -655,7 +655,7 @@
       ],
       "reason": "TK-06 central governed installation allowlist independent of Runtime execution policy.",
       "physical_loc": 30,
-      "bytes": 4108
+      "bytes": 4118
     },
     {
       "path": "policies/decision-rights.json",
@@ -1044,7 +1044,7 @@
     },
     {
       "path": "schemas/task-transaction.schema.json",
-      "sha256": "sha256:7fef65c559b35dfa438830eefb40daae46491aec86925f26874fabdcf1c295b6",
+      "sha256": "sha256:4c54448c7b5a7b3ae0bfd2098d7abffdfa2a154a737c62ce75feb17cdd86032e",
       "kind": "schema",
       "owner_layer": "k1-runtime-kernel",
       "trust_paths": [
@@ -1052,7 +1052,7 @@
       ],
       "reason": "Current and retained legacy journals share a strict compatibility envelope.",
       "physical_loc": 182,
-      "bytes": 9582
+      "bytes": 9500
     },
     {
       "path": "templates/v2/plan.md.template",
@@ -1670,16 +1670,16 @@
   "unresolved_dependencies": [],
   "totals": {
     "file_count": 31,
-    "physical_loc": 11049,
-    "nonblank_loc": 10128,
-    "executable_loc": 10042,
+    "physical_loc": 11080,
+    "nonblank_loc": 10158,
+    "executable_loc": 10072,
     "runtime_file_count": 23,
     "runtime_executable_loc": 3391,
     "distribution_file_count": 18,
-    "distribution_executable_loc": 8046,
+    "distribution_executable_loc": 8076,
     "duplicate_edge_count": 0,
     "artifact_count": 40,
-    "artifact_bytes": 145461
+    "artifact_bytes": 145409
   },
   "budget": {
     "baseline_executable_loc": 3068,
