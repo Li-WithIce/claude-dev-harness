@@ -182,6 +182,16 @@
       "legacy_status": "not-legacy"
     },
     {
+      "path": "scripts/context.ps1",
+      "layer": "c2-capability",
+      "current_role": "On-demand read-only project document and Codex message recall/read.",
+      "owner_candidate": "providers",
+      "tcb_included": false,
+      "reason": "Advisory context retrieval is invoked explicitly and does not authorize writes or enter Runtime roots.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
       "path": "scripts/diagnose-harness-host.ps1",
       "layer": "c2-capability",
       "current_role": "Manual read-only workspace, source and host-evidence diagnostic projection.",

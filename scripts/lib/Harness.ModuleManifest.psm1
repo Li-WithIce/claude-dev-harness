@@ -566,7 +566,7 @@ function Get-HarnessModuleManifestCatalog {
         $classificationPath = Resolve-HarnessContainedPath -WorkspaceRoot $RepoRoot -Path 'kernel-component-classification.json' -Label 'Kernel component classification' -MustExist File
         $classification = Get-Content -LiteralPath $classificationPath -Raw -Encoding utf8 | ConvertFrom-Json -Depth 100
         $c2Components = @($classification.components | Where-Object { [string]$_.layer -ceq 'c2-capability' })
-        if ($c2Components.Count -ne 44) { throw "C2 classification count differs from the TK-07 plus I03 diagnostic contract: $($c2Components.Count)" }
+        if ($c2Components.Count -ne 45) { throw "C2 classification count differs from the context retrieval contract: $($c2Components.Count)" }
         foreach ($component in $c2Components) {
             $owner = [string]$component.owner_candidate
             $path = [string]$component.path

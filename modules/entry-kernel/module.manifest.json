@@ -19,7 +19,6 @@
   "ownership": {
     "owned_paths": [
       "modules/entry-kernel/**",
-      "scripts/context.ps1",
       "scripts/generate-entry-contract.ps1",
       "scripts/harness-status.ps1",
       "scripts/lib/Harness.HostCapabilities.psm1",
@@ -37,7 +36,6 @@
   },
   "entrypoints": {
     "commands": [
-      "scripts/context.ps1",
       "scripts/task.ps1",
       "scripts/harness-status.ps1",
       "scripts/generate-entry-contract.ps1"

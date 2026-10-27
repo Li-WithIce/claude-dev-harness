@@ -13,6 +13,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'lib/Harness.Hashing.psm1') -Force
 $PSNativeCommandUseErrorActionPreference = $false
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $timer = [Diagnostics.Stopwatch]::StartNew()
@@ -27,10 +28,6 @@ if (!$WorkspaceRoot) {
 }
 $WorkspaceRoot = Get-ContextPath (Resolve-Path -LiteralPath $WorkspaceRoot).Path
 if (!$CodexHome) { $CodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' } }
-
-function Get-TextDigest([string]$Text) {
-    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($Text))).ToLowerInvariant()
-}
 
 function Get-ContextItems([string]$Path, [string]$Kind, [int]$OnlyLine = 0) {
     if ($Kind -eq 'document') {
@@ -96,7 +93,7 @@ if ($Command -eq 'read') {
     $reference = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Ref.Substring(4))) | ConvertFrom-Json -AsHashtable
     if (!$sources.Contains([string]$reference.path) -or $sources[[string]$reference.path] -ne $reference.kind) { throw 'Reference is outside the selected sources; session references require -IncludeSessions' }
     $items = @(Get-ContextItems -Path $reference.path -Kind $reference.kind -OnlyLine $reference.line)
-    if ($items.Count -ne 1 -or (Get-TextDigest $items[0].text) -cne $reference.digest) { throw 'Source changed or reference is invalid; run recall again' }
+    if ($items.Count -ne 1 -or (Get-HarnessUtf8TextSha256 -Text $items[0].text).Substring(7) -cne $reference.digest) { throw 'Source changed or reference is invalid; run recall again' }
     [ordered]@{ command='read'; path=$reference.path; line=$reference.line; kind=$reference.kind; authority='advisory'; text=$items[0].text } | ConvertTo-Json -Depth 8
     exit 0
 }
@@ -143,7 +140,7 @@ $digests = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 $used = 0
 foreach ($item in $sorted) {
     if ($results.Count -ge $Limit -or $used -ge $Budget) { break }
-    $digest = Get-TextDigest $item.text
+    $digest = (Get-HarnessUtf8TextSha256 -Text $item.text).Substring(7)
     if (!$digests.Add($digest)) { continue }
     $available = [Math]::Min(400, $Budget - $used)
     $start = [Math]::Max(0, $item.match_index - [Math]::Min(100,[int]($available / 4)))
