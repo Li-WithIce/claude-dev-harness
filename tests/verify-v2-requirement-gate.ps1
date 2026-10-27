@@ -196,7 +196,7 @@ try {
             Assert-True -Condition (@(Compare-Object $before $after).Count -eq 0) -Success "$label preserves every workspace path and file hash" -Failure "$label wrote workspace content"
             if (-not $arrayCase.Valid) {
                 Assert-ErrorWire -Result $run -Label $label
-                Assert-True -Condition ($run.StdErr -match 'request envelope schema validation failed') -Success "$label is rejected at input validation" -Failure "$label escaped input validation"
+                Assert-True -Condition ($run.StdErr -match 'request envelope (schema validation failed|failed schema validation)') -Success "$label is rejected at input validation" -Failure "$label escaped input validation"
                 continue
             }
             Assert-True -Condition ($run.Exited -and $run.ExitCode -eq 0 -and [string]::IsNullOrEmpty($run.StdErr)) -Success "$label succeeds" -Failure "$label failed: $($run.StdErr)"
