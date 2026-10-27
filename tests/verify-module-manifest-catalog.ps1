@@ -72,13 +72,13 @@ try {
     Check (($actualModules -join '|') -ceq ($expectedModules -join '|')) 'catalog contains the exact 13 mixed-version modules in ordinal order' "module discovery or ordering drifted: $($actualModules -join ', ')"
 
     $totals = $result.Catalog.totals
-    Check ($totals.manifest_count -eq 13 -and $totals.module_count -eq 13 -and $totals.v0_module_count -eq 6 -and $totals.v1_module_count -eq 7 -and $totals.capability_source_count -eq 7 -and $totals.capability_source_file_reference_count -eq 182 -and $totals.owner_test_count -eq 91 -and $totals.core_test_count -eq 47 -and $totals.quick_test_count -eq 1 -and $totals.full_test_count -eq 75 -and $totals.optional_route_count -eq 8) 'catalog includes the SQL-search fixture: 182 source references, 91 owners, 47 core checks, 75 full checks and 8 routes' "catalog totals drifted: $($totals | ConvertTo-Json -Compress)"
+    Check ($totals.manifest_count -eq 13 -and $totals.module_count -eq 13 -and $totals.v0_module_count -eq 6 -and $totals.v1_module_count -eq 7 -and $totals.capability_source_count -eq 7 -and $totals.capability_source_file_reference_count -eq 182 -and $totals.owner_test_count -eq 92 -and $totals.core_test_count -eq 48 -and $totals.quick_test_count -eq 1 -and $totals.full_test_count -eq 76 -and $totals.optional_route_count -eq 8) 'catalog includes on-demand context: 182 source references, 92 owners, 48 core checks, 76 full checks and 8 routes' "catalog totals drifted: $($totals | ConvertTo-Json -Compress)"
     Check (@($result.Catalog.unresolved_dependencies).Count -eq 0 -and @($result.Catalog.ownership_conflicts).Count -eq 0) 'constructed catalog has no unresolved dependency or ownership conflict' 'catalog contains unresolved dependencies or ownership conflicts'
 
     $expectedGroupNames = @('entry-lifecycle','evaluation-release','install-evidence','governance-approval','harness-contracts')
     $actualGroupNames = @($result.Catalog.core_groups.Keys)
     $groupCounts = @($expectedGroupNames | ForEach-Object { @($result.Catalog.core_groups[$_]).Count })
-    Check (($actualGroupNames -join '|') -ceq ($expectedGroupNames -join '|') -and ($groupCounts -join '|') -ceq '12|14|4|3|14') 'five CoreGroup identities are unchanged with explicit TK-03 active membership' "CoreGroup names or counts drifted: names=$($actualGroupNames -join ',') counts=$($groupCounts -join ',')"
+    Check (($actualGroupNames -join '|') -ceq ($expectedGroupNames -join '|') -and ($groupCounts -join '|') -ceq '13|14|4|3|14') 'five CoreGroup identities are unchanged with explicit TK-03 active membership' "CoreGroup names or counts drifted: names=$($actualGroupNames -join ',') counts=$($groupCounts -join ',')"
     Check (@($result.Catalog.quick_tests).Count -eq 1 -and [string]$result.Catalog.quick_tests[0] -ceq 'tests/verify-lite-footprint.ps1') 'quick validation derives only verify-lite-footprint' 'quick validation selection drifted'
 
     $full = Get-OrdinalStrings -Values @($result.Catalog.full_tests)
@@ -90,7 +90,7 @@ try {
 
     $ownerPaths = @($result.Catalog.test_owners | ForEach-Object { [string]$_.path })
     $duplicateOwners = @($ownerPaths | Group-Object -CaseSensitive | Where-Object Count -ne 1)
-    Check ($ownerPaths.Count -eq 91 -and $duplicateOwners.Count -eq 0 -and $ownerPaths -ccontains 'tests/verify-capability-extraction.ps1' -and $ownerPaths -ccontains 'tests/verify-installation.ps1' -and $ownerPaths -ccontains 'tests/run-scenario-evals.ps1' -and $ownerPaths -ccontains 'tests/verify-thin-adapters.ps1' -and $ownerPaths -ccontains 'tests/verify-declarative-distribution.ps1' -and $ownerPaths -ccontains 'tests/verify-v1-sunset.ps1' -and $ownerPaths -ccontains 'tests/verify-adapter-transport.ps1' -and $ownerPaths -ccontains 'tests/verify-host-diagnostics.ps1') 'every active or archived verifier and scenario runner has exactly one owner' 'verifier ownership is incomplete, duplicated, or missing special runners'
+    Check ($ownerPaths.Count -eq 92 -and $duplicateOwners.Count -eq 0 -and $ownerPaths -ccontains 'tests/verify-capability-extraction.ps1' -and $ownerPaths -ccontains 'tests/verify-installation.ps1' -and $ownerPaths -ccontains 'tests/run-scenario-evals.ps1' -and $ownerPaths -ccontains 'tests/verify-thin-adapters.ps1' -and $ownerPaths -ccontains 'tests/verify-declarative-distribution.ps1' -and $ownerPaths -ccontains 'tests/verify-v1-sunset.ps1' -and $ownerPaths -ccontains 'tests/verify-adapter-transport.ps1' -and $ownerPaths -ccontains 'tests/verify-host-diagnostics.ps1' -and $ownerPaths -ccontains 'tests/verify-context-recall.ps1') 'every active or archived verifier and scenario runner has exactly one owner' 'verifier ownership is incomplete, duplicated, or missing special runners'
 
     $routeModules = @($result.Catalog.optional_routes | ForEach-Object { [string]$_.module_id })
     $optionalTests = Get-OrdinalStrings -Values @($result.Catalog.optional_routes | ForEach-Object { @($_.tests) } | Select-Object -Unique)

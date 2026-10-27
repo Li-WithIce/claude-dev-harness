@@ -304,7 +304,7 @@ $validationAst=[System.Management.Automation.Language.Parser]::ParseFile($valida
 $manifestCatalogText = Get-Content -LiteralPath $manifestCatalogPath -Raw -Encoding utf8
 $manifestCatalog = $manifestCatalogText | ConvertFrom-Json -AsHashtable -Depth 100
 $expectedGroupNames = @('entry-lifecycle','evaluation-release','install-evidence','governance-approval','harness-contracts')
-$expectedGroupSizes = @(12,14,4,3,14)
+$expectedGroupSizes = @(13,14,4,3,14)
 $catalogGroupKeys = @($manifestCatalog.core_groups.Keys | Sort-Object -CaseSensitive)
 $coreGroupNames = @($expectedGroupNames)
 $coreGroupSizes = @($coreGroupNames | ForEach-Object { @($manifestCatalog.core_groups[$_]).Count })
@@ -362,7 +362,8 @@ if($coreGroupValidateSet.Count -eq 1){
 }
 $coreGroupDefault = if($coreGroupParameters.Count -eq 1){$coreGroupParameters[0].DefaultValue.SafeGetValue()}else{''}
 $optionalCoreOverlap = @($routing.tests | Where-Object {$actualCoreScripts -ccontains $_})
-Check ($catalogDerivationValid -and ($coreGroupNames -join '|') -ceq ($expectedGroupNames -join '|') -and ($coreGroupSizes -join '|') -ceq ($expectedGroupSizes -join '|') -and $actualCoreScripts.Count -eq 47 -and @($actualCoreScripts | Sort-Object -CaseSensitive -Unique).Count -eq 47 -and @($actualCoreScripts | Where-Object {-not(Test-Path -LiteralPath (Join-Path $RepoRoot "tests\$_") -PathType Leaf)}).Count -eq 0) 'five unchanged core groups derive forty-seven unique active scripts from the tracked catalog' 'catalog derivation, CoreGroup boundary, membership, uniqueness, order, or files drifted'
+Check ($catalogDerivationValid -and ($coreGroupNames -join '|') -ceq ($expectedGroupNames -join '|') -and ($coreGroupSizes -join '|') -ceq ($expectedGroupSizes -join '|') -and $actualCoreScripts.Count -eq 48 -and @($actualCoreScripts | Sort-Object -CaseSensitive -Unique).Count -eq 48 -and @($actualCoreScripts | Where-Object {-not(Test-Path -LiteralPath (Join-Path $RepoRoot "tests\$_") -PathType Leaf)}).Count -eq 0) 'five core groups derive forty-eight unique active scripts from the tracked catalog' 'catalog derivation, CoreGroup boundary, membership, uniqueness, order, or files drifted'
+Check (@($manifestCatalog.core_groups['entry-lifecycle']) -ccontains 'tests/verify-context-recall.ps1') 'on-demand context validation belongs to entry-lifecycle' 'context verifier is missing from its core owner group'
 Check (@($manifestCatalog.core_groups['install-evidence']) -ccontains 'tests/verify-declarative-distribution.ps1') 'TK-06 declarative Distribution validation belongs to install-evidence' 'TK-06 Distribution verifier is missing from its core owner group'
 Check ($flattenValid -and $groupSelectionValid -and $coreGroupDefault -ceq 'all' -and ($coreGroupAllowed -join '|') -ceq ((@('all')+$expectedCoreGroups) -join '|') -and $validation -match "'-CoreGroup',\`$CoreGroup" -and $validation -match "\`$Suite -ne 'core'.*\`$CoreGroup -ne 'all'") 'CoreGroup defaults to all active core checks, bridges safely, and rejects non-core use' 'CoreGroup parameter, flattening, bridge, or selection contract drifted'
 Check (($optionalCoreOverlap -join '|') -ceq 'verify-canonical-json.ps1|verify-hashing-module.ps1|verify-kernel-tcb-inventory.ps1|verify-module-manifest-catalog.ps1|verify-session-workspaces.ps1|verify-thin-adapters.ps1|verify-thin-trust-kernel-contracts.ps1|verify-v2-runtime-memory-decoupling.ps1') 'optional routes reuse only eight active lightweight and architecture contract verifiers' 'optional routes unexpectedly duplicate core verifier work'
