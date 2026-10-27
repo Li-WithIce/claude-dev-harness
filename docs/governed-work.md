@@ -22,6 +22,6 @@ Approval 与 Ask 不同：Approval 缺失是能力阻断，只有产品/授权�
 
 状态和 Evidence 都保留在工作区内的 canonical v2 路径；current pointer、事件、审计与恢复索引只是绑定记录或派生视图。只读 status/resume 不写状态，只有显式 resume-and-execute 才继续执行。
 
-设置 `HARNESS_PROTOCOL=v1` 只影响新任务路由，不会删除或隐式转换 v2 task。已有 v1 task 继续使用五阶段流程；显式迁移保留原 v1 artifact，回滚也不得靠删除 v2 数据重新激活 v1。
+`HARNESS_PROTOCOL=v1` 已退役并会拒绝；新工作与恢复只支持 v2。已有 v1 artifact 仅用于明确授权的历史检查或迁移，不继续执行旧五阶段。显式迁移保留原 artifact，回滚也不得靠删除 v2 数据重新激活 v1。
 
 机器状态、Evidence、Approval 与转换规则分别以 `schemas/`、`policies/` 和 `scripts/lib/` 为准；本页只提供操作心智模型。

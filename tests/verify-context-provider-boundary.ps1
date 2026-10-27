@@ -14,9 +14,15 @@ Need 'docs/工作流/context-provider-boundary.md' 'Provider output is evidence 
 Need 'docs/工作流/context-provider-boundary.md' 'advisory context providers'
 Need 'docs/工作流/context-provider-boundary.md' 'Only after the user explicitly authorizes memory write'
 Need 'docs/工作流/context-provider-boundary.md' 'iterative blocking clarification gate'
-Need 'docs/工作流/context-provider-boundary.md' 'write `.assistant/运行时/*`'
-Need 'docs/工作流/context-provider-boundary.md' 'decide TEST pass/fail'
-Need 'docs/工作流/context-provider-boundary.md' 'fallback'
+Need 'docs/工作流/context-provider-boundary.md' 'create/change v2 task state, Evidence, Approval or shared pointers'
+Need 'docs/工作流/context-provider-boundary.md' 'decide verification pass/fail'
+Need 'docs/工作流/context-provider-boundary.md' 'current files and `rg`/Read/manual inspection'
+Need 'docs/工作流/context-provider-boundary.md' 'writes no task artifacts or shared pointers'
+Need 'docs/工作流/provider-authority-order.md' '.assistant/runtime/tasks/{task_id}/task.json'
+foreach ($path in @('docs/工作流/context-provider-boundary.md','docs/工作流/provider-authority-order.md','docs/governed-work.md')) {
+    $text = Get-Content -LiteralPath (Join-Path $RepoRoot $path) -Raw
+    if ($text -match 'Workflow stays `PLAN|frontmatter is the only stage truth|已有 v1 task 继续使用五阶段|HARNESS_PROTOCOL=v1` 只影响') { $failures.Add("$path presents retired v1 as current") }
+}
 Need 'docs/工作流/provider-authority-order.md' 'Provider output'
 Need 'skills/orchestrator/references/context-provider-boundary.md' 'advisory-only'
 if ($failures.Count -gt 0) { $failures | ForEach-Object { Write-Output "- $_" }; exit 1 }

@@ -13,6 +13,7 @@
     {"module_id":"thin-trust-kernel","allowed_capabilities":["filesystem-read","process-execution"]}
   ],
   "asset_allowlist": [
+    {"id":"vault-context","kind":"vault","origin":"bootstrap","module_id":"distribution","source":"vault-template/entry/context.ps1.template","target":"entry/context.ps1","ownership":"managed","files":["vault-template/entry/context.ps1.template"]},
     {"id":"hook-pretooluse","kind":"hook","origin":"bootstrap","module_id":"distribution","source":"runtime-hooks/claude/pretooluse.ps1","target":"pretooluse.ps1","ownership":"managed","files":["runtime-hooks/claude/pretooluse.ps1"]},
     {"id":"hook-codex-pretooluse-launcher","kind":"hook","origin":"bootstrap","module_id":"distribution","source":"runtime-hooks/claude/codex-pretooluse-launcher.ps1","target":"codex-pretooluse-launcher.ps1","ownership":"managed","files":["runtime-hooks/claude/codex-pretooluse-launcher.ps1"]},
     {"id":"hook-stop","kind":"hook","origin":"bootstrap","module_id":"distribution","source":"runtime-hooks/claude/stop.js","target":"stop.js","ownership":"managed","files":["runtime-hooks/claude/stop.js"]},

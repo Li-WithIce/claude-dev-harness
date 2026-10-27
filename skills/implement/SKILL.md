@@ -1,4 +1,6 @@
 ---
+status: superseded
+superseded_by: docs/quick-start.md
 name: implement
 description: Use when the task is in IMPLEMENT and code plus fresh implementation evidence must be appended to `plan.md`.
 ---

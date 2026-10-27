@@ -539,7 +539,7 @@ function Assert-LegacyRebaselineManagedTarget {
             return
         }
         $relativeTarget = $target.Substring($vaultRoot.TrimEnd('\').Length).TrimStart('\')
-        $minimalTargets = @('entry\AGENTS.md','entry\advance-stage.ps1','entry\task.ps1','entry\validate-lite-artifacts.ps1')
+        $minimalTargets = @('entry\AGENTS.md','entry\advance-stage.ps1','entry\task.ps1','entry\context.ps1','entry\validate-lite-artifacts.ps1')
         if ([string]$Manifest['effective_vault_profile'] -eq 'minimal') {
             if ($relativeTarget -notin $minimalTargets) {
                 throw "Legacy minimal-vault target is not Harness-managed: $target"

@@ -16,6 +16,7 @@
     {"module_id":"thin-trust-kernel","allowed_capabilities":["filesystem-read","process-execution"]}
   ],
   "asset_allowlist": [
+    {"id":"vault-context","kind":"vault","origin":"bootstrap","module_id":"distribution","source":"vault-template/entry/context.ps1.template","target":"entry/context.ps1","ownership":"managed","files":["vault-template/entry/context.ps1.template"]},
     {"id":"skill-audit","kind":"skill","origin":"bootstrap","module_id":"distribution","source":"skills/audit/SKILL.md","target":"audit","ownership":"managed","files":["skills/audit/SKILL.md"]},
     {"id":"skill-codex","kind":"skill","origin":"bootstrap","module_id":"distribution","source":"skills/codex/SKILL.md","target":"codex","ownership":"managed","files":["skills/codex/SKILL.md","skills/codex/scripts/ask_codex.ps1","skills/codex/scripts/ask_codex.sh","skills/codex/scripts/invoke_codex.ps1","skills/codex/scripts/invoke_codex.sh"]},
     {"id":"skill-md-html","kind":"skill","origin":"module-request","module_id":"md-html","source":"skills/md-html/SKILL.md","target":"md-html","ownership":"managed","files":["skills/md-html/SKILL.md","skills/md-html/references/checklist.md","skills/md-html/references/pipeline.md"]},

@@ -19,6 +19,7 @@
   "ownership": {
     "owned_paths": [
       "modules/entry-kernel/**",
+      "scripts/context.ps1",
       "scripts/generate-entry-contract.ps1",
       "scripts/harness-status.ps1",
       "scripts/lib/Harness.HostCapabilities.psm1",
@@ -36,6 +37,7 @@
   },
   "entrypoints": {
     "commands": [
+      "scripts/context.ps1",
       "scripts/task.ps1",
       "scripts/harness-status.ps1",
       "scripts/generate-entry-contract.ps1"
@@ -44,6 +46,7 @@
   },
   "validation": {
     "owner_tests": [
+      "tests/verify-context-recall.ps1",
       "tests/verify-v1-sunset.ps1",
       "tests/verify-v2-entry-contract.ps1",
       "tests/verify-v2-protocol-config.ps1",
@@ -61,6 +64,7 @@
     "core_group": "entry-lifecycle",
     "changed": [],
     "full": [
+      "tests/verify-context-recall.ps1",
       "tests/verify-v1-sunset.ps1",
       "tests/verify-v2-entry-contract.ps1",
       "tests/verify-v2-protocol-config.ps1",

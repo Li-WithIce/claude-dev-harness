@@ -43,7 +43,24 @@ pwsh -File .assistant\entry\task.ps1 disable-v2
 - Governed：需要持久留痕或更强控制，创建 v2 task state 和 Evidence。
 - Critical：受保护或不可逆高风险工作，执行前必须满足额外能力门。
 
-不需要手工选择 profile，也不要把未运行的测试写成通过。详细边界见 [Requirement Gate](requirement-gate.md) 与 [Governed work](governed-work.md)。
+普通开发从 Direct 开始，不因为文件多、需要查历史或写一次实施步骤就加载完整治理流程；确需持久任务证据或受保护操作时才进入 Governed/Critical。不需要手工选择 profile，也不要把未运行的测试写成通过。详细边界见 [Requirement Gate](requirement-gate.md) 与 [Governed work](governed-work.md)。
+
+## 按需查上下文
+
+需要项目规范或历史依据时再调用只读入口；普通 Direct 不自动检索，不自动记日志：
+
+```powershell
+# 项目 Markdown：先取短摘录
+pwsh -File .assistant\entry\context.ps1 recall -Query '最小实现' -Budget 1200
+
+# 明确需要历史对话时，加入当前项目的 Codex 消息
+pwsh -File .assistant\entry\context.ps1 recall -Query '接口约定' -IncludeSessions
+
+# 使用上一步返回的完整 ref 读取原文；会话引用同样添加 -IncludeSessions
+pwsh -File .assistant\entry\context.ps1 read -Ref 'ctx:...'
+```
+
+入口需要 PowerShell 7.3+ 和 `rg`，不依赖 Hook、外部 Provider、模型调用或后台索引。首次使用需将工作区安装更新到包含该入口的版本。来源、旧规则替代和输出字段见 [Context Providers](工具/context-providers.md)。
 
 ## 健康状态
 

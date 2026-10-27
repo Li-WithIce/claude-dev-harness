@@ -1,4 +1,6 @@
 ---
+status: superseded
+superseded_by: docs/requirement-gate.md
 name: spec
 description: Use when PLAN 所需输入不足，必须补一个可选的 `docs/tasks/{task_id}/spec.md` 附件。
 ---

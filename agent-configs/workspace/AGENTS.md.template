@@ -4,6 +4,7 @@
 - Default to Simplified Chinese for explanations and summaries; keep code identifiers in their native language and never expose secrets or private data.
 - Use `.assistant\entry\task.ps1 status` only for an explicit v2 recovery/status request; new requests resolve admission without reading task/current state. Legacy history is explicit maintenance input only.
 - Use `rg`, file reading, and manual inspection only when directly relevant. Optional providers are never required for core routing.
+- When project history or conventions are explicitly needed, use `.assistant\entry\context.ps1 recall -Query <keywords>` for excerpts, then `read -Ref <ref>` for selected sources. Add `-IncludeSessions` only for Codex conversation history. This read-only tool does not activate a task or save memory; ordinary Direct does not call it automatically.
 - Current requirements and business correctness take precedence over stale tests or snapshots unless historical compatibility is explicitly required.
 - When the user explicitly authorizes and names a Workspace configuration file, database credentials and external-service keys may be persisted there, including production configuration files. This ordinary Runtime capability does not require Vault, KMS, a Secret Provider, Release Qualification, or an exact Host/model version. Persistence is not disclosure: never echo sensitive values into replies, logs, task artifacts, Evidence, reviews, PRs, CI artifacts, or unrelated files.
 - Report such business changes as: `已更新指定生产配置文件；数据库和外部服务敏感字段未在报告中回显。`

@@ -92,7 +92,7 @@
     },
     {
       "path": "install.ps1",
-      "sha256": "sha256:985665bdfedd29b75ae96786f62ccbba096fa913d05005b12438112ccbc7f33a",
+      "sha256": "sha256:076ed36f2f757ea2641241e00696af2d1e51a893f09838a565f4c4357a48a773",
       "layer": "d1-distribution",
       "trust_paths": [
         "distribution"
@@ -610,7 +610,7 @@
     },
     {
       "path": "agent-configs/workspace/AGENTS.md.template",
-      "sha256": "sha256:fb5cda2414f14b335621ff0526528af76454c16228a5a556f5265c152dcd7fa5",
+      "sha256": "sha256:9a303ad89c55fa765ec8c8fed2cc572ceb4b066ee3fd6e77fa0b33a189d1d4eb",
       "kind": "entry-template",
       "owner_layer": "a3-adapter",
       "trust_paths": [
@@ -618,44 +618,44 @@
         "runtime"
       ],
       "reason": "Workspace installed Entry Contract template is hashed by Runtime Default and rendered by the compiler.",
-      "physical_loc": 30,
-      "bytes": 3789
+      "physical_loc": 31,
+      "bytes": 4138
     },
     {
       "path": "modules/distribution/profiles/core.json",
-      "sha256": "sha256:e10b7e1146d37e41e089a82f9a35af38741a2b27d7c5a36720a690c8c20f389f",
+      "sha256": "sha256:4b77167be13ed37beae507cab64fd261dbdadb5a396818794ff6d268bc4fb86c",
       "kind": "policy",
       "owner_layer": "d1-distribution",
       "trust_paths": [
         "distribution"
       ],
       "reason": "TK-06 central core installation allowlist; grants Distribution transport only, never Runtime authority.",
-      "physical_loc": 28,
-      "bytes": 3701
+      "physical_loc": 29,
+      "bytes": 3950
     },
     {
       "path": "modules/distribution/profiles/full.json",
-      "sha256": "sha256:7b2ebe93f3deda56768f7f13202b361e4b3df91b6330da9c6736afb5e6a5b31e",
+      "sha256": "sha256:6dd91864ec9aa1a7f88c1bba45585cf2c6279b87d0e6b47046b79593e5a70a69",
       "kind": "policy",
       "owner_layer": "d1-distribution",
       "trust_paths": [
         "distribution"
       ],
       "reason": "TK-06 central full installation allowlist; module requests cannot expand this grant.",
-      "physical_loc": 52,
-      "bytes": 10180
+      "physical_loc": 53,
+      "bytes": 10429
     },
     {
       "path": "modules/distribution/profiles/governed.json",
-      "sha256": "sha256:679f30b7edc5d9f0c9d6fc54a314685e7904ae692306fa39df1a54fd4c1a686b",
+      "sha256": "sha256:da379fdd283ac9598b55ef2615fb095dfa5abe75c5235142231e90f294ad5f5a",
       "kind": "policy",
       "owner_layer": "d1-distribution",
       "trust_paths": [
         "distribution"
       ],
       "reason": "TK-06 central governed installation allowlist independent of Runtime execution policy.",
-      "physical_loc": 30,
-      "bytes": 4118
+      "physical_loc": 31,
+      "bytes": 4367
     },
     {
       "path": "policies/decision-rights.json",
@@ -1679,7 +1679,7 @@
     "distribution_executable_loc": 8076,
     "duplicate_edge_count": 0,
     "artifact_count": 40,
-    "artifact_bytes": 145409
+    "artifact_bytes": 146505
   },
   "budget": {
     "baseline_executable_loc": 3068,

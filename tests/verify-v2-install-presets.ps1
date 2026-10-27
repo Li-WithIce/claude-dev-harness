@@ -337,11 +337,20 @@ function Assert-ProtocolConfigPreserved {
 function Assert-InstalledTaskShim {
     param($Fixture,$Manifest,[string]$Label)
 
-    $path = Join-Path $Fixture.Workspace '.assistant\entry\task.ps1'
-    if ((Test-Path -LiteralPath $path -PathType Leaf) -and (Test-ManifestIncludesPath -Manifest $Manifest -Path $path)) {
-        Add-Check "$Label installs and owns the workspace task shim"
+    foreach ($entry in @('task','context')) {
+        $path = Join-Path $Fixture.Workspace ".assistant\entry\$entry.ps1"
+        if ((Test-Path -LiteralPath $path -PathType Leaf) -and (Test-ManifestIncludesPath -Manifest $Manifest -Path $path)) {
+            Add-Check "$Label installs and owns the workspace $entry shim"
+        } else {
+            Add-Failure "$Label did not install and own the workspace $entry shim"
+        }
+    }
+    $contextPath = Join-Path $Fixture.Workspace '.assistant\entry\context.ps1'
+    $run = Invoke-ChildScript -UserProfile $Fixture.User -ScriptPath $contextPath -Arguments @('recall','-Query','ContextInstallSmokeNeedle')
+    if ($run.ExitCode -eq 0 -and $run.Output -match '"command":\s*"recall"') {
+        Add-Check "$Label executes the installed context entry"
     } else {
-        Add-Failure "$Label did not install and own the workspace task shim"
+        Add-Failure "$Label context entry failed: $($run.Output)"
     }
 }
 
@@ -350,6 +359,7 @@ function Assert-InstalledPowerShellEntriesParse {
 
     $paths = @(
         (Join-Path $Fixture.Workspace '.assistant\entry\task.ps1'),
+        (Join-Path $Fixture.Workspace '.assistant\entry\context.ps1'),
         (Join-Path $Fixture.User '.claude\hooks-memory\pretooluse.ps1'),
         (Join-Path $Fixture.User '.claude\hooks-memory\codex-pretooluse-launcher.ps1')
     )

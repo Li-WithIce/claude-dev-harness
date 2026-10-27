@@ -990,6 +990,7 @@ function Assert-ManagedBackupTarget {
             'entry\AGENTS.md'
             'entry\advance-stage.ps1'
             'entry\task.ps1'
+            'entry\context.ps1'
             'entry\validate-lite-artifacts.ps1'
             '运行时\tasks\.gitkeep'
         )
