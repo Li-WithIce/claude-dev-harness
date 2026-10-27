@@ -39,4 +39,21 @@
 
 ## Execution record
 
-- 计划已制定，实施与验证进行中。最终结果在本节补充。
+- 实现候选：`802fea4b8e604844d38e6e6943475adc5c7fa195`。已提供按需 `recall/read`、当前项目 Codex 消息适配、摘录预算、内容绑定引用和旧规则替代关系；当前指南与 v2 Direct/Governed 一致。
+- 检索复用现有 Hashing 原语，并登记到现有上下文能力包。它属于 C2，只提供参考材料；不进入授权内核。Runtime TCB 保持 3391 行，没有新增模块或外部服务。
+- 检索行为 34 项、CI 路由 70 项、组件分类、TCB、能力包、模块目录及四项 Provider 边界检查通过。最终候选的 core/governed/full 三种安装 smoke 均完成 install → verify → update → verify → uninstall，退出码均为 0。
+- 完整 core 在冻结候选 `5f0b773` 上跑完 49 项：**43 pass / 6 fail，整轮 exit 1**。原始结果保留；以下逐项修正或完整复测补齐覆盖，没有将原整轮改写为通过，也没有重跑未受影响的全部检查。
+
+| 原失败检查 | 原因与处理 | 最终验证 |
+| --- | --- | --- |
+| release-runner-boundary | 临时源码路径含用户名，PowerShell 错误位置被误判为泄露；同一提交改用常规工作目录复测 | 10 项通过 |
+| v2-ci-routing | 新增 context 检查后仍断言旧 core 数量；更新数量并检查归属 | 70 项通过 |
+| v2-install-presets | runner 的 900 秒上限不足；单独执行同一版本的完整测试 | 474 项通过，约 19 分钟 |
+| hashing-module | 新 CLI 重复实现 SHA-256；改用已有 Hashing 模块，保持引用格式 | Hashing 与 34 项检索检查通过 |
+| thin-trust-kernel-contracts | 新 CLI 遗漏分类；补齐 C2 归属和能力包登记 | 分类、TCB 和能力包检查通过 |
+| module-manifest-catalog | owner/core/full 数量预期未更新；同步新增成员和源码计数 | 完整目录测试通过 |
+
+- 一次相关目录复测与会临时修改共享夹具的能力包测试并行，出现拒绝诊断不符；共享夹具恢复后，目录测试保持原断言顺序复测通过。该失败记录同样保留。
+- 真实项目历史检索曾返回 7 条消息、2655 个摘录字符，回读成功，单次检索约 744 ms。这是本地观测，不是与 mini-trellis 的性能对比。
+- 安装交付范围为当前 core 工作区。实际安装、入口回读、Hook 关闭偏好、用户规则摘要、原暂存对象和 current pointer 保留情况，记录在任务 `context-workflow-20261027` 的 Evidence 与运行日志中。
+- `not_run`：Bare / Harness Direct / mini 同模型完整代理 A/B；其他宿主对话格式；自动桌面 Hook 加载（用户要求保持关闭）。本轮不声明速度或费用提升比例。
