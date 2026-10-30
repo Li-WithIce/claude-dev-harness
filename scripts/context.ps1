@@ -74,7 +74,7 @@ $paths = @(& rg --files --hidden -g '!**/.git/**' -g '!**/.assistant/**' -g '!**
 if ($LASTEXITCODE -gt 1) { throw "Document enumeration failed: rg exit $LASTEXITCODE" }
 $sources = [ordered]@{}
 foreach ($path in $paths) { if ([IO.Path]::GetExtension($path) -ieq '.md') { $sources[(Get-ContextPath $path)] = 'document' } }
-foreach ($relative in @('AGENTS.md','CLAUDE.md','.assistant/MEMORY.md')) {
+foreach ($relative in @('AGENTS.md','CLAUDE.md','PROJECT.md','.assistant/MEMORY.md')) {
     $memoryPath = Join-Path $WorkspaceRoot $relative
     if (Test-Path -LiteralPath $memoryPath -PathType Leaf) { $sources[$memoryPath] = 'document' }
 }

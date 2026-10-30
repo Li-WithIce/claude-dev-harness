@@ -117,6 +117,10 @@ try {
     }
 
     $baseInput = Merge-Case -Base $catalog.base -Case $catalog.cases[0]
+    $businessNotes = Merge-Case -Base $catalog.base -Case $catalog.cases[0]
+    $businessNotes.changed_paths = @('src/view.ps1','docs/changes/view-label.md','docs/project-context.md')
+    $businessResult = Invoke-RouteCase -RouteInput $businessNotes
+    Assert-True -Condition ($businessResult.profile -ceq 'direct' -and $businessResult.artifact_policy -ceq 'ephemeral' -and $businessResult.side_effects.task_state_writes -eq 0 -and $businessResult.side_effects.runtime_writes -eq 0) -Success 'business change notes preserve Direct without machine lifecycle writes' -Failure 'business change notes escalated Direct or created machine state'
     $unknownTrigger = Merge-Case -Base $catalog.base -Case $catalog.cases[0]
     $unknownTrigger.critical_triggers = @('invented_trigger')
     Assert-True -Condition (Test-Throws { Invoke-RouteCase -RouteInput $unknownTrigger }) -Success 'unknown Critical triggers fail closed' -Failure 'unknown Critical trigger was accepted'

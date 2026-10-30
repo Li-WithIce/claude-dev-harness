@@ -39,15 +39,15 @@ pwsh -File .assistant\entry\task.ps1 disable-v2
 
 - Inspect：只读，零写入。
 - Ask：仍有会改变产品、权限、兼容或不可逆结果的未决决定，先澄清。
-- Direct：清楚、可逆、低风险，直接修改并做聚焦验证，不创建任务产物。
-- Governed：需要持久留痕或更强控制，创建 v2 task state 和 Evidence。
+- Direct：清楚、可逆、低风险，直接修改并做聚焦验证，不创建机器任务产物；已接入项目可维护普通业务变更说明。
+- Governed：需要持久机器任务状态、正式 Evidence 或更强控制，创建 v2 task state 和 Evidence。
 - Critical：受保护或不可逆高风险工作，执行前必须满足额外能力门。
 
 普通开发从 Direct 开始，不因为文件多、需要查历史或写一次实施步骤就加载完整治理流程；确需持久任务证据或受保护操作时才进入 Governed/Critical。不需要手工选择 profile，也不要把未运行的测试写成通过。详细边界见 [Requirement Gate](requirement-gate.md) 与 [Governed work](governed-work.md)。
 
 ## 按需查上下文
 
-需要项目规范或历史依据时再调用只读入口；普通 Direct 不自动检索，不自动记日志：
+需要历史背景时调用只读入口。项目可通过用户维护的 `PROJECT.md` 声明 `harness_continuity: enabled`，让代理先读固定项目/操作文档，并在代码改动前和关键步骤后更新业务记录；未接入项目保持原有 Direct 行为。具体接入与模板见 [项目连续记录](project-continuity.md)。
 
 ```powershell
 # 项目 Markdown：先取短摘录

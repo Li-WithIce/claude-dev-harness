@@ -37,7 +37,7 @@ hands off to v2 recovery. Explicit v1 is retired, not a rollback switch.
 | Profile | Persistence | Harness writes | Required behavior |
 |---|---|---|---|
 | Inspect | ephemeral | none | read-only inspection and appropriate verification |
-| Direct | ephemeral | no task/runtime/current state or task artifact | focused verification, self-review, and honest gaps |
+| Direct | ephemeral | no task/runtime/current state or machine task artifact; opted-in business Markdown is an ordinary project deliverable | focused verification, self-review, and honest gaps |
 | Governed | durable | transactional v2 state and explicit artifacts only | verification and durable Evidence; planning/audit only when policy requires them |
 | Critical | durable | same transaction boundary | plan, Approval, rollback, independent audit, verification, Evidence, and dry-run |
 

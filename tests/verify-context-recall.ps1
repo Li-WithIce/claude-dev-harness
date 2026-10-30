@@ -36,8 +36,12 @@ function Invoke-Context([string[]]$Arguments,[switch]$Fails,[string]$ScriptPath 
 }
 try {
     [void][IO.Directory]::CreateDirectory((Join-Path $workspace '.git'))
-    Write-Source 'project/.gitignore' "ignored.md`nAGENTS.md`n"
+    Write-Source 'project/.gitignore' "ignored.md`nAGENTS.md`nPROJECT.md`n"
     Write-Source 'project/AGENTS.md' '# 最小实现规范 internal agreement'
+    Write-Source 'project/PROJECT.md' "---`nharness_continuity: enabled`n---`n[ContinuityEntry](docs/project-context.md)"
+    Write-Source 'project/docs/project-context.md' "# 项目说明`n重复打包先读 operations/build.md；改造记录在 changes/。"
+    Write-Source 'project/docs/operations/build.md' '# 已验证入口：scripts/package.ps1 -Target production；配置来源 config/production.yml'
+    Write-Source 'project/docs/changes/build-entry.md' '# 改造原因：沿用已验证脚本。下一步：结构检查。测试尚未运行。实现提交：未提交。'
     Write-Source 'project/ignored.md' 'IgnoredCanary'
     Write-Source 'project/docs/current.md' '# 当前规范 current endpoint agreement'
     Write-Source 'project/docs/old.md' "---`nstatus: superseded`nsuperseded_by: docs/current.md`n---`n# 旧接口 LegacyNeedle"
@@ -67,6 +71,16 @@ try {
     Check ($result.results.Count -eq 1 -and $result.results[0].path.EndsWith('AGENTS.md')) 'Chinese query finds ignored root instructions'
     $read = Invoke-Context @('read','-Ref',$result.results[0].ref)
     Check ($read.text -eq '# 最小实现规范 internal agreement') 'reference reads the full document'
+    $result = Invoke-Context @('recall','-Query','ContinuityEntry')
+    Check ($result.results.Count -eq 1 -and $result.results[0].path.EndsWith('PROJECT.md')) 'ignored user-owned continuity entry is discoverable'
+    $read = Invoke-Context @('read','-Ref',$result.results[0].ref)
+    Check ($read.text -match 'docs/project-context.md') 'a fresh process reads the explicit project document location'
+    $result = Invoke-Context @('recall','-Query','已验证入口')
+    $read = Invoke-Context @('read','-Ref',$result.results[0].ref)
+    Check ($read.text -match 'scripts/package.ps1 -Target production' -and $read.text -match 'config/production.yml') 'operation recall retains exact script arguments and config source'
+    $result = Invoke-Context @('recall','-Query','改造原因')
+    $read = Invoke-Context @('read','-Ref',$result.results[0].ref)
+    Check ($read.text -match '下一步：结构检查' -and $read.text -match '测试尚未运行' -and $read.text -match '未提交') 'fresh-process handoff preserves next action and unverified work'
     $result = Invoke-Context @('recall','-Query','ENDPOINT agreement','-Budget','17')
     Check ($result.results.Count -eq 1 -and $result.excerpt_chars -le 17) 'English matching is case-insensitive, deduplicated and budgeted'
     Check ($result.results[0].excerpt -match 'endpoint') 'small excerpts retain the matching keyword'

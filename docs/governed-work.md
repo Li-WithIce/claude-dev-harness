@@ -2,7 +2,9 @@
 
 ## 何时使用
 
-Governed 适用于需要持久任务状态、可审计交付、较高风险或受保护范围的工作。Critical 适用于生产、权限/安全、资金、破坏性迁移、不可逆数据变化、公共 API 破坏、敏感数据导出、破坏 Git 历史或缺少 dry-run 的大规模自动化。
+Governed 适用于需要持久机器任务状态、正式 Evidence、较高风险或受保护范围的工作。Critical 适用于生产、权限/安全、资金、破坏性迁移、不可逆数据变化、公共 API 破坏、敏感数据导出、破坏 Git 历史或缺少 dry-run 的大规模自动化。
+
+通过 `PROJECT.md` 接入的普通项目说明、变更历史和操作文档属于业务交付，不单独触发 Governed；它们不设置策略选择器的 durable 标志。已有 Governed 任务可链接这些文档，机器状态仍只在 canonical v2 runtime 中维护。见 [项目连续记录](project-continuity.md)。
 
 文件数量本身不会升级 profile；真正决定因素是风险、持久化要求和受保护动作。
 

@@ -33,4 +33,6 @@ Requirement Gate 在任何写入前回答一个问题：当前证据是否足以
 
 Requirement clear 只表示产品意图足够明确，不代表已取得受保护动作的 Approval，也不代表验证已经完成。后续风险策略仍可要求计划、回滚、dry-run、独立审查或 Evidence。
 
+明确接入项目连续记录的项目，在需求 clear 后、代码改动前把要求、原因和验收写入业务变更说明；需求不明时不替用户补造原因。普通 Markdown 交付不等同于策略中的机器任务持久化，不因维护文档设置 `Persistence=durable` 或 `DurableArtifactsRequested`。
+
 机器契约的字段、枚举与校验规则以 `schemas/`、`policies/` 和实现模块为准，本页不复制它们。

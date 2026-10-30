@@ -4,7 +4,7 @@
 
 Durable Governed and Critical work uses `task-state/v2`. The canonical task document is the only lifecycle truth source; events, Evidence, Approval, audit, current pointer, and recovery index are bound records or derived views, not parallel state.
 
-Direct and Inspect work do not create this layout. Existing v1 `plan.md` tasks continue through the five-stage workflow and are never converted implicitly.
+Direct and Inspect work do not create this layout. Direct may maintain ordinary business Markdown when a project explicitly opts into continuity through PROJECT.md; these notes are not task-state/Evidence artifacts. Existing v1 material is historical maintenance input only, never an executable five-stage workflow or an implicit migration.
 
 ## Workspace layout
 
@@ -79,8 +79,8 @@ Memory and Team are optional consumers. Core recovery works from the runtime tas
 
 ## Compatibility, validation, and rollback
 
-Protocol detection is artifact-first: an existing v2 `task.json` stays v2; a legal v1 `plan.md` stays v1. Explicit protocol conflicts fail closed. Migration uses dry-run digest checks and atomic directory publication, preserves the v1 artifact read-only, and never deletes v2 data to perform rollback.
+Protocol detection preserves valid v2 task identity; legacy-only task artifacts require explicit migration instead of executing v1. Explicit protocol conflicts fail closed. Migration uses dry-run digest checks and atomic directory publication, preserves the v1 artifact read-only, and never deletes v2 data to perform rollback.
 
 `tests/verify-v2-task-state.ps1`, `tests/verify-v2-evidence.ps1`, `tests/verify-v2-approval.ps1`, `tests/verify-v2-governed-audit.ps1`, `tests/verify-v2-runtime-memory-decoupling.ps1`, and migration/coexistence tests cover these contracts.
 
-Rollback sets `HARNESS_PROTOCOL=v1` for new work or reverts the relevant implementation commit. Existing v2 runtime remains available for read-only diagnosis and explicit recovery; existing v1 tasks, installation, update, uninstall, recovery, and validation remain intact.
+Rollback reverts the relevant implementation through the normal update path. `HARNESS_PROTOCOL=v1` is retired and is not a rollback option. Existing v2 runtime remains available for read-only diagnosis and explicit recovery; historical artifacts remain intact.

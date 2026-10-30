@@ -1,5 +1,5 @@
 ﻿[CmdletBinding()]
-param([string]$RepoRoot = '',[switch]$OfflineSkillSourceOnly,[switch]$InputTransportOnly,[switch]$PreToolUsePreferenceOnly)
+param([string]$RepoRoot = '',[switch]$OfflineSkillSourceOnly,[switch]$InputTransportOnly,[switch]$PreToolUsePreferenceOnly,[switch]$ProjectContinuityOnly)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -811,6 +811,41 @@ function Invoke-H04HistoricalMatcherVerification {
     }
 }
 
+function Invoke-ProjectContinuityRegression {
+    $fixture=New-PresetFixture -Name 'project-continuity'
+    $sources=[ordered]@{
+        'PROJECT.md'="---`nharness_continuity: enabled`n---`n[Project](docs/project-context.md)`n"
+        'docs/project-context.md'="# User project`n[Build](operations/build.md)`n"
+        'docs/operations/build.md'='Run scripts/build.ps1 -Mode production; config: config/local.yml'
+        'docs/changes/request.md'='Reason: reuse previous method. Next: package verification. Tests: not_run.'
+    }
+    foreach($relative in $sources.Keys){
+        $path=Join-Path $fixture.Workspace $relative
+        [void][IO.Directory]::CreateDirectory((Split-Path $path))
+        [IO.File]::WriteAllText($path,$sources[$relative],[Text.UTF8Encoding]::new($false))
+    }
+    foreach($phase in @('install','update','uninstall')){
+        if($phase -eq 'uninstall'){
+            $run=Invoke-Uninstall $fixture
+            Assert-UninstallExit $run 'Project continuity'
+        }else{
+            $run=Invoke-Install $fixture @('-Preset','core')
+            Assert-InstallExit $run "Project continuity $phase"
+        }
+        if($run.ExitCode -ne 0){throw "Project continuity $phase failed: $($run.Output)"}
+        $manifest=if($phase -ne 'uninstall'){Get-LatestManifest $fixture}else{$null}
+        foreach($relative in $sources.Keys){
+            $path=Join-Path $fixture.Workspace $relative
+            if((Test-Path -LiteralPath $path) -and [IO.File]::ReadAllText($path) -ceq $sources[$relative]){Add-Check "$phase preserves user $relative"}else{Add-Failure "$phase changed user $relative"}
+            if($null -ne $manifest -and -not (Test-ManifestExcludesPath $manifest $path)){Add-Failure "$phase claimed user $relative"}
+        }
+        if($phase -ne 'uninstall'){
+            $entry=[IO.File]::ReadAllText((Join-Path $fixture.Workspace 'AGENTS.md'))
+            if($entry.Contains('harness_continuity: enabled')){Add-Check "$phase distributes the continuity entry rule"}else{Add-Failure "$phase omitted the continuity entry rule"}
+        }
+    }
+}
+
 function Invoke-PreToolUsePreferenceRegression {
     $fixture=New-PresetFixture -Name 'pretooluse-preference'
     $initial=Invoke-Install $fixture @('-Preset','core')
@@ -936,6 +971,13 @@ $fullFeatures = @('core','governed','memory','md-html','adapters','provider-refe
 try {
     New-Item -ItemType Directory -Path $script:ScratchRoot -Force | Out-Null
 
+    if($ProjectContinuityOnly){
+        Invoke-ProjectContinuityRegression
+        foreach($check in $script:Checks){Write-Output ('[PASS] '+$check)}
+        foreach($failure in $script:Failures){Write-Output ('[FAIL] '+$failure)}
+        if($script:Failures.Count){exit 1};exit 0
+    }
+
     if($PreToolUsePreferenceOnly){
         Invoke-PreToolUsePreferenceRegression
         foreach($check in $script:Checks){Write-Output ('[PASS] '+$check)}
@@ -965,6 +1007,7 @@ try {
     Invoke-H04SharedHookFailureRegression
     Invoke-H04NonActiveReleaseRegression
     Invoke-PreToolUsePreferenceRegression
+    Invoke-ProjectContinuityRegression
 
     $exactNumberToken = '0.1234567890123456789012345678'
     try {
