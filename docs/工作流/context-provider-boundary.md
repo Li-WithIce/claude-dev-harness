@@ -4,7 +4,7 @@ Context providers are advisory context providers. They help recall, search, and 
 
 ## Current v2 workflow
 
-- Inspect is read-only. Direct makes the required change, runs focused checks and self-review, and writes no machine task artifacts or shared pointers. An opted-in PROJECT.md can authorize ordinary project change notes without selecting Governed.
+- Inspect is read-only. Direct makes the required change, runs focused checks and self-review, and writes no task artifacts or shared pointers. Here task artifacts means machine task state or Evidence; an opted-in PROJECT.md can authorize ordinary project change notes without selecting Governed.
 - Governed/Critical use `.assistant/runtime/tasks/{task_id}/task.json` as task-state authority and bind Evidence to the current Contract/version/revision. Plans, Approval and independent review follow the selected task policy.
 - `quick` / `workflow` are compatibility aliases for Direct / Governed, not another lifecycle. v1 five-stage execution and plan frontmatter authority are retired.
 - Ask is an iterative blocking clarification gate for unresolved user/product decisions. Already authorized operations do not need repeated confirmation.
