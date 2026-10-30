@@ -597,7 +597,7 @@
   "artifacts": [
     {
       "path": "agent-configs/claude/CLAUDE.md.template",
-      "sha256": "sha256:86c6d3f3f56033e6c865ea67988b7e03d81f05954f17e04391308d469cadd8bf",
+      "sha256": "sha256:76e1f28337d3bd13d21d7c408f57c4a697457f1890f3ce8d622762fe25744fb9",
       "kind": "entry-template",
       "owner_layer": "a3-adapter",
       "trust_paths": [
@@ -605,12 +605,12 @@
         "runtime"
       ],
       "reason": "Claude installed Entry Contract template is hashed by Runtime Default and rendered by the compiler.",
-      "physical_loc": 27,
-      "bytes": 2779
+      "physical_loc": 28,
+      "bytes": 2841
     },
     {
       "path": "agent-configs/workspace/AGENTS.md.template",
-      "sha256": "sha256:9a303ad89c55fa765ec8c8fed2cc572ceb4b066ee3fd6e77fa0b33a189d1d4eb",
+      "sha256": "sha256:f9ebf6b46aad27d7c369e1c8f73ed6f8b47956d565f0c01cbc81ca5062c4b032",
       "kind": "entry-template",
       "owner_layer": "a3-adapter",
       "trust_paths": [
@@ -618,8 +618,8 @@
         "runtime"
       ],
       "reason": "Workspace installed Entry Contract template is hashed by Runtime Default and rendered by the compiler.",
-      "physical_loc": 31,
-      "bytes": 4138
+      "physical_loc": 33,
+      "bytes": 4535
     },
     {
       "path": "modules/distribution/profiles/core.json",
@@ -671,7 +671,7 @@
     },
     {
       "path": "policies/entry-contract.md",
-      "sha256": "sha256:4838491707510140a0c698ac26d0faa8b45d6dde90d03427dc78006f0643396c",
+      "sha256": "sha256:6ecfb01bc2d7da3c7f2615ecbc7ef6b7c89f9ee3488a2f05678bb70ca153945a",
       "kind": "entry-contract",
       "owner_layer": "k1-runtime-kernel",
       "trust_paths": [
@@ -679,8 +679,8 @@
         "runtime"
       ],
       "reason": "Canonical Entry Contract prose compiled into installed host and workspace templates.",
-      "physical_loc": 16,
-      "bytes": 2052
+      "physical_loc": 17,
+      "bytes": 2114
     },
     {
       "path": "policies/execution-profiles.json",
@@ -1068,7 +1068,7 @@
     },
     {
       "path": "vault-template/entry/AGENTS.md.template",
-      "sha256": "sha256:6c3c484650721a5205e544674a147347a9134869ccd1783d48a0b8e998ff0a84",
+      "sha256": "sha256:098f591822c9078e69ee8d35d26dc087fbca6e869b844cb310d7ef7d8bb98804",
       "kind": "entry-template",
       "owner_layer": "a3-adapter",
       "trust_paths": [
@@ -1076,8 +1076,8 @@
         "runtime"
       ],
       "reason": "Runtime source identity binds the installed compatibility entry template until v1 Sunset gates are satisfied.",
-      "physical_loc": 25,
-      "bytes": 2478
+      "physical_loc": 26,
+      "bytes": 2540
     }
   ],
   "edges": [
@@ -1679,7 +1679,7 @@
     "distribution_executable_loc": 8076,
     "duplicate_edge_count": 0,
     "artifact_count": 40,
-    "artifact_bytes": 146505
+    "artifact_bytes": 147088
   },
   "budget": {
     "baseline_executable_loc": 3068,

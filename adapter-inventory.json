@@ -4,7 +4,7 @@
   "source_basis": "git-index-blob/v1",
   "classification": {
     "path": "kernel-component-classification.json",
-    "sha256": "sha256:43340a0055ecd51ec0b9b53c211ec1bbe77040458842fa34aceea2bc7d351c12"
+    "sha256": "sha256:a3c02d545203850f4c5d173f5616a1bcd68adf76f99824a0d8fbe9439cfb59d2"
   },
   "metric_contract": {
     "powershell": "powershell-token-lines/v1",
@@ -138,5 +138,5 @@
     "threshold_breaches": 0
   },
   "digest_algorithm": "canonical-json/v1",
-  "inventory_digest": "sha256:e3f3a6ad7616ea99d82f0e8c95a36b82b462b1eb31497dd9aed9ca081e0377c4"
+  "inventory_digest": "sha256:66b52853ee01e1e6800cfc539cbb9cb5bd5992ae23cd156be135835f78e717d7"
 }
