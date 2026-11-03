@@ -74,7 +74,10 @@ Need-Text $entryContractPath 'minimum focused checks covering all confirmed acce
 Need-Text $entryContractPath 'valid v2 state wins and may status/resume'
 Need-Text $entryContractPath 'Legacy lifecycle and shim loading are retired'
 Need-Text $entryContractPath 'Read-only work performs zero writes'
-Need-Text $entryContractPath 'An unresolved Requirement or product decision blocks every write and enters Ask'
+Need-Text $entryContractPath 'Unresolved Requirement or product decision enters Ask;'
+Need-Text $entryContractPath 'opted-in projects may save a `pending clarification` draft in change records'
+Need-Text $entryContractPath 'original request, known source/date, unanswered questions only'
+Need-Text $entryContractPath 'Ask and all other writes stay blocked.'
 Need-Text $entryContractPath 'continuation alone enters Ask and authorizes no write'
 
 Need-Text 'agent-configs/codex/AGENTS.md.template' 'Resolve the active workspace in this order: explicit `-WorkspaceRoot`'
