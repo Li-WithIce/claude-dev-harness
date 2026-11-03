@@ -358,7 +358,7 @@
     },
     {
       "path": "scripts/lib/Harness.Policy.psm1",
-      "sha256": "sha256:df45015df1b4528e56c39749b892717be31a5aba3b83f2925c5dcb011fd48568",
+      "sha256": "sha256:5734ece8d17616379938bdbc8427ca13eb93272384c62ff0cbc6c0a9449e801b",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "distribution",
@@ -373,9 +373,9 @@
         "status-cli",
         "workspace-bootstrap"
       ],
-      "physical_loc": 128,
-      "nonblank_loc": 115,
-      "executable_loc": 115
+      "physical_loc": 133,
+      "nonblank_loc": 120,
+      "executable_loc": 120
     },
     {
       "path": "scripts/lib/Harness.ProtectedAction.psm1",
@@ -610,7 +610,7 @@
     },
     {
       "path": "agent-configs/workspace/AGENTS.md.template",
-      "sha256": "sha256:f9ebf6b46aad27d7c369e1c8f73ed6f8b47956d565f0c01cbc81ca5062c4b032",
+      "sha256": "sha256:09d6d989e4932ec20a82f416ba5e88c85a7316e17918ab5d8a015543ca8e5627",
       "kind": "entry-template",
       "owner_layer": "a3-adapter",
       "trust_paths": [
@@ -618,8 +618,8 @@
         "runtime"
       ],
       "reason": "Workspace installed Entry Contract template is hashed by Runtime Default and rendered by the compiler.",
-      "physical_loc": 33,
-      "bytes": 4535
+      "physical_loc": 34,
+      "bytes": 4964
     },
     {
       "path": "modules/distribution/profiles/core.json",
@@ -696,15 +696,15 @@
     },
     {
       "path": "policies/protected-actions.json",
-      "sha256": "sha256:dea83985dcdbe992a889d1b3dbad9def8f1ce48e130dc3d01a39bb934632e166",
+      "sha256": "sha256:127370df02857bdc768281bbc945f986ba1f14bb14de4b6807e424f91014198e",
       "kind": "policy",
       "owner_layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
       ],
       "reason": "Core protected-action rules fail closed before writes.",
-      "physical_loc": 26,
-      "bytes": 708
+      "physical_loc": 16,
+      "bytes": 408
     },
     {
       "path": "policies/risk-rules.json",
@@ -900,15 +900,15 @@
     },
     {
       "path": "schemas/protected-actions.schema.json",
-      "sha256": "sha256:ba4562c419fc4e5c2b78e9c0093a18377ef1020b8101dc69fc0a50e393705f94",
+      "sha256": "sha256:6fe77abe83ab048721d97f5830c3ac84b885092ea81a4c5868d26036c879d6eb",
       "kind": "schema",
       "owner_layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
       ],
       "reason": "Core protected-action policy is strictly validated before evaluation.",
-      "physical_loc": 51,
-      "bytes": 1864
+      "physical_loc": 50,
+      "bytes": 1769
     },
     {
       "path": "schemas/protocol-config-v2.schema.json",
@@ -984,15 +984,15 @@
     },
     {
       "path": "schemas/runtime-policies.schema.json",
-      "sha256": "sha256:c8b0f6926c74eccc279216358a1fcd7f4ca767f6226a4906ff16c4ddfe2d1fbd",
+      "sha256": "sha256:3ec6bfea37d90667c2aa4bae2d8ed9781f37cce083f9c5110f698a90f7093d7b",
       "kind": "schema",
       "owner_layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
       ],
       "reason": "Runtime risk and execution policies are validated as one strict bundle.",
-      "physical_loc": 204,
-      "bytes": 8593
+      "physical_loc": 203,
+      "bytes": 8494
     },
     {
       "path": "schemas/session-workspaces.schema.json",
@@ -1670,22 +1670,22 @@
   "unresolved_dependencies": [],
   "totals": {
     "file_count": 31,
-    "physical_loc": 11080,
-    "nonblank_loc": 10158,
-    "executable_loc": 10072,
+    "physical_loc": 11085,
+    "nonblank_loc": 10163,
+    "executable_loc": 10077,
     "runtime_file_count": 23,
-    "runtime_executable_loc": 3391,
+    "runtime_executable_loc": 3396,
     "distribution_file_count": 18,
-    "distribution_executable_loc": 8076,
+    "distribution_executable_loc": 8081,
     "duplicate_edge_count": 0,
     "artifact_count": 40,
-    "artifact_bytes": 147088
+    "artifact_bytes": 147023
   },
   "budget": {
     "baseline_executable_loc": 3068,
-    "current_executable_loc": 3391,
-    "delta": 323,
-    "covered_growth": 323,
+    "current_executable_loc": 3396,
+    "delta": 328,
+    "covered_growth": 328,
     "status": "covered-by-exception",
     "exceptions": [
       {
@@ -1764,6 +1764,18 @@
         ],
         "repayment_plan": "Review the session-grant cost at the next explicitly authorized Runtime change; preserve the original baseline, closure accounting, all-target checks and readable source.",
         "expires_at_milestone": "Next authorized Runtime budget review after multi-workspace boundary closure"
+      },
+      {
+        "id": "KTB-EX-012",
+        "added_lines": 5,
+        "reason": "The user-requested business source routing change adds 5 executable lines, 72 tokens, and 25 statement ASTs relative to 7aae456: the source-only classification requires changed paths and no command, while existing production database protection remains in force. The 3068 baseline and previous allowances are unchanged.",
+        "new_trust_assumption": "The caller identifies source-code-only work; actual commands and database operations continue through their existing policy checks.",
+        "alternatives": [
+          "Changing score thresholds globally would also change routing for actual operations.",
+          "Treating every authorization label or source directory as Critical would keep blocking the requested business development."
+        ],
+        "repayment_plan": "Review this measured allowance at the next Runtime budget review without removing the source-versus-command distinction.",
+        "expires_at_milestone": "Next authorized Runtime budget review after business source routing"
       }
     ]
   }

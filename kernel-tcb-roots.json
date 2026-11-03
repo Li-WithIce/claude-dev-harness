@@ -625,6 +625,18 @@
         ],
         "repayment_plan": "Review the session-grant cost at the next explicitly authorized Runtime change; preserve the original baseline, closure accounting, all-target checks and readable source.",
         "expires_at_milestone": "Next authorized Runtime budget review after multi-workspace boundary closure"
+      },
+      {
+        "id": "KTB-EX-012",
+        "added_lines": 5,
+        "reason": "The user-requested business source routing change adds 5 executable lines, 72 tokens, and 25 statement ASTs relative to 7aae456: the source-only classification requires changed paths and no command, while existing production database protection remains in force. The 3068 baseline and previous allowances are unchanged.",
+        "new_trust_assumption": "The caller identifies source-code-only work; actual commands and database operations continue through their existing policy checks.",
+        "alternatives": [
+          "Changing score thresholds globally would also change routing for actual operations.",
+          "Treating every authorization label or source directory as Critical would keep blocking the requested business development."
+        ],
+        "repayment_plan": "Review this measured allowance at the next Runtime budget review without removing the source-versus-command distinction.",
+        "expires_at_milestone": "Next authorized Runtime budget review after business source routing"
       }
     ]
   }

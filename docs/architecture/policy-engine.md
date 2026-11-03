@@ -15,13 +15,13 @@ The canonical machine sources are:
 
 Documentation and prompts may explain these rules but cannot weaken them. Missing, malformed, unknown, or semantically weaker policy fails closed.
 
-Core ships exactly two protected-action rules: production destructive database commands and authorization-path changes. This is not a claim that two rules cover every Critical trigger. Globstar prefixes such as `**/auth/**` match the protected directory at the workspace root as well as at nested depths. Projects extend the boundary with `protected-actions-overlay/v1`, validated by `schemas/protected-actions-overlay.schema.json`. Overlay rule ids must be unique and cannot replace core ids; each rule may match an exact environment label, command regex, path globs, or their intersection, and may only require Governed/Critical plus an existing Approval type, dry-run, and independent review. A malformed, duplicate, unreadable, or schema-invalid overlay rejects writes fail closed; reads remain available.
+Core protects production destructive database commands. Business source directories such as `auth`, `permissions`, and `rbac` do not by themselves require protected-action review. Projects extend the boundary with `protected-actions-overlay/v1`, validated by `schemas/protected-actions-overlay.schema.json`. Overlay rule ids must be unique and cannot replace core ids; each rule may match an exact environment label, command regex, path globs, or their intersection, and may only require Governed/Critical plus an existing Approval type, dry-run, and independent review. A malformed, duplicate, unreadable, or schema-invalid overlay rejects writes fail closed; reads remain available.
 
 ## Resolution flow
 
 1. `Harness.Requirement` resolves source authority and emits a Requirement Contract or `requirement_state=blocked`.
 2. Blocked requirements do not receive an execution profile. Read-only intent selects Inspect.
-3. Mutation risk is scored across the canonical dimensions. Totals 0-4 select Direct, 5-8 Governed, and 9-21 Critical.
+3. Mutation risk is scored across the canonical dimensions. Totals 0-4 select Direct, 5-8 Governed, and 9-21 Critical. For `ActionKind=source-code` only, a score of 9-21 selects Governed and the legacy `authorization_or_security_boundary` trigger is recorded as `source-only:authorization_or_security_boundary` instead of forcing Critical. This classification requires changed paths and an empty command; actual operations are evaluated separately.
 4. Durable artifact requests raise the minimum to Governed. File count alone never raises risk.
 5. A known Critical trigger raises the profile to Critical. Unknown triggers are rejected rather than ignored.
 6. Protected-action matches can only raise requirements. Scope expansion or a newly discovered product blocker reroutes before write.

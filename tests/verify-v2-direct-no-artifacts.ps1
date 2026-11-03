@@ -44,7 +44,7 @@ function Invoke-RouteCase {
     $previousProtocol = $env:HARNESS_PROTOCOL
     try {
         $env:HARNESS_PROTOCOL = [string]$RouteInput.protocol
-        return Resolve-HarnessExecutionProfile -RepoRoot $PolicyRepoRoot -Identity $RouteInput.identity -Intent $RouteInput.intent -RequirementState $RouteInput.requirement_state -Persistence $RouteInput.persistence -RiskScores $RouteInput.risk_scores -CriticalTriggers @($RouteInput.critical_triggers) -ChangedPaths @($RouteInput.changed_paths) -CommandText $RouteInput.command_text -Environment $RouteInput.environment -RequestedAlias $RouteInput.requested_alias -Reversible ([bool]$RouteInput.reversible) -VerificationAvailable ([bool]$RouteInput.verification_available) -DurableArtifactsRequested ([bool]$RouteInput.durable_artifacts_requested) -ScopeExpanded ([bool]$RouteInput.scope_expanded) -ProductBlockerDiscovered ([bool]$RouteInput.product_blocker_discovered)
+        return Resolve-HarnessExecutionProfile -RepoRoot $PolicyRepoRoot -Identity $RouteInput.identity -Intent $RouteInput.intent -RequirementState $RouteInput.requirement_state -Persistence $RouteInput.persistence -RiskScores $RouteInput.risk_scores -CriticalTriggers @($RouteInput.critical_triggers) -ChangedPaths @($RouteInput.changed_paths) -CommandText $RouteInput.command_text -ActionKind $RouteInput.action_kind -Environment $RouteInput.environment -RequestedAlias $RouteInput.requested_alias -Reversible ([bool]$RouteInput.reversible) -VerificationAvailable ([bool]$RouteInput.verification_available) -DurableArtifactsRequested ([bool]$RouteInput.durable_artifacts_requested) -ScopeExpanded ([bool]$RouteInput.scope_expanded) -ProductBlockerDiscovered ([bool]$RouteInput.product_blocker_discovered)
     } finally {
         $env:HARNESS_PROTOCOL = $previousProtocol
     }
@@ -88,7 +88,7 @@ try {
     Assert-True -Condition ($architecture -match 'Harness\.Policy\.psm1' -and $architecture -match 'Missing, malformed, unknown, or semantically weaker policy fails closed' -and $architecture -match 'no task/runtime/current state' -and $architecture -match 'Explicit v1 is retired') -Success 'policy engine architecture documents canonical authority, Direct zero-write, and rollback' -Failure 'policy engine architecture artifact is missing or contradicts the implementation contract'
 
     $catalog = Get-Content -LiteralPath $catalogPath -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable -ErrorAction Stop
-    Assert-True -Condition ([string]$catalog.schema_version -ceq 'direct-route-scenarios/v1' -and @($catalog.cases).Count -eq 19) -Success 'Direct scenario catalog declares nineteen route cases' -Failure 'Direct scenario catalog version or case count drifted'
+    Assert-True -Condition ([string]$catalog.schema_version -ceq 'direct-route-scenarios/v1' -and @($catalog.cases).Count -eq 21) -Success 'Direct scenario catalog declares twenty-one route cases' -Failure 'Direct scenario catalog version or case count drifted'
     foreach ($case in $catalog.cases) {
         $routeInput = Merge-Case -Base $catalog.base -Case $case
         $expected = $case.expected
@@ -138,7 +138,16 @@ try {
     $combinedProtected.environment = 'production'
     $combinedProtected.changed_paths = @('src/auth/authorize.ps1')
     $combinedResult = Invoke-RouteCase -RouteInput $combinedProtected
-    Assert-True -Condition ([string]$combinedResult.approval_policy -ceq 'production' -and @($combinedResult.triggers) -ccontains 'protected:production-database-destructive' -and @($combinedResult.triggers) -ccontains 'protected:authorization-path-change') -Success 'none plus one Approval type preserves the single required type' -Failure 'none plus one Approval type changed or lost the required type'
+    Assert-True -Condition ([string]$combinedResult.approval_policy -ceq 'production' -and @($combinedResult.triggers) -ccontains 'protected:production-database-destructive' -and @($combinedResult.triggers) -cnotcontains 'protected:authorization-path-change') -Success 'production database protection remains active alongside an ordinary authorization source path' -Failure 'production database protection changed for an authorization source path'
+    $sourceCommand = Merge-Case -Base $catalog.base -Case $catalog.cases[0]
+    $sourceCommand.action_kind = 'source-code'
+    $sourceCommand.command_text = 'DELETE FROM customer'
+    $sourceCommand.environment = 'production'
+    Assert-True -Condition (Test-Throws { Invoke-RouteCase -RouteInput $sourceCommand }) -Success 'source-code classification rejects an execution command' -Failure 'source-code classification accepted a database command'
+    $authorizationOperation = Merge-Case -Base $catalog.base -Case $catalog.cases[0]
+    $authorizationOperation.critical_triggers = @('authorization_or_security_boundary')
+    $authorizationOperation.command_text = 'actual boundary operation'
+    Assert-True -Condition ((Invoke-RouteCase -RouteInput $authorizationOperation).profile -ceq 'critical') -Success 'actual authorization boundary operations retain Critical routing' -Failure 'authorization operation lost Critical routing'
 
     $workspaceAfter = Get-TreeSnapshot -Root $scratchRoot
     Assert-True -Condition (@(Compare-Object $workspaceBefore $workspaceAfter -SyncWindow 0).Count -eq 0) -Success 'Direct policy selection creates no task/runtime/artifact content' -Failure 'Direct policy selection changed workspace content'
@@ -151,12 +160,14 @@ try {
     Assert-True -Condition (Test-Throws { Invoke-RouteCase -RouteInput $baseInput -PolicyRepoRoot $fixtureRepo }) -Success 'unsafe policy mutation fails closed' -Failure 'unsafe risk policy mutation was accepted'
     Copy-Item -LiteralPath (Join-Path $RepoRoot 'policies\risk-rules.json') -Destination (Join-Path $fixtureRepo 'policies\risk-rules.json') -Force
     $conflictingProtected = Get-Content -LiteralPath (Join-Path $fixtureRepo 'policies\protected-actions.json') -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable
-    $conflictingProtected.rules[1].requires_approval = 'architecture'
+    $additionalRule = $conflictingProtected.rules[0].Clone()
+    $additionalRule.id = 'additional-core-rule'
+    $conflictingProtected.rules = @($conflictingProtected.rules) + @($additionalRule)
     [System.IO.File]::WriteAllText((Join-Path $fixtureRepo 'policies\protected-actions.json'),($conflictingProtected|ConvertTo-Json -Depth 20),(New-Object System.Text.UTF8Encoding($false)))
-    Assert-True -Condition (Test-Throws { Invoke-RouteCase -RouteInput $combinedProtected -PolicyRepoRoot $fixtureRepo }) -Success 'classification rejects different Approval types from matched rules' -Failure 'classification selected the last matched Approval type'
+    Assert-True -Condition (Test-Throws { Invoke-RouteCase -RouteInput $combinedProtected -PolicyRepoRoot $fixtureRepo }) -Success 'classification rejects an unexpected core protected rule' -Failure 'classification accepted an unexpected core protected rule'
     Copy-Item -LiteralPath (Join-Path $RepoRoot 'policies\protected-actions.json') -Destination (Join-Path $fixtureRepo 'policies\protected-actions.json') -Force
     $badProtected = Get-Content -LiteralPath (Join-Path $fixtureRepo 'policies\protected-actions.json') -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable
-    $badProtected.rules[1].requires_independent_review = 'false'
+    $badProtected.rules[0].requires_independent_review = 'false'
     [System.IO.File]::WriteAllText((Join-Path $fixtureRepo 'policies\protected-actions.json'),($badProtected|ConvertTo-Json -Depth 20),(New-Object System.Text.UTF8Encoding($false)))
     Assert-True -Condition (Test-Throws { Invoke-RouteCase -RouteInput $baseInput -PolicyRepoRoot $fixtureRepo }) -Success 'non-boolean protected requirements fail closed' -Failure 'unsafe protected rule type was accepted'
     Copy-Item -LiteralPath (Join-Path $RepoRoot 'policies\protected-actions.json') -Destination (Join-Path $fixtureRepo 'policies\protected-actions.json') -Force

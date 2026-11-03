@@ -30,7 +30,7 @@ The Requirement Contract contains product truth only: goal, acceptance, scope, c
 
 ## Risk and execution profiles
 
-`policies/risk-rules.json` scores seven dimensions from 0 through 3. Scores 0–4 select Direct, 5–8 select Governed, and 9–21 select Critical unless a hard trigger overrides the total. Requirement-blocked work does not receive an execution profile. Read-only intent selects Inspect. Durable work is at least Governed. File count alone never escalates a task.
+`policies/risk-rules.json` scores seven dimensions from 0 through 3. Scores 0–4 select Direct, 5–8 select Governed, and 9–21 select Critical unless a hard trigger overrides the total. Explicit source-code-only work caps score-based routing at Governed and does not treat the authorization label alone as a Critical trigger; other Critical triggers remain effective. Commands and database operations are evaluated separately. Requirement-blocked work does not receive an execution profile. Read-only intent selects Inspect. Durable work is at least Governed. File count alone never escalates a task.
 
 `policies/execution-profiles.json` defines four profiles only:
 

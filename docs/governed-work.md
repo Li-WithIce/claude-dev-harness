@@ -2,7 +2,9 @@
 
 ## 何时使用
 
-Governed 适用于需要持久机器任务状态、正式 Evidence、较高风险或受保护范围的工作。Critical 适用于生产、权限/安全、资金、破坏性迁移、不可逆数据变化、公共 API 破坏、敏感数据导出、破坏 Git 历史或缺少 dry-run 的大规模自动化。
+Governed 适用于需要持久机器任务状态、正式 Evidence、较高风险或受保护范围的工作。Critical 适用于实际生产操作、权限/安全边界操作、资金、破坏性迁移、不可逆数据变化、公共 API 破坏、敏感数据导出、破坏 Git 历史或缺少 dry-run 的大规模自动化。
+
+审批人员、角色权限和数据关联的普通源码改造使用 `ActionKind=source-code`，不因业务名称或 `auth`、`permissions`、`rbac` 目录自动要求 Approval 或独立审查。源码改造的高分最多按 Governed 处理；旧的权限边界标签不会单独升级，但其他明确的 Critical 触发项仍生效。执行命令、实际数据库操作和部署须另行评估，不能使用此分类。
 
 通过 `PROJECT.md` 接入的普通项目说明、变更历史和操作文档属于业务交付，不单独触发 Governed；它们不设置策略选择器的 durable 标志。已有 Governed 任务可链接这些文档，机器状态仍只在 canonical v2 runtime 中维护。见 [项目连续记录](project-continuity.md)。
 
@@ -23,6 +25,8 @@ Approval 与 Ask 不同：Approval 缺失是能力阻断，只有产品/授权�
 ## 中断、恢复与回滚
 
 状态和 Evidence 都保留在工作区内的 canonical v2 路径；current pointer、事件、审计与恢复索引只是绑定记录或派生视图。只读 status/resume 不写状态，只有显式 resume-and-execute 才继续执行。
+
+已有 Critical 任务不会因为新规则自动降级。明确决定重新分流时，通过正式状态转换先将运行中的任务暂停，再取消旧任务并保留 Contract、事件和已有证据；重新按实际范围分类剩余工作，必要时创建新的 Governed 任务并在项目记录中链接旧任务。不得改写旧任务的 profile、伪造 Approval，或把实际数据库操作归为源码编辑。
 
 `HARNESS_PROTOCOL=v1` 已退役并会拒绝；新工作与恢复只支持 v2。已有 v1 artifact 仅用于明确授权的历史检查或迁移，不继续执行旧五阶段。显式迁移保留原 artifact，回滚也不得靠删除 v2 数据重新激活 v1。
 

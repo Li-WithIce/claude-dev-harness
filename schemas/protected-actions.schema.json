@@ -9,13 +9,12 @@
     "schema_version": { "enum": ["protected-actions/v1"] },
     "rules": {
       "type": "array",
-      "minItems": 2,
-      "maxItems": 2,
+      "minItems": 1,
+      "maxItems": 1,
       "uniqueItems": true,
       "items": { "$ref": "#/definitions/rule" },
       "allOf": [
-        { "contains": { "properties": { "id": { "enum": ["production-database-destructive"] } } } },
-        { "contains": { "properties": { "id": { "enum": ["authorization-path-change"] } } } }
+        { "contains": { "properties": { "id": { "enum": ["production-database-destructive"] } } } }
       ]
     }
   },
