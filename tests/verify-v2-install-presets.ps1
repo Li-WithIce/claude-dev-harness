@@ -9,6 +9,11 @@ $ErrorActionPreference = 'Stop'
 function Add-Check { param([string]$Message) $script:Checks.Add($Message) | Out-Null }
 function Add-Failure { param([string]$Message) $script:Failures.Add($Message) | Out-Null }
 
+function ConvertTo-NormalizedInstallOutput([string]$Output) {
+    $plain = $Output -replace '\x1b\[[0-9;]*m', ''
+    return ($plain -replace '(?m)^[ \t]*\| ?', '') -replace '\s+', ' '
+}
+
 function Get-TestStringSha256 {
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value)
 
@@ -597,7 +602,7 @@ function Invoke-I02SkillIntegrityRegression {
             $before=Get-TestFileSha256 $registryPath;$count=@(Get-ChildItem (Join-Path $a.User '.dev-harness/backups') -Directory).Count
             $run=Invoke-Install $b @('-Preset','core')
             $reason=switch($case){'link-drift'{'Shared Skill link differs from registered identity'};'ownership'{'Shared Skill has an unsupported ownership contract'};'source-conflict'{'Shared Skill source conflicts with registered owner'};'unowned-link'{'Unowned same-source Skill link requires explicit reconciliation'}}
-            $output=($run.Output -replace '(?m)^\s*\| ?', '') -replace '\s+',' '
+            $output=ConvertTo-NormalizedInstallOutput $run.Output
             if($run.ExitCode -ne 0 -and $output.Contains($reason) -and (Get-TestFileSha256 $registryPath) -ceq $before -and @(Get-ChildItem (Join-Path $a.User '.dev-harness/backups') -Directory).Count -eq $count){Add-Check "I02 $case rejects before transaction publication"}else{Add-Failure "I02 $case rejection incorrect: $($run.Output)"}
         } finally {
             if($case -in @('link-drift','source-conflict')){Remove-Item -LiteralPath $link -Force;[void](New-Item -ItemType Junction -Path $link -Target $target)}
@@ -762,7 +767,7 @@ function Invoke-H04SharedHookFailureRegression {
         $count=@(Get-ChildItem (Join-Path $fixture.User '.dev-harness/backups') -Directory).Count
         $run=Invoke-Install $b @('-Preset','core')
         $reason=switch($case){directory-drift{'Shared Hook directory differs from its registered identity'};manifest-digest{'Registered install manifest digest mismatch'};ownership{'Shared Hook directory has an unsupported ownership contract'}}
-        $normalizedOutput=($run.Output -replace '(?m)^\s*\| ?', '') -replace '\s+',' '
+        $normalizedOutput=ConvertTo-NormalizedInstallOutput $run.Output
         if($run.ExitCode -ne 0 -and $normalizedOutput.Contains($reason) -and (Get-TestFileSha256 $registryPath) -ceq $before -and @(Get-ChildItem (Join-Path $fixture.User '.dev-harness/backups') -Directory).Count -eq $count){Add-Check "H04 $case rejects before transaction publication"}else{Add-Failure "H04 $case did not preserve the specific prewrite rejection: $($run.Output)"}
         [IO.File]::WriteAllBytes($hookPath,$hookBytes);[IO.File]::WriteAllBytes($manifestPath,$manifestBytes);[IO.File]::WriteAllBytes($registryPath,$registryBytes)
     }
@@ -958,6 +963,14 @@ $script:UninstallScript = Join-Path $script:RepoRoot 'uninstall.ps1'
 . (Join-Path $script:RepoRoot 'scripts\install-transaction-common.ps1')
 $script:Checks = [System.Collections.Generic.List[string]]::new()
 $script:Failures = [System.Collections.Generic.List[string]]::new()
+$escape = [char]27
+$wrappedError = "${escape}[31;1m    | Shared Skill link differs from${escape}[0m`r`n${escape}[31;1m    | registered identity:${escape}[0m"
+$normalizedError = ConvertTo-NormalizedInstallOutput $wrappedError
+if ($normalizedError.Contains('Shared Skill link differs from registered identity') -and -not $normalizedError.Contains('Shared Skill link has changed')) {
+    Add-Check 'install rejection matching preserves the reason across colored, wrapped error lines'
+} else {
+    Add-Failure 'install rejection matching failed to normalize colored, wrapped error lines'
+}
 $script:ScratchRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('dev-harness-preset-test-' + [guid]::NewGuid().ToString('N'))
 $coreSkills = @('.system')
 $governedSkills = @($coreSkills + @('planning','audit'))

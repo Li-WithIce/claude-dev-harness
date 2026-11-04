@@ -144,7 +144,7 @@ function Invoke-UninstallCompatibilityRegression {
     }
     function UC-Install($Name,$Workspace,$Repo,$Preset){UC-Run $Name (Join-Path $Repo 'install.ps1') @('-WorkspaceRoot',$Workspace,'-RepoRoot',$Repo,'-Preset',$Preset)}
     function UC-Uninstall($Name,$Workspace,$Repo){UC-Run $Name (Join-Path $SourceRoot 'uninstall.ps1') @('-WorkspaceRoot',$Workspace,'-RepoRoot',$Repo)}
-    function UC-Verify($Name,$Workspace,$Repo){UC-Run $Name (Join-Path $Repo 'tests/verify-installation.ps1') @('-WorkspaceRoot',$Workspace,'-RepoRoot',$Repo,'-UserProfileRoot',$user,'-Scope','All')}
+    function UC-Verify($Name,$Workspace,$Repo,$Scope='All'){UC-Run $Name (Join-Path $Repo 'tests/verify-installation.ps1') @('-WorkspaceRoot',$Workspace,'-RepoRoot',$Repo,'-UserProfileRoot',$user,'-Scope',$Scope)}
     function UC-Snapshot($Name){
         $rows=@(foreach($base in @($user,$full,$governed,$core)){
             $q=[Collections.Generic.Queue[string]]::new();$q.Enqueue($base)
@@ -178,6 +178,12 @@ function Invoke-UninstallCompatibilityRegression {
         [IO.File]::WriteAllText((Join-Path $user '.codex/config.toml'),'# fixture only; no credentials')
         foreach($w in @($full,$governed,$core)){[IO.File]::WriteAllText((Join-Path $w 'business.txt'),'business fixture');[void][IO.Directory]::CreateDirectory((Join-Path $w 'docs/tasks/retained'));[IO.File]::WriteAllText((Join-Path $w 'docs/tasks/retained/user.md'),'user notes, not Evidence')}
         foreach($v in @(@{n='full';w=$full;s=$a;p='full'},@{n='governed';w=$governed;s=$a;p='governed'},@{n='core';w=$core;s=$b;p='core'})){
+            if($v.n -ceq 'core'){
+                foreach($current in @(@{n='full';w=$full},@{n='governed';w=$governed})){
+                    $run=UC-Verify ('before-older-core-all-'+$current.n) $current.w $a
+                    UC-Check ($run.ExitCode-eq0) ('matching-version All before older core '+$current.n)
+                }
+            }
             $run=UC-Install ('install-'+$v.n) $v.w $v.s $v.p;UC-Check ($run.ExitCode-eq0) ('normal setup '+$v.n)
             if($run.ExitCode-ne0){throw "Fixture setup: $($run.StdErr)"}
         }
@@ -187,7 +193,15 @@ function Invoke-UninstallCompatibilityRegression {
         $contract=Write-Contract $core 'retained-task' 'request.json'
         $run=UC-Run 'create-task' (Join-Path $b 'scripts/task.ps1') @('create','-WorkspaceRoot',$core,'-RepoRoot',$b,'-TaskId','retained-task','-Contract',$contract,'-AsJson')
         UC-Check ($run.ExitCode-eq0) 'normal task creation without fabricated Evidence';if($run.ExitCode-ne0){throw 'Task setup failed'}
-        foreach($v in @(@{n='full';w=$full;s=$a},@{n='governed';w=$governed;s=$a},@{n='core';w=$core;s=$b})){$run=UC-Verify ('initial-all-'+$v.n) $v.w $v.s;UC-Check ($run.ExitCode-eq0) ('matching-version initial All '+$v.n)}
+        foreach($v in @(@{n='full';w=$full},@{n='governed';w=$governed})){
+            $run=UC-Verify ('initial-shared-hooks-'+$v.n) $v.w $a 'SharedHooks'
+            UC-Check ($run.ExitCode-eq0) ('mixed-version shared hooks '+$v.n)
+            # The older installer writes a different user-global Claude bootstrap.
+            $run=UC-Verify ('initial-all-'+$v.n) $v.w $a
+            UC-Check ($run.ExitCode-eq2 -and $run.StdOut -match '(?ms)^Errors:\s*\r?\n- Claude CLAUDE\.md[^\r\n]*(?:\r?\n)*\z') ('older core causes only Claude bootstrap template drift '+$v.n)
+        }
+        $run=UC-Verify 'initial-all-core' $core $b
+        UC-Check ($run.ExitCode-eq0) 'matching-version initial All core'
         # Load only original definitions, never execute the main entry as a plan API.
         foreach($spec in @(@{path='install.ps1';names=@('ConvertFrom-JsonDocument','Read-JsonObject','New-InstallRegistry','Add-ManifestToRegistry','Refresh-InstallRegistryManifestDigests','Get-RegisteredManifestStatusUpgradePlan','Assert-RegisteredInstallManifestIdentity')},@{path='uninstall.ps1';names=@('Read-JsonObject','Read-InstallManifest','Assert-NormalInstallManifestStatus','Assert-WorkspaceManifestIdentity','Assert-RegisteredManifestIdentity','Assert-RegisteredWorkspaceSelection','Get-RegisteredManifestOwner','Assert-GlobalHistoryState','Get-UninstallHistoricalSkillState','Assert-UninstallPreservedSkillWriteSet','Assert-ManagedBackupTarget','Assert-ManifestBackupBoundaries','Get-BackupRecordScope')})){
             $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $SourceRoot $spec.path),[ref]$tokens,[ref]$errors)
