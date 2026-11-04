@@ -1805,12 +1805,14 @@ try {
 } finally {
     [System.IO.File]::WriteAllText($codexAgentsPath, $codexAgentsRaw, (New-Object System.Text.UTF8Encoding($false)))
 }
-if ($codexAgentsAuditResult.ExitCode -eq 1 -and
-    $codexAgentsAuditOutput -match '(?im)^STATUS:\s+LIVE_UPDATE_REQUIRED\s*$' -and
-    $codexAgentsAuditOutput -match '(?im)^- LIVE_UPDATE_REQUIRED: codex-agents-template-drift\s*$') {
-    $checks.Add('verify-installation reports the exact Codex AGENTS template drift rollout blocker') | Out-Null
+# Codex AGENTS.md is user-owned since e288edc; user edits are not template drift.
+if ($codexAgentsAuditResult.ExitCode -eq 0 -and
+    $codexAgentsAuditOutput -match '(?im)^STATUS:\s+PASS\s*$' -and
+    $codexAgentsAuditOutput -notmatch 'codex-agents-template-drift' -and
+    $codexAgentsAuditOutput -match 'Codex AGENTS\.md is preserved as user-owned instructions') {
+    $checks.Add('verify-installation preserves user-edited Codex AGENTS.md without a drift blocker') | Out-Null
 } else {
-    $failures.Add('Codex AGENTS drift audit should emit LIVE_UPDATE_REQUIRED: codex-agents-template-drift') | Out-Null
+    $failures.Add('user-edited Codex AGENTS.md should be preserved without codex-agents-template-drift') | Out-Null
 }
 
 $claudeGlobalPath = Join-Path $userProfile '.claude\CLAUDE.md'

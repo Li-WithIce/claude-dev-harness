@@ -1284,6 +1284,10 @@ try {
             Add-Failure 'ordinary file tools did not receive a consistent target-only policy result'
         }
 
+        # Core no longer protects auth paths; this workspace overlay keeps path-rule enforcement covered.
+        $authOverlayPath = Join-Path $defaultFixture.Workspace '.assistant\policies\protected-actions.local.json'
+        [void][IO.Directory]::CreateDirectory((Split-Path -Parent $authOverlayPath))
+        [IO.File]::WriteAllText($authOverlayPath,'{"schema_version":"protected-actions-overlay/v1","rules":[{"id":"fixture-authorization-path","match":{"path_globs":["**/auth/**","**/permissions/**","**/rbac/**"]},"requires_profile":"governed","requires_approval":"none","requires_dry_run":false,"requires_independent_review":true}]}',[Text.UTF8Encoding]::new($false))
         $protectedPatchCommands = [ordered]@{
             Add = "*** Begin Patch`n*** Add File: auth/new.ps1`n+new`n*** End Patch"
             Update = "*** Begin Patch`n*** Update File: permissions/update.ps1`n@@`n-old`n+new`n*** End Patch"

@@ -5,6 +5,9 @@ $root=Join-Path $OutputRoot ('input-transport-'+[guid]::NewGuid().ToString('N'))
 $hooks=Join-Path $root 'hooks'
 $workspace=Join-Path $root 'workspace'
 foreach($path in @($hooks,$workspace)){[void][IO.Directory]::CreateDirectory($path)}
+# Core no longer protects auth paths; a workspace overlay keeps the protected-policy case covered.
+[void][IO.Directory]::CreateDirectory((Join-Path $workspace '.assistant/policies'))
+[IO.File]::WriteAllText((Join-Path $workspace '.assistant/policies/protected-actions.local.json'),'{"schema_version":"protected-actions-overlay/v1","rules":[{"id":"fixture-authorization-path","match":{"path_globs":["**/auth/**"]},"requires_profile":"governed","requires_approval":"none","requires_dry_run":false,"requires_independent_review":true}]}',[Text.UTF8Encoding]::new($false))
 . (Join-Path $RepoRoot 'scripts/lib/Harness.RuntimeKernel.ps1')
 $results=[Collections.Generic.List[object]]::new()
 $probe=@'

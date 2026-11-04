@@ -10,6 +10,12 @@ $script:Failures=[Collections.Generic.List[string]]::new()
 
 function Check($Condition,[string]$Pass,[string]$Fail){if($Condition){$script:Passes.Add($Pass)}else{$script:Failures.Add($Fail)}}
 function Read-Text([string]$Path){return [IO.File]::ReadAllText((Join-Path $RepoRoot $Path),[Text.UTF8Encoding]::new($false,$true))}
+# Core no longer protects auth paths; a workspace overlay keeps path-rule enforcement covered.
+function Write-AuthPathOverlay([string]$Workspace){
+    $directory=Join-Path $Workspace '.assistant/policies'
+    [void][IO.Directory]::CreateDirectory($directory)
+    [IO.File]::WriteAllText((Join-Path $directory 'protected-actions.local.json'),'{"schema_version":"protected-actions-overlay/v1","rules":[{"id":"fixture-authorization-path","match":{"path_globs":["**/auth/**"]},"requires_profile":"governed","requires_approval":"none","requires_dry_run":false,"requires_independent_review":true}]}',[Text.UTF8Encoding]::new($false))
+}
 function Has-Bom([string]$Path){$bytes=[IO.File]::ReadAllBytes((Join-Path $RepoRoot $Path));return $bytes.Length-ge3-and$bytes[0]-eq0xEF-and$bytes[1]-eq0xBB-and$bytes[2]-eq0xBF}
 function Test-Schema($Value,[string]$Schema){
     try{return Test-Json -Json ($Value|ConvertTo-Json -Depth 40 -Compress) -SchemaFile (Join-Path $RepoRoot $Schema) -ErrorAction Stop -WarningAction SilentlyContinue}
@@ -220,6 +226,7 @@ $h02Workspace=Join-Path $h02Root 'work';$h02Sibling=Join-Path $h02Root 'work-sib
 [void][IO.Directory]::CreateDirectory((Join-Path $h02Workspace 'src/auth'))
 [void][IO.Directory]::CreateDirectory($h02Sibling)
 [IO.File]::WriteAllText((Join-Path $h02Workspace 'src/records.mjs'),'offline fixture')
+Write-AuthPathOverlay $h02Workspace
 function Invoke-H02Patch([string]$Patch,[hashtable]$Overrides=@{}) {
     $arguments=@{RepoRoot=$RepoRoot;WorkspaceRoot=$h02Workspace;WorkspaceRootFallback=$h02Workspace;SessionMode='write';ActionMode='write';ActionKind=$directPatchCase.ActionKind;PatchText=$Patch}
     foreach($key in $Overrides.Keys){$arguments[$key]=$Overrides[$key]}
@@ -257,6 +264,8 @@ try {
         $result=Invoke-H02Patch ("*** Begin Patch`n*** Add File: $target`n+x`n*** End Patch")
         Check (-not $result.Allowed -and $result.Error -match 'protected write requires TaskId and ExpectedVersion') 'H02 protected policy requirements survive target representation' "H02 protected target lost policy classification: $($result.Error)"
     }
+    $coreOnly=Invoke-H02Patch "*** Begin Patch`n*** Add File: src/auth/canary.txt`n+x`n*** End Patch" @{WorkspaceRoot=$h02Sibling;WorkspaceRootFallback=$h02Sibling}
+    Check $coreOnly.Allowed 'H02 core policy treats auth paths as ordinary business source' "H02 core policy still protects auth paths: $($coreOnly.Error)"
     foreach($overrides in @(@{SessionMode='read-only'},@{WorkspaceRoot='';WorkspaceRootFallback=''},@{WorkspaceRootFallback=$h02Sibling},@{WorkspaceRoot=''})){
         Check (-not (Invoke-H02Patch $relative $overrides).Allowed) 'H02 read-only, missing host cwd and conflicting bindings fail closed' 'H02 unbound or read-only patch was allowed'
     }
@@ -283,6 +292,7 @@ try {
 $denyRoot=Join-Path ([IO.Path]::GetTempPath()) ('h02-deny-'+[guid]::NewGuid().ToString('N'))
 $denyWorkspace=Join-Path $denyRoot 'work';$denyHome=Join-Path $denyRoot 'user'
 [void][IO.Directory]::CreateDirectory($denyWorkspace)
+Write-AuthPathOverlay $denyWorkspace
 [void][IO.Directory]::CreateDirectory((Join-Path $denyHome 'hooks-memory'))
 $denyAdapter=Join-Path $denyHome 'hooks-memory/pretooluse.ps1'
 $denyLauncher=Join-Path $denyRoot 'launcher.ps1'
@@ -406,7 +416,7 @@ try {
             @{Name='fallback-absent';Fallback=$null;Target=$businessTarget;Category='';Stage=''},
             @{Name='fallback-same';Fallback=$businessParent;Target=$businessTarget;Category='';Stage=''},
             @{Name='fallback-conflict';Fallback=$businessChild;Target=$businessTarget;Category='workspace-binding';Stage='workspace'},
-            @{Name='protected';Fallback=$null;Target=$protectedTarget;Category='policy-requirement';Stage='policy'},
+            @{Name='auth-path';Fallback=$null;Target=$protectedTarget;Category='';Stage=''},
             @{Name='outside';Fallback=$null;Target=$outsideTarget;Category='path-boundary';Stage='target'},
             @{Name='invalid-command-type';Fallback=$null;Target=$businessTarget;Category='input';Stage='tool'}
         )) {
@@ -473,7 +483,8 @@ try {
     $result=Run-H02Hook $denyLauncher '{}'
     $startupDecision=try{($result.StdOut|ConvertFrom-Json -AsHashtable).hookSpecificOutput}catch{$null}
     Check ($result.Complete -and $result.ExitCode -eq 0 -and $result.StdErr.Length -eq 0 -and $null -ne $startupDecision -and $startupDecision.permissionDecision -ceq 'deny' -and $startupDecision.permissionDecisionReason -ceq 'Harness PreToolUse launcher startup dependency unavailable' -and -not $result.StdOut.Contains($marker)) 'H02 missing startup dependency denies without private paths' 'H02 startup rejection was not sanitized'
-    Check (@(Get-ChildItem $denyWorkspace -Recurse -Force).Count -eq 0) 'H02 rendered hook fixtures never apply patches or create state' 'H02 hook fixture wrote business or runtime files'
+    $denyEntries=@(Get-ChildItem $denyWorkspace -Recurse -Force|ForEach-Object{[IO.Path]::GetRelativePath($denyWorkspace,$_.FullName).Replace('\','/')}|Sort-Object)
+    Check (($denyEntries -join '|') -ceq '.assistant|.assistant/policies|.assistant/policies/protected-actions.local.json') 'H02 rendered hook fixtures never apply patches or create state' 'H02 hook fixture wrote business or runtime files'
 } finally {
     $resolved=[IO.Path]::GetFullPath($denyRoot);$prefix=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')+'\'
     if(-not $resolved.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)){throw 'H02 cleanup outside test root'}
@@ -526,7 +537,7 @@ Check ($checkExit-eq0-and$beforeHash-ceq(Get-FileHash -LiteralPath $inventoryPat
 $moduleV1=Read-Text 'schemas/module-manifest-v1.schema.json'|ConvertFrom-Json -Depth 100
 Check (($moduleV1.properties.kind.enum-join'|')-ceq'capability') 'harness-module/v1 remains capability-only' 'TK-05 broadened harness-module/v1 beyond capability packages'
 $tcb=Read-Text 'kernel-tcb-inventory.json'|ConvertFrom-Json -Depth 100
-Check ([int]$tcb.totals.runtime_executable_loc-lt3392-and@($tcb.unresolved_dependencies).Count-eq0) 'Runtime TCB stays below the 3392 multi-workspace candidate bound with zero unresolved dependencies' 'Runtime TCB budget or dependency closure is invalid'
+Check ([int]$tcb.totals.runtime_executable_loc-lt3397-and@($tcb.unresolved_dependencies).Count-eq0) 'Runtime TCB stays below the 3397 business source routing bound with zero unresolved dependencies' 'Runtime TCB budget or dependency closure is invalid'
 
 foreach($pass in $script:Passes){Write-Output "[PASS] $pass"}
 if($script:Failures.Count){foreach($failure in $script:Failures){Write-Output "[FAIL] $failure"};exit 1}

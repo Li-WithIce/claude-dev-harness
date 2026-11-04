@@ -116,6 +116,8 @@ try {
     Check ($mixed.body.workspace_checks.Count -eq 3 -and $mixed.body.allowed) 'mixed-root patch checks every workspace'
     $patchArguments.PatchText = $patch.Replace((Join-Path $front 'src/plain.txt'),(Join-Path $sibling 'src/plain.txt'))
     Expect-Denial { Invoke-HarnessAdapterPreflightAction @patchArguments } 'escapes WorkspaceRoot' 'bad last target denies entire preflight'
+    # Core no longer protects auth paths; the target overlay keeps target-local protection covered.
+    Write-Json (Join-Path $service '.assistant/policies/protected-actions.local.json') @{schema_version='protected-actions-overlay/v1';rules=@(@{id='fixture-authorization-path';match=@{path_globs=@('**/auth/**')};requires_profile='governed';requires_approval='none';requires_dry_run=$false;requires_independent_review=$true})}
     $protected = @{} + $preflight
     $protected.ChangedPaths = @((Join-Path $service 'src/auth/canary.txt'))
     $protected.TaskId = 'workspace-fixture'

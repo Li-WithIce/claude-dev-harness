@@ -304,7 +304,8 @@ $entryContractPath = Join-Path $RepoRoot 'policies\entry-contract.md'
 $entryContractDigest = Get-LfNormalizedSha256 -Path $entryContractPath
 $entryContractLines = @(Get-Content -LiteralPath $entryContractPath).Count
 $entryContractBytes = [Text.Encoding]::UTF8.GetByteCount([IO.File]::ReadAllText($entryContractPath))
-Check ($entryContractDigest -ceq '4838491707510140a0c698ac26d0faa8b45d6dde90d03427dc78006f0643396c' -and $entryContractLines -eq 16 -and $entryContractBytes -eq 2052) 'TK-03 freezes the explicitly confirmed v2-only Entry Contract' 'Entry Contract differs from the confirmed TK-03 admission boundary'
+# Refrozen after the user-confirmed project continuity (d7d3d58) and clarification draft (2d7a843) rules.
+Check ($entryContractDigest -ceq '63315f7e09d86098f98765078d1382bb9f711bc7dc46ccec22daddf0b3e3e37c' -and $entryContractLines -eq 17 -and $entryContractBytes -eq 2111) 'TK-03 freezes the explicitly confirmed v2-only Entry Contract' 'Entry Contract differs from the confirmed TK-03 admission boundary'
 Check ((Get-LfNormalizedSha256 -Path (Join-Path $RepoRoot 'scripts\lib\Harness.Path.psm1')) -ceq '6a3e0abef8a96cee16c388e3bc584376484ee676289d3fdf0ba0bc1d7fcd6363') 'TK-07 binds the simplified canonical Harness.Path source across checkout line endings' 'Harness.Path differs from the TK-07 canonical source'
 $atomicWriteText = Read-Text -Path 'scripts/lib/Harness.AtomicWrite.psm1'
 Check ($atomicWriteText.Contains("Harness.Hashing.psm1",[StringComparison]::Ordinal) -and $thinText.Contains('scripts/lib/Harness.Hashing.psm1',[StringComparison]::Ordinal)) 'TK-01A installs Hashing as the canonical K0 dependency of AtomicWrite' 'canonical Hashing ownership or AtomicWrite dependency is missing'

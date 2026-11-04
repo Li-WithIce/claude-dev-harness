@@ -52,7 +52,7 @@ pwsh -File .assistant\entry\task.ps1 disable-v2
 
 只读请求使用 Inspect，保持零写入。`quick` / `workflow` 仅是 Direct / Governed 的兼容别名，不是第二套规则。
 
-普通开发优先使用 Direct；需要上下文时，按需调用 `.assistant/entry/context.ps1 recall -Query '关键词'`，先看短摘录，再用 `read -Ref 'ctx:...'` 读取原文。显式 `-IncludeSessions` 可加入当前项目的 Codex 历史消息。它是只读工具，不启动治理流程、不自动写记忆或注册 Hook；用法和旧规则替代见 [Context Providers](docs/工具/context-providers.md)。
+普通开发优先使用 Direct；需要上下文时，按需调用 `.assistant/entry/context.ps1 recall -Query '关键词'`，先看短摘录，再用 `read -Ref 'ctx:...'` 读取原文。该上下文工具需要 PowerShell 7.3+ 和 ripgrep（`rg`）。显式 `-IncludeSessions` 可加入当前项目的 Codex 历史消息。它是只读工具，不启动治理流程、不自动写记忆或注册 Hook；用法和旧规则替代见 [Context Providers](docs/工具/context-providers.md)。
 
 默认加载面只有 Host Overlay 和短 Bootstrap。新请求先解析一次准入（显式 v2 也受 pause 控制），再就地分类；不扫描 task/current，也不加载旧 entry-router/orchestrator。Codex 从 workspace `AGENTS.md` 读取契约，Claude global `CLAUDE.md` 携带相同 Bootstrap。
 
