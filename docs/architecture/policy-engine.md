@@ -15,13 +15,13 @@ The canonical machine sources are:
 
 Documentation and prompts may explain these rules but cannot weaken them. Missing, malformed, unknown, or semantically weaker policy fails closed.
 
-Core ships exactly two protected-action rules: production destructive database commands and authorization-path changes. This is not a claim that two rules cover every Critical trigger. Globstar prefixes such as `**/auth/**` match the protected directory at the workspace root as well as at nested depths. Projects extend the boundary with `protected-actions-overlay/v1`, validated by `schemas/protected-actions-overlay.schema.json`. Overlay rule ids must be unique and cannot replace core ids; each rule may match an exact environment label, command regex, path globs, or their intersection, and may only require Governed/Critical plus an existing Approval type, dry-run, and independent review. A malformed, duplicate, unreadable, or schema-invalid overlay rejects writes fail closed; reads remain available.
+Core protects production destructive database commands. Business source directories such as `auth`, `permissions`, and `rbac` do not by themselves require protected-action review. Projects extend the boundary with `protected-actions-overlay/v1`, validated by `schemas/protected-actions-overlay.schema.json`. Overlay rule ids must be unique and cannot replace core ids; each rule may match an exact environment label, command regex, path globs, or their intersection, and may only require Governed/Critical plus an existing Approval type, dry-run, and independent review. A malformed, duplicate, unreadable, or schema-invalid overlay rejects writes fail closed; reads remain available.
 
 ## Resolution flow
 
 1. `Harness.Requirement` resolves source authority and emits a Requirement Contract or `requirement_state=blocked`.
 2. Blocked requirements do not receive an execution profile. Read-only intent selects Inspect.
-3. Mutation risk is scored across the canonical dimensions. Totals 0-4 select Direct, 5-8 Governed, and 9-21 Critical.
+3. Mutation risk is scored across the canonical dimensions. Totals 0-4 select Direct, 5-8 Governed, and 9-21 Critical. For `ActionKind=source-code` only, a score of 9-21 selects Governed and the legacy `authorization_or_security_boundary` trigger is recorded as `source-only:authorization_or_security_boundary` instead of forcing Critical. This classification requires changed paths and an empty command; actual operations are evaluated separately.
 4. Durable artifact requests raise the minimum to Governed. File count alone never raises risk.
 5. A known Critical trigger raises the profile to Critical. Unknown triggers are rejected rather than ignored.
 6. Protected-action matches can only raise requirements. Scope expansion or a newly discovered product blocker reroutes before write.
@@ -37,7 +37,7 @@ hands off to v2 recovery. Explicit v1 is retired, not a rollback switch.
 | Profile | Persistence | Harness writes | Required behavior |
 |---|---|---|---|
 | Inspect | ephemeral | none | read-only inspection and appropriate verification |
-| Direct | ephemeral | no task/runtime/current state or task artifact | focused verification, self-review, and honest gaps |
+| Direct | ephemeral | no task/runtime/current state or machine task artifact; opted-in business Markdown is an ordinary project deliverable | focused verification, self-review, and honest gaps |
 | Governed | durable | transactional v2 state and explicit artifacts only | verification and durable Evidence; planning/audit only when policy requires them |
 | Critical | durable | same transaction boundary | plan, Approval, rollback, independent audit, verification, Evidence, and dry-run |
 
@@ -61,3 +61,13 @@ Ask is `requirement_state=blocked`, not a fifth profile. Legacy `quick` and `wor
 Rollback pauses new work and uses v2 recovery or a separately approved known-good
 v2 distribution. The [TK-03 contract](tk03-v2-only-transition.md) preserves
 legacy history but retires ordinary v1 lifecycle, install and recovery paths.
+
+## H02 local direct-patch path and denial contract
+
+Direct patch targets may be relative to the verified host cwd or fully qualified Windows drive-letter paths. Both forms go through the existing workspace containment and no-reparse checks, and the resulting normalized full target is passed to protected-action policy. Add, Update, Delete and both Move endpoints are checked as one preflight; no target is skipped. UNC, device paths, drive-relative/root-relative paths, ADS, dot segments, reserved DOS device names and ambiguous components are not added as supported forms.
+
+The host-supplied cwd is the path-resolution base; an installation environment binding is an authorization boundary. Current support requires these roots to normalize to the same directory when both are present. A direct patch without host cwd is rejected even if an environment workspace binding exists, because that binding alone does not establish the tool's relative-path base. Roots are never inferred from patch targets. The existing shell-form restriction is unchanged.
+
+The adapter emits only HARNESS_DENY followed by one fixed category: input, permission-mode, workspace-binding, patch-path, patch-syntax, path-boundary, read-only, shell-form, policy-requirement, policy-unavailable, startup, or unknown. The launcher accepts only an exact known category with adapter exit 2 and emits a fixed user-facing reason. Unknown exceptions, arbitrary stderr, mixed known-code plus extra text, or other exit codes remain a generic deny. No patch body, command body, credential or private path is forwarded. Missing startup dependencies are checked inside the guarded launcher path. The finite category is presentation only; it grants no authorization and does not introduce a state Schema.
+
+Offline fixture success is not evidence of active host loading or the historical first denial. Active hooks are not updated by this change.

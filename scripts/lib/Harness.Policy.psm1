@@ -30,6 +30,7 @@ function Resolve-HarnessExecutionProfile {
         [string[]]$CriticalTriggers = @(),
         [string[]]$ChangedPaths = @(),
         [string]$CommandText = '',
+        [ValidateSet('','source-code')][string]$ActionKind = '',
         [string]$Environment = '',
         [ValidateSet('','quick','workflow','ask')][string]$RequestedAlias = '',
         [bool]$Reversible = $true,
@@ -52,6 +53,7 @@ function Resolve-HarnessExecutionProfile {
     }
 
     foreach($unknownCritical in @($CriticalTriggers|Where-Object{@($policies.Risk.critical_triggers)-cnotcontains$_}|Select-Object -First 1)){throw "unknown critical trigger: $unknownCritical"}
+    if ($ActionKind -ceq 'source-code' -and ($Intent -cne 'write' -or -not [string]::IsNullOrWhiteSpace($CommandText) -or $ChangedPaths.Count -eq 0)) { throw 'source-code routing requires changed paths and no execution command' }
 
     if ($Identity -ceq 'new') {
         if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) { $WorkspaceRoot = $RepoRoot }
@@ -59,7 +61,9 @@ function Resolve-HarnessExecutionProfile {
         if ($protocolResolution.selected_protocol -cne 'v2') { throw "new-work-not-admitted: $($protocolResolution.reason)" }
     }
 
-    $triggers = [System.Collections.Generic.List[string]]::new([string[]]@($CriticalTriggers | Select-Object -Unique))
+    $effectiveCriticalTriggers = @($CriticalTriggers | Where-Object { $ActionKind -cne 'source-code' -or $_ -cne 'authorization_or_security_boundary' })
+    $triggers = [System.Collections.Generic.List[string]]::new([string[]]@($effectiveCriticalTriggers | Select-Object -Unique))
+    if ($ActionKind -ceq 'source-code' -and $CriticalTriggers -ccontains 'authorization_or_security_boundary') { $triggers.Add('source-only:authorization_or_security_boundary') }
     if ($RequestedAlias -cin @('quick','workflow','ask')) { $triggers.Add("legacy-alias:$RequestedAlias") }
 
     $blocked = $RequirementState -ceq 'blocked' -or $RequestedAlias -ceq 'ask' -or $ScopeExpanded -or $ProductBlockerDiscovered
@@ -74,7 +78,8 @@ function Resolve-HarnessExecutionProfile {
             $profile,$handoff = 'inspect','read-only-response'
         } else {
             $profile = @($policies.Risk.profile_thresholds | Where-Object { $riskTotal -ge [int]$_.min_total -and $riskTotal -le [int]$_.max_total })[0].profile
-            if ($CriticalTriggers.Count -gt 0 -and $script:ProfileRank[$policies.Risk.overrides.critical_trigger_profile] -gt $script:ProfileRank[$profile]) { $profile = [string]$policies.Risk.overrides.critical_trigger_profile }
+            if ($ActionKind -ceq 'source-code' -and $profile -ceq 'critical') { $profile = 'governed' }
+            if ($effectiveCriticalTriggers.Count -gt 0 -and $script:ProfileRank[$policies.Risk.overrides.critical_trigger_profile] -gt $script:ProfileRank[$profile]) { $profile = [string]$policies.Risk.overrides.critical_trigger_profile }
             if ($Persistence -ceq 'durable' -or $DurableArtifactsRequested -or -not $Reversible -or -not $VerificationAvailable -or $RequestedAlias -ceq 'workflow') {
                 if ($script:ProfileRank[$policies.Risk.overrides.durable_minimum_profile] -gt $script:ProfileRank[$profile]) { $profile = [string]$policies.Risk.overrides.durable_minimum_profile }
             }

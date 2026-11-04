@@ -869,7 +869,7 @@ function Assert-InstallExpectedPostimageShape {
         return
     }
     if ($contract -eq 'claude-settings/v1') {
-        if (-not ($Identity['managed_hooks'] -is [System.Collections.IList]) -or @($Identity['managed_hooks']).Count -eq 0) {
+        if (-not ($Identity['managed_hooks'] -is [System.Collections.IList])) {
             throw "$Label is missing its Claude managed hooks"
         }
         foreach ($managedHook in @($Identity['managed_hooks'])) {
@@ -1365,4 +1365,264 @@ function Exit-InstallTransactionMutex {
     } finally {
         $Mutex.Dispose()
     }
+}
+
+# Shared Hook requirements are derived, never persisted as a second owner registry.
+function Test-InstallPreToolUseEnabled {
+    param([string]$UserProfile)
+    $path=Join-Path $UserProfile '.dev-harness/preferences.json'
+    if(-not(Test-Path -LiteralPath $path)){return $true}
+    $preferences=ConvertFrom-InstallJson -Json ([IO.File]::ReadAllText($path))
+    if(-not $preferences.Contains('pretooluse_enabled')){return $true}
+    if($preferences.pretooluse_enabled -isnot [bool]){throw 'pretooluse_enabled must be a Boolean'}
+    return $preferences.pretooluse_enabled
+}
+
+function Get-InstallSharedHookRequirements {
+    param($Registry,[string]$UserProfile,[string]$ReplacingWorkspaceKey='',[string[]]$RequestedHooks=@())
+    $hookRoot=[IO.Path]::Combine($UserProfile,'.claude','hooks-memory')
+    $required=[ordered]@{}
+    foreach($name in $RequestedHooks){$required[$name]=@('current-request')}
+    $references=[ordered]@{'claude-settings'=@();'codex-hooks'=@()}
+    $liveReferences=[ordered]@{'claude-settings'=@();'codex-hooks'=@()}
+    $owners=[Collections.Generic.List[object]]::new()
+    $latestDirectory=$null
+    $restorationOwners=[ordered]@{}
+    foreach($manifestPath in @($Registry.global_manifest_history)){
+        Assert-InstallManifestRegistryDigest -Registry $Registry -ManifestPath $manifestPath -RequireManifestIntegrity $true
+        $manifest=ConvertFrom-InstallJson -Json ([IO.File]::ReadAllText($manifestPath))
+        foreach($hostKey in @('claude-settings','codex-hooks')){
+            $settingsPath=if($hostKey -ceq 'claude-settings'){[IO.Path]::Combine($UserProfile,'.claude','settings.json')}else{[IO.Path]::Combine($UserProfile,'.codex','hooks.json')}
+            foreach($record in @($manifest.backups|Where-Object {$_.path -eq $settingsPath})){
+                if($record.ownership -cne 'managed' -or $record.expected_postimage.contract -cne 'claude-settings/v1'){throw 'Shared Hook live configuration has an unsupported ownership contract'}
+                $liveReferences[$hostKey]=@($record.expected_postimage.managed_hooks)
+            }
+        }
+        $ownerKey=Get-WorkspaceRegistryKey $manifest.workspace_root
+        $latestOwnerPath=if($Registry.workspaces.Contains($ownerKey)){@($Registry.workspaces[$ownerKey].manifests)[-1]}else{''}
+        # Older recovery records may predate feature ownership; they grant no shared demand or retention authority.
+        if(($manifestPath -in @($Registry.retired_manifest_history) -or ($latestOwnerPath -and $manifestPath -ne $latestOwnerPath)) -and $manifest.Contains('feature_ownership') -and $manifest.feature_ownership.schema_version -ceq 'feature-ownership/v1' -and $manifest.feature_ownership.hooks -is [Collections.IList]){
+            foreach($name in @($manifest.feature_ownership.hooks)){
+                if($name -is [string] -and $name -cmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\.(ps1|js)$'){$restorationOwners[$name]=@($restorationOwners[$name])+@($manifestPath)}
+            }
+        }
+        foreach($record in @($manifest.backups|Where-Object { [IO.Path]::GetFullPath($_.path) -eq $hookRoot })){
+            if($record.ownership -cne 'managed' -or $record.expected_postimage.mode -cne 'exact' -or $record.expected_postimage.item_type -cne 'directory'){throw 'Shared Hook directory has an unsupported ownership contract'}
+            $latestDirectory=$record
+        }
+    }
+    if($null -ne $latestDirectory -and -not(Test-InstallExactIdentityEqual -Left (Get-InstallManagedPathIdentity $hookRoot) -Right $latestDirectory.expected_postimage)){
+        throw 'Shared Hook directory differs from its registered identity'
+    }
+    foreach($entryKey in @($Registry.workspaces.Keys)){
+        if($entryKey -eq $ReplacingWorkspaceKey){continue}
+        $entry=$Registry.workspaces[$entryKey]
+        $manifestPath=@($entry.manifests)[-1]
+        if($manifestPath -notin @($Registry.global_manifest_history) -or $manifestPath -in @($Registry.retired_manifest_history)){throw 'Shared Hook owner is outside active registry history'}
+        Assert-InstallManifestRegistryDigest -Registry $Registry -ManifestPath $manifestPath -RequireManifestIntegrity $true
+        $manifest=ConvertFrom-InstallJson -Json ([IO.File]::ReadAllText($manifestPath))
+        if($manifest.transaction_status -cne 'committed' -or (Get-WorkspaceRegistryKey $manifest.workspace_root) -cne $entryKey -or (Get-NormalizedPath $manifest.repo_root) -ne (Get-NormalizedPath $entry.repo_root) -or $manifest.claude_home -ne [IO.Path]::Combine($UserProfile,'.claude') -or $manifest.codex_home -ne [IO.Path]::Combine($UserProfile,'.codex')){throw 'Shared Hook owner manifest identity mismatch'}
+        if($manifest.feature_ownership.schema_version -cne 'feature-ownership/v1' -or $manifest.feature_ownership.hooks -isnot [Collections.IList]){throw 'Shared Hook owner has no explicit Hook requirements'}
+        $names=@($manifest.feature_ownership.hooks)
+        if(@($names|Sort-Object -Unique).Count -ne $names.Count){throw 'Shared Hook owner requirements are duplicated'}
+        foreach($name in $names){
+            if($name -isnot [string] -or $name -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\.(ps1|js)$'){throw 'Shared Hook requirement is not a contained file name'}
+            if(-not $required.Contains($name)){$required[$name]=@()}
+            $required[$name]=@($required[$name])+@($entryKey)
+        }
+        $owners.Add([ordered]@{workspace=$entryKey;manifest=$manifestPath;hooks=$names})
+        foreach($hostKey in @('claude-settings','codex-hooks')){
+            $settingsPath=if($hostKey -ceq 'claude-settings'){[IO.Path]::Combine($UserProfile,'.claude','settings.json')}else{[IO.Path]::Combine($UserProfile,'.codex','hooks.json')}
+            $records=@($manifest.backups|Where-Object {$_.path -eq $settingsPath})
+            if($records.Count -ne 1 -or $records[0].ownership -cne 'managed' -or $records[0].expected_postimage.contract -cne 'claude-settings/v1'){throw 'Shared Hook owner has no verified managed configuration record'}
+            foreach($reference in $records[0].expected_postimage.managed_hooks){
+                $tokens=$null;$errors=$null
+                $ast=[Management.Automation.Language.Parser]::ParseInput([string]$reference.hook.command,[ref]$tokens,[ref]$errors)
+                if($errors.Count){throw 'Shared Hook managed command cannot be parsed'}
+                $literalPaths=@($ast.FindAll({param($node)$node -is [Management.Automation.Language.StringConstantExpressionAst] -or ($node -is [Management.Automation.Language.ExpandableStringExpressionAst] -and $node.NestedExpressions.Count -eq 0)},$true)|ForEach-Object Value)
+                $targets=@($names|Where-Object {[IO.Path]::Combine($hookRoot,$_) -in $literalPaths})
+                # Ownership comes from feature_ownership plus exact registered command metadata, not command similarity.
+                if(@($targets|Where-Object {$_ -notin $RequestedHooks}).Count){$references[$hostKey]+= @($reference)}
+            }
+        }
+    }
+    foreach($name in $required.Keys){if($name -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\.(ps1|js)$'){throw 'Shared Hook target name is invalid'}}
+    $retained=@($required.Keys|Where-Object {$_ -notin $RequestedHooks})
+    if($retained.Count -and $null -eq $latestDirectory){throw 'Shared Hook requirements lack registered live directory bytes'}
+    $retainedIdentities=[ordered]@{}
+    foreach($name in $retained){
+        $path=[IO.Path]::Combine($hookRoot,$name)
+        if(-not(Test-Path -LiteralPath $path -PathType Leaf)){throw 'Required shared Hook is absent'}
+        [void](Assert-InstallStatePathHasNoReparsePoint -Path $path -Label 'Retained shared Hook')
+        $retainedIdentities[$name]=Get-InstallManagedPathIdentity $path
+    }
+    if(-not(Test-InstallPreToolUseEnabled -UserProfile $UserProfile)){
+        foreach($hostKey in @('claude-settings','codex-hooks')){
+            $references[$hostKey]=@($references[$hostKey]|Where-Object event -CNE 'PreToolUse')
+            $liveReferences[$hostKey]=@($liveReferences[$hostKey]|Where-Object event -CNE 'PreToolUse')
+        }
+    }
+    return [pscustomobject]@{Directory=$hookRoot;Required=@($required.Keys);Retained=$retained;RetainedIdentities=$retainedIdentities;Owners=$owners.ToArray();References=$references;LiveReferences=$liveReferences;RestorationOwners=$restorationOwners;DirectoryIdentity=$(if($null -ne $latestDirectory){$latestDirectory.expected_postimage}else{$null})}
+}
+
+function Merge-InstallSharedHookSettings {
+    param([string]$RequestedJson,[object[]]$References)
+    $settings=ConvertFrom-InstallJson -Json $RequestedJson
+    foreach($reference in $References){
+        if($reference.multiplicity -ne 1 -or $reference.event -cnotin @('PreToolUse','UserPromptSubmit','Stop','PostToolUse')){throw 'Shared Hook reference has unsupported multiplicity or event'}
+        $event=[string]$reference.event
+        if(-not $settings.Contains($event)){$settings[$event]=@()}
+        $existing=@($settings[$event]|ForEach-Object {foreach($hook in $_.hooks){if($hook.command -ceq $reference.hook.command){[ordered]@{section=$_;hook=$hook}}}})
+        if($existing.Count){
+            if($existing.Count -ne 1 -or (ConvertTo-InstallJson -Value $existing[0].hook -Compress) -cne (ConvertTo-InstallJson -Value $reference.hook -Compress)){throw 'Shared Hook command has conflicting registered content'}
+            $existingSection=ConvertTo-NormalizedObject -Value $existing[0].section
+            $existingSection.Remove('hooks')
+            if((ConvertTo-InstallJson -Value $existingSection -Compress) -cne (ConvertTo-InstallJson -Value $reference.section -Compress)){throw 'Shared Hook command has conflicting registered section'}
+            continue
+        }
+        $section=ConvertTo-NormalizedObject -Value $reference.section
+        $section['hooks']=@((ConvertTo-NormalizedObject -Value $reference.hook))
+        $settings[$event]=@($settings[$event])+@($section)
+    }
+    return ConvertTo-InstallJson -Value $settings
+}
+
+function Assert-InstallRetainedHookDependencies {
+    param($Coordination)
+    foreach($name in $Coordination.Retained){
+        $path=[IO.Path]::Combine($Coordination.Directory,$name)
+        $text=[IO.File]::ReadAllText($path)
+        if([IO.Path]::GetExtension($name) -cne '.js'){throw 'Retained Hook dependency verification supports only existing JavaScript transport assets'}
+        $calls=[regex]::Matches($text,'\brequire\s*\(')
+        $imports=[regex]::Matches($text,'\brequire\s*\(\s*["''](?<module>[^"'']+)["'']\s*\)')
+        if($calls.Count -ne $imports.Count -or $text -match '\bimport\s*(?:\(|[^;]*\bfrom\b)'){throw 'Retained Hook has unverified dynamic dependencies'}
+        foreach($import in $imports){
+            $module=$import.Groups['module'].Value
+            if($module -in @('fs','path','node:fs','node:path')){continue}
+            if($module.StartsWith('./',[StringComparison]::Ordinal) -and $module.Substring(2) -in $Coordination.Required){continue}
+            throw 'Retained Hook dependency is outside the verified shared set'
+        }
+    }
+}
+function Assert-InstallSharedHookState {
+    param($Coordination,[string]$UserProfile)
+    $actual=@(Get-ChildItem -LiteralPath $Coordination.Directory -Force|ForEach-Object Name)
+    $residual=@($actual|Where-Object {$_ -notin $Coordination.Required})
+    $missing=@($Coordination.Required|Where-Object {$_ -notin $actual})
+    if($missing.Count -or @($residual|Where-Object {-not $Coordination.RestorationOwners.Contains($_)}).Count){throw 'Shared Hook file set has unowned extras or missing active requirements'}
+    # Exact live directory identity was already checked. Residual history is restoration state, not an active demand.
+    if($residual.Count){Write-Verbose ('Shared Hook restoration-only assets: '+($residual -join ', '))}
+    foreach($hostKey in @('claude-settings','codex-hooks')){
+        $path=if($hostKey -ceq 'claude-settings'){[IO.Path]::Combine($UserProfile,'.claude','settings.json')}else{[IO.Path]::Combine($UserProfile,'.codex','hooks.json')}
+        $settings=ConvertFrom-InstallJson -Json ([IO.File]::ReadAllText($path))
+        foreach($reference in @($Coordination.References[$hostKey])+@($Coordination.LiveReferences[$hostKey])){
+            $exact=0;$total=0
+            foreach($event in $settings.hooks.Keys){foreach($section in $settings.hooks[$event]){foreach($hook in $section.hooks){
+                if($hook.command -ceq $reference.hook.command){
+                    $total++
+                    $metadata=ConvertTo-NormalizedObject -Value $section;$metadata.Remove('hooks')
+                    if($event -ceq $reference.event -and (ConvertTo-InstallJson -Value $hook -Compress) -ceq (ConvertTo-InstallJson -Value $reference.hook -Compress) -and (ConvertTo-InstallJson -Value $metadata -Compress) -ceq (ConvertTo-InstallJson -Value $reference.section -Compress)){$exact++}
+                }
+            }}}
+            if($exact -ne 1 -or $total -ne 1){throw 'Shared Hook reference does not satisfy its registered owner contract'}
+        }
+    }
+}
+function Get-InstallSharedSkillPlan {
+    param($Registry,$HookCoordination,[string]$UserProfile,[string]$RepoRoot,[string[]]$RequestedSkills,[switch]$Verification)
+
+    $required=[ordered]@{}
+    foreach($name in $RequestedSkills){$required[$name]=@('current-request')}
+    foreach($owner in $HookCoordination.Owners){
+        Assert-InstallManifestRegistryDigest -Registry $Registry -ManifestPath $owner.manifest -RequireManifestIntegrity $true
+        $manifest=ConvertFrom-InstallJson -Json ([IO.File]::ReadAllText($owner.manifest))
+        if(-not $manifest.feature_ownership.Contains('skills') -or $manifest.feature_ownership.skills -isnot [Collections.IList]){throw 'Shared Skill owner has no explicit Skill requirements'}
+        foreach($name in $manifest.feature_ownership.skills){
+            if($name -isnot [string] -or $name -cnotmatch '^(?:\.system|[A-Za-z0-9][A-Za-z0-9._-]*)$' -or $name -ceq 'docs'){throw 'Shared Skill requirement is not a supported contained name'}
+            if(-not $required.Contains($name)){$required[$name]=@()}
+            $required[$name]=@($required[$name])+@($owner.workspace)
+        }
+    }
+    $hosts=[ordered]@{}
+    foreach($hostName in @('.claude','.codex','.agents')){
+        $root=[IO.Path]::Combine($UserProfile,$hostName,'skills')
+        $live=[ordered]@{}
+        foreach($manifestPath in @($Registry.global_manifest_history)){
+            Assert-InstallManifestRegistryDigest -Registry $Registry -ManifestPath $manifestPath -RequireManifestIntegrity $true
+            $manifest=ConvertFrom-InstallJson -Json ([IO.File]::ReadAllText($manifestPath))
+            foreach($record in $manifest.backups){
+                if([IO.Path]::GetDirectoryName([string]$record.path) -ne $root){continue}
+                $name=[IO.Path]::GetFileName([string]$record.path)
+                $live[$name]=[ordered]@{Record=$record;Manifest=$manifestPath;Repo=$manifest.repo_root}
+            }
+        }
+        $targets=[ordered]@{};$expected=[ordered]@{};$obsolete=[Collections.Generic.List[string]]::new()
+        $rootLink=Get-JunctionTarget $root
+        if($rootLink -and $HookCoordination.Owners.Count){throw "Shared Skill root became a link while other owners remain: $root"}
+        foreach($name in $required.Keys){
+            $path=[IO.Path]::Combine($root,$name)
+            $requested=$name -in $RequestedSkills
+            $desired=[IO.Path]::Combine($RepoRoot,'skills',$name)
+            # The existing host .system hot-swap/mirror contract is deliberately unchanged.
+            if($name -ceq '.system'){
+                if($Verification -and -not $rootLink -and (Get-JunctionTarget $path) -and $live.Contains($name)){
+                    $identity=Get-InstallManagedPathIdentity $path
+                    $record=$live[$name].Record
+                    if($record.ownership -cne 'managed' -or $record.expected_postimage.mode -cne 'exact' -or $record.expected_postimage.item_type -cne 'link'){throw "Shared Skill has an unsupported ownership contract: $path"}
+                    if(-not(Test-InstallExactIdentityEqual -Left $identity -Right $live[$name].Record.expected_postimage)){throw "Shared Skill link differs from registered identity: $path"}
+                    if($identity.link_target -ne [IO.Path]::Combine($live[$name].Repo,'skills',$name)){throw "Shared Skill source conflicts with registered owner: $path"}
+                    $expected[$name]=$identity
+                    $desired=$identity.link_target
+                }
+                $targets[$name]=$desired
+                continue
+            }
+            $identity=if($rootLink){$null}else{Get-InstallManagedPathIdentity $path}
+            $record=if($live.Contains($name)){$live[$name].Record}else{$null}
+            if($null -ne $record){
+                if($record.ownership -cne 'managed' -or $record.expected_postimage.mode -cne 'exact' -or $record.expected_postimage.item_type -cnotin @('link','missing')){throw "Shared Skill has an unsupported ownership contract: $path"}
+                if($null -eq $identity -or -not(Test-InstallExactIdentityEqual -Left $identity -Right $record.expected_postimage)){throw "Shared Skill link differs from registered identity: $path"}
+                if($identity.item_type -ceq 'link' -and $identity.link_target -ne [IO.Path]::Combine($live[$name].Repo,'skills',$name)){throw "Shared Skill source conflicts with registered owner: $path"}
+            }
+            if(-not $requested -or $Verification){
+                if($null -eq $record -or $identity.item_type -cne 'link'){throw "Required shared Skill lacks registered live link: $path"}
+                $desired=$identity.link_target
+            }elseif($null -ne $identity -and $identity.item_type -cne 'missing' -and ($identity.item_type -cne 'link' -or $identity.link_target -ne $desired)){
+                if($null -eq $record){throw "Shared Skill target has no managed upgrade identity: $path"}
+                # Preserve the normal cross-source upgrade/restoration chain only for equivalent content.
+                if(@($required[$name]|Where-Object {$_ -cne 'current-request'}).Count){
+                    [void](Assert-InstallStatePathHasNoReparsePoint -Path $identity.link_target -Label 'Shared Skill upgrade source')
+                    [void](Assert-InstallStatePathHasNoReparsePoint -Path $desired -Label 'Shared Skill upgrade target')
+                    if((Get-InstallBackupPayloadDigest -Path $identity.link_target -ItemType directory) -cne (Get-InstallBackupPayloadDigest -Path $desired -ItemType directory)){throw "Shared Skill sources conflict for active owners: $path"}
+                }
+            }
+            if(-not $rootLink){$expected[$name]=$identity}
+            $targets[$name]=$desired
+        }
+        if(-not $rootLink -and (Test-Path -LiteralPath $root -PathType Container)){
+            foreach($entry in Get-ChildItem -LiteralPath $root -Force){
+                $name=$entry.Name
+                if($required.Contains($name)){continue}
+                $linkTarget=Get-JunctionTarget $entry.FullName
+                if($live.Contains($name) -and $live[$name].Record.expected_postimage.item_type -ceq 'link'){
+                    $identity=Get-InstallManagedPathIdentity $entry.FullName
+                    $record=$live[$name].Record
+                    if($record.ownership -cne 'managed' -or -not(Test-InstallExactIdentityEqual -Left $identity -Right $record.expected_postimage)){throw "Released shared Skill differs from registered identity: $($entry.FullName)"}
+                    $obsolete.Add($name);$expected[$name]=$identity
+                }elseif($name -cne 'docs' -and $linkTarget -and (Test-PathWithinRoot -Path $linkTarget -RootPath ([IO.Path]::Combine($RepoRoot,'skills')))){
+                    throw "Unowned same-source Skill link requires explicit reconciliation: $($entry.FullName)"
+                }
+            }
+        }
+        $hosts[$hostName]=[pscustomobject]@{Root=$root;Targets=$targets;Expected=$expected;Obsolete=$obsolete.ToArray()}
+    }
+    return [pscustomobject]@{Required=$required;Hosts=$hosts}
+}
+
+function Assert-InstallSharedSkillPlanCurrent {
+    param($Plan)
+    foreach($hostPlan in $Plan.Hosts.Values){foreach($name in $hostPlan.Expected.Keys){
+        $path=[IO.Path]::Combine($hostPlan.Root,$name)
+        if(-not(Test-InstallExactIdentityEqual -Left (Get-InstallManagedPathIdentity $path) -Right $hostPlan.Expected[$name])){throw "Shared Skill changed after coordination: $path"}
+    }}
 }

@@ -1,4 +1,10 @@
+---
+status: superseded
+superseded_by: docs/governed-work.md
+---
 # Stage Discipline Matrix
+
+Historical v1 reference only. Current execution uses v2 Direct/Governed/Critical; this retained matrix does not activate the retired lifecycle.
 
 ## Purpose
 

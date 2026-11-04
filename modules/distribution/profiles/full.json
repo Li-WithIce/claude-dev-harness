@@ -16,6 +16,7 @@
     {"module_id":"thin-trust-kernel","allowed_capabilities":["filesystem-read","process-execution"]}
   ],
   "asset_allowlist": [
+    {"id":"vault-context","kind":"vault","origin":"bootstrap","module_id":"distribution","source":"vault-template/entry/context.ps1.template","target":"entry/context.ps1","ownership":"managed","files":["vault-template/entry/context.ps1.template"]},
     {"id":"skill-audit","kind":"skill","origin":"bootstrap","module_id":"distribution","source":"skills/audit/SKILL.md","target":"audit","ownership":"managed","files":["skills/audit/SKILL.md"]},
     {"id":"skill-codex","kind":"skill","origin":"bootstrap","module_id":"distribution","source":"skills/codex/SKILL.md","target":"codex","ownership":"managed","files":["skills/codex/SKILL.md","skills/codex/scripts/ask_codex.ps1","skills/codex/scripts/ask_codex.sh","skills/codex/scripts/invoke_codex.ps1","skills/codex/scripts/invoke_codex.sh"]},
     {"id":"skill-md-html","kind":"skill","origin":"module-request","module_id":"md-html","source":"skills/md-html/SKILL.md","target":"md-html","ownership":"managed","files":["skills/md-html/SKILL.md","skills/md-html/references/checklist.md","skills/md-html/references/pipeline.md"]},
@@ -43,7 +44,7 @@
     {"id":"vault-28","kind":"vault","origin":"bootstrap","module_id":"distribution","source":"vault-template/配置/用户偏好.md.template","target":"配置/用户偏好.md","ownership":"user-owned","files":["vault-template/配置/用户偏好.md.template"]},
     {"id":"vault-29","kind":"vault","origin":"bootstrap","module_id":"distribution","source":"vault-template/配置/schema-versions.md","target":"配置/schema-versions.md","ownership":"managed","files":["vault-template/配置/schema-versions.md"]},
     {"id":"template-claude-global","kind":"template","origin":"bootstrap","module_id":"distribution","source":"agent-configs/claude/CLAUDE.md.template","target":"claude-global","ownership":"managed","files":["agent-configs/claude/CLAUDE.md.template"]},
-    {"id":"template-codex-global","kind":"template","origin":"bootstrap","module_id":"distribution","source":"agent-configs/codex/AGENTS.md.template","target":"codex-global","ownership":"managed","files":["agent-configs/codex/AGENTS.md.template"]},
+    {"id":"template-codex-global","kind":"template","origin":"bootstrap","module_id":"distribution","source":"agent-configs/codex/AGENTS.md.template","target":"codex-global","ownership":"create-if-missing","files":["agent-configs/codex/AGENTS.md.template"]},
     {"id":"template-workspace-global","kind":"template","origin":"bootstrap","module_id":"distribution","source":"agent-configs/workspace/AGENTS.md.template","target":"workspace-global","ownership":"managed","files":["agent-configs/workspace/AGENTS.md.template"]},
     {"id":"template-claude-settings","kind":"template","origin":"bootstrap","module_id":"distribution","source":"agent-configs/claude/settings.local.shared.json.template","target":"claude-settings","ownership":"managed","files":["agent-configs/claude/settings.local.shared.json.template"]},
     {"id":"template-codex-settings","kind":"template","origin":"bootstrap","module_id":"distribution","source":"agent-configs/codex/settings.local.shared.json.template","target":"codex-settings","ownership":"managed","files":["agent-configs/codex/settings.local.shared.json.template"]},

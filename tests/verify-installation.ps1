@@ -2,7 +2,7 @@
 param(
     [string]$WorkspaceRoot,
     [string]$RepoRoot = "",
-    [string]$Scope = "All",
+    [ValidateSet('All','SharedHooks')][string]$Scope = "All",
     [string]$CurrentFlowPath = "",
     [string]$UserProfileRoot = ""
 )
@@ -356,7 +356,9 @@ function Assert-ManagedSkillLinks {
         [string]$HostLabel,
         [string]$HostSkillsPath,
         [string]$RepoSkillsPath,
-        [string[]]$ManagedEntryNames
+        [string[]]$ManagedEntryNames,
+        [Collections.IDictionary]$EntryTargets,
+        [string[]]$RestorationNames=@()
     )
 
     $hotSwapPreservedNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -377,7 +379,7 @@ function Assert-ManagedSkillLinks {
     $expectedManagedEntryNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($name in $ManagedEntryNames) {
         [void]$expectedManagedEntryNames.Add($name)
-        $repoEntryPath = Join-Path $RepoSkillsPath $name
+        $repoEntryPath = if($null -ne $EntryTargets){$EntryTargets[$name]}else{Join-Path $RepoSkillsPath $name}
         $hostEntryPath = Join-Path $HostSkillsPath $name
         if (-not (Test-Path -LiteralPath $hostEntryPath)) {
             Add-Error ("{0} skills 缺少 managed 条目: {1}" -f $HostLabel, $hostEntryPath)
@@ -403,7 +405,7 @@ function Assert-ManagedSkillLinks {
 
     $normalizedRepoSkillsPath = Get-NormalizedPath -Path $RepoSkillsPath
     foreach ($entry in Get-ChildItem -LiteralPath $HostSkillsPath -Force) {
-        if ($expectedManagedEntryNames.Contains($entry.Name)) {
+        if ($expectedManagedEntryNames.Contains($entry.Name) -or $entry.Name -in $RestorationNames) {
             continue
         }
 
@@ -536,16 +538,44 @@ if (-not $hasFeatureOwnership -or
     Add-Check ("install manifest feature ownership matches preset: {0}" -f $effectivePreset)
 }
 
-Assert-ManagedSkillLinks -HostLabel 'Claude' -HostSkillsPath $ClaudeSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
-Assert-ManagedSkillLinks -HostLabel 'Codex' -HostSkillsPath $CodexSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
-Assert-ManagedSkillLinks -HostLabel 'Agents' -HostSkillsPath $AgentsSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
+. (Join-Path $RepoRoot 'scripts/install-transaction-common.ps1')
+$preToolUseEnabled=Test-InstallPreToolUseEnabled -UserProfile $effectiveUserProfile
+$sharedHookNames=@($presetDefinition.hooks)
+try {
+    $sharedRegistry=ConvertFrom-InstallJson -Json ([IO.File]::ReadAllText($InstallRegistryPath))
+    # Current-request assets use the live registered upgrade contract, as they do during install.
+    $sharedCoordination=Get-InstallSharedHookRequirements -Registry $sharedRegistry -UserProfile $effectiveUserProfile -RequestedHooks $presetDefinition.hooks
+    $sharedHookNames=@($sharedCoordination.Required)
+    $restorationHooks=@(Get-ChildItem -LiteralPath $ClaudeHooksPath -File|Where-Object {$_.Name -notin $sharedHookNames -and $sharedCoordination.RestorationOwners.Contains($_.Name)}|ForEach-Object Name)
+    if($restorationHooks.Count){Add-Check ('Shared Hook restoration-only assets have verified historical owners, not workspace feature ownership: '+($restorationHooks -join ', '))}
+    $sharedHookNames+=$restorationHooks
+    Assert-InstallSharedHookState -Coordination $sharedCoordination -UserProfile $effectiveUserProfile
+    Add-Check 'Shared Hook directory identity and active owner requirements are verified independently of workspace preset'
+} catch { Add-Error ('Shared Hook ownership verification failed: '+$_.Exception.Message) }
+
+if ($Scope -ceq 'SharedHooks') {
+    Write-Output 'Verification scope: SharedHooks (workspace ownership plus registered shared files and exact managed references only)'
+    foreach ($message in $script:Checks) { Write-Output ('[PASS] '+$message) }
+    foreach ($message in $script:Errors) { Write-Output ('[FAIL] '+$message) }
+    if ($script:Errors.Count) { exit 2 }
+    Write-Output 'STATUS: PASS'
+    exit 0
+}
+try {
+    $skillPlan=Get-InstallSharedSkillPlan -Registry $sharedRegistry -HookCoordination $sharedCoordination -UserProfile $effectiveUserProfile -RepoRoot $RepoRoot -RequestedSkills $presetDefinition.skills -Verification
+    foreach($hostName in $skillPlan.Hosts.Keys){
+        $hostPlan=$skillPlan.Hosts[$hostName]
+        Assert-ManagedSkillLinks -HostLabel $hostName -HostSkillsPath $hostPlan.Root -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($hostPlan.Targets.Keys) -EntryTargets $hostPlan.Targets -RestorationNames $hostPlan.Obsolete
+        if($hostPlan.Obsolete.Count){Add-Check ('Registered restoration-only Skills, not active feature ownership: '+($hostPlan.Obsolete -join ', '))}
+    }
+} catch { Add-Error ('Shared Skill ownership verification failed: '+$_.Exception.Message) }
 
 foreach ($hookName in @('pretooluse.ps1','codex-pretooluse-launcher.ps1','userpromptsubmit.js','stop.js','workspace-resolver.js')) {
     $hookPath = Join-Path $ClaudeHooksPath $hookName
-    if (@($presetDefinition.hooks) -contains $hookName) {
+    if ($sharedHookNames -contains $hookName) {
         $templatePath = if ($hookName -eq 'userpromptsubmit.js') { Join-Path $RepoRoot 'runtime-hooks\memory\userpromptsubmit.js' } else { Join-Path $RepoRoot "runtime-hooks\claude\$hookName" }
         Assert-RenderedFile -Path $hookPath -ForbiddenTokens $ForbiddenTokens
-        Assert-TemplateFileMatches -Path $hookPath -TemplatePath $templatePath -Label "Claude hook $hookName" -EscapeForCode:($hookName.EndsWith('.js'))
+        if (-not (Test-Path -LiteralPath $hookPath -PathType Leaf)) { Add-Error "Required shared Hook missing: $hookName" }
     } elseif (Test-Path -LiteralPath $hookPath) {
         Add-Error ("Claude preset should not install hook: {0}" -f $hookPath)
     } else {
@@ -562,7 +592,7 @@ if (Test-Path -LiteralPath $retiredPostToolHookPath) {
 Assert-RenderedFile -Path $ClaudeGlobalPath -ForbiddenTokens $ForbiddenTokens
 Assert-TemplateFileMatches -Path $ClaudeGlobalPath -TemplatePath (Join-Path $RepoRoot 'agent-configs\claude\CLAUDE.md.template') -Label 'Claude CLAUDE.md'
 Assert-RenderedFile -Path $CodexAgentsPath -ForbiddenTokens $ForbiddenTokens
-Assert-TemplateFileMatches -Path $CodexAgentsPath -TemplatePath (Join-Path $RepoRoot 'agent-configs\codex\AGENTS.md.template') -Label 'Codex AGENTS.md' -RolloutMarker 'codex-agents-template-drift'
+if(Test-Path -LiteralPath $CodexAgentsPath -PathType Leaf){Add-Check 'Codex AGENTS.md is preserved as user-owned instructions'}else{Add-Error 'Codex AGENTS.md is missing'}
 Assert-RenderedFile -Path $WorkspaceAgentsPath -ForbiddenTokens $ForbiddenTokens
 Assert-TemplateFileMatches -Path $WorkspaceAgentsPath -TemplatePath (Join-Path $RepoRoot 'agent-configs\workspace\AGENTS.md.template') -Label 'workspace AGENTS.md' -RolloutMarker 'workspace-agents-template-drift'
 Assert-GitIgnoreManagedEntries -Path $WorkspaceGitIgnorePath
@@ -582,7 +612,7 @@ if (Test-Path -LiteralPath $ClaudeSettingsPath -PathType Leaf) {
         $eventByHook = [ordered]@{ 'pretooluse.ps1'='PreToolUse';'userpromptsubmit.js'='UserPromptSubmit';'stop.js'='Stop' }
         foreach ($hookName in $eventByHook.Keys) {
             $key = $eventByHook[$hookName]
-            if (@($presetDefinition.hooks) -notcontains $hookName) {
+            if ($sharedHookNames -notcontains $hookName -or ($key -ceq 'PreToolUse' -and -not $preToolUseEnabled)) {
                 continue
             }
             $value = $claudeSettings.hooks.$key
@@ -601,7 +631,7 @@ if (Test-Path -LiteralPath $ClaudeSettingsPath -PathType Leaf) {
             })
         foreach ($hookName in $eventByHook.Keys) {
             $expectedHookPath = Join-Path $ClaudeHooksPath $hookName
-            $expectedCount = if (@($presetDefinition.hooks) -contains $hookName) { 1 } else { 0 }
+            $expectedCount = if ($sharedHookNames -contains $hookName -and ($eventByHook[$hookName] -cne 'PreToolUse' -or $preToolUseEnabled)) { 1 } else { 0 }
             if (@($registeredCommands | Where-Object { $_ -like "*$expectedHookPath*" }).Count -eq $expectedCount) {
                 Add-Check ("Claude settings.json 唯一注册真实 hook: {0}" -f $hookName)
             } else {
@@ -735,7 +765,9 @@ if (Test-Path -LiteralPath $CodexHooksPath -PathType Leaf) {
                 }
             }
         )
-        if ($matches.Count -eq 1 -and
+        if (-not $preToolUseEnabled -and $matches.Count -eq 0) {
+            Add-Check 'Codex Harness PreToolUse remains disabled by user preference'
+        } elseif ($preToolUseEnabled -and $matches.Count -eq 1 -and
             [string]$matches[0].Event -ceq 'PreToolUse' -and
             [string]$matches[0].Section.matcher -ceq '^(Bash|apply_patch|Write|Edit|MultiEdit|NotebookEdit)$' -and
             [string]$matches[0].Hook.type -ceq 'command' -and

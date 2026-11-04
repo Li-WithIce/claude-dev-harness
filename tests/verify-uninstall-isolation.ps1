@@ -1,6 +1,7 @@
 ﻿[CmdletBinding()]
 param(
-    [string]$RepoRoot = ""
+    [string]$RepoRoot = "",
+    [switch]$UninstallCompatibilityOnly
 )
 
 Set-StrictMode -Version Latest
@@ -119,6 +120,232 @@ function Set-RegistryManifestDigestForPath {
     }
 }
 
+function Invoke-UninstallCompatibilityRegression {
+    param([string]$SourceRoot)
+    $root=Join-Path $scratchRoot 'compatibility';$user=Join-Path $root 'user'
+    $a=Join-Path $root 'source-a';$b=Join-Path $root 'source-h04';$c=Join-Path $root 'source-new'
+    $full=Join-Path $root 'full';$governed=Join-Path $root 'governed';$core=Join-Path $root 'core'
+    $logRoot=if($env:DEV_HARNESS_COMPAT_LOG_ROOT){Join-Path $env:DEV_HARNESS_COMPAT_LOG_ROOT ([guid]::NewGuid().ToString('N'))}else{Join-Path $root 'results'}
+    foreach($p in @($user,$a,$b,$c,$full,$governed,$core,$logRoot)){[void][IO.Directory]::CreateDirectory($p)}
+    Write-Output "Uninstall compatibility evidence: $logRoot"
+    function UC-Check($Condition,[string]$Label){if($Condition){Add-Check "compatibility: $Label"}else{Add-Failure "compatibility: $Label"}}
+    function UC-Run([string]$Name,[string]$Script,[string[]]$Arguments){
+        $start=[DateTimeOffset]::Now.ToString('o')
+        $child=Start-RepoProcess -UserProfile $user -ScriptPath $Script -Arguments $Arguments -WorkingDirectory $root
+        try{
+            if(-not$child.Process.WaitForExit(180000)){$child.Process.Kill($true);throw "Compatibility child timeout: $Name"}
+            $out=$child.StdOut.GetAwaiter().GetResult();$err=$child.StdErr.GetAwaiter().GetResult()
+            [IO.File]::WriteAllText((Join-Path $logRoot ($Name+'.stdout.log')),$out)
+            [IO.File]::WriteAllText((Join-Path $logRoot ($Name+'.stderr.log')),$err)
+            [ordered]@{name=$Name;script=$Script;arguments=$Arguments;start=$start;end=[DateTimeOffset]::Now.ToString('o');exit_code=$child.Process.ExitCode;timed_out=$false}|ConvertTo-Json -Depth 6|Set-Content (Join-Path $logRoot ($Name+'.json'))
+            Write-Host "compatibility step $Name exit=$($child.Process.ExitCode)"
+            return [pscustomobject]@{ExitCode=$child.Process.ExitCode;StdOut=$out;StdErr=$err}
+        }finally{$child.Process.Dispose()}
+    }
+    function UC-Install($Name,$Workspace,$Repo,$Preset){UC-Run $Name (Join-Path $Repo 'install.ps1') @('-WorkspaceRoot',$Workspace,'-RepoRoot',$Repo,'-Preset',$Preset)}
+    function UC-Uninstall($Name,$Workspace,$Repo){UC-Run $Name (Join-Path $SourceRoot 'uninstall.ps1') @('-WorkspaceRoot',$Workspace,'-RepoRoot',$Repo)}
+    function UC-Verify($Name,$Workspace,$Repo,$Scope='All'){UC-Run $Name (Join-Path $Repo 'tests/verify-installation.ps1') @('-WorkspaceRoot',$Workspace,'-RepoRoot',$Repo,'-UserProfileRoot',$user,'-Scope',$Scope)}
+    function UC-Snapshot($Name){
+        $rows=@(foreach($base in @($user,$full,$governed,$core)){
+            $q=[Collections.Generic.Queue[string]]::new();$q.Enqueue($base)
+            while($q.Count){foreach($i in Get-ChildItem -LiteralPath $q.Dequeue() -Force|Sort-Object FullName){
+                if(($i.Attributes-band[IO.FileAttributes]::ReparsePoint)-ne0){'L|'+$i.FullName+'|'+($i.Target-join'|')}
+                elseif($i.PSIsContainer){'D|'+$i.FullName;$q.Enqueue($i.FullName)}else{'F|'+$i.FullName+'|'+(Get-FileHash $i.FullName).Hash}
+            }}
+        })
+        $registryFile=Join-Path $user '.dev-harness/install-registry.json'
+        $registryObservation=if(Test-Path $registryFile){Get-Content $registryFile -Raw|ConvertFrom-Json -AsHashtable}else{$null}
+        $manifestObservations=@(if(Test-Path (Join-Path $user '.dev-harness/backups')){foreach($file in Get-ChildItem (Join-Path $user '.dev-harness/backups') -Filter install-manifest.json -Recurse -File){$m=Get-Content $file.FullName -Raw|ConvertFrom-Json -AsHashtable;[ordered]@{path=$file.FullName;sha256=(Get-FileHash $file.FullName).Hash;status=$m.transaction_status;source=$m.repo_root;workspace=$m.workspace_root;preset=$m.effective_preset;ownership=$m.feature_ownership}}})
+        [ordered]@{registry=$registryObservation;manifests=$manifestObservations;pending_install=Test-Path (Join-Path $user '.dev-harness/install-transaction.json');pending_uninstall=Test-Path (Join-Path $user '.dev-harness/uninstall-transaction.json')}|ConvertTo-Json -Depth 30|Set-Content (Join-Path $logRoot ($Name+'.state.json'))
+
+        $rows|Set-Content (Join-Path $logRoot ($Name+'.snapshot'));return $rows
+    }
+    function UC-Registry {Get-Content (Join-Path $user '.dev-harness/install-registry.json') -Raw|ConvertFrom-Json -AsHashtable}
+    $savedProfile=$env:USERPROFILE
+    try{
+        foreach($rel in @(git -C $SourceRoot -c core.quotepath=false ls-files)){
+            Copy-RepoPathToFixture -SourceRoot $SourceRoot -FixtureRoot $a -RelativePath $rel
+            Copy-RepoPathToFixture -SourceRoot $SourceRoot -FixtureRoot $c -RelativePath $rel
+        }
+        $zip=Join-Path $root 'h04.zip';git -C $SourceRoot archive --format=zip "--output=$zip" 21dc2f15168fa9f001f031704ef9fbc06b1daee7
+        if($LASTEXITCODE-ne0){throw 'Required H04 history unavailable'}
+        [IO.Compression.ZipFile]::ExtractToDirectory($zip,$b)
+        [ordered]@{old_shared=$a;old_shared_code='current tested tree, not dirty daily code';old_core=$b;old_core_commit='21dc2f15168fa9f001f031704ef9fbc06b1daee7';new_source=$c;uninstall_executable=(Join-Path $SourceRoot 'uninstall.ps1');real_profile_copied=$false}|ConvertTo-Json|Set-Content (Join-Path $logRoot 'sources.json')
+        foreach($h in @('.claude','.codex','.agents')){$p=Join-Path $user ($h+'/skills/external-user');[void][IO.Directory]::CreateDirectory($p);[IO.File]::WriteAllText((Join-Path $p 'SKILL.md'),'external fixture')}
+        $p=Join-Path $user '.codex/skills/.system';[void][IO.Directory]::CreateDirectory($p);[IO.File]::WriteAllText((Join-Path $p 'host-marker.txt'),'host fixture')
+        $settings='{"hooks":{"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"echo EXTERNAL_FIXTURE"}]}]},"external_fixture":true}'
+        [IO.File]::WriteAllText((Join-Path $user '.claude/settings.json'),$settings);[IO.File]::WriteAllText((Join-Path $user '.codex/hooks.json'),$settings)
+        [IO.File]::WriteAllText((Join-Path $user '.codex/config.toml'),'# fixture only; no credentials')
+        foreach($w in @($full,$governed,$core)){[IO.File]::WriteAllText((Join-Path $w 'business.txt'),'business fixture');[void][IO.Directory]::CreateDirectory((Join-Path $w 'docs/tasks/retained'));[IO.File]::WriteAllText((Join-Path $w 'docs/tasks/retained/user.md'),'user notes, not Evidence')}
+        foreach($v in @(@{n='full';w=$full;s=$a;p='full'},@{n='governed';w=$governed;s=$a;p='governed'},@{n='core';w=$core;s=$b;p='core'})){
+            if($v.n -ceq 'core'){
+                foreach($current in @(@{n='full';w=$full},@{n='governed';w=$governed})){
+                    $run=UC-Verify ('before-older-core-all-'+$current.n) $current.w $a
+                    UC-Check ($run.ExitCode-eq0) ('matching-version All before older core '+$current.n)
+                }
+            }
+            $run=UC-Install ('install-'+$v.n) $v.w $v.s $v.p;UC-Check ($run.ExitCode-eq0) ('normal setup '+$v.n)
+            if($run.ExitCode-ne0){throw "Fixture setup: $($run.StdErr)"}
+        }
+        $tokens=$null;$errors=$null
+        $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $SourceRoot 'tests/verify-v2-task-state.ps1'),[ref]$tokens,[ref]$errors)
+        . ([scriptblock]::Create((@($ast.FindAll({param($n)$n-is[Management.Automation.Language.FunctionDefinitionAst]-and$n.Name-in@('Digest','Write-Contract')},$false)|ForEach-Object {$_.Extent.Text})-join"`n")))
+        $contract=Write-Contract $core 'retained-task' 'request.json'
+        $run=UC-Run 'create-task' (Join-Path $b 'scripts/task.ps1') @('create','-WorkspaceRoot',$core,'-RepoRoot',$b,'-TaskId','retained-task','-Contract',$contract,'-AsJson')
+        UC-Check ($run.ExitCode-eq0) 'normal task creation without fabricated Evidence';if($run.ExitCode-ne0){throw 'Task setup failed'}
+        foreach($v in @(@{n='full';w=$full},@{n='governed';w=$governed})){
+            $run=UC-Verify ('initial-shared-hooks-'+$v.n) $v.w $a 'SharedHooks'
+            UC-Check ($run.ExitCode-eq0) ('mixed-version shared hooks '+$v.n)
+            # The older installer writes a different user-global Claude bootstrap.
+            $run=UC-Verify ('initial-all-'+$v.n) $v.w $a
+            UC-Check ($run.ExitCode-eq2 -and $run.StdOut -match '(?ms)^Errors:\s*\r?\n- Claude CLAUDE\.md[^\r\n]*(?:\r?\n)*\z') ('older core causes only Claude bootstrap template drift '+$v.n)
+        }
+        $run=UC-Verify 'initial-all-core' $core $b
+        UC-Check ($run.ExitCode-eq0) 'matching-version initial All core'
+        # Load only original definitions, never execute the main entry as a plan API.
+        foreach($spec in @(@{path='install.ps1';names=@('ConvertFrom-JsonDocument','Read-JsonObject','New-InstallRegistry','Add-ManifestToRegistry','Refresh-InstallRegistryManifestDigests','Get-RegisteredManifestStatusUpgradePlan','Assert-RegisteredInstallManifestIdentity')},@{path='uninstall.ps1';names=@('Read-JsonObject','Read-InstallManifest','Assert-NormalInstallManifestStatus','Assert-WorkspaceManifestIdentity','Assert-RegisteredManifestIdentity','Assert-RegisteredWorkspaceSelection','Get-RegisteredManifestOwner','Assert-GlobalHistoryState','Get-UninstallHistoricalSkillState','Assert-UninstallPreservedSkillWriteSet','Assert-ManagedBackupTarget','Assert-ManifestBackupBoundaries','Get-BackupRecordScope')})){
+            $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $SourceRoot $spec.path),[ref]$tokens,[ref]$errors)
+            . ([scriptblock]::Create((@($ast.FindAll({param($n)$n-is[Management.Automation.Language.FunctionDefinitionAst]},$false)|Where-Object {$_.Name-in$spec.names}|ForEach-Object {$_.Extent.Text})-join"`n")))
+        }
+        $env:USERPROFILE=$user;$registryPath=Join-Path $user '.dev-harness/install-registry.json';$registry=UC-Registry
+        $entry=@($registry.workspaces.Values|Where-Object workspace_root -eq $core)[0];$manifestPath=@($entry.manifests)[-1];$raw=Get-Content $manifestPath -Raw
+        $used=@(Get-PSDrive -PSProvider FileSystem|ForEach-Object {$_.Name.ToUpperInvariant()})+@([IO.DriveInfo]::GetDrives()|ForEach-Object {$_.Name.Substring(0,1).ToUpperInvariant()})
+        $letter=@(90..68|ForEach-Object {([char]$_).ToString()}|Where-Object {$_-notin$used-and$_-ne'V'})[0];$offline=$letter+':\uninstall-history'
+        foreach($case in @('online','offline','wrong-vault','wrong-user','wrong-repo')){
+            $m=$raw|ConvertFrom-Json -AsHashtable;$w=if($case-eq'online'){$core}else{$offline};$m.workspace_root=$w;$m.vault_path=[IO.Path]::Combine($w,'.assistant')
+            if($case-eq'wrong-vault'){$m.vault_path=[IO.Path]::Combine($w,'other')};if($case-eq'wrong-user'){$m.claude_home=Join-Path $root 'foreign-user'};if($case-eq'wrong-repo'){$m.repo_root=$c}
+            $installError='';$uninstallError=''
+            try{Assert-RegisteredInstallManifestIdentity -ManifestPath $manifestPath -Manifest $m -ExpectedWorkspaceRoot $w -ExpectedRepoRoot $b -RegistryPath $registryPath -ExpectedUserProfile $user}catch{$installError=$_.Exception.Message}
+            try{$ec=[ordered]@{workspace_root=$w;repo_root=$b;manifests=@($manifestPath)};Assert-RegisteredManifestIdentity -Entry $ec -WorkspaceKey (Get-WorkspaceRegistryKey $w) -ManifestPath $manifestPath -Manifest $m -RegistryPath $registryPath}catch{$uninstallError=$_.Exception.Message}
+            [ordered]@{case=$case;install_error=$installError;uninstall_error=$uninstallError}|ConvertTo-Json|Set-Content (Join-Path $logRoot ($case+'.identity.json'))
+            if($case-in@('online','offline')){UC-Check ($installError-eq''-and$uninstallError-eq'') "install/uninstall accept $case history: $uninstallError"}
+            else{UC-Check ($installError-match'identity|workspace|repo|user'-and$uninstallError-match'identity|workspace|repo|user'-and$uninstallError-notmatch'驱动器|drive') "both validators reject $case with identity reason"}
+        }
+        # Same minimal metadata fixture contract as the H03 owner; never install
+        # against this synthetic offline identity or alter a real registry.
+        $probeUser=Join-Path $root 'offline-identity-user';$probeBackup=Join-Path $probeUser '.dev-harness/backups/fixture'
+        [void][IO.Directory]::CreateDirectory($probeBackup)
+        $probeRegistryPath=Join-Path $probeUser '.dev-harness/install-registry.json';$probeManifestPath=Join-Path $probeBackup 'install-manifest.json'
+        $probeRepo=$letter+':\offline-source'
+        $probeManifest=[ordered]@{schema_version='install-manifest/v1.2';postimage_identity_contract='v1';workspace_root=$offline;repo_root=$probeRepo;vault_path=[IO.Path]::Combine($offline,'.assistant');claude_home=[IO.Path]::Combine($probeUser,'.claude');codex_home=[IO.Path]::Combine($probeUser,'.codex');agents_home=[IO.Path]::Combine($probeUser,'.agents');backup_root=$probeBackup;registry_path=$probeRegistryPath;transaction_status='committed';feature_ownership=[ordered]@{schema_version='feature-ownership/v1';skills=@();hooks=@()};backups=@()}
+        [IO.File]::WriteAllText($probeManifestPath,($probeManifest|ConvertTo-Json -Depth 15),[Text.UTF8Encoding]::new($false))
+        $probeRegistry=New-InstallRegistry
+        Add-ManifestToRegistry -Registry $probeRegistry -ManifestPath $probeManifestPath -WorkspaceRoot $offline -RepoRoot $probeRepo -VaultProfile minimal -InstalledAt 'synthetic-H03-fixture'
+        Refresh-InstallRegistryManifestDigests -Registry $probeRegistry
+        $offlineInstallError='';$offlineUninstallError='';$env:USERPROFILE=$probeUser
+        try{
+            try{Get-RegisteredManifestStatusUpgradePlan -Registry $probeRegistry -RegistryPath $probeRegistryPath -ExpectedUserProfile $probeUser -RequireManifestIntegrity $true|Out-Null}catch{$offlineInstallError=$_.Exception.Message}
+            try{Assert-GlobalHistoryState -GlobalHistory @($probeRegistry.global_manifest_history) -Workspaces $probeRegistry.workspaces -Registry $probeRegistry -RegistryPath $probeRegistryPath -RequireManifestIntegrity $true -RetiredManifestHistory @()|Out-Null}catch{$offlineUninstallError=$_.Exception.Message}
+        }finally{$env:USERPROFILE=$user}
+        [ordered]@{workspace=$offline;repo=$probeRepo;install_error=$offlineInstallError;uninstall_error=$offlineUninstallError;drive_created=$false;operation_executed=$false}|ConvertTo-Json|Set-Content (Join-Path $logRoot 'offline-complete-history.json')
+        UC-Check ($offlineInstallError-eq''-and$offlineUninstallError-eq'') ('offline workspace and RepoRoot pass complete historical identity chains: '+$offlineInstallError+' / '+$offlineUninstallError)
+
+        function UC-Validate($value){$null=Assert-GlobalHistoryState -GlobalHistory @($value.global_manifest_history) -Workspaces $value.workspaces -Registry $value -RegistryPath $registryPath -RequireManifestIntegrity $true -RetiredManifestHistory @($value.retired_manifest_history)}
+        function UC-Reject([string]$Label,[string]$Expected,[scriptblock]$Action){$message='';try{& $Action}catch{$message=$_.Exception.Message};UC-Check ($message-match$Expected) ($Label+': '+$message)}
+        $registryBefore=(Get-FileHash $registryPath).Hash
+        $bad=($registry|ConvertTo-Json -Depth 100)|ConvertFrom-Json -AsHashtable
+        $bad.manifest_digests[(Get-InstallManifestDigestRegistryKey -ManifestPath $manifestPath)]='0'*64
+        UC-Reject 'manifest digest tamper rejected' 'Registered install manifest digest mismatch' {UC-Validate $bad}
+        $bad=($registry|ConvertTo-Json -Depth 100)|ConvertFrom-Json -AsHashtable
+        $bad.workspaces[(Get-WorkspaceRegistryKey $core)].repo_root=$c
+        UC-Reject 'forged registered source rejected' 'repo owner does not match registry entry' {UC-Validate $bad}
+        foreach($skillName in @('planning','.system')){
+            $link=Join-Path $user ('.claude/skills/'+$skillName);$target=Get-TestJunctionTarget $link
+            $drift=Join-Path $root 'drift';[void][IO.Directory]::CreateDirectory($drift)
+            Remove-Item -LiteralPath $link -Force
+            [void](New-Item -ItemType Junction -Path $link -Target $drift)
+            try{UC-Reject ('managed link drift rejected '+$skillName) 'Shared Skill link differs from registered identity' {UC-Validate $registry}}
+            finally{Remove-Item -LiteralPath $link -Force;[void](New-Item -ItemType Junction -Path $link -Target $target)}
+        }
+        $target=Get-TestJunctionTarget (Join-Path $user '.claude/skills/planning')
+        $unowned=Join-Path $user '.claude/skills/unowned-compat';[void](New-Item -ItemType Junction -Path $unowned -Target $target)
+        try{UC-Reject 'unowned registered-source link rejected' 'User-global managed Skill has no registered ownership|Unowned same-source Skill link' {UC-Validate $registry}}
+        finally{Remove-Item -LiteralPath $unowned -Force}
+        $m=$raw|ConvertFrom-Json -AsHashtable
+        $payload=@($m.backups|Where-Object {$_.item_type-eq'file'-and$_.backup_path}|Select-Object -First 1)[0].backup_path
+        if(-not([IO.Path]::GetFullPath($payload).StartsWith($root+[IO.Path]::DirectorySeparatorChar))){throw 'Payload fixture path escaped'}
+        $holding=$payload+'.unavailable';Move-Item -LiteralPath $payload -Destination $holding
+        try{UC-Reject 'required restore payload remains mandatory' 'Missing backup payload:' {Assert-ManifestBackupBoundaries -Manifest $m -RequiredRestoreScopes @('workspace','user-global')}}
+        finally{Move-Item -LiteralPath $holding -Destination $payload}
+        UC-Reject 'actual unavailable operation path remains rejected' '驱动器|drive' {Assert-InstallStatePathHasNoReparsePoint -Path $offline -Label 'Current operation target'|Out-Null}
+        UC-Check ((Get-FileHash $registryPath).Hash-ceq$registryBefore) 'negative metadata/identity probes leave registry bytes unchanged'
+
+        $before=UC-Snapshot 'before-core-uninstall'
+        $run=UC-Uninstall 'uninstall-core' $core $b;$null=UC-Snapshot 'after-core-uninstall'
+        UC-Check ($run.ExitCode-eq0) ('mixed-source core uninstall commits with real old RepoRoot: '+$run.StdErr)
+        if($run.ExitCode-ne0){return}
+        $registry=UC-Registry
+        UC-Check (@($registry.workspaces.Values|Where-Object workspace_root -eq $core).Count-eq0) 'core registration consumed by native uninstall'
+        $consumed=Get-Content $manifestPath -Raw|ConvertFrom-Json -AsHashtable;UC-Check ($consumed.transaction_status-eq'uninstalled') 'fully consumed manifest status is uninstalled'
+        foreach($v in @(@{n='full';w=$full},@{n='governed';w=$governed})){$run=UC-Verify ('after-uninstall-'+$v.n) $v.w $a;UC-Check ($run.ExitCode-eq0) ('remaining '+$v.n+' owner usable')}
+        # Existing I02 fault: allow registry reads/writes but deny atomic replacement.
+        # The old uninstall is already committed; only the new failed install is recovered.
+        $gap=UC-Snapshot 'committed-uninstall-gap';$gapRegistry=(Get-FileHash $registryPath).Hash
+        $held=[IO.File]::Open($registryPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+        try{$run=UC-Install 'new-install-registry-fault' $core $c 'core'}finally{$held.Dispose()}
+        $journalPath=Join-Path $user '.dev-harness/install-transaction.json'
+        UC-Check ($run.ExitCode-ne0-and$run.StdErr-match'Install failed after writing recovery manifest'-and(Test-Path $journalPath)) 'new install fails at recoverable native commit boundary'
+        if($run.ExitCode-eq0-or-not(Test-Path $journalPath)){return}
+        $null=UC-Snapshot 'new-install-failed'
+        $journal=Get-Content $journalPath -Raw|ConvertFrom-Json -AsHashtable
+        $run=UC-Run 'recover-new-install' (Join-Path $SourceRoot 'uninstall.ps1') @('-RecoveryManifestPath',$journal.manifest_path,'-RepoRoot',$c)
+        UC-Check ($run.ExitCode-eq0) ('native recovery of new failed install: '+$run.StdErr)
+        if($run.ExitCode-ne0){return}
+        $recovered=UC-Snapshot 'new-install-recovered'
+        UC-Check ((Get-FileHash $registryPath).Hash-ceq$gapRegistry) 'recovery restores post-uninstall registry, not retired old registration'
+        $livePattern='\\user\\\.(claude|codex|agents)\\|\\(full|governed|core)\\'
+        UC-Check ((@($gap|Where-Object {$_-match$livePattern}|Sort-Object)-join"`n")-ceq(@($recovered|Where-Object {$_-match$livePattern}|Sort-Object)-join"`n")) 'recovery restores exact live assets and target gap state'
+        UC-Check (-not(Test-Path (Join-Path $core '.assistant/entry/task.ps1'))) 'committed old uninstall is not falsely undone by failed-install recovery'
+        foreach($v in @(@{n='full';w=$full},@{n='governed';w=$governed})){$run=UC-Verify ('after-recovery-'+$v.n) $v.w $a;UC-Check ($run.ExitCode-eq0) ('other owner usable after recovery '+$v.n)}
+        $run=UC-Install 'restore-old-core' $core $b 'core';UC-Check ($run.ExitCode-eq0) 'normal old-source reinstall restores core availability'
+        if($run.ExitCode-ne0){return}
+        $registry=UC-Registry;$restoredEntry=@($registry.workspaces.Values|Where-Object workspace_root -eq $core)[0]
+        UC-Check ($restoredEntry.repo_root-eq$b) 'restored core binds old B, not intended new C'
+        $run=UC-Verify 'restored-old-core-all' $core $b;UC-Check ($run.ExitCode-eq0) 'old-source restored installation All'
+        $run=UC-Run 'restored-old-core-diagnostic' (Join-Path $c 'scripts/diagnose-harness-host.ps1') @('-WorkspaceRoot',$core,'-RepoRoot',$b,'-UserProfileRoot',$user,'-CodexHome',(Join-Path $user '.codex'));UC-Check ($run.ExitCode-eq0) 'restored old B source observed by diagnostic'
+        $run=UC-Uninstall 'uninstall-restored-core' $core $b;UC-Check ($run.ExitCode-eq0) 'restored old core can be normally uninstalled'
+        if($run.ExitCode-ne0){return}
+
+        $run=UC-Install 'reinstall-core-new' $core $c 'core';UC-Check ($run.ExitCode-eq0) ('same workspace registers new source: '+$run.StdErr)
+        if($run.ExitCode-ne0){return}
+        $null=UC-Snapshot 'after-core-new-install';$registry=UC-Registry;$entry=@($registry.workspaces.Values|Where-Object workspace_root -eq $core)[0];UC-Check ($entry.repo_root-eq$c) 'new core registration binds destination'
+        $run=UC-Verify 'new-core-all' $core $c;UC-Check ($run.ExitCode-eq0) 'new core All'
+        $run=UC-Run 'new-core-status' (Join-Path $c 'scripts/harness-status.ps1') @('-WorkspaceRoot',$core,'-RepoRoot',$c,'-UserProfileRoot',$user);UC-Check ($run.ExitCode-eq0) 'new core status'
+        $run=UC-Run 'new-core-protocol' (Join-Path $c 'scripts/task.ps1') @('protocol','-WorkspaceRoot',$core,'-RepoRoot',$c,'-AsJson');UC-Check ($run.ExitCode-eq0) 'new core protocol'
+        $run=UC-Run 'new-core-diagnostic' (Join-Path $c 'scripts/diagnose-harness-host.ps1') @('-WorkspaceRoot',$core,'-RepoRoot',$c,'-UserProfileRoot',$user,'-CodexHome',(Join-Path $user '.codex'));UC-Check ($run.ExitCode-eq0) 'new core diagnostic binding'
+        foreach($v in @(@{n='full';w=$full;p='full'},@{n='governed';w=$governed;p='governed'})){
+            $run=UC-Uninstall ('migrate-uninstall-'+$v.n) $v.w $a;UC-Check ($run.ExitCode-eq0) ('normal '+$v.n+' uninstall for source change')
+            if($run.ExitCode-ne0){return}
+            $null=UC-Snapshot ('after-'+$v.n+'-uninstall')
+            if($v.n-eq'full'){
+                $registry=UC-Registry;$owners=@(foreach($k in $registry.workspaces.Keys){[ordered]@{workspace=$k;manifest=@($registry.workspaces[$k].manifests)[-1]}})
+                $plan=Get-InstallSharedSkillPlan -Registry $registry -HookCoordination ([pscustomobject]@{Owners=$owners}) -UserProfile $user -RepoRoot $c -RequestedSkills @() -Verification
+                UC-Check (@('codex','md-html','obsidian-memory'|Where-Object {$plan.Required.Contains($_)}).Count-eq0) 'retired full-only Skills are restoration state, not permanent demand'
+            }
+            $run=UC-Install ('migrate-install-'+$v.n) $v.w $c $v.p;UC-Check ($run.ExitCode-eq0) ('normal '+$v.n+' destination install preserves preset')
+            if($run.ExitCode-ne0){return}
+            $null=UC-Snapshot ('after-'+$v.n+'-install')
+            $registry=UC-Registry;$entry=@($registry.workspaces.Values|Where-Object workspace_root -eq $v.w)[0];$m=Get-Content @($entry.manifests)[-1] -Raw|ConvertFrom-Json -AsHashtable
+            UC-Check ($entry.repo_root-eq$c-and$m.effective_preset-eq$v.p) ($v.n+' source and preset verified')
+        }
+        foreach($v in @(@{n='full';w=$full},@{n='governed';w=$governed},@{n='core';w=$core})){
+            $run=UC-Verify ('final-all-'+$v.n) $v.w $c;UC-Check ($run.ExitCode-eq0) ('final destination All '+$v.n)
+            $run=UC-Run ('final-status-'+$v.n) (Join-Path $c 'scripts/harness-status.ps1') @('-WorkspaceRoot',$v.w,'-RepoRoot',$c,'-UserProfileRoot',$user);UC-Check ($run.ExitCode-eq0) ('final status '+$v.n)
+            $run=UC-Run ('final-protocol-'+$v.n) (Join-Path $c 'scripts/task.ps1') @('protocol','-WorkspaceRoot',$v.w,'-RepoRoot',$c,'-AsJson');UC-Check ($run.ExitCode-eq0) ('final protocol '+$v.n)
+            $run=UC-Run ('final-diagnostic-'+$v.n) (Join-Path $c 'scripts/diagnose-harness-host.ps1') @('-WorkspaceRoot',$v.w,'-RepoRoot',$c,'-UserProfileRoot',$user,'-CodexHome',(Join-Path $user '.codex'));UC-Check ($run.ExitCode-eq0) ('final source diagnostic '+$v.n)
+        }
+
+        foreach($rel in @('.claude/settings.json','.codex/hooks.json')){
+            $settings=Get-Content (Join-Path $user $rel) -Raw|ConvertFrom-Json
+            UC-Check ($settings.external_fixture -and @($settings.hooks.PreToolUse|ForEach-Object {$_.hooks}|Where-Object command -eq 'echo EXTERNAL_FIXTURE').Count-eq1) ('custom Hook/config preserved '+$rel)
+        }
+
+        $after=UC-Snapshot 'core-complete';$pattern='\\business.txt\||\\docs\\tasks\\|\\.assistant\\runtime\\|\\request.json\||external-user|host-marker.txt|\\.codex\\config.toml\|'
+        UC-Check ((@($before|Where-Object {$_-match$pattern}|Sort-Object)-join"`n")-ceq(@($after|Where-Object {$_-match$pattern}|Sort-Object)-join"`n")) 'business, task, external Skill, host system and user config bytes survive'
+    }catch{Add-Failure ('compatibility preparation/execution error: '+$_.Exception.Message)}finally{$env:USERPROFILE=$savedProfile}
+}
+
+
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 }
@@ -160,6 +387,13 @@ $script:Failures = [System.Collections.Generic.List[string]]::new()
 $results = [System.Collections.Generic.List[object]]::new()
 $mixedProcesses = [System.Collections.Generic.List[object]]::new()
 
+Invoke-UninstallCompatibilityRegression -SourceRoot $sourceRoot
+if ($UninstallCompatibilityOnly) {
+    $script:Checks | ForEach-Object { Write-Output ('[PASS] '+$_) }
+    $script:Failures | ForEach-Object { Write-Output ('[FAIL] '+$_) }
+    if ($script:Failures.Count) { exit 1 }
+    exit 0
+}
 try {
     foreach ($relativePath in @(
             'install.ps1'
@@ -1286,6 +1520,28 @@ try {
         Add-Check 'last-workspace resume publishes independently bound receipt markers for multiple RepoRoots before restore'
     } else {
         Add-Failure ("multi-RepoRoot receipt uninstall must group marker intents by manifest RepoRoot and resume safely; installs={0},{1}; uninstall_a={2}; blocked={3}; write_free={4}; resume={5}; markers={6},{7}; outputs={8} / {9}" -f $receiptInstallA.ExitCode,$receiptInstallB.ExitCode,$receiptUninstallA.ExitCode,$receiptBlockedFinalUninstall.ExitCode,$receiptBlockedFinalWasWriteFree,$receiptResumedFinalUninstall.ExitCode,$receiptMarkerAAfterResume,$receiptMarkerBAfterResume,(@($receiptBlockedFinalUninstall.Output) -join ' | '),(@($receiptResumedFinalUninstall.Output) -join ' | '))
+    }
+
+    # Reuse the legal multi-source receipt fixture after its native consumption.
+    # Re-register the same workspace under B; never rewrite a consumed manifest.
+    if ($receiptResumedFinalUninstall.ExitCode -eq 0 -and -not (Test-Path $receiptRegistryPath)) {
+        $receiptFreshInstall = Invoke-RepoScript -UserProfile $receiptUserProfile -ScriptPath (Join-Path $sourceRoot 'install.ps1') -Arguments @{
+            WorkspaceRoot=$receiptWorkspaceA;RepoRoot=$receiptRepoB;Preset='core'
+        }
+        $results.Add($receiptFreshInstall) | Out-Null
+        if ($receiptFreshInstall.ExitCode -ne 0) { throw ('Receipt cross-source reinstall failed: '+($receiptFreshInstall.Output -join ' | ')) }
+        $receiptFreshRegistry = Read-JsonFile $receiptRegistryPath
+        $receiptFreshEntries = @($receiptFreshRegistry.workspaces.PSObject.Properties)
+        $receiptFreshVerify = Invoke-RepoScript -UserProfile $receiptUserProfile -ScriptPath (Join-Path $sourceRoot 'tests/verify-installation.ps1') -Arguments @{
+            WorkspaceRoot=$receiptWorkspaceA;RepoRoot=$receiptRepoB;UserProfileRoot=$receiptUserProfile;Scope='All'
+        }
+        $results.Add($receiptFreshVerify) | Out-Null
+        if ($receiptFreshInstall.ExitCode -eq 0 -and $receiptFreshVerify.ExitCode -eq 0 -and $receiptFreshEntries.Count -eq 1 -and $receiptFreshEntries[0].Value.repo_root -eq $receiptRepoB -and $receiptFreshEntries[0].Value.workspace_root -eq $receiptWorkspaceA -and [IO.File]::ReadAllText($receiptMarkerPathA).Trim() -eq $receiptPointerDigestA -and [IO.File]::ReadAllText($receiptMarkerPathB).Trim() -eq $receiptPointerDigestB) {
+            Add-Check 'consumed multi-source receipts permit fresh cross-source registration without reviving old source ownership'
+        } else { Add-Failure 'consumed receipt cross-source reinstall or exact marker preservation failed' }
+        if ($env:DEV_HARNESS_COMPAT_LOG_ROOT) {
+            [ordered]@{workspace=$receiptWorkspaceA;old_source=$receiptRepoA;new_source=$receiptRepoB;uninstall_exit=$receiptResumedFinalUninstall.ExitCode;install_exit=$receiptFreshInstall.ExitCode;verify_exit=$receiptFreshVerify.ExitCode;registered_sources=@($receiptFreshEntries|ForEach-Object {$_.Value.repo_root});install_output=$receiptFreshInstall.Output;verify_output=$receiptFreshVerify.Output} | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $env:DEV_HARNESS_COMPAT_LOG_ROOT 'receipt-cross-source.json')
+        }
     }
 
     $unregisteredInstall = Invoke-RepoScript -UserProfile $unregisteredUserProfile -ScriptPath (Join-Path $RepoRoot 'install.ps1') -Arguments @{

@@ -1,4 +1,6 @@
 ---
+status: superseded
+superseded_by: docs/quick-start.md
 name: review
 description: Use when the task is in PLAN_REVIEW or CODE_REVIEW and a new append-only review run must be written into `plan.md`.
 ---

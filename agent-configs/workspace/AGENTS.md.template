@@ -4,13 +4,16 @@
 - Default to Simplified Chinese for explanations and summaries; keep code identifiers in their native language and never expose secrets or private data.
 - Use `.assistant\entry\task.ps1 status` only for an explicit v2 recovery/status request; new requests resolve admission without reading task/current state. Legacy history is explicit maintenance input only.
 - Use `rg`, file reading, and manual inspection only when directly relevant. Optional providers are never required for core routing.
+- Read fixed project/operation documents through the opted-in `PROJECT.md` entry first. When historical background is needed, use `.assistant\entry\context.ps1 recall -Query <keywords>` for excerpts, then `read -Ref <ref>` for selected sources; add `-IncludeSessions` only for Codex history. Retrieval is read-only and never activates a task. Without project opt-in, ordinary Direct does not automatically retrieve or record history.
 - Current requirements and business correctness take precedence over stale tests or snapshots unless historical compatibility is explicitly required.
+- Opted-in project Markdown notes are business deliverables: they alone do not set Persistence=durable or DurableArtifactsRequested, escalate Direct, or create runtime/current/Evidence. Preserve PROJECT.md and linked documents during install/update.
+- Classify ordinary business source edits, including approval people, roles, permissions, and data relationships, as `ActionKind=source-code` with changed paths and no execution command. Names, directory names, and business records alone do not require Approval or independent review. Evaluate actual commands, database operations, deployment, and other Critical triggers separately; never use source-code routing for execution.
 - When the user explicitly authorizes and names a Workspace configuration file, database credentials and external-service keys may be persisted there, including production configuration files. This ordinary Runtime capability does not require Vault, KMS, a Secret Provider, Release Qualification, or an exact Host/model version. Persistence is not disclosure: never echo sensitive values into replies, logs, task artifacts, Evidence, reviews, PRs, CI artifacts, or unrelated files.
 - Report such business changes as: `已更新指定生产配置文件；数据库和外部服务敏感字段未在报告中回显。`
 - Never read an old `.assistant\entry\AGENTS.md` lifecycle shim or route into v1. Use explicit migration maintenance for retained legacy history.
 
 <!-- BEGIN GENERATED ENTRY CONTRACT -->
-<!-- source-sha256: 4838491707510140a0c698ac26d0faa8b45d6dde90d03427dc78006f0643396c -->
+<!-- source-sha256: 63315f7e09d86098f98765078d1382bb9f711bc7dc46ccec22daddf0b3e3e37c -->
 # Entry Contract Bootstrap
 
 Bootstrap only; routes/lifecycle stay lazy.
@@ -19,12 +22,13 @@ Bootstrap only; routes/lifecycle stay lazy.
 - `auto_resolves_to`: `existing-v2-or-admitted-v2-new-task`
 - `v2_entry_activation`: `v2-only-with-new-work-admission`
 
-- New identity/artifact-free: use host/user-surfaced `HARNESS_PROTOCOL`; else read its process value once; never guess. Resolve admission once with `.assistant\entry\task.ps1 protocol`: only `auto|v2` are supported. Workspace `new_work=paused` stops new work even with explicit v2; missing Runtime Default admits v2, invalid/unavailable decisions block. No task `status`, nested shim, or task/runtime/current inspection.
-- Known identity: `.assistant\entry\task.ps1 protocol -TaskId {task_id}`; valid v2 state wins and may status/resume. Legacy artifact presence stops with an explicit-migration diagnostic, without reading its contents. Explicit v1 and invalid input fail closed. Never create, resume, or migrate a legacy task implicitly.
+- New identity/artifact-free: use host/user-surfaced `HARNESS_PROTOCOL`; else read its process value once; never guess. Resolve admission once via `.assistant\entry\task.ps1 protocol`: only `auto|v2`; `new_work=paused` blocks new work; missing Runtime Default admits v2, invalid/unavailable blocks. No task `status`, nested shim, or task/runtime/current inspection.
+- Known identity: `.assistant\entry\task.ps1 protocol -TaskId {task_id}`; valid v2 state wins and may status/resume. Legacy artifacts require explicit migration; do not read or resume. v1/invalid fails closed.
 - After admission classify inline. Selected v2 Direct loads no `entry-router`, `orchestrator`, lifecycle skill, Memory, Team, or Provider; hand off now. No status/runtime/lifecycle fan-out.
-- An unresolved Requirement or product decision blocks every write and enters Ask. Protected/expanded/non-Direct reroute before writes.
-- A public-contract change found outside confirmed scope stays unresolved until the user explicitly confirms this change; continuation alone enters Ask and authorizes no write.
-- Clear Direct: relevant targets -> minimum edit -> minimum focused checks covering all confirmed acceptance criteria -> one bounded diff/self-review -> report. Stop only when all required checks pass. Expand only after failure/ambiguity. No task/runtime/current/lifecycle writes.
+- If PROJECT.md declares `harness_continuity: enabled`, follow its linked context/record/operation rules before development, resume or compaction recovery. No opt-in: no change.
+- Unresolved Requirement or product decision enters Ask; opted-in projects may save a `pending clarification` draft in change records (original request, known source/date, unanswered questions only). Ask and all other writes stay blocked. Protected/expanded/non-Direct reroute before writes.
+- Out-of-scope public-contract changes require explicit confirmation; continuation alone enters Ask and authorizes no write.
+- Clear Direct: minimum edit -> minimum focused checks covering all confirmed acceptance criteria -> one bounded diff/self-review -> report. Stop only when all required checks pass. Expand only after failure/ambiguity. No task/runtime/current/lifecycle writes.
 - Read-only work performs zero writes. Report actual commands/results, self-review, gaps; `not_run`/unavailable is not pass.
-- Legacy lifecycle and shim loading are retired. Stop-loss pauses new work; recovery uses v2. Explicit migration/history maintenance is isolated and requires its own authorization.
+- Legacy lifecycle and shim loading are retired. Stop-loss pauses new work; recovery uses v2. History/migration needs explicit authorization.
 <!-- END GENERATED ENTRY CONTRACT -->

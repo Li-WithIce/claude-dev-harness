@@ -80,7 +80,112 @@ New-Item -ItemType Directory -Path $scratchRoot | Out-Null
 $checks = New-Object System.Collections.Generic.List[string]
 $failures = New-Object System.Collections.Generic.List[string]
 
+function Invoke-H03HistoricalIdentityRegression {
+    param([string]$SourceRoot,[string]$FixtureRoot)
+    . (Join-Path $SourceRoot 'scripts/install-transaction-common.ps1')
+    $tokens=$null;$errors=$null
+    $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $SourceRoot 'install.ps1'),[ref]$tokens,[ref]$errors)
+    if($errors.Count){throw 'H03 installer parsing failed'}
+    $needed=@('ConvertFrom-JsonDocument','Read-JsonObject','New-InstallRegistry','Add-ManifestToRegistry','Refresh-InstallRegistryManifestDigests','Assert-RegisteredInstallManifestIdentity','Get-RegisteredManifestStatusUpgradePlan')
+    foreach($definition in $ast.FindAll({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst]},$false)){
+        if($definition.Name -in $needed){Set-Item -Path ("Function:local:"+$definition.Name) -Value $definition.Body.GetScriptBlock()}
+    }
+    $h03Checks=[Collections.Generic.List[string]]::new();$h03Failures=[Collections.Generic.List[string]]::new()
+    function H03-Check([bool]$Condition,[string]$Label,[string]$Detail='') {
+        if($Condition){$h03Checks.Add($Label)}else{$h03Failures.Add("$Label : $Detail")}
+    }
+    $usedDrives=@(Get-PSDrive -PSProvider FileSystem|ForEach-Object {$_.Name.ToUpperInvariant()})
+    $usedDrives+=@([IO.DriveInfo]::GetDrives()|ForEach-Object {$_.Name.Substring(0,1).ToUpperInvariant()})
+    $missingDrive=@(90..68|ForEach-Object {([char]$_).ToString()}|Where-Object {$_ -notin $usedDrives})[0]
+    if(-not $missingDrive){throw 'H03 fixture requires an unmapped drive letter'}
+    $offlineWorkspace='{0}:\{1}' -f $missingDrive,'h03-offline-workspace'
+    $offlineRepo='{0}:\{1}' -f $missingDrive,'h03-offline-repo'
+    $normalWorkspace=Join-Path $FixtureRoot 'online-workspace'
+    [void][IO.Directory]::CreateDirectory($normalWorkspace)
+    function New-H03Fixture([string]$Name,[string]$Workspace=$normalWorkspace,[string]$Source=$SourceRoot) {
+        $user=Join-Path $FixtureRoot $Name
+        $backup=Join-Path $user '.dev-harness/backups/fixture'
+        [void][IO.Directory]::CreateDirectory($backup)
+        $manifestPath=Join-Path $backup 'install-manifest.json'
+        $registryPath=Join-Path $user '.dev-harness/install-registry.json'
+        $manifest=[ordered]@{schema_version='install-manifest/v1.2';postimage_identity_contract='v1';workspace_root=$Workspace;repo_root=$Source;vault_path=[IO.Path]::Combine($Workspace,'.assistant');claude_home=[IO.Path]::Combine($user,'.claude');codex_home=[IO.Path]::Combine($user,'.codex');agents_home=[IO.Path]::Combine($user,'.agents');backup_root=$backup;registry_path=$registryPath;transaction_status='committed';backups=@()}
+        [IO.File]::WriteAllText($manifestPath,($manifest|ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false))
+        $registry=New-InstallRegistry
+        Add-ManifestToRegistry -Registry $registry -ManifestPath $manifestPath -WorkspaceRoot $Workspace -RepoRoot $Source -VaultProfile minimal -InstalledAt 'synthetic-fixture'
+        Refresh-InstallRegistryManifestDigests -Registry $registry
+        return @{User=$user;ManifestPath=$manifestPath;RegistryPath=$registryPath;Manifest=$manifest;Registry=$registry;Workspace=$Workspace}
+    }
+    function H03-Run($Fixture) {
+        $before=@(Get-ChildItem $Fixture.User -Recurse -Force|ForEach-Object {if($_.PSIsContainer){'D|'+$_.FullName}else{'F|'+$_.FullName+'|'+(Get-FileHash -LiteralPath $_.FullName).Hash}}|Sort-Object)
+        $message='';$errorId='';$jsonError=$false
+        try{$null=Get-RegisteredManifestStatusUpgradePlan -Registry $Fixture.Registry -RegistryPath $Fixture.RegistryPath -ExpectedUserProfile $Fixture.User -RequireManifestIntegrity $true}
+        catch{$message=$_.Exception.Message;$errorId=$_.FullyQualifiedErrorId;$exception=$_.Exception;while($exception){if($exception -is [Text.Json.JsonException]){$jsonError=$true};$exception=$exception.InnerException}}
+        $after=@(Get-ChildItem $Fixture.User -Recurse -Force|ForEach-Object {if($_.PSIsContainer){'D|'+$_.FullName}else{'F|'+$_.FullName+'|'+(Get-FileHash -LiteralPath $_.FullName).Hash}}|Sort-Object)
+        H03-Check (@(Compare-Object $before $after).Count -eq 0) 'H03 metadata validation leaves fixture files byte-identical'
+        return @{Error=$message;ErrorId=$errorId;JsonError=$jsonError}
+    }
+    foreach($candidate in @($normalWorkspace,($normalWorkspace+'\'),$normalWorkspace.Replace('\','/'))){
+        H03-Check ((Get-NormalizedPath ([IO.Path]::Combine($candidate,'.assistant'))) -ceq (Get-NormalizedPath (Join-Path $candidate '.assistant'))) 'H03 existing-drive normalized Join-Path and Combine identities agree'
+    }
+    $online=New-H03Fixture 'normal'
+    $result=H03-Run $online
+    H03-Check (-not $result.Error) 'H03 normal-drive manifest metadata validates' $result.Error
+    $offline=New-H03Fixture 'offline' $offlineWorkspace $offlineRepo
+    $result=H03-Run $offline
+    H03-Check (-not $result.Error) 'H03 local manifest with offline workspace/repo passes metadata validation' "$($result.ErrorId): $($result.Error)"
+    $cases=@(
+        @{Name='missing';Expected='^Registered install manifest is missing:'},
+        @{Name='corrupt';Expected='json'},
+        @{Name='digest';Expected='^Registered install manifest digest mismatch:'},
+        @{Name='vault';Expected='^Registered install manifest path or user identity is invalid:'},
+        @{Name='offline-vault';Expected='^Registered install manifest path or user identity is invalid:'},
+        @{Name='workspace';Expected='^Registered install manifest identity does not match its owner:'},
+        @{Name='repo';Expected='^Registered install manifest identity does not match its owner:'},
+        @{Name='user';Expected='^Registered install manifest path or user identity is invalid:'},
+        @{Name='registry';Expected='^Registered install manifest path or user identity is invalid:'},
+        @{Name='backup-root';Expected='^Registered install manifest path or user identity is invalid:'},
+        @{Name='backup-shape';Expected='^Install manifest backup record is missing expected postimage:'},
+        @{Name='committed';Expected='^Registered install manifest is not committed:'},
+        @{Name='duplicate-history';Expected='^Install registry global history contains a duplicate manifest:'},
+        @{Name='duplicate-owner';Expected='^Install manifest is registered by more than one workspace:'}
+    )
+    foreach($case in $cases){
+        $fixture=if($case.Name -ceq 'offline-vault'){New-H03Fixture $case.Name $offlineWorkspace $offlineRepo}else{New-H03Fixture $case.Name}
+        switch($case.Name){
+            missing{[IO.File]::Delete($fixture.ManifestPath)}
+            corrupt{[IO.File]::WriteAllText($fixture.ManifestPath,'{broken');Refresh-InstallRegistryManifestDigests $fixture.Registry}
+            digest{$fixture.Registry.manifest_digests[(Get-InstallManifestDigestRegistryKey $fixture.ManifestPath)]='0'*64}
+            vault{$fixture.Manifest.vault_path=[IO.Path]::Combine($fixture.Workspace,'wrong-vault')}
+            offline-vault{$fixture.Manifest.vault_path=[IO.Path]::Combine($fixture.Workspace,'wrong-vault')}
+            workspace{$fixture.Manifest.workspace_root=[IO.Path]::Combine($fixture.Workspace,'wrong-owner')}
+            repo{$fixture.Manifest.repo_root=[IO.Path]::Combine($SourceRoot,'wrong-repo')}
+            user{$fixture.Manifest.claude_home=[IO.Path]::Combine($fixture.User,'wrong-user')}
+            registry{$fixture.Manifest.registry_path=[IO.Path]::Combine($fixture.User,'wrong-registry.json')}
+            backup-root{$fixture.Manifest.backup_root=$FixtureRoot}
+            backup-shape{$fixture.Manifest.backups=@(@{path='fixture'})}
+            committed{$fixture.Manifest.transaction_status='in-progress'}
+            duplicate-history{$fixture.Registry.global_manifest_history+=@($fixture.ManifestPath)}
+            duplicate-owner{Add-ManifestToRegistry -Registry $fixture.Registry -ManifestPath $fixture.ManifestPath -WorkspaceRoot ([IO.Path]::Combine($normalWorkspace,'other-owner')) -RepoRoot $SourceRoot -VaultProfile minimal -InstalledAt 'synthetic-fixture'}
+        }
+        if($case.Name -in @('vault','offline-vault','workspace','repo','user','registry','backup-root','backup-shape','committed')){
+            [IO.File]::WriteAllText($fixture.ManifestPath,($fixture.Manifest|ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false))
+            Refresh-InstallRegistryManifestDigests $fixture.Registry
+        }
+        $result=H03-Run $fixture
+        $expected=if($case.Expected -ceq 'json'){$result.JsonError}else{$result.Error -match $case.Expected}
+        H03-Check $expected "H03 rejects $($case.Name) with its original specific validation reason" "$($result.ErrorId): $($result.Error)"
+    }
+    $targetRejected=$false
+    try{$null=Assert-InstallStatePathHasNoReparsePoint -Path $offlineWorkspace -Label 'Current operation target'}catch{$targetRejected=$_.FullyQualifiedErrorId -like 'DriveNotFound,*'}
+    H03-Check $targetRejected 'H03 inaccessible current operation target still fails filesystem validation'
+    H03-Check (-not (Get-PSDrive -Name $missingDrive -ErrorAction SilentlyContinue)) 'H03 never creates or maps the unavailable drive'
+    foreach($label in $h03Checks){Write-Output "[PASS] $label"}
+    foreach($label in $h03Failures){Write-Output "[FAIL] $label"}
+    if($h03Failures.Count){throw "H03 historical identity regression failed: $($h03Failures.Count)"}
+}
+
 try {
+Invoke-H03HistoricalIdentityRegression -SourceRoot $RepoRoot -FixtureRoot (Join-Path $scratchRoot 'h03-history')
 $installSource = Get-Content -LiteralPath (Join-Path $RepoRoot 'install.ps1') -Raw -Encoding utf8
 if ($installSource.Contains("if (`$pointerDigest -match '^[0-9a-f]{64}$' -and")) {
     $checks.Add('receipt retry skips pointer marker creation when both receipt and pointer are absent') | Out-Null
@@ -1358,6 +1463,59 @@ if ($legacyRetryResult.ExitCode -eq 0 -and
     $failures.Add(("repeating a committed rebaseline digest should safely retry without duplicating its receipt or reactivating legacy history; exit={0}; receipt_count={1}; prefix={2}; history={3}; legacy={4}; output={5}" -f $legacyRetryResult.ExitCode,$retryReceiptCount,$retryPreservesActivePrefix,$retryHistoryValid,$retryContainsLegacy,($legacyRetryResult.Output -replace '\r?\n',' | '))) | Out-Null
 }
 
+# The native warm-up is deliberately outside the consumable history. Do not
+# invent leaf records: prove the legacy boundary and the real restore write set.
+$legacyUninstallAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $legacyRepoRoot 'uninstall.ps1'),[ref]$null,[ref]$null)
+$legacyDefinitions=@($legacyUninstallAst.FindAll({param($n)$n-is[Management.Automation.Language.FunctionDefinitionAst]},$false)|ForEach-Object {$_.Extent.Text})
+$legacyReadOnlyProbe={
+    param($Definitions,$User,$RegistryPath,$Workspace,$ManifestPaths,[switch]$CorruptRegistryDigest)
+    . ([scriptblock]::Create($Definitions-join"`n"))
+    $previousUser=$env:USERPROFILE;$env:USERPROFILE=$User
+    try{
+        $registry=Read-JsonObject $RegistryPath
+        if($CorruptRegistryDigest){$key=Get-InstallManifestDigestRegistryKey -ManifestPath $ManifestPaths[-1];$registry.manifest_digests[$key]='0'*64}
+        $null=Assert-GlobalHistoryState -GlobalHistory @($registry.global_manifest_history) -Workspaces $registry.workspaces -Registry $registry -RegistryPath $RegistryPath -RequireManifestIntegrity $true -RetiredManifestHistory @($registry.retired_manifest_history)
+        $preserved=@(Get-UninstallHistoricalSkillState -Registry $registry)
+        $cache=@{};foreach($path in $ManifestPaths){$cache[$path]=Read-InstallManifest $path}
+        $plan=@(Get-InstallRestorePlan -WorkspaceManifestPaths $ManifestPaths -GlobalManifestPaths @($registry.global_manifest_history) -RestoreUserGlobal $true -ManifestCache $cache -ReleasedTargetHistory (Get-InstallRegistryReleasedTargetHistoryMap -Registry $registry -ExpectedUserProfile $User))
+        Assert-UninstallPreservedSkillWriteSet -Preserved $preserved -Plan $plan -Manifests @($cache.Values)
+        $probes=@()
+        foreach($item in $preserved){
+            foreach($ancestor in @((Split-Path $item.Path -Parent),$item.Target)){
+                $reason='';try{Assert-UninstallPreservedSkillWriteSet -Preserved @($item) -Plan @([pscustomobject]@{Record=@{path=$ancestor}}) -Manifests @()}catch{$reason=$_.Exception.Message}
+                $probes+=@($reason -match 'restore or cleanup would affect unowned legacy Skill')
+            }
+        }
+        return [pscustomobject]@{Preserved=$preserved;PlanPaths=@($plan|ForEach-Object {$_.Record.path});ParentRejects=$probes}
+    }finally{$env:USERPROFILE=$previousUser}
+}
+$legacyPreservationProbe=& $legacyReadOnlyProbe $legacyDefinitions $legacyUserProfile $legacyRegistryPath $legacyWorkspace $retryActiveManifestPaths
+$legacyAudit=Get-NormalizedPath (Join-Path $legacyUserProfile '.claude/skills/audit')
+$legacyAuditRecords=@($retryActiveManifests|ForEach-Object {$_.backups}|Where-Object {(Get-NormalizedPath $_.path)-eq$legacyAudit})
+$legacyPreservedLinks=@($legacyPreservationProbe.Preserved)
+$legacyRestoreRecordsBefore=@($retryActiveManifestPaths|ForEach-Object { $value=Get-Content $_ -Raw|ConvertFrom-Json -AsHashtable; [ordered]@{path=$_;backups=$value.backups;managed_backup_targets=$value.managed_backup_targets} })
+$legacyPreservedBefore=@($legacyPreservedLinks|ForEach-Object {[ordered]@{path=$_.Path;identity=(Get-InstallManagedPathIdentity $_.Path);target_digest=(Get-InstallBackupPayloadDigest -Path $_.Target -ItemType directory)}})
+$legacyHistoryBeforeProbe=Get-InstallStateFileDigest $legacyRegistryPath
+if($legacyAuditRecords.Count-eq0-and$legacyWarmupManifestPath-notin$retryActiveManifestPaths-and@($legacyPreservedLinks|Where-Object Path -eq $legacyAudit).Count-eq1-and@($legacyPreservationProbe.ParentRejects|Where-Object {-not$_}).Count-eq0){$checks.Add('legacy preexisting Skills have no consumable leaf ownership and are disjoint from native restore/cleanup; parent or target writes reject')|Out-Null}else{$failures.Add('legacy preservation boundary or write-set guard is not distinguished')|Out-Null}
+# A legacy receipt is not a blanket exemption for an extra Harness-source link.
+$legacyExtra=Join-Path $legacyUserProfile '.claude/skills/unowned-extra'
+[void](New-Item -ItemType Junction -Path $legacyExtra -Target (Join-Path $legacyRepoRoot 'skills/audit'))
+$legacyExtraReason=''
+try{$null=& $legacyReadOnlyProbe $legacyDefinitions $legacyUserProfile $legacyRegistryPath $legacyWorkspace $retryActiveManifestPaths}catch{$legacyExtraReason=$_.Exception.Message}finally{Remove-Item -LiteralPath $legacyExtra -Force}
+if($legacyExtraReason-match'no registered ownership or untouched legacy boundary'){$checks.Add('valid legacy receipt does not exempt an unowned extra Skill')|Out-Null}else{$failures.Add('legacy extra Skill did not reject for exact preservation boundary: '+$legacyExtraReason)|Out-Null}
+# The same warm-up left .system unowned; an unrelated target cannot use that boundary.
+$legacySystem=Join-Path $legacyUserProfile '.claude/skills/.system';$legacySystemTarget=Get-JunctionTarget $legacySystem
+$legacyDrift=Join-Path $legacyCaseRoot 'drift';[void][IO.Directory]::CreateDirectory($legacyDrift)
+Remove-Item -LiteralPath $legacySystem -Force;[void](New-Item -ItemType Junction -Path $legacySystem -Target $legacyDrift)
+$legacyDriftReason=''
+try{$null=& $legacyReadOnlyProbe $legacyDefinitions $legacyUserProfile $legacyRegistryPath $legacyWorkspace $retryActiveManifestPaths}catch{$legacyDriftReason=$_.Exception.Message}finally{Remove-Item -LiteralPath $legacySystem -Force;[void](New-Item -ItemType Junction -Path $legacySystem -Target $legacySystemTarget)}
+if(@($legacyPreservedLinks|Where-Object Path -eq $legacySystem).Count-eq1-and$legacyDriftReason-match'no registered ownership or untouched legacy boundary'){$checks.Add('unowned legacy system link with unrelated target cannot use preservation boundary')|Out-Null}else{$failures.Add('legacy system boundary rejected for wrong reason: '+$legacyDriftReason)|Out-Null}
+$legacyDigestReason=''
+try{$null=& $legacyReadOnlyProbe $legacyDefinitions $legacyUserProfile $legacyRegistryPath $legacyWorkspace $retryActiveManifestPaths -CorruptRegistryDigest}catch{$legacyDigestReason=$_.Exception.Message}
+if($legacyDigestReason-match'Registered install manifest digest mismatch'){$checks.Add('legacy history digest conflict never falls back to missing-record preservation')|Out-Null}else{$failures.Add('legacy digest conflict wrong rejection: '+$legacyDigestReason)|Out-Null}
+if((Get-InstallStateFileDigest $legacyRegistryPath)-eq$legacyHistoryBeforeProbe){$checks.Add('legacy preservation probes grant no new registry or backup ownership')|Out-Null}else{$failures.Add('legacy probes modified registry')|Out-Null}
+if($env:DEV_HARNESS_COMPAT_LOG_ROOT){$legacyPreservationProbe|ConvertTo-Json -Depth 20|Set-Content (Join-Path $env:DEV_HARNESS_COMPAT_LOG_ROOT 'legacy-preservation-boundary.json')}
+
 $legacyClaudeSettingsPath = Join-Path $legacyUserProfile '.claude\settings.json'
 $legacyClaudeSettings = Get-Content -LiteralPath $legacyClaudeSettingsPath -Raw -Encoding utf8 | ConvertFrom-Json
 $legacyClaudeSettings | Add-Member -NotePropertyName 'lifecycle_user_sentinel' -NotePropertyValue 'preserve-me' -Force
@@ -1426,6 +1584,10 @@ if ($legacyUninstallResult.ExitCode -eq 0 -and
     $failures.Add(("synthetic full uninstall should remove Codex hooks, preserve released managed_config, restore its oldest safe baseline, and leave a reusable pointer marker; exit={0}; exact={1}; missing={2}; hooks={3}; managed_config={4}; semantic={5}; registry={6}; install_journal={7}; uninstall_journal={8}; marker={9}; output={10}" -f $legacyUninstallResult.ExitCode,($legacyExactAfterUninstall -ceq $legacyEarliestExactContent),(-not (Test-Path -LiteralPath $legacyEarliestMissingPath)),(-not (Test-Path -LiteralPath $legacyCodexHooksPath)),($legacyManagedConfigAfterUninstall -ceq $legacyManagedConfigUserContent),($null -ne $legacySettingsAfterUninstall -and [string]$legacySettingsAfterUninstall.lifecycle_user_sentinel -eq 'preserve-me'),(Test-Path -LiteralPath $legacyRegistryPath),(Test-Path -LiteralPath $legacyInstallJournalPath),(Test-Path -LiteralPath $legacyUninstallJournalPath),($legacyMarkerContentAfterUninstall -eq $legacyPointerDigestAfterApply),($legacyUninstallResult.Output -replace '\r?\n',' | '))) | Out-Null
 }
 
+$legacyRestoreRecordsAfter=@($retryActiveManifestPaths|ForEach-Object { $value=Get-Content $_ -Raw|ConvertFrom-Json -AsHashtable; [ordered]@{path=$_;backups=$value.backups;managed_backup_targets=$value.managed_backup_targets} })
+if(($legacyRestoreRecordsBefore|ConvertTo-Json -Depth 100 -Compress)-ceq($legacyRestoreRecordsAfter|ConvertTo-Json -Depth 100 -Compress)){$checks.Add('legacy consumption changes status without adding ownership, backups or expected postimages')|Out-Null}else{$failures.Add('legacy consumption fabricated or changed restore records')|Out-Null}
+$legacyPreservedAfter=@($legacyPreservedLinks|ForEach-Object {[ordered]@{path=$_.Path;identity=(Get-InstallManagedPathIdentity $_.Path);target_digest=(Get-InstallBackupPayloadDigest -Path $_.Target -ItemType directory)}})
+if(($legacyPreservedBefore|ConvertTo-Json -Depth 12 -Compress)-ceq($legacyPreservedAfter|ConvertTo-Json -Depth 12 -Compress)){$checks.Add('native legacy uninstall leaves unowned links and target bytes unchanged, without acquiring ownership')|Out-Null}else{$failures.Add('legacy unowned preserved assets changed during uninstall')|Out-Null}
 $legacyFreshInstallResult = Invoke-RepoScriptProcess `
     -UserProfile $legacyUserProfile `
     -ScriptPath $legacyInstallScript `
@@ -1643,12 +1805,14 @@ try {
 } finally {
     [System.IO.File]::WriteAllText($codexAgentsPath, $codexAgentsRaw, (New-Object System.Text.UTF8Encoding($false)))
 }
-if ($codexAgentsAuditResult.ExitCode -eq 1 -and
-    $codexAgentsAuditOutput -match '(?im)^STATUS:\s+LIVE_UPDATE_REQUIRED\s*$' -and
-    $codexAgentsAuditOutput -match '(?im)^- LIVE_UPDATE_REQUIRED: codex-agents-template-drift\s*$') {
-    $checks.Add('verify-installation reports the exact Codex AGENTS template drift rollout blocker') | Out-Null
+# Codex AGENTS.md is user-owned since e288edc; user edits are not template drift.
+if ($codexAgentsAuditResult.ExitCode -eq 0 -and
+    $codexAgentsAuditOutput -match '(?im)^STATUS:\s+PASS\s*$' -and
+    $codexAgentsAuditOutput -notmatch 'codex-agents-template-drift' -and
+    $codexAgentsAuditOutput -match 'Codex AGENTS\.md is preserved as user-owned instructions') {
+    $checks.Add('verify-installation preserves user-edited Codex AGENTS.md without a drift blocker') | Out-Null
 } else {
-    $failures.Add('Codex AGENTS drift audit should emit LIVE_UPDATE_REQUIRED: codex-agents-template-drift') | Out-Null
+    $failures.Add('user-edited Codex AGENTS.md should be preserved without codex-agents-template-drift') | Out-Null
 }
 
 $claudeGlobalPath = Join-Path $userProfile '.claude\CLAUDE.md'

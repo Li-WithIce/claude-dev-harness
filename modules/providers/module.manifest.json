@@ -4,7 +4,7 @@
   "module_version": "1.0.0",
   "classification_owner": "providers",
   "kind": "capability",
-  "description": "Optional context and code-intelligence provider routing, boundaries, and usage recording.",
+  "description": "On-demand local context retrieval and optional external context and code-intelligence provider routing.",
   "default_activation": false,
   "dependencies": {
     "kernel_api": "v1",
@@ -15,6 +15,7 @@
     "owned_paths": [
       "modules/providers/**",
       "scripts/audit-context-provider-usage.ps1",
+      "scripts/context.ps1",
       "tests/verify-code-intel-provider-boundary.ps1",
       "tests/verify-context-provider-boundary.ps1",
       "tests/verify-context-provider-install-isolation.ps1",
@@ -32,7 +33,7 @@
     ]
   },
   "package": {
-    "code": ["scripts/audit-context-provider-usage.ps1"],
+    "code": ["scripts/audit-context-provider-usage.ps1", "scripts/context.ps1"],
     "schemas": [],
     "tests": [
       "tests/verify-code-intel-provider-boundary.ps1",
@@ -46,7 +47,7 @@
     "install_assets": []
   },
   "exports": {
-    "commands": ["scripts/audit-context-provider-usage.ps1"],
+    "commands": ["scripts/audit-context-provider-usage.ps1", "scripts/context.ps1"],
     "hooks": [],
     "libraries": []
   },

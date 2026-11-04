@@ -12,9 +12,19 @@ historical receipt bytes. TK-05 adds the strict four-operation Adapter Kernel
 API, makes the exact nine current A3 paths thin, and binds their raw source and
 executable LOC through `adapter-inventory/v1`. TK-07 removes duplicated Runtime
 validation, projection, and task-state machinery while keeping the same public
-contracts. Its frozen baseline is 3068 executable LOC; the bounded R1/R2 repair
-measures 3078 with explicit `KTB-EX-002` coverage for the positive 10-line delta,
-still below the user's 2026-09-07 revised strict 3100-line acceptance bound.
+contracts. Its frozen baseline remains 3068 executable LOC. The 2026-09-14
+H01/H02 authorization covers the current 3141-line implementation with the
+unchanged `KTB-EX-002` +10, `KTB-EX-003` H01 +2 and `KTB-EX-004` H02 +61.
+The 2026-09-20 limited Hook authorization adds `KTB-EX-005` +51 for the reviewed
+converged implementation, without changing baseline 3068 or those prior exceptions.
+The 2026-09-23 process cleanup authorization adds `KTB-EX-006` +15, retaining
+the prior allowances. That version's strict acceptance bound is <3208; historical TK-07 bounds remain
+recorded below and are not rewritten as current measurement results. The multi-workspace repair
+candidate proposes `KTB-EX-011` +184 LOC (+1670 tokens/+481 statement ASTs over c4faeb6),
+giving Runtime transitive executable LOC < 3392 and density ceilings 37843/11164.
+The exact candidate's deployment approval is pending; this accounting is not an installation grant.
+See [session-workspaces.md](session-workspaces.md) for the additional session-grant trust assumption,
+alternatives, migration and verification boundary.
 The original below-3000 goal remains unmet; terminal task closure additionally
 requires all prescribed verification evidence. A later
 boundary change requires an explicit Architecture Decision or Change Contract
@@ -356,7 +366,7 @@ wait and EOF only after successful delivery. A single stopwatch starts after
 successful process start; stdin, exit, and stdout/stderr drains receive only the
 remaining `TimeoutMilliseconds`. Failed delivery or completion returns the
 unchanged fail-closed result (`Complete=false`, `ExitCode=-1`, empty outputs).
-Cleanup has a separate 2250 ms wait budget. Windows PowerShell 5.1 keeps its
+Cleanup has a separate 2250 ms wait budget. At R2, Windows PowerShell 5.1 used its
 single absolute-system `taskkill` hop (at most 1000 ms execution, 250 ms inner
 cleanup); recursive tree cleanup is disabled for that hop. PowerShell 7 keeps
 owned-tree `Kill(true)`. Synchronous native process start, OS termination and
@@ -370,6 +380,48 @@ Both supported first-hop hosts exercise full Unicode stdin/stdout/stderr, an
 post-input wait must not receive a fresh full timeout. Existing child/grandchild
 cleanup tests still observe receipt-bound process identities before fixture
 safety cleanup. This does not broaden all Runtime support to PowerShell 5.1.
+
+The 2026-09-23 process correction preserves the execution deadline, the 2250 ms
+total cleanup budget, and the 15-second owner assertion. The native tree-cleanup
+hop receives the remaining cleanup time less its existing 250 ms reserve,
+instead of an independent 1000 ms cap that can abandon tree cleanup while time
+remains. Only this private native-cleanup hop uses replacement decoding for
+localized non-protocol output; ordinary child stdout/stderr remain strict UTF-8.
+Neither a native exit code nor the outer safety cleanup proves tree termination.
+The probe checks PID, creation time and `HasExited`, and propagates unexpected
+query errors. A native cleanup proxy holds its completion until at least 1.2
+seconds after entry and must return completely with exit zero, in addition to
+the owned-tree checks. Native work runs inside that interval: delaying its launch
+instead incorrectly added uncontrolled native startup/execution to the injected
+duration and failed the first fixed-candidate all run. This completion regression
+tests the old 1000 ms cap without changing production thresholds; it does not
+promise success for arbitrary utility latency beyond the cleanup budget. The original
+proxy used a separate CLR executable; a later run showed that its startup plus
+native startup alone could consume the window. The fixture now uses the native
+Windows Script Host, retains the caller's creation-checked root handle, forwards
+both real taskkill streams and preserves the same minimum duration and assertions.
+The original
+September 20 failure lacks native details and is not claimed to be conclusively
+the same event. A separate exited-root regression demonstrated that the 5.1
+native utility cannot locate an already exited root although its pipe-holding
+child remains alive. The fallback therefore queries only that retained root's
+direct children, validates creation time at CIM's microsecond precision against
+held process handles, and cleans each proven subtree within the same deadline.
+Unknown identities are not terminated. Explicit user approval on 2026-09-23
+covers up to 3207 LOC, 36165 tokens and 10685 statement ASTs through
+`KTB-EX-006` (+15/+186/+57). Baseline 3068, all prior exceptions, readability,
+single-adapter and reduction constraints remain unchanged. Current acceptance
+requires Runtime transitive executable LOC < 3208; lower measurements do not
+reset the baseline or authorize unrelated growth.
+
+On 2026-09-24, a redirected adapter process was shown to default to CP936 even
+though the launcher writes UTF-8. An odd-length Chinese string before an escaped
+quote reproduced an input-stage JSON failure with changed packet identity.
+The adapter now selects UTF-8 before reading stdin. The user approved only eight
+additional tokens of ceiling (36165 to 36173); LOC <3208 and AST <=10685 stay
+unchanged. The resulting measurements are 3207 LOC, 36173 tokens and 10683 ASTs.
+Regression packets cover BOMs, Chinese, backslashes, multiline input, invalid
+input and unchanged policy denials without recording business patch bodies.
 
 The unchanged closure algorithm measures 21 Runtime files, **3078 executable
 LOC**, **35352 executable tokens**, and **10402 statement ASTs**. Growth relative
@@ -385,12 +437,70 @@ engineering guards, not newly attributed user thresholds. The exact-Base
 remain active. Exception repayment/expiry is an explicitly authorized future
 budget review, not additional compression work in this repair.
 
+### Explicit H01/H02 budget authorization, 2026-09-14
+
+The user approved this limited update for the reviewed final implementation:
+**Runtime transitive executable LOC < 3142**, executable Token checkpoint
+**35575**, and Statement AST checkpoint **10498**. The unchanged accounting
+algorithm measures **3141 LOC / 35575 tokens / 10498 statement ASTs** over the
+same 21 Runtime files. No extra headroom was authorized.
+
+The frozen LOC baseline stays **3068**. Existing `KTB-EX-002` still covers +10
+for R2 correctness; new `KTB-EX-003` covers H01 +2 and `KTB-EX-004` covers the
+final readable H02 +61. Total positive delta is 73, fully covered by 10+2+61.
+These are exceptions, not a new baseline or an expansion of write authority.
+
+Relative to the original HEAD after R2, actual source growth is **+63 LOC,
++223 tokens and +96 ASTs**. Original HEAD tokens measured 35352 while its
+checkpoint was 35428: the existing **76-token headroom is not new growth**.
+Therefore the checkpoint changes are **+147 tokens and +96 ASTs**, distinct
+from measured source growth. H01 contributes +13 tokens/+13 ASTs and H02
+contributes +210 tokens/+83 ASTs.
+
+This review also rechecked `KTB-EX-002` at its stated review milestone. Its
+original record and reason remain unchanged: asynchronous stdin delivery,
+one post-start I/O deadline and a separately bounded cleanup window are still
+needed, and no replacement of those correctness mechanisms is part of H01/H02.
+Retaining that +10 does not grant another +10 to the new changes.
+
+The new allowances must be reviewed for continued necessity at the next
+explicitly authorized Runtime change. No immediate mechanical line-for-line
+repayment is required; only proven semantic redundancy may be removed.
+The original exact-Base 35-percent Token/AST reductions, 300-character line
+limit, two-separator density, parameter-layout and sibling-statement guards,
+and each Adapter's <200 limit remain unchanged. Roots, dependency closure,
+classification, algorithms, permissions, path checks, failure refusal and
+unknown-error sanitization are unchanged. Test timeout budgets are unchanged.
+
+This is an engineering budget decision only. It does not establish installed
+Hook activation, host qualification, or B03 behavior acceptance.
+### Limited Hook usability budget authorization, 2026-09-20
+
+The approved converged source diff has SHA256
+`0120ec9d18750fee44d029847c84f16da6063156c6576bce36440099b338c0e7`.
+Its final measurements are **3192 LOC / 35979 tokens / 10628 statement ASTs**.
+The authorized limits are **Runtime transitive executable LOC < 3193**, Token
+checkpoint **35979**, and Statement AST checkpoint **10628**, with no spare
+growth authorization beyond this reviewed implementation.
+
+Baseline **3068** and `KTB-EX-002/003/004` coverage **+10/+2/+61** remain intact.
+`KTB-EX-005` adds **+51**, making total covered growth **124**. Diagnostics account
+for **+29 LOC / +186 tokens / +70 ASTs**, including both A3 Hook entry points;
+bounded literal-data recognition accounts for **+22 / +218 / +60**. Both costs
+use the existing accounting and the same Runtime closure, not a baseline reset.
+
+This approval does not authorize further Runtime implementation changes for I03.
+The direct diagnostic consumer remains C2 and preserves evidence provenance.
+Roots, classification, file inclusion, accounting algorithms, exact-Base 35-percent
+reduction, line/statement density, parameter layout, and each Adapter's <200 limit
+are unchanged. No deployment or real Hook execution acceptance is implied.
+
 ## Terminal SLOs
 
 These are end-state directions, not TK-00 completion claims:
 
 - Runtime Kernel transitive executable LOC < 3000 as the original long-term goal;
-  TK-07 uses the explicitly revised < 3100 acceptance bound;
+  the current limited Hook authorization uses the explicit <3193 acceptance bound;
 - Entry Contract <= 80 lines and <= 1200 tokens;
 - each Host Adapter < 200 executable LOC;
 - new module central-file modifications = 0 for discovery, validation, and

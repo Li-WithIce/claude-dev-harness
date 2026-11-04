@@ -105,7 +105,12 @@ function Test-ExplicitNewV2FastPath {
         'No status/runtime/lifecycle fan-out.','valid v2 state wins and may status/resume.',
         'Selected v2 Direct loads no `entry-router`, `orchestrator`, lifecycle skill','hand off now',
         'minimum focused checks covering all confirmed acceptance criteria','Stop only when all required checks pass',
-        'An unresolved Requirement or product decision blocks every write and enters Ask',
+        'Unresolved Requirement or product decision enters Ask;',
+        'opted-in projects may save a `pending clarification` draft in change records',
+        'original request, known source/date, unanswered questions only',
+        'Ask and all other writes stay blocked.',
+        'Protected/expanded/non-Direct reroute before writes.',
+        'Read-only work performs zero writes.',
         'continuation alone enters Ask and authorizes no write','Expand only after failure/ambiguity.'
     )) { if (-not $Text.Contains($fragment,[StringComparison]::Ordinal)) { return $false } }
     return $Text.Contains('Legacy lifecycle and shim loading are retired.',[StringComparison]::Ordinal)
@@ -211,7 +216,12 @@ try {
             'No status/runtime/lifecycle fan-out.',
             'valid v2 state wins and may status/resume.',
             'minimum focused checks covering all confirmed acceptance criteria',
-            'Stop only when all required checks pass'
+            'Stop only when all required checks pass',
+            'opted-in projects may save a `pending clarification` draft in change records',
+            'original request, known source/date, unanswered questions only',
+            'Ask and all other writes stay blocked.',
+            'Protected/expanded/non-Direct reroute before writes.',
+            'Read-only work performs zero writes.'
         )) {
         $mutation = $canonicalText.Replace($fragment, '')
         Assert-True -Condition (-not (Test-ExplicitNewV2FastPath -Text $mutation)) -Success ("fast-path mutation is rejected when removing: {0}" -f $fragment) -Failure ("fast-path verifier survived removal of: {0}" -f $fragment)

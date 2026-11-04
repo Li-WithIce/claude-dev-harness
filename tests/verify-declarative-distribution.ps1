@@ -118,7 +118,9 @@ try {
         $hooks=@($plan.assets | Where-Object kind -CEQ 'hook' | ForEach-Object target)
         $expectedHooks=@('pretooluse.ps1','codex-pretooluse-launcher.ps1')+$(if($preset -ceq 'full'){@('userpromptsubmit.js')}else{@()})+@('stop.js','workspace-resolver.js')
         Check (($hooks -join '|') -ceq ($expectedHooks -join '|')) "$preset preserves legacy hook selection"
-        Check (@($plan.assets | Where-Object kind -CEQ 'vault').Count -eq $(if($preset -ceq 'full'){16}else{1})) "$preset omits retired v1 lifecycle and mirror assets"
+        $vaultAssets = @($plan.assets | Where-Object kind -CEQ 'vault')
+        $entryTargets = @($vaultAssets | Where-Object { $_.target.StartsWith('entry/') } | ForEach-Object target | Sort-Object)
+        Check ($vaultAssets.Count -eq $(if($preset -ceq 'full'){17}else{2}) -and ($entryTargets -join '|') -eq 'entry/context.ps1|entry/task.ps1') "$preset installs only context/task entries and omits retired v1 lifecycle assets"
         $unsigned=[ordered]@{}; foreach($key in $plan.Keys){if($key -cne 'digest'){$unsigned[$key]=$plan[$key]}}
         $referenceDigest=Get-HarnessCanonicalJsonSha256 -JsonBytes $utf8.GetBytes((ConvertTo-Json -InputObject $unsigned -Depth 100 -Compress))
         Check ($plan.digest_algorithm -ceq 'canonical-json/v1' -and $plan.digest -ceq $referenceDigest) "$preset uses the independently verified canonical digest contract"

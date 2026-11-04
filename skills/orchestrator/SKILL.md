@@ -1,4 +1,6 @@
 ---
+status: superseded
+superseded_by: docs/governed-work.md
 name: orchestrator
 description: Use when a development task needs lite workflow dispatch, per-stage tool selection, recovery, or stage advancement through `plan.md` frontmatter.
 ---

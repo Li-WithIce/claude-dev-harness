@@ -59,6 +59,14 @@
       "reason": "Risk Routing is an irreducible Harness trust responsibility even though host prose performs the first inline classification hop."
     },
     {
+      "id": "session-workspace-registration",
+      "path": "scripts/register-session-workspaces.ps1",
+      "trust_path": "runtime",
+      "role": "Register exact session-bound workspace roots using current scoped Approval and CAS.",
+      "layer": "k1-runtime-kernel",
+      "reason": "Workspace grants extend the authorization boundary and use the same counted Runtime primitives."
+    },
+    {
       "id": "task-cli",
       "path": "scripts/task.ps1",
       "trust_path": "runtime",
@@ -84,7 +92,7 @@
     },
     {
       "path": "install.ps1",
-      "sha256": "sha256:36f58b164ee1001a930bda48a1663c6bdb0af9064142d42066ed0b3aadf5c432",
+      "sha256": "sha256:076ed36f2f757ea2641241e00696af2d1e51a893f09838a565f4c4357a48a773",
       "layer": "d1-distribution",
       "trust_paths": [
         "distribution"
@@ -92,13 +100,13 @@
       "root_ids": [
         "workspace-bootstrap"
       ],
-      "physical_loc": 3402,
-      "nonblank_loc": 3135,
-      "executable_loc": 3103
+      "physical_loc": 3444,
+      "nonblank_loc": 3176,
+      "executable_loc": 3141
     },
     {
       "path": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",
-      "sha256": "sha256:8296881eaa5519b2647fe8fd698c8a8750fcfbb5e2c2b0e378bbb48199c30da0",
+      "sha256": "sha256:ae65b6ebc430ab3b59af707abdcc349136e2e24056d6c9ad92d2b229365f22ed",
       "layer": "a3-adapter",
       "trust_paths": [
         "runtime"
@@ -106,13 +114,13 @@
       "root_ids": [
         "codex-pretooluse-launcher"
       ],
-      "physical_loc": 32,
-      "nonblank_loc": 29,
-      "executable_loc": 27
+      "physical_loc": 48,
+      "nonblank_loc": 45,
+      "executable_loc": 43
     },
     {
       "path": "runtime-hooks/claude/pretooluse.ps1",
-      "sha256": "sha256:6abcc1333b5a2bb732a9ca3a268f7ddd6c37824c10d89183b5af542bbd56ed58",
+      "sha256": "sha256:836c0d6cf309763eadbd0b92ead39dc78fc81ae1ab6a6a99303053d44529d242",
       "layer": "a3-adapter",
       "trust_paths": [
         "runtime"
@@ -121,9 +129,9 @@
         "claude-pretooluse-adapter",
         "codex-pretooluse-launcher"
       ],
-      "physical_loc": 65,
-      "nonblank_loc": 60,
-      "executable_loc": 60
+      "physical_loc": 132,
+      "nonblank_loc": 127,
+      "executable_loc": 125
     },
     {
       "path": "scripts/generate-entry-contract.ps1",
@@ -171,7 +179,7 @@
     },
     {
       "path": "scripts/install-transaction-common.ps1",
-      "sha256": "sha256:765d438e4539db6c4adf9d80a1334a0c8b25af9a39a8db09fa55caede3f75b5f",
+      "sha256": "sha256:1e314da851862a011a9788afb42c483ee7cb629641d9b1400738f7b00a3d6a0c",
       "layer": "d1-distribution",
       "trust_paths": [
         "distribution"
@@ -179,13 +187,13 @@
       "root_ids": [
         "workspace-bootstrap"
       ],
-      "physical_loc": 1368,
-      "nonblank_loc": 1251,
-      "executable_loc": 1250
+      "physical_loc": 1628,
+      "nonblank_loc": 1505,
+      "executable_loc": 1498
     },
     {
       "path": "scripts/lib/Harness.AdapterAction.psm1",
-      "sha256": "sha256:629fbc570710e76460f1c3bcc9f4e1760d2b7c88b128debdc7679f7196bf1532",
+      "sha256": "sha256:cbf1779a1688e7dd99ebd453b816a6082302507a73fae28cf42f7d6b18ae48b2",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
@@ -195,9 +203,9 @@
         "codex-pretooluse-launcher",
         "controlled-write-adapter"
       ],
-      "physical_loc": 150,
-      "nonblank_loc": 137,
-      "executable_loc": 137
+      "physical_loc": 229,
+      "nonblank_loc": 212,
+      "executable_loc": 206
     },
     {
       "path": "scripts/lib/Harness.AtomicWrite.psm1",
@@ -213,6 +221,7 @@
         "controlled-write-adapter",
         "entry-contract-compiler",
         "risk-policy-evaluator",
+        "session-workspace-registration",
         "status-cli",
         "task-cli",
         "workspace-bootstrap"
@@ -253,7 +262,7 @@
     },
     {
       "path": "scripts/lib/Harness.Distribution.psm1",
-      "sha256": "sha256:8b38dcae3835e00aac7c1c5575ebc53595b01953140962f80dfec85339d9b930",
+      "sha256": "sha256:307c42a9d58fbe9b01058fa78e8759ec28416305f4a38783ccadf75336ca3939",
       "layer": "d1-distribution",
       "trust_paths": [
         "distribution"
@@ -293,6 +302,7 @@
         "controlled-write-adapter",
         "entry-contract-compiler",
         "risk-policy-evaluator",
+        "session-workspace-registration",
         "status-cli",
         "task-cli",
         "workspace-bootstrap"
@@ -314,6 +324,7 @@
         "codex-pretooluse-launcher",
         "controlled-write-adapter",
         "risk-policy-evaluator",
+        "session-workspace-registration",
         "status-cli",
         "task-cli",
         "workspace-bootstrap"
@@ -336,6 +347,7 @@
         "controlled-write-adapter",
         "entry-contract-compiler",
         "risk-policy-evaluator",
+        "session-workspace-registration",
         "status-cli",
         "task-cli",
         "workspace-bootstrap"
@@ -346,7 +358,7 @@
     },
     {
       "path": "scripts/lib/Harness.Policy.psm1",
-      "sha256": "sha256:df45015df1b4528e56c39749b892717be31a5aba3b83f2925c5dcb011fd48568",
+      "sha256": "sha256:5734ece8d17616379938bdbc8427ca13eb93272384c62ff0cbc6c0a9449e801b",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "distribution",
@@ -357,16 +369,17 @@
         "codex-pretooluse-launcher",
         "controlled-write-adapter",
         "risk-policy-evaluator",
+        "session-workspace-registration",
         "status-cli",
         "workspace-bootstrap"
       ],
-      "physical_loc": 128,
-      "nonblank_loc": 115,
-      "executable_loc": 115
+      "physical_loc": 133,
+      "nonblank_loc": 120,
+      "executable_loc": 120
     },
     {
       "path": "scripts/lib/Harness.ProtectedAction.psm1",
-      "sha256": "sha256:10004f24af12a6820a57ca7095b3485ac29eb3d8fb073603593a29f50d481ff8",
+      "sha256": "sha256:84092da8e42f4e9db2024528a83fba6dac224bdee9e97c522962d4b7b88e9a2f",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "distribution",
@@ -376,12 +389,13 @@
         "claude-pretooluse-adapter",
         "codex-pretooluse-launcher",
         "controlled-write-adapter",
+        "session-workspace-registration",
         "status-cli",
         "workspace-bootstrap"
       ],
-      "physical_loc": 91,
-      "nonblank_loc": 86,
-      "executable_loc": 86
+      "physical_loc": 92,
+      "nonblank_loc": 87,
+      "executable_loc": 87
     },
     {
       "path": "scripts/lib/Harness.Protocol.psm1",
@@ -396,6 +410,7 @@
         "codex-pretooluse-launcher",
         "controlled-write-adapter",
         "risk-policy-evaluator",
+        "session-workspace-registration",
         "status-cli",
         "task-cli",
         "workspace-bootstrap"
@@ -420,7 +435,7 @@
     },
     {
       "path": "scripts/lib/Harness.Requirement.psm1",
-      "sha256": "sha256:7420a519af3caa8acd866b1564c5bb5314c9b4a5f817583fd4f28f3d342951e4",
+      "sha256": "sha256:49da5fa2d4a74ac9436e3ab14437ce9105713aceb0192afd82678b2759b844b4",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
@@ -428,9 +443,9 @@
       "root_ids": [
         "task-cli"
       ],
-      "physical_loc": 134,
-      "nonblank_loc": 125,
-      "executable_loc": 125
+      "physical_loc": 136,
+      "nonblank_loc": 127,
+      "executable_loc": 127
     },
     {
       "path": "scripts/lib/Harness.RuntimeDefaultReader.ps1",
@@ -445,6 +460,7 @@
         "codex-pretooluse-launcher",
         "controlled-write-adapter",
         "risk-policy-evaluator",
+        "session-workspace-registration",
         "status-cli",
         "task-cli",
         "workspace-bootstrap"
@@ -455,7 +471,7 @@
     },
     {
       "path": "scripts/lib/Harness.RuntimeKernel.ps1",
-      "sha256": "sha256:1de12ec3f6170bdf8451584eb12cbbed0c70b8a6760be0906a7cb7d547b23366",
+      "sha256": "sha256:0788814f0adabfe79051f92fbb51df5c446fdea836923d56bd259cfa08659b47",
       "layer": "k1-runtime-kernel",
       "trust_paths": [
         "distribution",
@@ -467,13 +483,31 @@
         "controlled-write-adapter",
         "entry-contract-compiler",
         "risk-policy-evaluator",
+        "session-workspace-registration",
         "status-cli",
         "task-cli",
         "workspace-bootstrap"
       ],
-      "physical_loc": 579,
-      "nonblank_loc": 542,
-      "executable_loc": 537
+      "physical_loc": 603,
+      "nonblank_loc": 566,
+      "executable_loc": 555
+    },
+    {
+      "path": "scripts/lib/Harness.SessionWorkspace.psm1",
+      "sha256": "sha256:7b3ece57366e8a0ba9686a0a9d898d8faa91928d74a79b81107f6e00db6a6e76",
+      "layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "root_ids": [
+        "claude-pretooluse-adapter",
+        "codex-pretooluse-launcher",
+        "controlled-write-adapter",
+        "session-workspace-registration"
+      ],
+      "physical_loc": 121,
+      "nonblank_loc": 116,
+      "executable_loc": 116
     },
     {
       "path": "scripts/lib/Harness.TaskState.psm1",
@@ -488,6 +522,20 @@
       "physical_loc": 844,
       "nonblank_loc": 803,
       "executable_loc": 803
+    },
+    {
+      "path": "scripts/register-session-workspaces.ps1",
+      "sha256": "sha256:082f4c15648e599fb6a44074b51e712456f40f8c83ccc7ab1af14ffb5d08369c",
+      "layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "root_ids": [
+        "session-workspace-registration"
+      ],
+      "physical_loc": 26,
+      "nonblank_loc": 26,
+      "executable_loc": 26
     },
     {
       "path": "scripts/task.ps1",
@@ -533,7 +581,7 @@
     },
     {
       "path": "tests/verify-installation.ps1",
-      "sha256": "sha256:673d1479333343f3beba12f92d44d389c3e5ac703ab40632ad93e097b5d23e13",
+      "sha256": "sha256:ac1c0884d294ed103bc9a7cdb5c95590d2c5a801a46272d09151c88b4000baa9",
       "layer": "d1-distribution",
       "trust_paths": [
         "distribution"
@@ -541,15 +589,15 @@
       "root_ids": [
         "workspace-bootstrap"
       ],
-      "physical_loc": 811,
-      "nonblank_loc": 715,
-      "executable_loc": 711
+      "physical_loc": 843,
+      "nonblank_loc": 746,
+      "executable_loc": 741
     }
   ],
   "artifacts": [
     {
       "path": "agent-configs/claude/CLAUDE.md.template",
-      "sha256": "sha256:86c6d3f3f56033e6c865ea67988b7e03d81f05954f17e04391308d469cadd8bf",
+      "sha256": "sha256:fc46e201a1f8cbc0a13d18cbc9d399b7c8d35542d816c66a77ea814a1f04a383",
       "kind": "entry-template",
       "owner_layer": "a3-adapter",
       "trust_paths": [
@@ -557,12 +605,12 @@
         "runtime"
       ],
       "reason": "Claude installed Entry Contract template is hashed by Runtime Default and rendered by the compiler.",
-      "physical_loc": 27,
-      "bytes": 2779
+      "physical_loc": 28,
+      "bytes": 2811
     },
     {
       "path": "agent-configs/workspace/AGENTS.md.template",
-      "sha256": "sha256:fb5cda2414f14b335621ff0526528af76454c16228a5a556f5265c152dcd7fa5",
+      "sha256": "sha256:7161c65f0b2d3d0d0df978eda82051937481f7ec89bd9e92a00b90b27de04c2c",
       "kind": "entry-template",
       "owner_layer": "a3-adapter",
       "trust_paths": [
@@ -570,44 +618,44 @@
         "runtime"
       ],
       "reason": "Workspace installed Entry Contract template is hashed by Runtime Default and rendered by the compiler.",
-      "physical_loc": 30,
-      "bytes": 3789
+      "physical_loc": 34,
+      "bytes": 4961
     },
     {
       "path": "modules/distribution/profiles/core.json",
-      "sha256": "sha256:15c81eb0993f57b5d158ab4864311933556c8255b8831e7e775e0e815930d6f1",
+      "sha256": "sha256:4b77167be13ed37beae507cab64fd261dbdadb5a396818794ff6d268bc4fb86c",
       "kind": "policy",
       "owner_layer": "d1-distribution",
       "trust_paths": [
         "distribution"
       ],
       "reason": "TK-06 central core installation allowlist; grants Distribution transport only, never Runtime authority.",
-      "physical_loc": 28,
-      "bytes": 3691
+      "physical_loc": 29,
+      "bytes": 3950
     },
     {
       "path": "modules/distribution/profiles/full.json",
-      "sha256": "sha256:46667f0460f6c03da34b4e2aa0d931a2772ce2ef131b6256994b172b344bdbff",
+      "sha256": "sha256:6dd91864ec9aa1a7f88c1bba45585cf2c6279b87d0e6b47046b79593e5a70a69",
       "kind": "policy",
       "owner_layer": "d1-distribution",
       "trust_paths": [
         "distribution"
       ],
       "reason": "TK-06 central full installation allowlist; module requests cannot expand this grant.",
-      "physical_loc": 52,
-      "bytes": 10170
+      "physical_loc": 53,
+      "bytes": 10429
     },
     {
       "path": "modules/distribution/profiles/governed.json",
-      "sha256": "sha256:9f748a8f7eff4c05b587dd7fcf3e07472d033c18f8c67ef45521561f5d5b1a78",
+      "sha256": "sha256:da379fdd283ac9598b55ef2615fb095dfa5abe75c5235142231e90f294ad5f5a",
       "kind": "policy",
       "owner_layer": "d1-distribution",
       "trust_paths": [
         "distribution"
       ],
       "reason": "TK-06 central governed installation allowlist independent of Runtime execution policy.",
-      "physical_loc": 30,
-      "bytes": 4108
+      "physical_loc": 31,
+      "bytes": 4367
     },
     {
       "path": "policies/decision-rights.json",
@@ -623,7 +671,7 @@
     },
     {
       "path": "policies/entry-contract.md",
-      "sha256": "sha256:4838491707510140a0c698ac26d0faa8b45d6dde90d03427dc78006f0643396c",
+      "sha256": "sha256:63315f7e09d86098f98765078d1382bb9f711bc7dc46ccec22daddf0b3e3e37c",
       "kind": "entry-contract",
       "owner_layer": "k1-runtime-kernel",
       "trust_paths": [
@@ -631,8 +679,8 @@
         "runtime"
       ],
       "reason": "Canonical Entry Contract prose compiled into installed host and workspace templates.",
-      "physical_loc": 16,
-      "bytes": 2052
+      "physical_loc": 17,
+      "bytes": 2111
     },
     {
       "path": "policies/execution-profiles.json",
@@ -648,15 +696,15 @@
     },
     {
       "path": "policies/protected-actions.json",
-      "sha256": "sha256:dea83985dcdbe992a889d1b3dbad9def8f1ce48e130dc3d01a39bb934632e166",
+      "sha256": "sha256:127370df02857bdc768281bbc945f986ba1f14bb14de4b6807e424f91014198e",
       "kind": "policy",
       "owner_layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
       ],
       "reason": "Core protected-action rules fail closed before writes.",
-      "physical_loc": 26,
-      "bytes": 708
+      "physical_loc": 16,
+      "bytes": 408
     },
     {
       "path": "policies/risk-rules.json",
@@ -672,15 +720,15 @@
     },
     {
       "path": "schemas/adapter-kernel-api.schema.json",
-      "sha256": "sha256:847ecff3df6dd2f4fde8abffa7c87e650ef51c761d839b12bd22f0854a18f015",
+      "sha256": "sha256:880991eb550cb91dc332be856db4fe45e206898e7eee5af22e5a83eed41b7a46",
       "kind": "schema",
       "owner_layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
       ],
       "reason": "The strict four-operation Adapter request and response contract binds the public K1 boundary.",
-      "physical_loc": 225,
-      "bytes": 10864
+      "physical_loc": 241,
+      "bytes": 11926
     },
     {
       "path": "schemas/approval.schema.json",
@@ -852,15 +900,15 @@
     },
     {
       "path": "schemas/protected-actions.schema.json",
-      "sha256": "sha256:ba4562c419fc4e5c2b78e9c0093a18377ef1020b8101dc69fc0a50e393705f94",
+      "sha256": "sha256:6fe77abe83ab048721d97f5830c3ac84b885092ea81a4c5868d26036c879d6eb",
       "kind": "schema",
       "owner_layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
       ],
       "reason": "Core protected-action policy is strictly validated before evaluation.",
-      "physical_loc": 51,
-      "bytes": 1864
+      "physical_loc": 50,
+      "bytes": 1769
     },
     {
       "path": "schemas/protocol-config-v2.schema.json",
@@ -936,15 +984,27 @@
     },
     {
       "path": "schemas/runtime-policies.schema.json",
-      "sha256": "sha256:c8b0f6926c74eccc279216358a1fcd7f4ca767f6226a4906ff16c4ddfe2d1fbd",
+      "sha256": "sha256:3ec6bfea37d90667c2aa4bae2d8ed9781f37cce083f9c5110f698a90f7093d7b",
       "kind": "schema",
       "owner_layer": "k1-runtime-kernel",
       "trust_paths": [
         "runtime"
       ],
       "reason": "Runtime risk and execution policies are validated as one strict bundle.",
-      "physical_loc": 204,
-      "bytes": 8593
+      "physical_loc": 203,
+      "bytes": 8494
+    },
+    {
+      "path": "schemas/session-workspaces.schema.json",
+      "sha256": "sha256:984f1e87bf7f566208a591c3fb6f5366831fb1c78a45aa46693f0c69783afd73",
+      "kind": "schema",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ],
+      "reason": "Session workspace grants strictly bind session, primary and target physical identities and registration provenance.",
+      "physical_loc": 25,
+      "bytes": 1369
     },
     {
       "path": "schemas/task-state.schema.json",
@@ -984,7 +1044,7 @@
     },
     {
       "path": "schemas/task-transaction.schema.json",
-      "sha256": "sha256:7fef65c559b35dfa438830eefb40daae46491aec86925f26874fabdcf1c295b6",
+      "sha256": "sha256:4c54448c7b5a7b3ae0bfd2098d7abffdfa2a154a737c62ce75feb17cdd86032e",
       "kind": "schema",
       "owner_layer": "k1-runtime-kernel",
       "trust_paths": [
@@ -992,7 +1052,7 @@
       ],
       "reason": "Current and retained legacy journals share a strict compatibility envelope.",
       "physical_loc": 182,
-      "bytes": 9582
+      "bytes": 9500
     },
     {
       "path": "templates/v2/plan.md.template",
@@ -1008,7 +1068,7 @@
     },
     {
       "path": "vault-template/entry/AGENTS.md.template",
-      "sha256": "sha256:6c3c484650721a5205e544674a147347a9134869ccd1783d48a0b8e998ff0a84",
+      "sha256": "sha256:251e9b13309f9dd23280a83caea92485f7c6249cd669731dacd55349f4712a9d",
       "kind": "entry-template",
       "owner_layer": "a3-adapter",
       "trust_paths": [
@@ -1016,8 +1076,8 @@
         "runtime"
       ],
       "reason": "Runtime source identity binds the installed compatibility entry template until v1 Sunset gates are satisfied.",
-      "physical_loc": 25,
-      "bytes": 2478
+      "physical_loc": 26,
+      "bytes": 2537
     }
   ],
   "edges": [
@@ -1173,6 +1233,15 @@
       "to": "scripts/lib/Harness.RuntimeKernel.ps1",
       "kind": "dot-source",
       "resolution": "ast-static:. (Join-Path $PSScriptRoot 'Harness.RuntimeKernel.ps1')",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.AdapterAction.psm1",
+      "to": "scripts/lib/Harness.SessionWorkspace.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.SessionWorkspace.psm1') -Force -ErrorAction Stop",
       "trust_paths": [
         "runtime"
       ]
@@ -1398,6 +1467,33 @@
       ]
     },
     {
+      "from": "scripts/lib/Harness.SessionWorkspace.psm1",
+      "to": "scripts/lib/Harness.ProtectedAction.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.ProtectedAction.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.SessionWorkspace.psm1",
+      "to": "scripts/lib/Harness.Protocol.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $PSScriptRoot 'Harness.Protocol.psm1') -Force -ErrorAction Stop",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/lib/Harness.SessionWorkspace.psm1",
+      "to": "scripts/lib/Harness.RuntimeKernel.ps1",
+      "kind": "dot-source",
+      "resolution": "ast-static:. (Join-Path $PSScriptRoot 'Harness.RuntimeKernel.ps1')",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
       "from": "scripts/lib/Harness.TaskState.psm1",
       "to": "scripts/lib/Harness.Governance.psm1",
       "kind": "import-module",
@@ -1420,6 +1516,15 @@
       "to": "scripts/lib/Harness.RuntimeKernel.ps1",
       "kind": "dot-source",
       "resolution": "ast-static:. (Join-Path $PSScriptRoot 'Harness.RuntimeKernel.ps1')",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "from": "scripts/register-session-workspaces.ps1",
+      "to": "scripts/lib/Harness.SessionWorkspace.psm1",
+      "kind": "import-module",
+      "resolution": "ast-static:Import-Module (Join-Path $RepoRoot 'scripts/lib/Harness.SessionWorkspace.psm1') -Force -ErrorAction Stop",
       "trust_paths": [
         "runtime"
       ]
@@ -1483,6 +1588,15 @@
       "to": "tests/verify-installation.ps1",
       "kind": "manual",
       "resolution": "manual:runtime-invocation:Join-Path $RepoRoot 'tests\\verify-installation.ps1'",
+      "trust_paths": [
+        "distribution"
+      ]
+    },
+    {
+      "from": "tests/verify-installation.ps1",
+      "to": "scripts/install-transaction-common.ps1",
+      "kind": "dot-source",
+      "resolution": "ast-static:. (Join-Path $RepoRoot 'scripts/install-transaction-common.ps1')",
       "trust_paths": [
         "distribution"
       ]
@@ -1555,23 +1669,23 @@
   ],
   "unresolved_dependencies": [],
   "totals": {
-    "file_count": 29,
-    "physical_loc": 10410,
-    "nonblank_loc": 9505,
-    "executable_loc": 9443,
-    "runtime_file_count": 21,
-    "runtime_executable_loc": 3078,
+    "file_count": 31,
+    "physical_loc": 11085,
+    "nonblank_loc": 10163,
+    "executable_loc": 10077,
+    "runtime_file_count": 23,
+    "runtime_executable_loc": 3396,
     "distribution_file_count": 18,
-    "distribution_executable_loc": 7741,
+    "distribution_executable_loc": 8081,
     "duplicate_edge_count": 0,
-    "artifact_count": 39,
-    "artifact_bytes": 143030
+    "artifact_count": 40,
+    "artifact_bytes": 146984
   },
   "budget": {
     "baseline_executable_loc": 3068,
-    "current_executable_loc": 3078,
-    "delta": 10,
-    "covered_growth": 10,
+    "current_executable_loc": 3396,
+    "delta": 328,
+    "covered_growth": 328,
     "status": "covered-by-exception",
     "exceptions": [
       {
@@ -1586,6 +1700,82 @@
         ],
         "repayment_plan": "Retain the 3068 baseline and explicit positive delta. Reassess this 10-line allowance at the next explicitly authorized Runtime change; do not delete correctness checks or start extra compression in this repair.",
         "expires_at_milestone": "Next explicitly authorized Runtime budget review after TK-07 R1/R2 closure"
+      },
+      {
+        "id": "KTB-EX-003",
+        "added_lines": 2,
+        "reason": "Explicit user approval on 2026-09-14 covers H01 optional-array omission handling: +2 LOC, +13 executable tokens and +13 statement ASTs relative to the original HEAD. This does not reset baseline 3068 or repurpose KTB-EX-002.",
+        "new_trust_assumption": "None. Input Schema validation, requirement blockers and read-only behavior remain unchanged; no new dependency or permission.",
+        "alternatives": [
+          "Leaving omitted arrays as null elements rejects inputs already allowed by the existing Schema.",
+          "Relaxing the Schema, filtering null globally or packing source would change validation or defeat accounting."
+        ],
+        "repayment_plan": "Review continued necessity at the next explicitly authorized Runtime change. Do not mechanically delete two lines; only remove proven semantic redundancy without changing validation, accounting or trust boundaries.",
+        "expires_at_milestone": "Next explicitly authorized Runtime change after H01/H02 budget approval"
+      },
+      {
+        "id": "KTB-EX-004",
+        "added_lines": 61,
+        "reason": "Explicit user approval on 2026-09-14 covers final readable H02: +61 LOC, +210 tokens and +83 statement ASTs over HEAD plus H01. Combined HEAD growth is +63 LOC/+223 tokens/+96 ASTs; the Token checkpoint increases only 147 because its prior 76-token headroom already existed.",
+        "new_trust_assumption": "None beyond existing trusted host cwd and installation bindings. Absolute and relative paths share containment and policy checks; finite refusal categories do not grant authority or expose arbitrary stderr.",
+        "alternatives": [
+          "Duplicate target resolution was removed; retaining separate syntax, binding, containment and policy boundaries is necessary.",
+          "Blind native path normalization cannot replace ADS, reparse, device-path or all-target checks.",
+          "Forwarding arbitrary stderr, packing branches, moving accounting scope or refactoring unrelated state/process code is not an acceptable substitute."
+        ],
+        "repayment_plan": "Review continued necessity at the next explicitly authorized Runtime change. No immediate line-for-line repayment is required. Retain readable branches and only remove independently justified redundancy; do not loosen security or change measurement to repay this allowance.",
+        "expires_at_milestone": "Next explicitly authorized Runtime change after H01/H02 budget approval"
+      },
+      {
+        "id": "KTB-EX-005",
+        "added_lines": 51,
+        "reason": "Explicit user approval on 2026-09-20 binds the converged Hook diff SHA256 0120ec9d18750fee44d029847c84f16da6063156c6576bce36440099b338c0e7. Diagnostics cost +29 LOC/+186 tokens/+70 statement ASTs; bounded literal-data recognition costs +22 LOC/+218 tokens/+60 statement ASTs. Total growth is +51/+404/+130 over 3141/35575/10498, yielding 3192/35979/10628. Baseline remains 3068, covered growth becomes 124, strict LOC bound is <3193, and Token/Statement AST checkpoints are 35979/10628.",
+        "new_trust_assumption": "None. No shell dialect is inferred, ambiguous keyword use remains denied, and the original policy still checks the untouched command. Finite refusal context does not authenticate Hook execution or grant permission.",
+        "alternatives": [
+          "The prior cross-shell parser was removed; only bounded static data forms retain a keyword exemption.",
+          "Dropping refusal context, denying every literal search, assuming a shell dialect, or allowing unknown results would not meet the approved scope.",
+          "Resetting the baseline, changing roots or accounting, packing source, or relaxing readability, single-adapter and 35-percent reduction checks is not authorized."
+        ],
+        "repayment_plan": "Review the continued necessity of this exact 29+22 split at the next explicitly authorized Runtime budget review. This allowance covers only the approved converged diff, not further Runtime growth or I03 consumer changes.",
+        "expires_at_milestone": "Next explicitly authorized Runtime budget review after the 2026-09-20 limited Hook approval"
+      },
+      {
+        "id": "KTB-EX-006",
+        "added_lines": 15,
+        "reason": "Explicit user approval on 2026-09-23 authorizes the owned-process cleanup correction: up to +15 LOC/+186 tokens/+57 Statement ASTs over 3192/35979/10628, with strict LOC <3208 and checkpoints 36165/10685. On 2026-09-24 the user approved only +8 to the Token ceiling, to 36173, for explicit UTF-8 adapter stdin decoding; LOC <3208 and Statement AST <=10685 remain unchanged. Baseline 3068 and prior allowances 10/2/61/51 remain unchanged; total covered growth is 139.",
+        "new_trust_assumption": "The local Windows CIM process provider supplies parent PID and microsecond creation timestamps. Only children of the retained invocation root are queried, and native process handles independently verify creation time before an owned subtree is terminated. No command lines or unrelated sessions are collected.",
+        "alternatives": [
+          "A native exit code alone does not prove tree cleanup; the independent receipt checks remain required.",
+          "Killing only an exited root cannot terminate pipe-holding descendants, and broad process-name scans cannot prove ownership.",
+          "Increasing execution deadlines, disabling 5.1, packing source or moving code out of accounting does not fix the demonstrated ownership and cleanup defects."
+        ],
+        "repayment_plan": "Review necessity at the next explicitly authorized Runtime budget review. Preserve identity validation, bounded waits, readable branches, existing adapter limits and reduction constraints; do not require mechanical line deletion.",
+        "expires_at_milestone": "Next explicitly authorized Runtime budget review after the 2026-09-23 owned-process cleanup correction"
+      },
+      {
+        "id": "KTB-EX-011",
+        "added_lines": 184,
+        "reason": "Candidate allowance for the user-authorized 2026-10-13 multi-workspace boundary repair: +184 LOC/+1670 tokens/+481 statement ASTs over c4faeb6, yielding 3391/37843/11164. Baseline 3068 and previous 139-line coverage remain. Exact candidate deployment approval is pending.",
+        "new_trust_assumption": "The documented host session_id and an operator-maintained session grant bind additional installed workspace roots. Hostile same-account control-file replacement remains outside the cooperative Hook contract.",
+        "alternatives": [
+          "A parent-directory grant or cwd rewrite would discard workspace-local policy boundaries.",
+          "Guessing host payload roots or parsing transcripts supplies no stable authorization contract.",
+          "The existing K0 physical identity, K1 schema/Approval and atomic CAS primitives avoid a new dependency."
+        ],
+        "repayment_plan": "Review the session-grant cost at the next explicitly authorized Runtime change; preserve the original baseline, closure accounting, all-target checks and readable source.",
+        "expires_at_milestone": "Next authorized Runtime budget review after multi-workspace boundary closure"
+      },
+      {
+        "id": "KTB-EX-012",
+        "added_lines": 5,
+        "reason": "The user-requested business source routing change adds 5 executable lines, 72 tokens, and 25 statement ASTs relative to 7aae456: the source-only classification requires changed paths and no command, while existing production database protection remains in force. The 3068 baseline and previous allowances are unchanged.",
+        "new_trust_assumption": "The caller identifies source-code-only work; actual commands and database operations continue through their existing policy checks.",
+        "alternatives": [
+          "Changing score thresholds globally would also change routing for actual operations.",
+          "Treating every authorization label or source directory as Critical would keep blocking the requested business development."
+        ],
+        "repayment_plan": "Review this measured allowance at the next Runtime budget review without removing the source-versus-command distinction.",
+        "expires_at_milestone": "Next authorized Runtime budget review after business source routing"
       }
     ]
   }

@@ -148,6 +148,7 @@ $expectedSchemaFiles = @(
     'runtime-default-admission.schema.json',
     'runtime-default-decision.schema.json',
     'runtime-policies.schema.json',
+    'session-workspaces.schema.json',
     'task-state.schema.json',
     'task-step-claim.schema.json',
     'task-transaction-operations.schema.json',
@@ -297,7 +298,7 @@ Assert-True -Condition (-not $profiles.Contains('ask') -and [string]$execution['
 $protected = Read-JsonHashtable -Path (Join-Path $policyRoot 'protected-actions.json')
 Assert-True -Condition (Test-KeySet -Value $protected -Expected @('schema_version', 'rules') -and [string]$protected['schema_version'] -ceq 'protected-actions/v1') -Success 'protected action policy shape and version are canonical' -Failure 'protected action policy shape or version is invalid'
 $protectedIds = @($protected['rules'] | ForEach-Object { [string]$_['id'] })
-Assert-True -Condition (@(Compare-Object @('production-database-destructive', 'authorization-path-change') $protectedIds).Count -eq 0) -Success 'PR-01 contains only the two plan-defined protected rules' -Failure 'protected rules are missing or expanded beyond PR-01'
+Assert-True -Condition (@(Compare-Object @('production-database-destructive') $protectedIds).Count -eq 0) -Success 'core protection covers the production destructive database rule' -Failure 'core protected rules are missing or unexpectedly expanded'
 foreach ($rule in $protected['rules']) {
     Assert-True -Condition (Test-KeySet -Value $rule -Expected @('id', 'match', 'requires_profile', 'requires_approval', 'requires_dry_run', 'requires_independent_review')) -Success ("protected rule {0} keys are exact" -f $rule['id']) -Failure ("protected rule {0} keys drifted" -f $rule['id'])
     Assert-True -Condition ([string]$rule['requires_profile'] -in @('governed', 'critical') -and $rule['requires_independent_review'] -eq $true) -Success ("protected rule {0} only escalates requirements" -f $rule['id']) -Failure ("protected rule {0} weakens requirements or declares safety" -f $rule['id'])

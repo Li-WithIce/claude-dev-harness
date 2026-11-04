@@ -160,6 +160,11 @@ function Exit-HarnessKernelMutex {
 function Resolve-HarnessProtectedRuleMatch {
     param([Collections.IDictionary]$Rule,[string]$CommandText,[string[]]$Paths,[string]$Environment,[switch]$RequireTrustedEnvironment)
     if ($Rule.match.Contains('command_regex') -and $CommandText -notmatch [string]$Rule.match.command_regex) { return $null }
+    $searchData = '''(?!-)[A-Za-z0-9_./:\\#-]*''|"(?!-)(?:[A-Za-z0-9_./:# \[\]()^*+?| -]|\\(?:s|\.|x60))*"|[A-Za-z0-9_./:#][A-Za-z0-9_./:#-]*'
+    $searchOptions = '-n|-i|-F|-e|--fixed-strings|--line-number|--count|--'
+    # Static search data is not executable SQL; unknown options and shell syntax keep the original policy.
+    $literalSearch = '\A[ \t]*rg[ \t]+--no-config(?:[ \t]+(?:' + $searchOptions + '|' + $searchData + '))+[ \t]*(?:\r?\n)?\z'
+    if ($Rule.id -ceq 'production-database-destructive' -and $CommandText -cmatch $literalSearch) { return $null }
     $matchingPaths = @()
     if ($Rule.match.Contains('path_globs')) {
         $matchingPaths = @($Paths | ForEach-Object {
@@ -170,7 +175,7 @@ function Resolve-HarnessProtectedRuleMatch {
     }
     if ($Rule.match.Contains('environment')) {
         if ([string]::IsNullOrWhiteSpace($Environment)) {
-            if ($RequireTrustedEnvironment) { throw "protected write matches rule '$($Rule.id)' but has no trusted Environment binding" }
+            if ($RequireTrustedEnvironment) { throw "protected write requires a trusted Environment binding for rule '$($Rule.id)'" }
             return $null
         }
         if ($Environment -cne [string]$Rule.match.environment) { return $null }
@@ -193,7 +198,9 @@ function Invoke-HarnessKernelProcess {
         UseShellExecute=$false;CreateNoWindow=$true
         RedirectStandardOutput=$true;RedirectStandardError=$true
         RedirectStandardInput=$null-ne$StandardInput
-        StandardOutputEncoding=[Text.UTF8Encoding]::new($false,$true);StandardErrorEncoding=[Text.UTF8Encoding]::new($false,$true)}
+        # Only the internal native cleanup utility has non-protocol, localized
+        # output. Keep normal child protocol decoding strict; still drain both.
+        StandardOutputEncoding=[Text.UTF8Encoding]::new($false, -not $SkipTreeCleanup);StandardErrorEncoding=[Text.UTF8Encoding]::new($false, -not $SkipTreeCleanup)}
     if ($CleanGitEnvironment) {
         foreach ($name in @($info.Environment.Keys)) {
             if ([string]$name -like 'GIT_*') { [void]$info.Environment.Remove([string]$name) }
@@ -241,12 +248,29 @@ function Invoke-HarnessKernelProcess {
                     # Windows PowerShell 5.1 lacks Kill(bool). Bound its native
                     # owned-tree cleanup to one hop, including process-I/O failures.
                     if (-not $SkipTreeCleanup -and [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+                        $targets = @($process)
                         try {
-                            $treeTimeout = [int][Math]::Min(1000,[Math]::Max(0,$cleanupMilliseconds-$timer.ElapsedMilliseconds-250))
-                            if ($treeTimeout -gt 0) {
-                                [void](Invoke-HarnessKernelProcess -FilePath (Join-Path ([Environment]::GetFolderPath('System')) 'taskkill.exe') -WorkingDirectory $WorkingDirectory -Arguments @('/PID',[string]$process.Id,'/T','/F') -TimeoutMilliseconds $treeTimeout -SkipTreeCleanup)
+                            if ($process.HasExited) {
+                                $targets = @()
+                                # The retained root handle prevents its PID reuse.
+                                # Query only its direct children, never command lines.
+                                foreach ($record in @(Get-CimInstance Win32_Process -Filter ("ParentProcessId="+$process.Id) -Property ProcessId,CreationDate -OperationTimeoutSec 1 -ErrorAction Stop)) {
+                                    $child = Get-Process -Id ([int]$record.ProcessId) -ErrorAction SilentlyContinue
+                                    if ($null -eq $child) { continue }
+                                    try {
+                                        $created = $child.StartTime.ToUniversalTime().Ticks
+                                        # CIM creation timestamps have microsecond precision.
+                                        if ($null -ne $record.CreationDate -and $created -ge $process.StartTime.ToUniversalTime().Ticks -and ($created-($created%10)) -eq $record.CreationDate.ToUniversalTime().Ticks -and -not $child.HasExited) { $targets += $child }
+                                    } finally { if ($targets -notcontains $child) { $child.Dispose() } }
+                                }
                             }
-                        } catch {}
+                            foreach ($target in $targets) {
+                                $treeTimeout = [int][Math]::Max(0,$cleanupMilliseconds-$timer.ElapsedMilliseconds-250)
+                                if ($treeTimeout -gt 0) {
+                                    [void](Invoke-HarnessKernelProcess -FilePath (Join-Path ([Environment]::GetFolderPath('System')) 'taskkill.exe') -WorkingDirectory $WorkingDirectory -Arguments @('/PID',[string]$target.Id,'/T','/F') -TimeoutMilliseconds $treeTimeout -SkipTreeCleanup)
+                                }
+                            }
+                        } catch {} finally { foreach ($target in $targets) { if (-not [object]::ReferenceEquals($target,$process)) { $target.Dispose() } } }
                     }
                     try { $process.Kill() } catch {}
                 }

@@ -184,7 +184,7 @@ function Assert-DistributionAssetShape {
     }
     if (@($Asset.files) -cnotcontains $source) { throw 'Distribution asset source is absent from its file allowlist' }
     if ($Asset.kind -cne 'skill' -and @($Asset.files).Count -ne 1) { throw 'Only skill transport may explicitly include support files' }
-    if ($Asset.kind -cne 'vault' -and $Asset.ownership -cne 'managed') { throw 'Distribution non-vault asset ownership must be managed' }
+    if ($Asset.kind -cne 'vault' -and $Asset.ownership -cne 'managed' -and -not ($Asset.kind -ceq 'template' -and $Asset.target -ceq 'codex-global' -and $Asset.ownership -ceq 'create-if-missing')) { throw 'Distribution non-vault asset ownership must be managed except user-owned Codex instructions' }
 }
 
 function Get-HarnessDistributionPlan {

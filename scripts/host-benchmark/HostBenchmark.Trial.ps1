@@ -37,6 +37,100 @@
 
 Import-Module (Join-Path $PSScriptRoot '..\lib\Harness.Hashing.psm1') -Force -ErrorAction Stop
 
+$script:HostTrialGitBindings = @{}
+
+function Assert-HostTrialGitPointer {
+    param([Parameter(Mandatory)][object]$Binding)
+    $pointer = Join-Path $Binding.workspace '.git'
+    foreach ($path in @($pointer,$Binding.git_directory,$Binding.metadata_root)) {
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        if ($item.Attributes.HasFlag([IO.FileAttributes]::ReparsePoint)) { throw 'host-benchmark-git-binding-link' }
+    }
+    $text = [IO.File]::ReadAllText($pointer).TrimEnd("`r","`n")
+    if (-not $text.StartsWith('gitdir: ',[StringComparison]::Ordinal)) { throw 'host-benchmark-git-pointer-invalid' }
+    $actual = [IO.Path]::GetFullPath($text.Substring(8),$Binding.workspace).TrimEnd('\','/')
+    if (-not $actual.Equals($Binding.git_directory,[StringComparison]::OrdinalIgnoreCase)) { throw 'host-benchmark-git-pointer-mismatch' }
+    $null = Resolve-HarnessContainedPath -WorkspaceRoot $Binding.metadata_root -Path $Binding.git_directory -Label 'trial Git metadata' -MustExist Directory
+    if (Test-Path -LiteralPath (Join-Path $Binding.git_directory 'objects/info/alternates')) { throw 'host-benchmark-git-shared-objects' }
+}
+
+function Assert-HostTrialGitBinding {
+    param([Parameter(Mandatory)][object]$Binding)
+    Assert-HostTrialGitPointer -Binding $Binding
+    # No forced worktree: verify persisted core.worktree against construction input.
+    $arguments = @(('--git-dir='+$Binding.git_directory),'rev-parse','--show-toplevel','--absolute-git-dir','--git-common-dir','--git-path','index')
+    if ($Binding.baseline_revision) { $arguments += 'HEAD' }
+    $actual = @(Invoke-HostGitProcess -Root $Binding.workspace -Arguments $arguments)
+    $expected = @($Binding.workspace,$Binding.git_directory,$Binding.git_directory,(Join-Path $Binding.git_directory 'index'))
+    $count = if ($Binding.baseline_revision) { 5 } else { 4 }
+    if ($actual.Count -ne $count) { throw 'host-benchmark-git-binding-unavailable' }
+    for ($i=0; $i -lt $expected.Count; $i++) {
+        if (-not [IO.Path]::GetFullPath($actual[$i],$Binding.workspace).TrimEnd('\','/').Equals($expected[$i],[StringComparison]::OrdinalIgnoreCase)) { throw 'host-benchmark-git-binding-mismatch' }
+    }
+    if ($Binding.baseline_revision -and $actual[4] -cne $Binding.baseline_revision) { throw 'host-benchmark-git-baseline-mismatch' }
+    $Binding.observed_paths = @($actual[0..3])
+    $Binding.observed_head = if ($Binding.baseline_revision) { $actual[4] } else { '' }
+    return $Binding
+}
+
+function New-HostTrialRepository {
+    param([Parameter(Mandatory)][string]$Workspace,[Parameter(Mandatory)][string]$MetadataRoot,[string]$SourceRepository='',[string]$Revision='',[switch]$CopyTemplate)
+    $workspaceFull = [IO.Path]::GetFullPath($Workspace).TrimEnd('\','/')
+    $metadataFull = [IO.Path]::GetFullPath($MetadataRoot).TrimEnd('\','/')
+    [void][IO.Directory]::CreateDirectory($metadataFull)
+    $null = Get-HostPhysicalPathInfo -Path $metadataFull -RejectLinks
+    if (Test-Path -LiteralPath (Join-Path $workspaceFull '.git')) { throw 'host-benchmark-git-existing-repository' }
+    $gitDirectory = Join-Path $metadataFull ([guid]::NewGuid().ToString('N'))
+    $binding = [ordered]@{workspace=$workspaceFull;metadata_root=$metadataFull;git_directory=$gitDirectory;baseline_revision=$Revision;observed_paths=@();observed_head=''}
+    if ($SourceRepository) {
+        if ($Revision -cnotmatch '^[0-9a-f]{40,64}$') { throw 'host-benchmark-git-source-revision-required' }
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($workspaceFull))
+        if ($CopyTemplate) {
+            Copy-Item -LiteralPath $SourceRepository -Destination $workspaceFull -Recurse -Force -ErrorAction Stop
+            # Relocate only this newly copied, independently owned template metadata.
+            $null = Invoke-HostGitProcess -Root $workspaceFull -Arguments @('init','--quiet',('--separate-git-dir='+$gitDirectory))
+        } else {
+            $null = Invoke-HostGitProcess -Root $metadataFull -Arguments @('clone','--no-local','--no-checkout','--quiet',('--separate-git-dir='+$gitDirectory),'--',$SourceRepository,$workspaceFull)
+        }
+    } else {
+        [void][IO.Directory]::CreateDirectory($workspaceFull)
+        $null = Invoke-HostGitProcess -Root $workspaceFull -Arguments @('init','--quiet',('--separate-git-dir='+$gitDirectory))
+    }
+    $script:HostTrialGitBindings[$workspaceFull] = $binding
+    if (-not $CopyTemplate) {
+        $null = Invoke-HostGit -Root $workspaceFull -Arguments @('config','core.worktree',$workspaceFull)
+        $null = Invoke-HostGit -Root $workspaceFull -Arguments @('config','core.longpaths','true')
+        $null = Invoke-HostGit -Root $workspaceFull -Arguments @('config','core.hooksPath','NUL')
+    }
+    if ($SourceRepository -and -not $CopyTemplate) {
+        $null = Invoke-HostGit -Root $workspaceFull -Arguments @('checkout','--quiet','--detach',$Revision,'--')
+    }
+    $null = Assert-HostTrialGitBinding -Binding $binding
+    return $binding
+}
+
+function Invoke-HostTrialWrapper {
+    param([Parameter(Mandatory)][object]$Binding,[Parameter(Mandatory)][string[]]$Arguments)
+    $null = Assert-HostTrialGitBinding -Binding $Binding
+    $saved = @{}
+    try {
+        foreach ($name in @('GIT_DIR','GIT_WORK_TREE','GIT_INDEX_FILE','GIT_COMMON_DIR','GIT_OBJECT_DIRECTORY','GIT_ALTERNATE_OBJECT_DIRECTORIES')) {
+            $saved[$name] = [Environment]::GetEnvironmentVariable($name,'Process')
+            Remove-Item -LiteralPath ('Env:'+$name) -ErrorAction SilentlyContinue
+        }
+        $env:GIT_DIR = $Binding.git_directory
+        $env:GIT_WORK_TREE = $Binding.workspace
+        $env:GIT_INDEX_FILE = Join-Path $Binding.git_directory 'index'
+        $output = @(& pwsh @Arguments 2>&1 | ForEach-Object { [string]$_ })
+        return [pscustomobject]@{Output=$output;ExitCode=$LASTEXITCODE}
+    } finally {
+        foreach ($entry in $saved.GetEnumerator()) {
+            if ($null -eq $entry.Value) { Remove-Item -LiteralPath ('Env:'+$entry.Key) -ErrorAction SilentlyContinue }
+            else { [Environment]::SetEnvironmentVariable($entry.Key,$entry.Value,'Process') }
+        }
+    }
+}
+
 function Complete-HostPendingOtlpCleanup {
     param([Parameter(Mandatory)]$Pending)
     $collector = $Pending.collector
@@ -83,25 +177,63 @@ function Test-HostPathAtOrBelow {
     return $pathFull.Equals($rootFull,[StringComparison]::OrdinalIgnoreCase) -or $pathFull.StartsWith($rootFull + '\',[StringComparison]::OrdinalIgnoreCase)
 }
 
+function New-HostFileSystemIdentityError {
+    param(
+        [string]$Path,[string]$Stage,[string]$Reason,
+        [string]$ExecutablePath = '',[Nullable[int]]$NativeExitCode = $null,
+        [string[]]$NativeOutput = @(),[switch]$UnsupportedPath
+    )
+    $errorSummary = $Reason
+    # Retain only a bounded native error number, never arbitrary stderr or paths.
+    $nativeError = [regex]::Match(($NativeOutput -join "`n"),'(?im)^\s*(?:Error|错误)\s+([0-9]{1,10})\s*[:：]')
+    if ($nativeError.Success) { $errorSummary += ':win32-error-' + $nativeError.Groups[1].Value }
+    $pathType = 'unavailable'
+    if ($UnsupportedPath) { $pathType = 'unsupported' }
+    elseif (Test-Path -LiteralPath $Path -PathType Container) { $pathType = 'directory' }
+    elseif (Test-Path -LiteralPath $Path -PathType Leaf) { $pathType = 'file' }
+    $failure = [Management.Automation.RuntimeException]::new('host-benchmark-path-physical-identity-unavailable')
+    $failure.Data['stage'] = $Stage
+    $failure.Data['path_length'] = $Path.Length
+    $failure.Data['path_type'] = $pathType
+    # Explicit local diagnostics can correlate this reference with their target record.
+    $failure.Data['target_ref'] = Get-HarnessUtf8TextSha256 -Text $Path
+    $failure.Data['executable_path'] = $ExecutablePath
+    $failure.Data['native_exit_code'] = $NativeExitCode
+    $failure.Data['error_summary'] = $errorSummary
+    $record = [Management.Automation.ErrorRecord]::new($failure,$failure.Message,[Management.Automation.ErrorCategory]::ResourceUnavailable,$null)
+    $record.ErrorDetails = [Management.Automation.ErrorDetails]::new(
+        ('{0}; stage={1}; path_length={2}; path_type={3}; target_ref={4}; executable_path={5}; native_exit_code={6}; error_summary={7}' -f
+            $failure.Message,$Stage,$Path.Length,$pathType,$failure.Data['target_ref'],$ExecutablePath,$NativeExitCode,$errorSummary)
+    )
+    return $record
+}
+
 function Get-HostFileSystemIdentity {
     param([Parameter(Mandatory)][string]$Path)
     $full = [IO.Path]::GetFullPath($Path)
-    if (-not (Test-Path -LiteralPath $full)) { throw 'host-benchmark-path-physical-identity-unavailable' }
-    $fileIdOutput = @(& fsutil file queryFileID $full 2>&1 | ForEach-Object { [string]$_ })
-    if ($LASTEXITCODE -ne 0) { throw 'host-benchmark-path-physical-identity-unavailable' }
-    $fileIdMatch = [regex]::Match(($fileIdOutput -join "`n"),'(?i)0x[0-9a-f]{32}')
-    if (-not $fileIdMatch.Success) { throw 'host-benchmark-path-physical-identity-unavailable' }
     $root = [IO.Path]::GetPathRoot($full)
     if ($root -match '^\\\\\?\\([A-Za-z]:\\)$') { $root = $Matches[1] }
-    if ($root -notmatch '^[A-Za-z]:\\$') { throw 'host-benchmark-path-physical-identity-unavailable' }
-    $volumeOutput = @(& mountvol $root /L 2>&1 | ForEach-Object { [string]$_ })
-    if ($LASTEXITCODE -ne 0) { throw 'host-benchmark-path-physical-identity-unavailable' }
+    if ($root -notmatch '^[A-Za-z]:\\$') { throw (New-HostFileSystemIdentityError -Path $full -Stage 'path' -Reason 'unsupported-root' -UnsupportedPath) }
+    if (-not (Test-Path -LiteralPath $full)) { throw (New-HostFileSystemIdentityError -Path $full -Stage 'path' -Reason 'target-unavailable') }
+    $fsutilPath = @(Get-Command fsutil -CommandType Application -ErrorAction Stop)[0].Source
+    # fsutil file queryFileID needs extended local paths; stored identities stay unchanged.
+    $nativePath = if ($full.StartsWith('\\?\',[StringComparison]::Ordinal)) { $full } else { '\\?\' + $full }
+    $fileIdOutput = @(& $fsutilPath file queryFileID $nativePath 2>&1 | ForEach-Object { [string]$_ })
+    $fileIdExit = $LASTEXITCODE
+    if ($fileIdExit -ne 0) { throw (New-HostFileSystemIdentityError -Path $full -Stage 'queryFileID' -Reason 'native-command-failed' -ExecutablePath $fsutilPath -NativeExitCode $fileIdExit -NativeOutput $fileIdOutput) }
+    $fileIdMatch = [regex]::Match(($fileIdOutput -join "`n"),'(?i)0x[0-9a-f]{32}')
+    if (-not $fileIdMatch.Success) { throw (New-HostFileSystemIdentityError -Path $full -Stage 'queryFileID' -Reason 'invalid-native-output' -ExecutablePath $fsutilPath -NativeExitCode $fileIdExit) }
+    $mountvolPath = @(Get-Command mountvol -CommandType Application -ErrorAction Stop)[0].Source
+    $volumeOutput = @(& $mountvolPath $root /L 2>&1 | ForEach-Object { [string]$_ })
+    $volumeExit = $LASTEXITCODE
+    if ($volumeExit -ne 0) { throw (New-HostFileSystemIdentityError -Path $full -Stage 'mountvol' -Reason 'native-command-failed' -ExecutablePath $mountvolPath -NativeExitCode $volumeExit -NativeOutput $volumeOutput) }
     $volumeMatch = [regex]::Match(($volumeOutput -join "`n"),'(?i)\\\\\?\\Volume\{[0-9a-f-]{36}\}\\')
-    if (-not $volumeMatch.Success) { throw 'host-benchmark-path-physical-identity-unavailable' }
-    $nameOutput = @(& fsutil file queryFileNameById $volumeMatch.Value $fileIdMatch.Value 2>&1 | ForEach-Object { [string]$_ })
-    if ($LASTEXITCODE -ne 0) { throw 'host-benchmark-path-physical-identity-unavailable' }
+    if (-not $volumeMatch.Success) { throw (New-HostFileSystemIdentityError -Path $full -Stage 'mountvol' -Reason 'invalid-native-output' -ExecutablePath $mountvolPath -NativeExitCode $volumeExit) }
+    $nameOutput = @(& $fsutilPath file queryFileNameById $volumeMatch.Value $fileIdMatch.Value 2>&1 | ForEach-Object { [string]$_ })
+    $nameExit = $LASTEXITCODE
+    if ($nameExit -ne 0) { throw (New-HostFileSystemIdentityError -Path $full -Stage 'queryFileNameById' -Reason 'native-command-failed' -ExecutablePath $fsutilPath -NativeExitCode $nameExit -NativeOutput $nameOutput) }
     $pathMatch = [regex]::Match(($nameOutput -join "`n"),'(?i)\\\\\?\\(?:[A-Za-z]:\\|UNC\\|Volume\{[0-9a-f-]{36}\}\\)[^\r\n]+')
-    if (-not $pathMatch.Success) { throw 'host-benchmark-path-physical-identity-unavailable' }
+    if (-not $pathMatch.Success) { throw (New-HostFileSystemIdentityError -Path $full -Stage 'queryFileNameById' -Reason 'invalid-native-output' -ExecutablePath $fsutilPath -NativeExitCode $nameExit) }
     $physicalPath = $pathMatch.Value.Trim()
     if ($physicalPath.StartsWith('\\?\UNC\',[StringComparison]::OrdinalIgnoreCase)) {
         $physicalPath = '\\' + $physicalPath.Substring(8)
@@ -802,13 +934,18 @@ function Invoke-InstalledDesktopRouteProbe {
 
 function Initialize-HostWorkspaceBaseline {
     param([Parameter(Mandatory)][string]$Workspace)
+    $key = [IO.Path]::GetFullPath($Workspace).TrimEnd('\','/')
+    if ($script:HostTrialGitBindings.ContainsKey($key)) { $null = Assert-HostTrialGitBinding -Binding $script:HostTrialGitBindings[$key] }
     [void](Invoke-HostGit -Root $Workspace -Arguments @('config','core.hooksPath','NUL'))
     [void](Invoke-HostGit -Root $Workspace -Arguments @('config','core.longpaths','true'))
     [void](Invoke-HostGit -Root $Workspace -Arguments @('config','user.name','Harness Benchmark'))
     [void](Invoke-HostGit -Root $Workspace -Arguments @('config','user.email','harness-benchmark@example.invalid'))
     [void](Invoke-HostGit -Root $Workspace -Arguments @('add','--all','--force','--','.'))
     [void](Invoke-HostGit -Root $Workspace -Arguments @('commit','--quiet','--no-gpg-sign','-m','host benchmark baseline'))
-    return (@(Invoke-HostGit -Root $Workspace -Arguments @('rev-parse','HEAD')) -join '').Trim()
+    $baseline = (@(Invoke-HostGit -Root $Workspace -Arguments @('rev-parse','HEAD')) -join '').Trim()
+    $key = [IO.Path]::GetFullPath($Workspace).TrimEnd('\','/')
+    if ($script:HostTrialGitBindings.ContainsKey($key)) { $script:HostTrialGitBindings[$key].baseline_revision = $baseline }
+    return $baseline
 }
 
 function Get-HostWorkspaceChanges {
@@ -990,10 +1127,7 @@ function Invoke-HostTrial {
     if ($SourceBindingRequired) {
         if ($SourceRevision -cnotmatch '^[0-9a-f]{40,64}$' -or $SourceCommitTree -cnotmatch '^[0-9a-f]{40,64}$') { throw 'host-benchmark-source-identity-invalid' }
         $trialSourceRoot = Join-Path $trialRoot 'source'
-        $cloneOutput = @(& git -c core.longpaths=true clone --no-local --no-checkout --quiet -- $RepoRoot $trialSourceRoot 2>&1 | ForEach-Object { [string]$_ })
-        if ($LASTEXITCODE -ne 0) { throw 'host-benchmark-source-clone-failed' }
-        [void](Invoke-HostGit -Root $trialSourceRoot -Arguments @('config','core.longpaths','true'))
-        [void](Invoke-HostGit -Root $trialSourceRoot -Arguments @('-c','core.hooksPath=NUL','checkout','--quiet','--detach',$SourceRevision,'--'))
+        $null = New-HostTrialRepository -Workspace $trialSourceRoot -MetadataRoot $script:HostTrialGitMetadataRoot -SourceRepository $RepoRoot -Revision $SourceRevision
         $sourceState = Get-HostGitState -Root $trialSourceRoot -IncludeIgnored
         if ([string]$sourceState.revision -cne $SourceRevision -or [string]$sourceState.commit_tree_oid -cne $SourceCommitTree -or [bool]$sourceState.dirty) { throw 'host-benchmark-source-checkout-mismatch' }
         $RepoRoot = $trialSourceRoot
@@ -1007,7 +1141,7 @@ function Invoke-HostTrial {
     $pathModule = $pathModule[0]
     Import-Module (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1') -Force -ErrorAction Stop
     [IO.File]::WriteAllText((Join-Path $workspace 'src\value.txt'),'alpha',[Text.UTF8Encoding]::new($false))
-    [void](Invoke-HostGit -Root $workspace -Arguments @('init','--quiet'))
+    $workspaceGitBinding = New-HostTrialRepository -Workspace $workspace -MetadataRoot $script:HostTrialGitMetadataRoot
     if ($Protocol -eq 'bare') {
         $bareRules = @"
 # Bare Host Benchmark
@@ -1147,8 +1281,9 @@ Work only inside this workspace. The user explicitly authorizes this complete, r
             $wrapperArguments += @('-OutputSchema',$SchemaPath,'-Output',$responsePath,'-TelemetryOutput',$telemetryPath)
             $wrapperArguments += $otelArguments
             $wrapperArguments += @('-TimeoutSeconds',$TimeoutSeconds)
-            $wrapperOutput = @(& pwsh @wrapperArguments 2>&1 | ForEach-Object { [string]$_ })
-            $wrapperExit = $LASTEXITCODE
+            $wrapperInvocation = Invoke-HostTrialWrapper -Binding $workspaceGitBinding -Arguments $wrapperArguments
+            $wrapperOutput = $wrapperInvocation.Output
+            $wrapperExit = $wrapperInvocation.ExitCode
             if ($wrapperExit -ne 0 -or -not (Test-Path -LiteralPath $responsePath -PathType Leaf) -or -not (Test-Path -LiteralPath $telemetryPath -PathType Leaf)) {
                 $invocationUnavailable = $true
                 $diagnostic = 'wrapper-exit-' + $wrapperExit

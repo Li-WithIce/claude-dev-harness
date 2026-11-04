@@ -147,3 +147,57 @@ Zero-install-write snapshots bind the entire isolated workspace and user tree
 apart from PowerShell's own exact `StartupProfileData-NonInteractive` JIT cache
 and its empty parent-directory bookkeeping; every other file under those
 parents is still included. Host startup cache activity is not installer state.
+
+## H04 shared Hook requirements
+
+The current install request replaces only the target workspace's latest Hook requirements. Other still-registered owners contribute their latest committed, digest-verified feature_ownership.hooks; older target revisions and retired owners are not active demands. Unavailable workspace drives do not retire owners. The result is derived from existing registry/manifests, not a new persisted ownership record.
+
+The same coordination object builds the complete user-global Hook directory and the managed Claude/Codex reference set. Current-plan files are rendered from the validated DistributionPlan. Other-owner-only assets use exact registered live directory bytes and checked local dependencies, never an offline historical source tree. Directory drift, malformed ownership, missing assets or conflicting registered command metadata fail before transaction publication. Staging copies retained files with exact identities and rechecks the live directory; the original mutex, CAS, backup and recovery mechanism remains authoritative.
+
+Workspace preset and feature_ownership remain request-local: a core workspace does not acquire Memory because another owner keeps an optional Hook. Installation verification checks the shared directory digest, explicit owner set and exact managed references separately. The explicit SharedHooks verification scope covers those assets plus this workspace's feature ownership; All retains all original skill/template checks and is not weakened. Existing cross-workspace Skills behavior is outside this change.
+
+Uninstall retains its existing ordered restoration and ownership handoff. An inactive owner's removal may leave exact registry-bound restoration bytes until the next install/update or final global restoration; these are reported as restoration-only, never unioned as active requirements. Only files tied to verified superseded/retired manifest requirements and the current exact directory identity qualify, not arbitrary disk extras. The next normal install computes current demands without them; the final owner release restores the original preimage. No garbage collector or permanent retention flag is introduced.
+
+H04 does not change Runtime Hook execution, permissions, trust, budgets, or Skills synchronization. Offline tests and normal-user preview are not deployment or proof of host loading.
+
+## I02 shared Skill requirements
+
+Synchronization keeps a retained-only link after rechecking its registered identity, without probing or recreating its target. The target may be offline; retention does not certify that Skill as usable. Current-request sources still require normal availability checks. The regression removes an isolated owner's Skill source directory while installing core for another owner and verifies all retained link identities.
+
+Installation and All verification use one transient Skill plan derived from the same digest-verified active owners as H04. Each owner contributes only its latest explicit feature_ownership.skills; the current request replaces the target's old demand. Workspace availability is not a retirement signal. No additional registry, public state field or reference-count service is introduced.
+
+The plan binds each required name to the exact registered live link. Current-request assets still come from the validated source plan. An upgrade to another source keeps the original backup/restoration mechanism only after the current link is registered and the two source directories have matching content identities; otherwise it fails before transaction publication. Retained-only Skills never materialize unverified historical source contents. A missing or drifted owned link, unsupported ownership or unowned same-source extra is an explicit conflict, not a reason to overwrite or silently retain arbitrary data.
+
+After a nonactive owner is uninstalled, existing ordered restoration can leave exact registered links temporarily. All verification reports these as restoration-only, not active ownership; the next install removes released managed links through the normal transaction, and final uninstall restores original preimages. User/external entries stay under their existing preservation rules. The reserved host .system mirror/hot-swap behavior remains unchanged; its registered shared link may follow a legitimate source update, while physical host content is retained.
+
+A core workspace still owns only its own core Skill set. The shared host directory may expose other owners' Skills to the host: lack of core ownership does not imply host discovery isolation. I02 adds no such isolation and edits no SKILL.md instructions. H04 Hook coordination, Runtime, policies and budgets are unchanged.
+## Uninstall compatibility with shared providers and offline history
+
+The last global manifest remains the transaction-order/handoff owner, not the
+provider of every shared Skill. Uninstall validates the latest applicable leaf
+or ancestor record against its exact live postimage. A registered leaf link must
+also match its recorded provider. Parent identity coverage follows the existing
+restore contract without inventing leaf records; mismatches never fall back to
+missing-record preservation. Installation and installed-health verification
+retain their strict completeness rules.
+
+A preexisting same-source Skill absent from consumable legacy history can remain
+untouched only within a digest-verified native rebaseline receipt/source boundary.
+The latest effective owner demand, precise source/name, receipt source digests,
+user and backup boundaries must agree. No current Profile supplies authority.
+The native restore plan and generated-source cleanup must not touch the retained
+link, an ancestor, or its target, including indirect directory effects. This is
+checked before first publication and again on resume. The decision exists only in
+memory; no ownership, backup, postimage or new persistent classification is
+created. Retention neither certifies history completeness nor authorizes a later
+install/source migration to take over the asset. Native physical `.system`
+content, recorded managed `.system` links and untouched historical links retain
+these distinct contracts.
+
+Historical workspace/vault, source/skills and receipt-pointer comparisons use
+lexical fixed-subpath composition. Actual operation paths, restoration sources
+and payloads must still be available and meet the original identity checks.
+Direct install cannot change a registered workspace's RepoRoot; normal uninstall
+must commit first. The owners cover mixed-source H04 handoff, retained business
+and tasks, source re-registration, native failed-install recovery, and the real
+warm-up-excluded legacy rebaseline/marker-failure lifecycle.

@@ -3,6 +3,13 @@
   "classification_path": "kernel-component-classification.json",
   "runtime_roots": [
     {
+      "id": "session-workspace-registration",
+      "path": "scripts/register-session-workspaces.ps1",
+      "role": "Register exact session-bound workspace roots using current scoped Approval and CAS.",
+      "layer": "k1-runtime-kernel",
+      "reason": "Workspace grants extend the authorization boundary and use the same counted Runtime primitives."
+    },
+    {
       "id": "entry-contract-compiler",
       "path": "scripts/generate-entry-contract.ps1",
       "role": "Compile and verify the canonical Entry Contract bootstrap.",
@@ -62,45 +69,370 @@
     }
   ],
   "trust_artifacts": [
-    { "path": "agent-configs/claude/CLAUDE.md.template", "kind": "entry-template", "reason": "Claude installed Entry Contract template is hashed by Runtime Default and rendered by the compiler.", "owner_layer": "a3-adapter", "trust_paths": ["runtime", "distribution"] },
-    { "path": "agent-configs/workspace/AGENTS.md.template", "kind": "entry-template", "reason": "Workspace installed Entry Contract template is hashed by Runtime Default and rendered by the compiler.", "owner_layer": "a3-adapter", "trust_paths": ["runtime", "distribution"] },
-    { "path": "modules/distribution/profiles/core.json", "kind": "policy", "reason": "TK-06 central core installation allowlist; grants Distribution transport only, never Runtime authority.", "owner_layer": "d1-distribution", "trust_paths": ["distribution"] },
-    { "path": "modules/distribution/profiles/full.json", "kind": "policy", "reason": "TK-06 central full installation allowlist; module requests cannot expand this grant.", "owner_layer": "d1-distribution", "trust_paths": ["distribution"] },
-    { "path": "modules/distribution/profiles/governed.json", "kind": "policy", "reason": "TK-06 central governed installation allowlist independent of Runtime execution policy.", "owner_layer": "d1-distribution", "trust_paths": ["distribution"] },
-    { "path": "policies/decision-rights.json", "kind": "policy", "reason": "Requirement Gate decision ownership is machine enforced from this policy.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "policies/entry-contract.md", "kind": "entry-contract", "reason": "Canonical Entry Contract prose compiled into installed host and workspace templates.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime", "distribution"] },
-    { "path": "policies/execution-profiles.json", "kind": "policy", "reason": "Defines allowed persistence and capability composition for Runtime profiles.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "policies/protected-actions.json", "kind": "policy", "reason": "Core protected-action rules fail closed before writes.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "policies/risk-rules.json", "kind": "policy", "reason": "Defines risk dimensions, thresholds, triggers, and routing overrides.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "schemas/approval.schema.json", "kind": "schema", "reason": "Approval documents are validated before protected completion.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "schemas/adapter-kernel-api.schema.json", "kind": "schema", "reason": "The strict four-operation Adapter request and response contract binds the public K1 boundary.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "schemas/audit-record.schema.json", "kind": "schema", "reason": "Policy-selected independent audit artifacts use this strict record shape.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "schemas/current-pointer.schema.json", "kind": "schema", "reason": "Current task projection and recovery use this strict pointer shape.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "schemas/decision-rights.schema.json", "kind": "schema", "reason": "Requirement decision ownership policy is validated before inspection.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "schemas/event.schema.json", "kind": "schema", "reason": "Task lifecycle event-log records are schema validated.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "schemas/evidence.schema.json", "kind": "schema", "reason": "Evidence Chain completion is bound to this strict document shape.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "schemas/host-capabilities.schema.json", "kind": "schema", "reason": "Host capability observations use one strict Runtime document shape.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "schemas/distribution-plan.schema.json", "kind": "schema", "reason": "Strict new Distribution desired-state contract validated before installation writes.", "owner_layer": "d1-distribution", "trust_paths": ["distribution"] },
-    { "path": "schemas/install-profile.schema.json", "kind": "schema", "reason": "Strict Profile prevents undeclared transport fields or ambiguous asset grants.", "owner_layer": "d1-distribution", "trust_paths": ["distribution"] },
-    { "path": "schemas/module-manifest-catalog-v1.schema.json", "kind": "schema", "reason": "Distribution validates the published Manifest identity set without executing the C2 constructor.", "owner_layer": "d1-distribution", "trust_paths": ["distribution"] },
-    { "path": "schemas/module-manifest-v1.schema.json", "kind": "schema", "reason": "Frozen v1 Manifest schema validates descriptive capability requests consumed by Distribution.", "owner_layer": "d1-distribution", "trust_paths": ["distribution"] },
-    { "path": "schemas/module-manifest.schema.json", "kind": "schema", "reason": "Frozen v0 Manifest schema validates compatibility metadata without inventing install authority.", "owner_layer": "d1-distribution", "trust_paths": ["distribution"] },
-    { "path": "schemas/mcp-write-file.schema.json", "kind": "schema", "reason": "The MCP adapter advertises and validates one strict controlled-write argument contract.", "owner_layer": "a3-adapter", "trust_paths": ["runtime"] },
-    { "path": "schemas/protected-actions.schema.json", "kind": "schema", "reason": "Core protected-action policy is strictly validated before evaluation.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "schemas/protected-actions-overlay.schema.json", "kind": "schema", "reason": "Workspace protected-action overlays cannot weaken core policy and are strictly validated.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "schemas/protocol-config.schema.json", "kind": "schema", "reason": "Workspace protocol configuration and Runtime Default inputs use strict validation.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "schemas/protocol-config-v2.schema.json", "kind": "schema", "reason": "TK-03 v2-only new-work admission and explicit pause must be strictly validated.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "schemas/runtime-default-admission.schema.json", "kind": "schema", "reason": "Current Runtime admits only v2 without rewriting the historical Decision Schema or digest.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "schemas/requirement-contract.schema.json", "kind": "schema", "reason": "Task creation and protected writes bind a clear Requirement Contract.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "schemas/requirement-inspection.schema.json", "kind": "schema", "reason": "Requirement inspection requests are validated by one strict input envelope.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "schemas/runtime-default-decision.schema.json", "kind": "schema", "reason": "Auto protocol selection consumes only this distilled version-neutral Runtime decision.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "schemas/runtime-policies.schema.json", "kind": "schema", "reason": "Runtime risk and execution policies are validated as one strict bundle.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "schemas/task-step-claim.schema.json", "kind": "schema", "reason": "Durable publication claims are validated before transaction recovery.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "schemas/task-state.schema.json", "kind": "schema", "reason": "Durable task state, replay, recovery, and protected writes validate this shape.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "schemas/task-transaction.schema.json", "kind": "schema", "reason": "Current and retained legacy journals share a strict compatibility envelope.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "schemas/task-transaction-operations.schema.json", "kind": "schema", "reason": "Transaction operations bind exact ordered step signatures declaratively.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "templates/v2/plan.md.template", "kind": "governance-template", "reason": "Plan-required Governed tasks create a Contract-bound plan from this template.", "owner_layer": "k1-runtime-kernel", "trust_paths": ["runtime"] },
-    { "path": "vault-template/entry/AGENTS.md.template", "kind": "entry-template", "reason": "Runtime source identity binds the installed compatibility entry template until v1 Sunset gates are satisfied.", "owner_layer": "a3-adapter", "trust_paths": ["runtime", "distribution"] }
+    {
+      "path": "agent-configs/claude/CLAUDE.md.template",
+      "kind": "entry-template",
+      "reason": "Claude installed Entry Contract template is hashed by Runtime Default and rendered by the compiler.",
+      "owner_layer": "a3-adapter",
+      "trust_paths": [
+        "runtime",
+        "distribution"
+      ]
+    },
+    {
+      "path": "agent-configs/workspace/AGENTS.md.template",
+      "kind": "entry-template",
+      "reason": "Workspace installed Entry Contract template is hashed by Runtime Default and rendered by the compiler.",
+      "owner_layer": "a3-adapter",
+      "trust_paths": [
+        "runtime",
+        "distribution"
+      ]
+    },
+    {
+      "path": "modules/distribution/profiles/core.json",
+      "kind": "policy",
+      "reason": "TK-06 central core installation allowlist; grants Distribution transport only, never Runtime authority.",
+      "owner_layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ]
+    },
+    {
+      "path": "modules/distribution/profiles/full.json",
+      "kind": "policy",
+      "reason": "TK-06 central full installation allowlist; module requests cannot expand this grant.",
+      "owner_layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ]
+    },
+    {
+      "path": "modules/distribution/profiles/governed.json",
+      "kind": "policy",
+      "reason": "TK-06 central governed installation allowlist independent of Runtime execution policy.",
+      "owner_layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ]
+    },
+    {
+      "path": "policies/decision-rights.json",
+      "kind": "policy",
+      "reason": "Requirement Gate decision ownership is machine enforced from this policy.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "policies/entry-contract.md",
+      "kind": "entry-contract",
+      "reason": "Canonical Entry Contract prose compiled into installed host and workspace templates.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime",
+        "distribution"
+      ]
+    },
+    {
+      "path": "policies/execution-profiles.json",
+      "kind": "policy",
+      "reason": "Defines allowed persistence and capability composition for Runtime profiles.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "policies/protected-actions.json",
+      "kind": "policy",
+      "reason": "Core protected-action rules fail closed before writes.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "policies/risk-rules.json",
+      "kind": "policy",
+      "reason": "Defines risk dimensions, thresholds, triggers, and routing overrides.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/approval.schema.json",
+      "kind": "schema",
+      "reason": "Approval documents are validated before protected completion.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/adapter-kernel-api.schema.json",
+      "kind": "schema",
+      "reason": "The strict four-operation Adapter request and response contract binds the public K1 boundary.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/audit-record.schema.json",
+      "kind": "schema",
+      "reason": "Policy-selected independent audit artifacts use this strict record shape.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/current-pointer.schema.json",
+      "kind": "schema",
+      "reason": "Current task projection and recovery use this strict pointer shape.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/decision-rights.schema.json",
+      "kind": "schema",
+      "reason": "Requirement decision ownership policy is validated before inspection.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/event.schema.json",
+      "kind": "schema",
+      "reason": "Task lifecycle event-log records are schema validated.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/evidence.schema.json",
+      "kind": "schema",
+      "reason": "Evidence Chain completion is bound to this strict document shape.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/host-capabilities.schema.json",
+      "kind": "schema",
+      "reason": "Host capability observations use one strict Runtime document shape.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/distribution-plan.schema.json",
+      "kind": "schema",
+      "reason": "Strict new Distribution desired-state contract validated before installation writes.",
+      "owner_layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ]
+    },
+    {
+      "path": "schemas/install-profile.schema.json",
+      "kind": "schema",
+      "reason": "Strict Profile prevents undeclared transport fields or ambiguous asset grants.",
+      "owner_layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ]
+    },
+    {
+      "path": "schemas/module-manifest-catalog-v1.schema.json",
+      "kind": "schema",
+      "reason": "Distribution validates the published Manifest identity set without executing the C2 constructor.",
+      "owner_layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ]
+    },
+    {
+      "path": "schemas/module-manifest-v1.schema.json",
+      "kind": "schema",
+      "reason": "Frozen v1 Manifest schema validates descriptive capability requests consumed by Distribution.",
+      "owner_layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ]
+    },
+    {
+      "path": "schemas/module-manifest.schema.json",
+      "kind": "schema",
+      "reason": "Frozen v0 Manifest schema validates compatibility metadata without inventing install authority.",
+      "owner_layer": "d1-distribution",
+      "trust_paths": [
+        "distribution"
+      ]
+    },
+    {
+      "path": "schemas/mcp-write-file.schema.json",
+      "kind": "schema",
+      "reason": "The MCP adapter advertises and validates one strict controlled-write argument contract.",
+      "owner_layer": "a3-adapter",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/protected-actions.schema.json",
+      "kind": "schema",
+      "reason": "Core protected-action policy is strictly validated before evaluation.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/protected-actions-overlay.schema.json",
+      "kind": "schema",
+      "reason": "Workspace protected-action overlays cannot weaken core policy and are strictly validated.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/session-workspaces.schema.json",
+      "kind": "schema",
+      "reason": "Session workspace grants strictly bind session, primary and target physical identities and registration provenance.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/protocol-config.schema.json",
+      "kind": "schema",
+      "reason": "Workspace protocol configuration and Runtime Default inputs use strict validation.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/protocol-config-v2.schema.json",
+      "kind": "schema",
+      "reason": "TK-03 v2-only new-work admission and explicit pause must be strictly validated.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/runtime-default-admission.schema.json",
+      "kind": "schema",
+      "reason": "Current Runtime admits only v2 without rewriting the historical Decision Schema or digest.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/requirement-contract.schema.json",
+      "kind": "schema",
+      "reason": "Task creation and protected writes bind a clear Requirement Contract.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/requirement-inspection.schema.json",
+      "kind": "schema",
+      "reason": "Requirement inspection requests are validated by one strict input envelope.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/runtime-default-decision.schema.json",
+      "kind": "schema",
+      "reason": "Auto protocol selection consumes only this distilled version-neutral Runtime decision.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/runtime-policies.schema.json",
+      "kind": "schema",
+      "reason": "Runtime risk and execution policies are validated as one strict bundle.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/task-step-claim.schema.json",
+      "kind": "schema",
+      "reason": "Durable publication claims are validated before transaction recovery.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/task-state.schema.json",
+      "kind": "schema",
+      "reason": "Durable task state, replay, recovery, and protected writes validate this shape.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/task-transaction.schema.json",
+      "kind": "schema",
+      "reason": "Current and retained legacy journals share a strict compatibility envelope.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "schemas/task-transaction-operations.schema.json",
+      "kind": "schema",
+      "reason": "Transaction operations bind exact ordered step signatures declaratively.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "templates/v2/plan.md.template",
+      "kind": "governance-template",
+      "reason": "Plan-required Governed tasks create a Contract-bound plan from this template.",
+      "owner_layer": "k1-runtime-kernel",
+      "trust_paths": [
+        "runtime"
+      ]
+    },
+    {
+      "path": "vault-template/entry/AGENTS.md.template",
+      "kind": "entry-template",
+      "reason": "Runtime source identity binds the installed compatibility entry template until v1 Sunset gates are satisfied.",
+      "owner_layer": "a3-adapter",
+      "trust_paths": [
+        "runtime",
+        "distribution"
+      ]
+    }
   ],
   "manual_edges": [
     {
@@ -172,31 +504,46 @@
       "id": "dotnet-base-class-library",
       "name": ".NET and .NET Framework base class libraries; System.Text.Json on PowerShell 7",
       "reason": "Strict UTF-8, JSON parsing, cryptography, process, and filesystem primitives are provided by the host runtime. The installed Windows PowerShell 5.1 first hop uses .NET Framework before invoking the pinned PowerShell 7 runtime.",
-      "trust_paths": ["runtime", "distribution"]
+      "trust_paths": [
+        "runtime",
+        "distribution"
+      ]
     },
     {
       "id": "git-executable",
       "name": "Git executable",
       "reason": "Evidence revision binding, Runtime source identity, workspace discovery, and distribution verification invoke Git without treating it as a repository file.",
-      "trust_paths": ["runtime", "distribution"]
+      "trust_paths": [
+        "runtime",
+        "distribution"
+      ]
     },
     {
       "id": "operating-system-filesystem",
       "name": "Operating-system filesystem identity, locking, and atomic replacement semantics",
       "reason": "Containment, reparse rejection, mutexes, atomic replace, and installation convergence depend on OS semantics.",
-      "trust_paths": ["runtime", "distribution"]
+      "trust_paths": [
+        "runtime",
+        "distribution"
+      ]
     },
     {
       "id": "operating-system-process-tree",
       "name": "Operating-system owned process-tree termination and Windows System32 taskkill.exe",
       "reason": "The Windows PowerShell 5.1 launcher lacks Process.Kill(bool); its bounded cleanup invokes the absolute system taskkill executable only for the process it started. Modern hosts use Process.Kill(true). Cleanup is best effort on exceptional OS failure and never establishes successful execution.",
-      "trust_paths": ["runtime", "distribution"]
+      "trust_paths": [
+        "runtime",
+        "distribution"
+      ]
     },
     {
       "id": "powershell-runtime",
       "name": "PowerShell 7 runtime and parser; Windows PowerShell 5.1 installed first hop",
       "reason": "Selected Runtime work and AST dependency analysis use PowerShell 7. The installed Windows Hook launcher first executes in Windows PowerShell 5.1 with compatible argument quoting and owned process-tree cleanup.",
-      "trust_paths": ["runtime", "distribution"]
+      "trust_paths": [
+        "runtime",
+        "distribution"
+      ]
     }
   ],
   "budget": {
@@ -214,6 +561,82 @@
         ],
         "repayment_plan": "Retain the 3068 baseline and explicit positive delta. Reassess this 10-line allowance at the next explicitly authorized Runtime change; do not delete correctness checks or start extra compression in this repair.",
         "expires_at_milestone": "Next explicitly authorized Runtime budget review after TK-07 R1/R2 closure"
+      },
+      {
+        "id": "KTB-EX-003",
+        "added_lines": 2,
+        "reason": "Explicit user approval on 2026-09-14 covers H01 optional-array omission handling: +2 LOC, +13 executable tokens and +13 statement ASTs relative to the original HEAD. This does not reset baseline 3068 or repurpose KTB-EX-002.",
+        "new_trust_assumption": "None. Input Schema validation, requirement blockers and read-only behavior remain unchanged; no new dependency or permission.",
+        "alternatives": [
+          "Leaving omitted arrays as null elements rejects inputs already allowed by the existing Schema.",
+          "Relaxing the Schema, filtering null globally or packing source would change validation or defeat accounting."
+        ],
+        "repayment_plan": "Review continued necessity at the next explicitly authorized Runtime change. Do not mechanically delete two lines; only remove proven semantic redundancy without changing validation, accounting or trust boundaries.",
+        "expires_at_milestone": "Next explicitly authorized Runtime change after H01/H02 budget approval"
+      },
+      {
+        "id": "KTB-EX-004",
+        "added_lines": 61,
+        "reason": "Explicit user approval on 2026-09-14 covers final readable H02: +61 LOC, +210 tokens and +83 statement ASTs over HEAD plus H01. Combined HEAD growth is +63 LOC/+223 tokens/+96 ASTs; the Token checkpoint increases only 147 because its prior 76-token headroom already existed.",
+        "new_trust_assumption": "None beyond existing trusted host cwd and installation bindings. Absolute and relative paths share containment and policy checks; finite refusal categories do not grant authority or expose arbitrary stderr.",
+        "alternatives": [
+          "Duplicate target resolution was removed; retaining separate syntax, binding, containment and policy boundaries is necessary.",
+          "Blind native path normalization cannot replace ADS, reparse, device-path or all-target checks.",
+          "Forwarding arbitrary stderr, packing branches, moving accounting scope or refactoring unrelated state/process code is not an acceptable substitute."
+        ],
+        "repayment_plan": "Review continued necessity at the next explicitly authorized Runtime change. No immediate line-for-line repayment is required. Retain readable branches and only remove independently justified redundancy; do not loosen security or change measurement to repay this allowance.",
+        "expires_at_milestone": "Next explicitly authorized Runtime change after H01/H02 budget approval"
+      },
+      {
+        "id": "KTB-EX-005",
+        "added_lines": 51,
+        "reason": "Explicit user approval on 2026-09-20 binds the converged Hook diff SHA256 0120ec9d18750fee44d029847c84f16da6063156c6576bce36440099b338c0e7. Diagnostics cost +29 LOC/+186 tokens/+70 statement ASTs; bounded literal-data recognition costs +22 LOC/+218 tokens/+60 statement ASTs. Total growth is +51/+404/+130 over 3141/35575/10498, yielding 3192/35979/10628. Baseline remains 3068, covered growth becomes 124, strict LOC bound is <3193, and Token/Statement AST checkpoints are 35979/10628.",
+        "new_trust_assumption": "None. No shell dialect is inferred, ambiguous keyword use remains denied, and the original policy still checks the untouched command. Finite refusal context does not authenticate Hook execution or grant permission.",
+        "alternatives": [
+          "The prior cross-shell parser was removed; only bounded static data forms retain a keyword exemption.",
+          "Dropping refusal context, denying every literal search, assuming a shell dialect, or allowing unknown results would not meet the approved scope.",
+          "Resetting the baseline, changing roots or accounting, packing source, or relaxing readability, single-adapter and 35-percent reduction checks is not authorized."
+        ],
+        "repayment_plan": "Review the continued necessity of this exact 29+22 split at the next explicitly authorized Runtime budget review. This allowance covers only the approved converged diff, not further Runtime growth or I03 consumer changes.",
+        "expires_at_milestone": "Next explicitly authorized Runtime budget review after the 2026-09-20 limited Hook approval"
+      },
+      {
+        "id": "KTB-EX-006",
+        "added_lines": 15,
+        "reason": "Explicit user approval on 2026-09-23 authorizes the owned-process cleanup correction: up to +15 LOC/+186 tokens/+57 Statement ASTs over 3192/35979/10628, with strict LOC <3208 and checkpoints 36165/10685. On 2026-09-24 the user approved only +8 to the Token ceiling, to 36173, for explicit UTF-8 adapter stdin decoding; LOC <3208 and Statement AST <=10685 remain unchanged. Baseline 3068 and prior allowances 10/2/61/51 remain unchanged; total covered growth is 139.",
+        "new_trust_assumption": "The local Windows CIM process provider supplies parent PID and microsecond creation timestamps. Only children of the retained invocation root are queried, and native process handles independently verify creation time before an owned subtree is terminated. No command lines or unrelated sessions are collected.",
+        "alternatives": [
+          "A native exit code alone does not prove tree cleanup; the independent receipt checks remain required.",
+          "Killing only an exited root cannot terminate pipe-holding descendants, and broad process-name scans cannot prove ownership.",
+          "Increasing execution deadlines, disabling 5.1, packing source or moving code out of accounting does not fix the demonstrated ownership and cleanup defects."
+        ],
+        "repayment_plan": "Review necessity at the next explicitly authorized Runtime budget review. Preserve identity validation, bounded waits, readable branches, existing adapter limits and reduction constraints; do not require mechanical line deletion.",
+        "expires_at_milestone": "Next explicitly authorized Runtime budget review after the 2026-09-23 owned-process cleanup correction"
+      },
+      {
+        "id": "KTB-EX-011",
+        "added_lines": 184,
+        "reason": "Candidate allowance for the user-authorized 2026-10-13 multi-workspace boundary repair: +184 LOC/+1670 tokens/+481 statement ASTs over c4faeb6, yielding 3391/37843/11164. Baseline 3068 and previous 139-line coverage remain. Exact candidate deployment approval is pending.",
+        "new_trust_assumption": "The documented host session_id and an operator-maintained session grant bind additional installed workspace roots. Hostile same-account control-file replacement remains outside the cooperative Hook contract.",
+        "alternatives": [
+          "A parent-directory grant or cwd rewrite would discard workspace-local policy boundaries.",
+          "Guessing host payload roots or parsing transcripts supplies no stable authorization contract.",
+          "The existing K0 physical identity, K1 schema/Approval and atomic CAS primitives avoid a new dependency."
+        ],
+        "repayment_plan": "Review the session-grant cost at the next explicitly authorized Runtime change; preserve the original baseline, closure accounting, all-target checks and readable source.",
+        "expires_at_milestone": "Next authorized Runtime budget review after multi-workspace boundary closure"
+      },
+      {
+        "id": "KTB-EX-012",
+        "added_lines": 5,
+        "reason": "The user-requested business source routing change adds 5 executable lines, 72 tokens, and 25 statement ASTs relative to 7aae456: the source-only classification requires changed paths and no command, while existing production database protection remains in force. The 3068 baseline and previous allowances are unchanged.",
+        "new_trust_assumption": "The caller identifies source-code-only work; actual commands and database operations continue through their existing policy checks.",
+        "alternatives": [
+          "Changing score thresholds globally would also change routing for actual operations.",
+          "Treating every authorization label or source directory as Critical would keep blocking the requested business development."
+        ],
+        "repayment_plan": "Review this measured allowance at the next Runtime budget review without removing the source-versus-command distinction.",
+        "expires_at_milestone": "Next authorized Runtime budget review after business source routing"
       }
     ]
   }

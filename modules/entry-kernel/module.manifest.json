@@ -44,6 +44,7 @@
   },
   "validation": {
     "owner_tests": [
+      "tests/verify-context-recall.ps1",
       "tests/verify-v1-sunset.ps1",
       "tests/verify-v2-entry-contract.ps1",
       "tests/verify-v2-protocol-config.ps1",
@@ -61,6 +62,7 @@
     "core_group": "entry-lifecycle",
     "changed": [],
     "full": [
+      "tests/verify-context-recall.ps1",
       "tests/verify-v1-sunset.ps1",
       "tests/verify-v2-entry-contract.ps1",
       "tests/verify-v2-protocol-config.ps1",

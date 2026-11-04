@@ -1,3 +1,9 @@
+---
+status: superseded
+superseded_by: docs/governed-work.md
+---
+> Historical v1 reference only; current execution uses v2. See docs/governed-work.md.
+
 # Gate Rules
 
 lite workflow 只认 `docs/tasks/{task_id}/` 下的任务产物；这些 gate 只适用于 `new-task mode=workflow`，不约束 `mode=quick` 的直接处理。

@@ -19,6 +19,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Install ripgrep for context retrieval
+        shell: pwsh
+        run: choco install ripgrep --no-progress -y
+
       - name: Run all repository verifiers
         shell: pwsh
         run: >

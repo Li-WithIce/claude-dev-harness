@@ -1,3 +1,9 @@
+---
+status: superseded
+superseded_by: docs/governed-work.md
+---
+> Historical v1 reference only; current execution uses v2. See docs/governed-work.md.
+
 # State Templates
 
 ## plan.md frontmatter

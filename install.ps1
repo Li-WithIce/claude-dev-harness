@@ -539,7 +539,7 @@ function Assert-LegacyRebaselineManagedTarget {
             return
         }
         $relativeTarget = $target.Substring($vaultRoot.TrimEnd('\').Length).TrimStart('\')
-        $minimalTargets = @('entry\AGENTS.md','entry\advance-stage.ps1','entry\task.ps1','entry\validate-lite-artifacts.ps1')
+        $minimalTargets = @('entry\AGENTS.md','entry\advance-stage.ps1','entry\task.ps1','entry\context.ps1','entry\validate-lite-artifacts.ps1')
         if ([string]$Manifest['effective_vault_profile'] -eq 'minimal') {
             if ($relativeTarget -notin $minimalTargets) {
                 throw "Legacy minimal-vault target is not Harness-managed: $target"
@@ -1345,7 +1345,7 @@ function Assert-RegisteredInstallManifestIdentity {
     if ((Get-NormalizedPath -Path $Manifest['registry_path']) -ne (Get-NormalizedPath -Path $RegistryPath) -or
         -not (Test-PathWithinRoot -Path $manifestBackupRoot -RootPath $expectedBackupBase) -or
         (Get-NormalizedPath -Path $ManifestPath) -ne (Get-NormalizedPath -Path (Join-Path $manifestBackupRoot 'install-manifest.json')) -or
-        (Get-NormalizedPath -Path $Manifest['vault_path']) -ne (Get-NormalizedPath -Path (Join-Path $ExpectedWorkspaceRoot '.assistant')) -or
+        (Get-NormalizedPath -Path $Manifest['vault_path']) -ne (Get-NormalizedPath -Path ([IO.Path]::Combine($ExpectedWorkspaceRoot, '.assistant'))) -or
         (Get-NormalizedPath -Path $Manifest['claude_home']) -ne (Get-NormalizedPath -Path (Join-Path $ExpectedUserProfile '.claude')) -or
         (Get-NormalizedPath -Path $Manifest['codex_home']) -ne (Get-NormalizedPath -Path (Join-Path $ExpectedUserProfile '.codex')) -or
         (Get-NormalizedPath -Path $Manifest['agents_home']) -ne (Get-NormalizedPath -Path (Join-Path $ExpectedUserProfile '.agents'))) {
@@ -2401,6 +2401,10 @@ function Assert-RegisteredHookSettingsPostimage {
     if ([string]$identity['mode'] -ne 'semantic' -or [string]$identity['contract'] -ne 'claude-settings/v1') {
         throw "Registered hook settings have an invalid postimage contract: $TargetPath"
     }
+    if(-not(Test-InstallPreToolUseEnabled -UserProfile $env:USERPROFILE)){
+        $identity=ConvertTo-NormalizedObject -Value $identity
+        $identity.managed_hooks=@($identity.managed_hooks|Where-Object event -CNE 'PreToolUse')
+    }
     if (-not (Test-HookSettingsPostimage -Path $TargetPath -Identity $identity)) {
         throw "Hook settings changed from their registered Harness postimage; restore or uninstall before updating: $TargetPath"
     }
@@ -2591,7 +2595,10 @@ function Sync-SkillsDirectory {
     param(
         [string]$HostSkillsPath,
         [string]$RepoSkillsPath,
-        [string[]]$ManagedEntryNames
+        [string[]]$ManagedEntryNames,
+        [Collections.IDictionary]$EntryTargets,
+        [Collections.IDictionary]$RetainedEntryIdentities,
+        [string[]]$RemoveEntryNames=@()
     )
 
     $hotSwapPreservedNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -2599,7 +2606,16 @@ function Sync-SkillsDirectory {
 
     $managedEntries = [ordered]@{}
     foreach ($name in $ManagedEntryNames) {
-        $entryPath = Join-Path $RepoSkillsPath $name
+        $entryPath = if($null -ne $EntryTargets){$EntryTargets[$name]}else{Join-Path $RepoSkillsPath $name}
+        if($null -ne $RetainedEntryIdentities -and $RetainedEntryIdentities.Contains($name)){
+            $expected=$RetainedEntryIdentities[$name]
+            $linkPath=Join-Path $HostSkillsPath $name
+            if($expected.item_type -cne 'link' -or $expected.link_target -ine $entryPath -or -not(Test-InstallExactIdentityEqual -Left (Get-InstallManagedPathIdentity $linkPath) -Right $expected)){throw "Retained shared Skill changed after coordination: $linkPath"}
+            # Retain the registered link itself; an offline owner's target is
+            # neither a source to install nor authority to replace that link.
+            $managedEntries[$name]=$entryPath
+            continue
+        }
         if (-not (Test-Path -LiteralPath $entryPath)) {
             throw "Preset skill entry is missing: $entryPath"
         }
@@ -2633,9 +2649,10 @@ function Sync-SkillsDirectory {
     $preservedNames = Get-PreservedSkillEntryNames -SkillsRoot $HostSkillsPath -ManagedEntryNames $managedEntries.Keys -RepoSkillsPath $RepoSkillsPath
 
     foreach ($entry in Get-ChildItem -LiteralPath $HostSkillsPath -Force) {
+        if($null -ne $RetainedEntryIdentities -and $RetainedEntryIdentities.Contains($entry.Name)){continue}
         $currentTarget = Get-JunctionTarget -Path $entry.FullName
         $shouldPreserveForHotSwap = $hotSwapPreservedNames.Contains($entry.Name) -and ($null -eq $currentTarget)
-        if ($preservedNames.Contains($entry.Name) -or $shouldPreserveForHotSwap) {
+        if (($preservedNames.Contains($entry.Name) -and $entry.Name -notin $RemoveEntryNames) -or $shouldPreserveForHotSwap) {
             continue
         }
 
@@ -2659,6 +2676,7 @@ function Sync-SkillsDirectory {
     }
 
     foreach ($name in $managedEntries.Keys) {
+        if($null -ne $RetainedEntryIdentities -and $RetainedEntryIdentities.Contains($name)){continue}
         $linkPath = Join-Path $HostSkillsPath $name
         if ($hotSwapPreservedNames.Contains($name) -and (Test-Path -LiteralPath $linkPath) -and ($null -eq (Get-JunctionTarget -Path $linkPath))) {
             if ($name -eq '.system') {
@@ -3146,6 +3164,25 @@ try {
         Assert-LegacyPointerMigrationMarkerWritable -UserProfile $env:USERPROFILE -PointerPath $LegacyActiveInstallPath
     }
 
+    $sharedHooks = Get-InstallSharedHookRequirements -Registry $installRegistry -UserProfile $env:USERPROFILE -ReplacingWorkspaceKey $currentWorkspaceKey -RequestedHooks $presetDefinition.hooks
+    Assert-InstallRetainedHookDependencies -Coordination $sharedHooks
+    $sharedSkills = Get-InstallSharedSkillPlan -Registry $installRegistry -HookCoordination $sharedHooks -UserProfile $env:USERPROFILE -RepoRoot $RepoRoot -RequestedSkills $presetDefinition.skills
+    $claudeSharedSettingsJson = Render-JsonTemplateText -TemplatePath $templateSources['claude-settings'] -TargetPath $claudeSettingsPath
+    $claudeSharedSettingsJson = Merge-InstallSharedHookSettings -RequestedJson $claudeSharedSettingsJson -References $sharedHooks.References['claude-settings']
+    $codexHooksJson = Render-JsonTemplateText -TemplatePath $templateSources['codex-hooks'] -TargetPath $codexHooksPath
+    $codexHooksJson = Merge-InstallSharedHookSettings -RequestedJson $codexHooksJson -References $sharedHooks.References['codex-hooks']
+    if(-not(Test-InstallPreToolUseEnabled -UserProfile $env:USERPROFILE)){
+        $claudeHooks=ConvertFrom-JsonDocument -Json $claudeSharedSettingsJson
+        $claudeHooks.Remove('PreToolUse')
+        $claudeSharedSettingsJson=ConvertTo-JsonDocument -Value $claudeHooks
+        $codexHooks=ConvertFrom-JsonDocument -Json $codexHooksJson
+        $codexHooks.Remove('PreToolUse')
+        $codexHooksJson=ConvertTo-JsonDocument -Value $codexHooks
+    }
+    # Preview exact managed merges before publishing the transaction or any shared asset.
+    $null = Merge-ClaudeSettingsJsonText -RenderedHooksJson $claudeSharedSettingsJson -ExistingPath $claudeSettingsPath -HookHome $ClaudeHome -ExpectedSourcePostimage $registeredClaudeSettingsPostimage
+    $null = Merge-ClaudeSettingsJsonText -RenderedHooksJson $codexHooksJson -ExistingPath $codexHooksPath -HookHome $ClaudeHome -ExpectedSourcePostimage $registeredCodexHooksPostimage
+
     Ensure-Directory -Path $BackupRoot
     Save-InstallManifestSnapshot
     $journalLegacyPointerPath = if ($legacyPointerImported) { $LegacyActiveInstallPath } else { $null }
@@ -3273,7 +3310,7 @@ try {
 
     Install-RenderedFile -SourcePath $templateSources['claude-global'] -TargetPath $claudeGlobalPath -RecordBackup
 
-    Install-RenderedFile -SourcePath $templateSources['codex-global'] -TargetPath $codexGlobalPath -RecordBackup
+    Install-RenderedFile -SourcePath $templateSources['codex-global'] -TargetPath $codexGlobalPath -SkipIfExists -Ownership 'create-if-missing'
 
     Install-RenderedFile -SourcePath $templateSources['workspace-global'] -TargetPath $workspaceAgentsPath -RecordBackup
 
@@ -3284,6 +3321,10 @@ try {
         foreach ($asset in @($script:DistributionPlan.assets | Where-Object kind -CEQ 'hook')) {
             Install-RenderedFile -SourcePath (Join-Path $RepoRoot $asset.source) -TargetPath (Join-Path $claudeHooksStagingPath $asset.target)
         }
+        foreach ($name in $sharedHooks.Retained) {
+            Copy-InstallStateFileAtomic -SourcePath ([IO.Path]::Combine($sharedHooks.Directory,$name)) -Path (Join-Path $claudeHooksStagingPath $name) -ExpectedCurrentIdentity (New-InstallExactMissingIdentity) -ExpectedDesiredIdentity $sharedHooks.RetainedIdentities[$name]
+        }
+        if ($null -ne $sharedHooks.DirectoryIdentity -and -not (Test-InstallExactIdentityEqual -Left (Get-InstallManagedPathIdentity $claudeHooksPath) -Right $sharedHooks.DirectoryIdentity)) { throw 'Shared Hook directory changed after coordination' }
         $claudeHooksExpectedPostimage = New-InstallExactDirectoryIdentity -Path $claudeHooksStagingPath
         $claudeHooksSourceIdentity = Get-InstallManagedPathIdentity -Path $claudeHooksPath
         Backup-IfNeeded -Path $claudeHooksPath -ExpectedPostimage $claudeHooksExpectedPostimage
@@ -3296,7 +3337,6 @@ try {
         Remove-PathIfExists -Path $claudeHooksStagingPath
     }
 
-    $claudeSharedSettingsJson = Render-JsonTemplateText -TemplatePath $templateSources['claude-settings'] -TargetPath $claudeSettingsPath
     $claudeSettingsMerge = Merge-ClaudeSettingsJsonText -RenderedHooksJson $claudeSharedSettingsJson -ExistingPath $claudeSettingsPath -HookHome $ClaudeHome -ExpectedSourcePostimage $registeredClaudeSettingsPostimage
     $claudeSettingsExpectedPostimage = New-ClaudeSettingsPostimageIdentity -ManagedSettings (ConvertFrom-JsonDocument -Json $claudeSharedSettingsJson) -PreimageIdentity $registeredClaudeSettingsPostimage
     Backup-IfNeeded -Path $claudeSettingsPath -ExpectedPostimage $claudeSettingsExpectedPostimage
@@ -3309,7 +3349,6 @@ try {
     $codexSettingsMerge = Merge-SettingsLocalJsonText -RenderedSharedJson $codexSharedSettingsJson -ExistingPath $codexSettingsPath -OverlayPath $codexOverlayPath
     Write-ManagedInstallText -Path $codexSettingsPath -Content $codexSettingsMerge.Content -RecordBackup -ExpectedCurrentIdentity $codexSettingsMerge.Identity
 
-    $codexHooksJson = Render-JsonTemplateText -TemplatePath $templateSources['codex-hooks'] -TargetPath $codexHooksPath
     $codexHooksMerge = Merge-ClaudeSettingsJsonText `
         -RenderedHooksJson $codexHooksJson `
         -ExistingPath $codexHooksPath `
@@ -3326,9 +3365,12 @@ try {
         -ExpectedCurrentDigest $(if ([string]$codexHooksMerge.Identity['item_type'] -eq 'missing') { 'missing' } else { [string]$codexHooksMerge.Identity['sha256'] })
 
     Assert-HarnessDistributionSkillSourcesCurrent -RepoRoot $RepoRoot -Plan $script:DistributionPlan
-    Sync-SkillsDirectory -HostSkillsPath $claudeSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
-    Sync-SkillsDirectory -HostSkillsPath $codexSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
-    Sync-SkillsDirectory -HostSkillsPath $agentsSkillsPath -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($presetDefinition.skills)
+    Assert-InstallSharedSkillPlanCurrent -Plan $sharedSkills
+    foreach ($hostPlan in $sharedSkills.Hosts.Values) {
+        $retained=[ordered]@{}
+        foreach($name in $hostPlan.Targets.Keys){if($name -notin $presetDefinition.skills){$retained[$name]=$hostPlan.Expected[$name]}}
+        Sync-SkillsDirectory -HostSkillsPath $hostPlan.Root -RepoSkillsPath $RepoSkillsPath -ManagedEntryNames @($hostPlan.Targets.Keys) -EntryTargets $hostPlan.Targets -RetainedEntryIdentities $retained -RemoveEntryNames $hostPlan.Obsolete
+    }
 
     Save-InstallManifestSnapshot
     Add-ManifestToRegistry `
