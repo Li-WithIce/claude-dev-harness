@@ -253,7 +253,7 @@ try {
         Check ($installedJson -match '"tk06_compat_integer"\s*:\s*18446744073709551616' -and $installedJson -match '"tk06_compat_decimal"\s*:\s*0\.1234567890123456789012345678') 'legacy host JSON keeps exact BigInteger and Decimal source support'
         $registry=Read-Json (Join-Path $fixtureUser '.dev-harness/install-registry.json')
         $manifest=Read-Json ([string]@($registry.global_manifest_history)[-1])
-        Check ($manifest.schema_version -ceq 'install-manifest/v1.2' -and $registry.schema_version -ceq 'install-registry/v1.1' -and @($manifest.feature_ownership.skills) -cnotcontains 'md-html' -and @($manifest.feature_ownership.skills) -cnotcontains 'workflow-team') 'historical install schemas persist the actually applied selection without changing digest algorithms'
+        Check ($manifest.schema_version -ceq 'install-manifest/v1.2' -and $registry.schema_version -ceq 'install-registry/v1.2' -and @($manifest.feature_ownership.skills) -cnotcontains 'md-html' -and @($manifest.feature_ownership.skills) -cnotcontains 'workflow-team') 'install schemas persist the actually applied selection without changing digest algorithms'
     } full
     $catalogPath=Join-Path $fixtureRepo 'module-manifest-catalog.json'
     [IO.File]::WriteAllText($catalogPath,'invalid current distribution inputs',$utf8)

@@ -1295,7 +1295,7 @@ $modernReleasedManagedConfigEntries = @($modernRegistry.released_target_history 
 $modernHistoryContainsLegacy = @($modernActiveManifestPaths + $modernGlobalManifestPaths | Where-Object { $legacyInactiveManifestPaths -contains $_ }).Count -ne 0
 $modernRegistryFields = @($modernRegistry.PSObject.Properties.Name)
 $modernHistoryValid =
-    $modernRegistry.schema_version -eq 'install-registry/v1.1' -and
+    $modernRegistry.schema_version -eq 'install-registry/v1.2' -and
     $modernRegistry.transaction_status_contract -eq 'v1' -and
     $modernRegistry.history_ownership_contract -eq 'v1' -and
     $modernRegistry.manifest_integrity_contract -eq 'sha256-v1' -and
@@ -1598,7 +1598,7 @@ $legacyFreshRegistry = if (Test-Path -LiteralPath $legacyRegistryPath -PathType 
 } else { $null }
 if ($legacyFreshInstallResult.ExitCode -eq 0 -and
     $null -ne $legacyFreshRegistry -and
-    [string]$legacyFreshRegistry.schema_version -eq 'install-registry/v1.1' -and
+    [string]$legacyFreshRegistry.schema_version -eq 'install-registry/v1.2' -and
     (Test-Path -LiteralPath $legacyCodexHooksPath -PathType Leaf) -and
     (Test-Path -LiteralPath $legacyManagedConfigPath -PathType Leaf) -and
     ([System.IO.File]::ReadAllText($legacyManagedConfigPath) -ceq $legacyManagedConfigUserContent) -and
@@ -1652,7 +1652,7 @@ try {
     $freshBackupRecords = @($freshManifest.backups)
     $freshRegistryFields = @($freshRegistry.PSObject.Properties.Name)
     $freshContractValid = `
-        $freshRegistry.schema_version -eq 'install-registry/v1.1' -and `
+        $freshRegistry.schema_version -eq 'install-registry/v1.2' -and `
         $freshRegistry.transaction_status_contract -eq 'v1' -and `
         $freshRegistry.history_ownership_contract -eq 'v1' -and `
         $freshRegistry.manifest_integrity_contract -eq 'sha256-v1' -and `
@@ -1667,7 +1667,7 @@ try {
     $freshContractValid = $false
 }
 if ($freshContractValid) {
-    $checks.Add('fresh install persists registry v1.1, manifest v1.2, and expected postimage identities before clearing its journal') | Out-Null
+    $checks.Add('fresh install persists registry v1.2, manifest v1.2, and expected postimage identities before clearing its journal') | Out-Null
 } else {
     $failures.Add('fresh install should persist the complete registry, manifest, and expected-postimage contract') | Out-Null
 }

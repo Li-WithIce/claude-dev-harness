@@ -662,7 +662,7 @@ if (Test-Path -LiteralPath $InstallRegistryPath -PathType Leaf) {
             $installRegistry.transaction_status_contract -eq 'v1' -and
             $installRegistry.history_ownership_contract -eq 'v1' -and
             $installRegistry.manifest_integrity_contract -eq 'sha256-v1'
-        if ($installRegistry.schema_version -eq 'install-registry/v1.1' -and
+        if ($installRegistry.schema_version -in @('install-registry/v1.1','install-registry/v1.2') -and
             $modernTupleValid -and
             $matchingEntries.Count -eq 1 -and
             @($matchingEntries[0].Value.manifests).Count -gt 0) {

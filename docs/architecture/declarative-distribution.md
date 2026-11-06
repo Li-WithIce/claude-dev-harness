@@ -112,10 +112,15 @@ and Runtime boundaries.
 
 ## Historical and release boundaries
 
-`install-registry/v1.1`, `install-manifest/v1.2`, transaction journals, postimage
-identities and all their byte/digest algorithms are unchanged. No new plan field
-is injected into historical records. Feature ownership records the actual
-plan-derived selection using the existing schema.
+TK-06 did not change `install-registry/v1.1`, `install-manifest/v1.2`,
+transaction journals, postimage identities, or their byte/digest algorithms.
+The subsequent shared-entry version gate commits `install-registry/v1.2`.
+New uninstall journals use `uninstall-transaction/v1.2`, including when the
+registry preimage is older; current tools still accept v1.1 state and its pending
+journals. The manifest schema and digest algorithms stay
+unchanged. No Distribution plan field is injected into historical records.
+Feature ownership records the actual plan-derived selection using the existing
+schema.
 
 Uninstall does not import `Harness.Distribution` or rediscover a current Profile.
 It converges from registry/history and registered identities, including when

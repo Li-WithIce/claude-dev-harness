@@ -368,7 +368,7 @@ function Read-InstallRegistry {
     }
 
     $schemaVersion = [string]$registry['schema_version']
-    if ($schemaVersion -notin @('install-registry/v1.0','install-registry/v1.1')) {
+    if ($schemaVersion -notin @('install-registry/v1.0','install-registry/v1.1','install-registry/v1.2')) {
         throw "Unsupported install registry schema: $schemaVersion"
     }
     if (-not ($registry['workspaces'] -is [System.Collections.IDictionary])) {
@@ -1051,7 +1051,7 @@ function Get-LegacyRebaselineReceiptInfo {
         [string]$UserProfile
     )
 
-    if ([string]$Registry['schema_version'] -ne 'install-registry/v1.1') {
+    if ([string]$Registry['schema_version'] -notin @('install-registry/v1.1','install-registry/v1.2')) {
         return $null
     }
     [void](Get-RegisteredManifestStatusUpgradePlan `
@@ -1619,7 +1619,7 @@ function Resolve-PendingInstallTransaction {
     }
     if (-not ($journal -is [System.Collections.IDictionary]) -or
         [string]$journal['schema_version'] -ne 'install-transaction/v1.1' -or
-        [string]$journal['registry_schema_version'] -ne 'install-registry/v1.1' -or
+        [string]$journal['registry_schema_version'] -notin @('install-registry/v1.1','install-registry/v1.2') -or
         [string]$journal['manifest_schema_version'] -ne 'install-manifest/v1.2' -or
         [string]$journal['postimage_identity_contract'] -ne 'v1' -or
         (Get-NormalizedPath -Path $journal['user_profile']) -ne (Get-NormalizedPath -Path $ExpectedUserProfile) -or
@@ -1669,7 +1669,7 @@ function Resolve-PendingInstallTransaction {
             throw "Pending install transaction is missing its committed postimage contract: $JournalPath"
         }
         if (-not ($registry -is [System.Collections.IDictionary]) -or
-            [string]$registry['schema_version'] -ne 'install-registry/v1.1' -or
+            [string]$registry['schema_version'] -ne [string]$journal['registry_schema_version'] -or
             [string]$registry['history_ownership_contract'] -ne [string]$journal['postimage_history_ownership_contract'] -or
             [string]$registry['manifest_integrity_contract'] -ne [string]$journal['postimage_manifest_integrity_contract'] -or
             [string]$registry['transaction_status_contract'] -ne $expectedStatusContract -or
@@ -2919,7 +2919,7 @@ if (Test-Path -LiteralPath $pendingUninstallJournalPath -PathType Leaf) {
     if ([string]$pendingUninstallJournal['schema_version'] -eq 'uninstall-transaction/v1.0') {
         throw "LIVE_UPDATE_REQUIRED: legacy-install-state; manual recovery is required for legacy uninstall transaction: $pendingUninstallJournalPath"
     }
-    if ([string]$pendingUninstallJournal['schema_version'] -ne 'uninstall-transaction/v1.1') {
+    if ([string]$pendingUninstallJournal['schema_version'] -notin @('uninstall-transaction/v1.1','uninstall-transaction/v1.2')) {
         throw "Unsupported pending uninstall transaction: $pendingUninstallJournalPath"
     }
     throw "A pending uninstall transaction must be resumed before install: $pendingUninstallJournalPath"
@@ -2977,7 +2977,7 @@ foreach ($asset in @($script:DistributionPlan.assets | Where-Object { $_.kind -c
 
 if ($RebaselineLegacyInstallState) {
     $registryShape = Read-JsonObject -Path $InstallRegistryPath
-    if ([string]$registryShape['schema_version'] -eq 'install-registry/v1.1') {
+    if ([string]$registryShape['schema_version'] -in @('install-registry/v1.1','install-registry/v1.2')) {
         $modernRegistry = Read-InstallRegistry -Path $InstallRegistryPath
         $receipt = Get-LegacyRebaselineReceiptInfo `
             -Registry $modernRegistry `
@@ -3189,7 +3189,7 @@ try {
     $journalLegacyPointerImportDigest = if ($legacyPointerImported) { [string]$legacyPointerImportDigest } else { $null }
     $installTransactionJournal = [ordered]@{
         schema_version = 'install-transaction/v1.1'
-        registry_schema_version = 'install-registry/v1.1'
+        registry_schema_version = 'install-registry/v1.2'
         manifest_schema_version = 'install-manifest/v1.2'
         postimage_identity_contract = 'v1'
         prepared_at = (Get-Date -Format 's')
@@ -3393,6 +3393,8 @@ try {
     $script:Manifest.transaction_status = 'committed'
     Save-InstallManifestSnapshot
     Refresh-InstallRegistryManifestDigests -Registry $installRegistry
+    # Publish the version gate only with the committed registry postimage.
+    $installRegistry['schema_version'] = 'install-registry/v1.2'
     Write-InstallRegistry -Path $InstallRegistryPath -Registry $installRegistry -ExpectedCurrentDigest $registryPreimageSha256
     $registryCommitted = $true
     if ($legacyPointerImported) {

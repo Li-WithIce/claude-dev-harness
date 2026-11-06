@@ -1365,11 +1365,15 @@ function Get-RegisteredManifestOwner {
     param(
         [string]$ManifestPath,
         $Workspaces,
-        [string]$RegistryPath
+        [string]$RegistryPath,
+        $Registry,
+        [bool]$RequireManifestIntegrity
     )
 
     $normalizedManifestPath = Get-NormalizedPath -Path $ManifestPath
-    $manifest = Read-InstallManifest -Path $normalizedManifestPath
+    $manifest = if ($RequireManifestIntegrity) {
+        (Read-InstallManifestSnapshot -Path $normalizedManifestPath -Registry $Registry).Manifest
+    } else { Read-InstallManifest -Path $normalizedManifestPath }
     $workspaceRoot = Get-NormalizedPath -Path $manifest['workspace_root']
     $workspaceKey = Get-WorkspaceRegistryKey -Path $workspaceRoot
     if (-not $Workspaces.Contains($workspaceKey)) {
@@ -1398,18 +1402,94 @@ function Refresh-InstallRegistryManifestDigests {
 
     $digests = [ordered]@{}
     foreach ($manifestPath in @($Registry['global_manifest_history'] | ForEach-Object { Get-NormalizedPath -Path $_ } | Select-Object -Unique)) {
-        $digests[(Get-InstallManifestDigestRegistryKey -ManifestPath $manifestPath)] = Get-InstallStateFileDigest -Path $manifestPath
+        $key = Get-InstallManifestDigestRegistryKey -ManifestPath $manifestPath
+        $expected = [string]$Registry['manifest_digests'][$key]
+        if ($expected -notmatch '^[0-9a-f]{64}$' -or (Get-InstallStateFileDigest -Path $manifestPath) -ne $expected) {
+            throw "Registered install manifest digest mismatch: $manifestPath"
+        }
+        $digests[$key] = $expected.ToLowerInvariant()
     }
     $Registry['manifest_digests'] = $digests
     $Registry['manifest_integrity_contract'] = 'sha256-v1'
 }
 
+function Assert-UninstallConsumedManifestPreimage {
+    param($Registry,$Journal,[string]$ManifestPath,$Manifest)
+
+    if ($null -ne $Registry -and -not ($Registry['manifest_digests'] -is [System.Collections.IDictionary])) {
+        throw "Cannot authenticate a consumed manifest without its registry digest map: $ManifestPath"
+    }
+    $digestKey = Get-InstallManifestDigestRegistryKey -ManifestPath $ManifestPath
+    $expectedDigest = if ($null -ne $Registry) { [string]$Registry['manifest_digests'][$digestKey] } else { '' }
+    $status = [string]$Manifest['transaction_status']
+    if (($null -ne $Registry -and $expectedDigest -notmatch '^[0-9a-f]{64}$') -or $status -notin @('committed','uninstalled') -or
+        ($status -eq 'uninstalled' -and (-not $Manifest.Contains('uninstalled_at') -or [string]::IsNullOrWhiteSpace([string]$Manifest['uninstalled_at'])))) {
+        throw "Uninstall consumed manifest has an invalid status or registry digest: $ManifestPath"
+    }
+    if ([string]$Journal['schema_version'] -eq 'uninstall-transaction/v1.2') {
+        $preimages = $Journal['consumed_manifest_preimages']
+        if (-not ($preimages -is [System.Collections.IDictionary]) -or -not $preimages.Contains($digestKey)) {
+            throw "Uninstall journal lacks the consumed manifest preimage: $ManifestPath"
+        }
+        try { $bytes = [Convert]::FromBase64String([string]$preimages[$digestKey]) }
+        catch [FormatException] { throw "Uninstall journal contains an invalid manifest preimage: $ManifestPath" }
+        $actualDigest = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+        if ($null -ne $Registry -and $actualDigest -ne $expectedDigest) { throw "Uninstall manifest preimage does not match registry digest: $ManifestPath" }
+        $offset = if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xef -and $bytes[1] -eq 0xbb -and $bytes[2] -eq 0xbf) { 3 } else { 0 }
+        $text = [Text.UTF8Encoding]::new($false,$true).GetString($bytes,$offset,$bytes.Length-$offset)
+        $before = ConvertFrom-InstallJson -Json $text
+        if (-not ($before -is [System.Collections.IDictionary]) -or [string]$before['transaction_status'] -ne 'committed') {
+            throw "Uninstall manifest preimage is not committed: $ManifestPath"
+        }
+        if ($status -eq 'uninstalled') {
+            $before['transaction_status'] = 'uninstalled'
+            $before['uninstalled_at'] = $Manifest['uninstalled_at']
+        }
+        if (-not (Test-InstallJsonValueEqual -Left $before -Right $Manifest)) {
+            $preimageSource = if ($null -ne $Registry) { 'authenticated' } else { 'journal' }
+            throw "Uninstall consumed manifest differs from its $preimageSource preimage: $ManifestPath"
+        }
+    } elseif ($status -eq 'uninstalled' -and $null -ne $Registry) {
+        # Older journals did not retain bytes. Recover only when their original
+        # committed manifest can be reconstructed to the registered digest.
+        $before = ConvertTo-NormalizedObject -Value $Manifest
+        $before['transaction_status'] = 'committed'
+        [void]$before.Remove('uninstalled_at')
+        $reconstructed = ConvertTo-Json -InputObject $before -Depth 50
+        if ((Get-InstallStateIdentityHash -Value $reconstructed) -ne $expectedDigest) {
+            throw "Cannot authenticate the legacy consumed manifest preimage: $ManifestPath"
+        }
+    }
+}
+
+function Read-InstallManifestSnapshot {
+    param([string]$Path,$Registry=$null,$ResumeJournal=$null)
+
+    $normalizedPath = Get-NormalizedPath -Path $Path
+    if (-not (Test-Path -LiteralPath $normalizedPath -PathType Leaf)) { throw "Missing install manifest: $normalizedPath" }
+    $bytes = [IO.File]::ReadAllBytes($normalizedPath)
+    $digest = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+    $offset = if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xef -and $bytes[1] -eq 0xbb -and $bytes[2] -eq 0xbf) { 3 } else { 0 }
+    $manifest = ConvertFrom-InstallJson -Json ([Text.UTF8Encoding]::new($false,$true).GetString($bytes,$offset,$bytes.Length-$offset))
+    if (-not ($manifest -is [System.Collections.IDictionary])) { throw "Invalid install manifest: $normalizedPath" }
+    if ($null -ne $Registry) {
+        if ($null -ne $ResumeJournal -and [string]$manifest['transaction_status'] -eq 'uninstalled' -and
+            $normalizedPath -in @($ResumeJournal['fully_consumed_manifest_paths'] | ForEach-Object { Get-NormalizedPath -Path $_ })) {
+            Assert-UninstallConsumedManifestPreimage -Registry $Registry -Journal $ResumeJournal -ManifestPath $normalizedPath -Manifest $manifest
+        } else {
+            $key = Get-InstallManifestDigestRegistryKey -ManifestPath $normalizedPath
+            $expected = [string]$Registry['manifest_digests'][$key]
+            if ($expected -notmatch '^[0-9a-f]{64}$' -or $digest -ne $expected) { throw "Registered install manifest digest mismatch: $normalizedPath" }
+        }
+    }
+    return [pscustomobject]@{ Manifest=$manifest; Bytes=$bytes; Digest=$digest }
+}
+
 function Get-UninstallHistoricalSkillState {
-    param($Registry,[object[]]$RestorePlan=@())
+    param($Registry,[object[]]$RestorePlan=@(),$ResumeJournal=$null)
     $history = @()
     foreach ($manifestPath in @($Registry.global_manifest_history)) {
-        Assert-InstallManifestRegistryDigest -Registry $Registry -ManifestPath $manifestPath -RequireManifestIntegrity $true
-        $manifest = Read-InstallManifest -Path $manifestPath
+        $manifest = (Read-InstallManifestSnapshot -Path $manifestPath -Registry $Registry -ResumeJournal $ResumeJournal).Manifest
         $history += [pscustomobject]@{ Path=$manifestPath; Manifest=$manifest }
     }
     $required = [ordered]@{}
@@ -1564,11 +1644,12 @@ function Assert-GlobalHistoryState {
                 throw "Workspace manifest order disagrees with global history: $entryWorkspace"
             }
             $previousHistoryIndex = $currentHistoryIndex
-            Assert-InstallManifestRegistryDigest `
-                -Registry $Registry `
-                -ManifestPath $entryManifestPath `
-                -RequireManifestIntegrity $RequireManifestIntegrity
-            $manifest = Read-InstallManifest -Path $entryManifestPath
+            $manifest = if ($RequireManifestIntegrity) {
+                (Read-InstallManifestSnapshot -Path $entryManifestPath -Registry $Registry).Manifest
+            } else {
+                Assert-InstallManifestRegistryDigest -Registry $Registry -ManifestPath $entryManifestPath -RequireManifestIntegrity $false
+                Read-InstallManifest -Path $entryManifestPath
+            }
             Assert-RegisteredManifestIdentity `
                 -Entry $entry `
                 -WorkspaceKey ([string]$workspaceEntry.Key) `
@@ -1595,11 +1676,12 @@ function Assert-GlobalHistoryState {
         }
         $previousRetiredHistoryIndex = $currentHistoryIndex
 
-        Assert-InstallManifestRegistryDigest `
-            -Registry $Registry `
-            -ManifestPath $normalizedRetiredPath `
-            -RequireManifestIntegrity $RequireManifestIntegrity
-        $retiredManifest = Read-InstallManifest -Path $normalizedRetiredPath
+        $retiredManifest = if ($RequireManifestIntegrity) {
+            (Read-InstallManifestSnapshot -Path $normalizedRetiredPath -Registry $Registry).Manifest
+        } else {
+            Assert-InstallManifestRegistryDigest -Registry $Registry -ManifestPath $normalizedRetiredPath -RequireManifestIntegrity $false
+            Read-InstallManifest -Path $normalizedRetiredPath
+        }
         $retiredWorkspace = Get-NormalizedPath -Path $retiredManifest['workspace_root']
         $retiredRepo = Get-NormalizedPath -Path $retiredManifest['repo_root']
         if ([string]::IsNullOrWhiteSpace($retiredWorkspace) -or [string]::IsNullOrWhiteSpace($retiredRepo)) {
@@ -1621,7 +1703,7 @@ function Assert-GlobalHistoryState {
         }
     }
 
-    $activeOwner = Get-RegisteredManifestOwner -ManifestPath $GlobalHistory[-1] -Workspaces $Workspaces -RegistryPath $RegistryPath
+    $activeOwner = Get-RegisteredManifestOwner -ManifestPath $GlobalHistory[-1] -Workspaces $Workspaces -RegistryPath $RegistryPath -Registry $Registry -RequireManifestIntegrity $RequireManifestIntegrity
     [void](Get-UninstallHistoricalSkillState -Registry $Registry)
     return $activeOwner
 }
@@ -1760,7 +1842,9 @@ function Assert-UninstallJournalDerivedState {
     $retiredManifestHistory = @()
     [object[]]$registryReleasedTargetHistory = @()
     if ($null -ne $Registry) {
-        if ([string]$Registry['schema_version'] -ne 'install-registry/v1.1' -or
+        $registrySchemaMatches = [string]$Registry['schema_version'] -eq [string]$Journal['registry_schema_version'] -or
+            ([string]$Registry['schema_version'] -eq 'install-registry/v1.0' -and [string]$Journal['registry_schema_version'] -eq 'install-registry/v1.1')
+        if (-not $registrySchemaMatches -or
             -not ($Registry['workspaces'] -is [System.Collections.IDictionary])) {
             throw "Uninstall journal registry preimage is invalid: $RegistryPath"
         }
@@ -1823,7 +1907,7 @@ function Assert-UninstallJournalDerivedState {
             throw "Workspace registry entry has no install manifests: $entryWorkspaceRoot"
         }
         foreach ($path in $workspaceManifestPaths) {
-            $manifest = Read-InstallManifest -Path $path
+            $manifest = (Read-InstallManifestSnapshot -Path $path -Registry $Registry -ResumeJournal $Journal).Manifest
             Assert-WorkspaceManifestIdentity `
                 -ManifestPath $path `
                 -Manifest $manifest `
@@ -1838,7 +1922,7 @@ function Assert-UninstallJournalDerivedState {
             throw 'Install registry has workspaces but no user-global owner history'
         }
         $activeManifestPath = $globalHistory[-1]
-        $activeManifest = Read-InstallManifest -Path $activeManifestPath
+        $activeManifest = (Read-InstallManifestSnapshot -Path $activeManifestPath -Registry $Registry -ResumeJournal $Journal).Manifest
         $activeWorkspaceKey = Get-WorkspaceRegistryKey -Path $activeManifest['workspace_root']
         if (-not $workspaces.Contains($activeWorkspaceKey)) {
             throw "Global owner manifest has no registered workspace: $activeManifestPath"
@@ -1859,7 +1943,7 @@ function Assert-UninstallJournalDerivedState {
             $handoffIndex = -1
             for ($historyIndex = $globalHistory.Count - 2; $historyIndex -ge 0; $historyIndex--) {
                 $candidatePath = $globalHistory[$historyIndex]
-                $candidateManifest = Read-InstallManifest -Path $candidatePath
+                $candidateManifest = (Read-InstallManifestSnapshot -Path $candidatePath -Registry $Registry -ResumeJournal $Journal).Manifest
                 $candidateKey = Get-WorkspaceRegistryKey -Path $candidateManifest['workspace_root']
                 if ($candidateKey -eq $workspaceKey -or -not $workspaces.Contains($candidateKey)) {
                     continue
@@ -1923,6 +2007,21 @@ function Assert-UninstallJournalDerivedState {
         $fullyConsumedManifestPaths = @($candidateConsumedManifestPaths)
     }
 
+    if ([string]$Journal['schema_version'] -eq 'uninstall-transaction/v1.2') {
+        if (-not ($Journal['consumed_manifest_preimages'] -is [System.Collections.IDictionary])) {
+            throw 'Uninstall journal is missing consumed manifest preimages'
+        }
+        $expectedPreimageKeys = @($fullyConsumedManifestPaths | ForEach-Object { Get-InstallManifestDigestRegistryKey -ManifestPath $_ })
+        if (-not (Test-StringSetEqual -Left @($Journal['consumed_manifest_preimages'].Keys) -Right $expectedPreimageKeys)) {
+            throw 'Uninstall journal consumed manifest preimage keys do not match the derived plan'
+        }
+        foreach ($path in $fullyConsumedManifestPaths) {
+            $manifest = Read-InstallManifest -Path $path
+            $manifestRegistry = if ($registered) { $Registry } else { $null }
+            Assert-UninstallConsumedManifestPreimage -Registry $manifestRegistry -Journal $Journal -ManifestPath $path -Manifest $manifest
+        }
+    }
+
     if ($registered) {
         $fullyConsumedPathSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
         foreach ($path in $fullyConsumedManifestPaths) { [void]$fullyConsumedPathSet.Add($path) }
@@ -1958,7 +2057,7 @@ function Assert-UninstallJournalDerivedState {
                 throw "Workspace registry entry has no install manifests: $ownedWorkspaceRoot"
             }
             foreach ($ownedManifestPath in $ownedManifestPaths) {
-                $ownedManifest = Read-InstallManifest -Path $ownedManifestPath
+                $ownedManifest = (Read-InstallManifestSnapshot -Path $ownedManifestPath -Registry $Registry -ResumeJournal $Journal).Manifest
                 Assert-WorkspaceManifestIdentity `
                     -ManifestPath $ownedManifestPath `
                     -Manifest $ownedManifest `
@@ -1969,19 +2068,16 @@ function Assert-UninstallJournalDerivedState {
                 }
                 if ($fullyConsumedPathSet.Contains($ownedManifestPath) -and
                     [string]$ownedManifest['transaction_status'] -eq 'uninstalled') {
+                    Assert-UninstallConsumedManifestPreimage -Registry $Registry -Journal $Journal -ManifestPath $ownedManifestPath -Manifest $ownedManifest
                     continue
                 }
                 Assert-NormalInstallManifestStatus `
                     -Manifest $ownedManifest `
                     -ManifestPath $ownedManifestPath
-                Assert-InstallManifestRegistryDigest `
-                    -Registry $Registry `
-                    -ManifestPath $ownedManifestPath `
-                    -RequireManifestIntegrity $requireManifestIntegrity
             }
         }
         foreach ($retiredManifestPath in $retiredManifestHistory) {
-            $retiredManifest = Read-InstallManifest -Path $retiredManifestPath
+            $retiredManifest = (Read-InstallManifestSnapshot -Path $retiredManifestPath -Registry $Registry -ResumeJournal $Journal).Manifest
             $retiredWorkspaceRoot = Get-NormalizedPath -Path $retiredManifest['workspace_root']
             Assert-WorkspaceManifestIdentity `
                 -ManifestPath $retiredManifestPath `
@@ -1990,15 +2086,12 @@ function Assert-UninstallJournalDerivedState {
                 -RegistryPath $RegistryPath
             if ($fullyConsumedPathSet.Contains($retiredManifestPath) -and
                 [string]$retiredManifest['transaction_status'] -eq 'uninstalled') {
+                Assert-UninstallConsumedManifestPreimage -Registry $Registry -Journal $Journal -ManifestPath $retiredManifestPath -Manifest $retiredManifest
                 continue
             }
             Assert-NormalInstallManifestStatus `
                 -Manifest $retiredManifest `
                 -ManifestPath $retiredManifestPath
-            Assert-InstallManifestRegistryDigest `
-                -Registry $Registry `
-                -ManifestPath $retiredManifestPath `
-                -RequireManifestIntegrity $requireManifestIntegrity
         }
     }
 
@@ -2033,7 +2126,7 @@ function Assert-UninstallJournalDerivedState {
         throw 'Uninstall journal registry-owned digest keys do not match the registry preimage'
     }
     foreach ($path in $expectedOwnedManifestPaths) {
-        $manifest = Read-InstallManifest -Path $path
+        $manifest = (Read-InstallManifestSnapshot -Path $path -Registry $Registry -ResumeJournal $Journal).Manifest
         $digestKey = Get-InstallManifestDigestRegistryKey -ManifestPath $path
         $expectedPlanDigest = [string]$Journal['registry_owned_manifest_plan_digests'][$digestKey]
         if ($expectedPlanDigest -notmatch '^[0-9a-f]{64}$' -or
@@ -2131,7 +2224,7 @@ function Test-UninstallJournalRegistryCommitted {
     }
     $currentRegistry = Read-JsonObject -Path $RegistryPath
     if ($null -eq $currentRegistry -or
-        [string]$currentRegistry['schema_version'] -ne 'install-registry/v1.1' -or
+        [string]$currentRegistry['schema_version'] -ne [string]$Journal['registry_schema_version'] -or
         [string]$currentRegistry['transaction_status_contract'] -ne $expectedPostimageStatusContract -or
         [string]$currentRegistry['history_ownership_contract'] -ne [string]$Journal['postimage_history_ownership_contract'] -or
         [string]$currentRegistry['manifest_integrity_contract'] -ne [string]$Journal['postimage_manifest_integrity_contract'] -or
@@ -2197,7 +2290,10 @@ function Test-UninstallJournalRegistryCommitted {
 function Resume-UninstallTransaction {
     param(
         [string]$JournalPath,
-        [string]$ExpectedRepoRoot
+        [string]$ExpectedRepoRoot,
+        [string]$ExpectedWorkspaceRoot,
+        [string]$ExpectedManifestPath,
+        [string]$InstallRecoveryPath
     )
 
     $journal = Read-JsonObject -Path $JournalPath
@@ -2205,8 +2301,8 @@ function Resume-UninstallTransaction {
         throw "LIVE_UPDATE_REQUIRED: legacy-install-state; manual recovery is required for legacy uninstall transaction: $JournalPath"
     }
     if ($null -eq $journal -or
-        [string]$journal['schema_version'] -ne 'uninstall-transaction/v1.1' -or
-        [string]$journal['registry_schema_version'] -ne 'install-registry/v1.1' -or
+        [string]$journal['schema_version'] -notin @('uninstall-transaction/v1.1','uninstall-transaction/v1.2') -or
+        [string]$journal['registry_schema_version'] -notin @('install-registry/v1.1','install-registry/v1.2') -or
         [string]$journal['manifest_schema_version'] -ne 'install-manifest/v1.2' -or
         [string]$journal['postimage_identity_contract'] -ne 'v1') {
         throw "Unsupported or unreadable uninstall transaction journal: $JournalPath"
@@ -2217,6 +2313,20 @@ function Resume-UninstallTransaction {
     }
     if ((Get-NormalizedPath -Path $journal['repo_root']) -ne (Get-NormalizedPath -Path $ExpectedRepoRoot)) {
         throw "Uninstall journal RepoRoot mismatch: $JournalPath"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($InstallRecoveryPath)) {
+        throw 'An uninstall journal cannot be resumed with an install recovery selector'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedWorkspaceRoot) -and
+        (Get-WorkspaceRegistryKey -Path $ExpectedWorkspaceRoot) -ne [string]$journal['workspace_key']) {
+        throw 'Uninstall journal workspace selector does not match the pending transaction'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedManifestPath)) {
+        $journalWorkspaceManifests = @($journal['workspace_manifest_paths'])
+        if ($journalWorkspaceManifests.Count -eq 0 -or
+            (Get-NormalizedPath -Path $ExpectedManifestPath) -ne (Get-NormalizedPath -Path $journalWorkspaceManifests[-1])) {
+            throw 'Uninstall journal manifest selector does not match the pending transaction'
+        }
     }
     $registryPath = Get-NormalizedPath -Path $journal['registry_path']
     if ($registryPath -ne (Get-NormalizedPath -Path (Join-Path $env:USERPROFILE '.dev-harness\install-registry.json'))) {
@@ -2239,6 +2349,7 @@ function Resume-UninstallTransaction {
         -Registry $resumeRegistry `
         -RegistryPath $registryPath `
         -ExpectedRepoRoot $ExpectedRepoRoot
+    $manifestRegistry = if ($null -ne $resumeRegistry -and $resumeRegistry['workspaces'].Contains([string]$journal['workspace_key'])) { $resumeRegistry } else { $null }
 
     $workspaceManifestPaths = @($journal['workspace_manifest_paths'] | ForEach-Object { Get-NormalizedPath -Path $_ })
     $globalManifestPaths = @($journal['global_manifest_paths'] | ForEach-Object { Get-NormalizedPath -Path $_ })
@@ -2263,24 +2374,20 @@ function Resume-UninstallTransaction {
     if (-not ($journal['manifest_plan_digests'] -is [System.Collections.IDictionary])) {
         throw "Uninstall journal is missing manifest plan digests: $JournalPath"
     }
-    $resumeManifestIntegrityRequired = $null -ne $resumeRegistry -and
-        [string]$resumeRegistry['manifest_integrity_contract'] -eq 'sha256-v1'
-
     $manifestCache = @{}
     foreach ($path in @($workspaceManifestPaths + $globalManifestPaths | Select-Object -Unique)) {
-        $manifest = Read-InstallManifest -Path $path
+        $manifest = (Read-InstallManifestSnapshot -Path $path -Registry $manifestRegistry -ResumeJournal $journal).Manifest
         $digestKey = Get-InstallManifestDigestRegistryKey -ManifestPath $path
         $expectedPlanDigest = [string]$journal['manifest_plan_digests'][$digestKey]
         if ($expectedPlanDigest -notmatch '^[0-9a-f]{64}$' -or
             (Get-InstallManifestPlanDigest -Manifest $manifest) -ne $expectedPlanDigest) {
             throw "Uninstall journal manifest plan digest mismatch: $path"
         }
-        if ([string]$manifest['transaction_status'] -ne 'uninstalled' -and
-            $null -ne $resumeRegistry -and $resumeRegistry['manifest_digests'] -is [System.Collections.IDictionary]) {
-            Assert-InstallManifestRegistryDigest `
-                -Registry $resumeRegistry `
-                -ManifestPath $path `
-                -RequireManifestIntegrity $resumeManifestIntegrityRequired
+        if ([string]$manifest['transaction_status'] -eq 'uninstalled') {
+            if (-not $fullyConsumedPathSet.Contains($path)) { throw "Uninstall journal has an unplanned consumed manifest: $path" }
+            if ($null -eq $manifestRegistry) {
+                Assert-UninstallConsumedManifestPreimage -Registry $null -Journal $journal -ManifestPath $path -Manifest $manifest
+            }
         }
         $requiredScopes = @()
         if ($workspacePathSet.Contains($path)) { $requiredScopes += 'workspace' }
@@ -2302,11 +2409,17 @@ function Resume-UninstallTransaction {
         -RestoreUserGlobal $restoreUserGlobal `
         -ManifestCache $manifestCache `
         -ReleasedTargetHistory (Get-InstallRegistryReleasedTargetHistoryMap -Registry $resumeRegistry -ExpectedUserProfile $env:USERPROFILE))
-    $preservedSkills = @(if ($null -ne $resumeRegistry) { Get-UninstallHistoricalSkillState -Registry $resumeRegistry -RestorePlan $restorePlan })
+    $preservedSkills = @(if ($null -ne $resumeRegistry) { Get-UninstallHistoricalSkillState -Registry $resumeRegistry -RestorePlan $restorePlan -ResumeJournal $journal })
     Assert-UninstallPreservedSkillWriteSet -Preserved $preservedSkills -Plan $restorePlan -Manifests @($manifestCache.Values)
-    $resumeProjectionValidator = { param($Projected, $ProjectedPlan) [void](Get-InstallRestorePlanPrefix -Plan $ProjectedPlan -ProjectedExactIdentities $Projected) }
+    $hasConsumedStatus = @($fullyConsumedManifestPaths | Where-Object { [string]$manifestCache[$_]['transaction_status'] -eq 'uninstalled' }).Count -gt 0
+    $resumeProjectionValidator = {
+        param($Projected, $ProjectedPlan)
+        $prefix = Get-InstallRestorePlanPrefix -Plan $ProjectedPlan -ProjectedExactIdentities $Projected
+        if ($hasConsumedStatus -and $prefix -ne @($ProjectedPlan).Count) { throw 'Consumed manifest status requires a completed restore plan' }
+    }
     Repair-InstallRestorePlanTransitions -Plan $restorePlan -ValidateProjectedPlan $resumeProjectionValidator
     $restorePrefix = Get-InstallRestorePlanPrefix -Plan $restorePlan
+    if ($hasConsumedStatus -and $restorePrefix -ne @($restorePlan).Count) { throw 'Consumed manifest status requires a completed restore plan' }
 
     Mark-LegacyPointerIfConsumed `
         -PointerPath (Get-NormalizedPath -Path $journal['legacy_pointer_path']) `
@@ -2347,6 +2460,7 @@ function Resume-UninstallTransaction {
         } elseif ($registryAction -eq 'write') {
             $resumeRegistry = Read-JsonObject -Path $registryPath
             [void]$resumeRegistry['workspaces'].Remove([string]$journal['workspace_key'])
+            $resumeRegistry['schema_version'] = [string]$journal['registry_schema_version']
             $resumeRegistry['global_manifest_history'] = @($journal['updated_global_history'])
             $resumeRegistry['retired_manifest_history'] = @($journal['updated_retired_manifest_history'])
             $resumeRegistry['history_ownership_contract'] = 'v1'
@@ -2401,7 +2515,10 @@ if ($selectorCount -eq 0 -and -not (Test-Path -LiteralPath $pendingUninstallJour
 if (Test-Path -LiteralPath $uninstallJournalPath -PathType Leaf) {
     $resumeResult = Resume-UninstallTransaction `
         -JournalPath $uninstallJournalPath `
-        -ExpectedRepoRoot $RepoRoot
+        -ExpectedRepoRoot $RepoRoot `
+        -ExpectedWorkspaceRoot $WorkspaceRoot `
+        -ExpectedManifestPath $ManifestPath `
+        -InstallRecoveryPath $RecoveryManifestPath
     Write-Output 'Resumed pending uninstall transaction:'
     Write-Output ('- restored_count: {0}' -f @($resumeResult.Restored).Count)
     Write-Output ('- removed_generated_count: {0}' -f @($resumeResult.Removed).Count)
@@ -2417,7 +2534,7 @@ if (Test-Path -LiteralPath $pendingInstallJournalPath -PathType Leaf) {
     }
     if ($null -eq $pendingInstallJournal -or
         [string]$pendingInstallJournal['schema_version'] -ne 'install-transaction/v1.1' -or
-        [string]$pendingInstallJournal['registry_schema_version'] -ne 'install-registry/v1.1' -or
+        [string]$pendingInstallJournal['registry_schema_version'] -notin @('install-registry/v1.1','install-registry/v1.2') -or
         [string]$pendingInstallJournal['manifest_schema_version'] -ne 'install-manifest/v1.2' -or
         [string]$pendingInstallJournal['postimage_identity_contract'] -ne 'v1' -or
         (Get-NormalizedPath -Path $pendingInstallJournal['user_profile']) -ne (Get-NormalizedPath -Path $env:USERPROFILE) -or
@@ -2472,7 +2589,7 @@ if (Test-Path -LiteralPath $pendingInstallJournalPath -PathType Leaf) {
             throw "Pending install transaction is missing its committed postimage contract: $pendingInstallJournalPath"
         }
         if ($null -eq $pendingRegistry -or
-            [string]$pendingRegistry['schema_version'] -ne 'install-registry/v1.1' -or
+            [string]$pendingRegistry['schema_version'] -ne [string]$pendingInstallJournal['registry_schema_version'] -or
             [string]$pendingRegistry['history_ownership_contract'] -ne [string]$pendingInstallJournal['postimage_history_ownership_contract'] -or
             [string]$pendingRegistry['manifest_integrity_contract'] -ne [string]$pendingInstallJournal['postimage_manifest_integrity_contract'] -or
             [string]$pendingRegistry['transaction_status_contract'] -ne $pendingExpectedStatusContract -or
@@ -2537,7 +2654,7 @@ $retiredManifestHistory = @()
 $releasedTargetHistory = @{}
 if ($null -ne $registry) {
     $schemaVersion = [string]$registry['schema_version']
-    if ($schemaVersion -notin @('install-registry/v1.0','install-registry/v1.1') -or
+    if ($schemaVersion -notin @('install-registry/v1.0','install-registry/v1.1','install-registry/v1.2') -or
         -not ($registry['workspaces'] -is [System.Collections.IDictionary]) -or
         -not ($registry['global_manifest_history'] -is [System.Collections.IList])) {
         throw "Unsupported or malformed install registry: $registryPath"
@@ -2672,6 +2789,9 @@ if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
     }
 }
 
+if ($registered) {
+    $selectedManifest = (Read-InstallManifestSnapshot -Path $ManifestPath -Registry $registry).Manifest
+}
 Assert-NormalInstallManifestStatus `
     -Manifest $selectedManifest `
     -ManifestPath $ManifestPath
@@ -2730,7 +2850,7 @@ if ($registered -and $remainingWorkspaceCount -eq 0) {
         $handoffIndex = -1
         for ($historyIndex = $globalHistory.Count - 2; $historyIndex -ge 0; $historyIndex--) {
             $candidatePath = $globalHistory[$historyIndex]
-            $candidateManifest = Read-InstallManifest -Path $candidatePath
+            $candidateManifest = (Read-InstallManifestSnapshot -Path $candidatePath -Registry $registry).Manifest
             $candidateKey = Get-WorkspaceRegistryKey -Path $candidateManifest['workspace_root']
             if ($candidateKey -eq $workspaceKey -or -not $workspaces.Contains($candidateKey)) {
                 continue
@@ -2739,7 +2859,9 @@ if ($registered -and $remainingWorkspaceCount -eq 0) {
             $handoffOwner = Get-RegisteredManifestOwner `
                 -ManifestPath $candidatePath `
                 -Workspaces $workspaces `
-                -RegistryPath $registryPath
+                -RegistryPath $registryPath `
+                -Registry $registry `
+                -RequireManifestIntegrity $manifestIntegrityRequired
             if (-not (Test-Path -LiteralPath (Join-Path $handoffOwner.RepoRoot 'skills') -PathType Container)) {
                 throw "Remaining user-global owner repo is unavailable: $($handoffOwner.RepoRoot)"
             }
@@ -2771,11 +2893,14 @@ if ($registered -and $remainingWorkspaceCount -gt 0) {
 }
 
 $manifestCache = @{}
+$manifestByteCache = @{}
 $normalizedWorkspaceManifestPaths = @($workspaceManifestPaths | ForEach-Object { Get-NormalizedPath -Path $_ })
 $normalizedGlobalManifestPaths = @($globalManifestPaths | ForEach-Object { Get-NormalizedPath -Path $_ })
 foreach ($path in @($workspaceManifestPaths + $globalManifestPaths | Select-Object -Unique)) {
     $normalizedPath = Get-NormalizedPath -Path $path
-    $manifest = Read-InstallManifest -Path $normalizedPath
+    $snapshot = Read-InstallManifestSnapshot -Path $normalizedPath -Registry $(if ($registered) { $registry } else { $null })
+    $manifest = $snapshot.Manifest
+    $manifestByteCache[$normalizedPath] = $snapshot.Bytes
     $requiredRestoreScopes = @()
     if ($normalizedWorkspaceManifestPaths -contains $normalizedPath) {
         $requiredRestoreScopes += 'workspace'
@@ -2832,7 +2957,7 @@ if ($registered) {
         $ownedManifest = if ($manifestCache.ContainsKey($manifestPath)) {
             $manifestCache[$manifestPath]
         } else {
-            Read-InstallManifest -Path $manifestPath
+            (Read-InstallManifestSnapshot -Path $manifestPath -Registry $registry).Manifest
         }
         $registryOwnedManifestPlanDigests[(Get-InstallManifestDigestRegistryKey -ManifestPath $manifestPath)] = `
             Get-InstallManifestPlanDigest -Manifest $ownedManifest
@@ -2841,9 +2966,19 @@ if ($registered) {
 $postimageTransactionStatusContract = if ($registryAction -eq 'write') { [string]$registry['transaction_status_contract'] } else { $null }
 $postimageHistoryOwnershipContract = if ($registryAction -eq 'write') { 'v1' } else { $null }
 $postimageManifestIntegrityContract = if ($registryAction -eq 'write') { 'sha256-v1' } else { $null }
+$consumedManifestPreimages = [ordered]@{}
+foreach ($manifestPath in $fullyConsumedManifestPaths) {
+    $digestKey = Get-InstallManifestDigestRegistryKey -ManifestPath $manifestPath
+    $bytes = $manifestByteCache[(Get-NormalizedPath -Path $manifestPath)]
+    $digest = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+    if ($registered -and $digest -ne [string]$registry['manifest_digests'][$digestKey]) {
+        throw "Registered install manifest digest mismatch: $manifestPath"
+    }
+    $consumedManifestPreimages[$digestKey] = [Convert]::ToBase64String($bytes)
+}
 $uninstallJournal = [ordered]@{
-    schema_version = 'uninstall-transaction/v1.1'
-    registry_schema_version = 'install-registry/v1.1'
+    schema_version = 'uninstall-transaction/v1.2'
+    registry_schema_version = if ($null -ne $registry) { [string]$registry['schema_version'] } else { 'install-registry/v1.1' }
     manifest_schema_version = 'install-manifest/v1.2'
     postimage_identity_contract = 'v1'
     prepared_at = (Get-Date -Format 's')
@@ -2860,6 +2995,7 @@ $uninstallJournal = [ordered]@{
     workspace_manifest_paths = @($workspaceManifestPaths)
     global_manifest_paths = @($globalManifestPaths)
     fully_consumed_manifest_paths = @($fullyConsumedManifestPaths)
+    consumed_manifest_preimages = $consumedManifestPreimages
     manifest_plan_digests = $manifestPlanDigests
     registry_owned_manifest_plan_digests = $registryOwnedManifestPlanDigests
     restore_user_global = [bool]$restoreUserGlobal
