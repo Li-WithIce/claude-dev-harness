@@ -691,24 +691,35 @@ function Invoke-I02SharedSkillsRegression {
         [IO.File]::WriteAllText((Join-Path $system 'host-marker.txt'),'host fixture')
         $a=$fixture
         $b=[pscustomobject]@{Root=$fixture.Root;Workspace=(Join-Path $fixture.Root 'workspace-b');User=$fixture.User}
+        $c=[pscustomobject]@{Root=$fixture.Root;Workspace=(Join-Path $fixture.Root 'workspace-c');User=$fixture.User}
         [void][IO.Directory]::CreateDirectory($b.Workspace)
+        [void][IO.Directory]::CreateDirectory($c.Workspace)
         $sequence=if($order -ceq 'full-first'){@(@{Fixture=$a;Preset='full'},@{Fixture=$b;Preset='core'})}else{@(@{Fixture=$b;Preset='core'},@{Fixture=$a;Preset='full'})}
+        $sequence+=@(@{Fixture=$c;Preset='governed'})
         foreach($step in $sequence){$run=Invoke-Install $step.Fixture @('-Preset',$step.Preset);Assert-InstallExit $run "I02 $order $($step.Preset)";if($run.ExitCode){throw $run.Output}}
         $full=Get-LatestManifest $a;$core=Get-LatestManifest $b
         $optional=@($full.feature_ownership.skills|Where-Object {$_ -notin $core.feature_ownership.skills})
         if(($core.feature_ownership.features -join '|') -ceq 'core' -and ($core.feature_ownership.skills -join '|') -ceq '.system'){Add-Check 'I02 core retains only its requested ownership'}else{Add-Failure 'I02 core claimed another owner skills'}
-        foreach($target in @($a,$b)){
-            $verify=Invoke-ChildScript -UserProfile $target.User -ScriptPath (Join-Path $script:RepoRoot 'tests/verify-installation.ps1') -Arguments @('-WorkspaceRoot',$target.Workspace,'-RepoRoot',$script:RepoRoot,'-UserProfileRoot',$target.User,'-Scope','All')
-            if($verify.ExitCode -eq 0){Add-Check "I02 $order All verifies $($target.Workspace)"}else{Add-Failure "I02 $order All failed: $($verify.Output)"}
+        foreach($phase in @('initial','repeated-core')){
+            if($phase -ceq 'repeated-core'){Assert-InstallExit (Invoke-Install $b) "I02 $order repeated core update"}
+            foreach($step in $sequence){
+                $target=$step.Fixture
+                $manifest=Get-LatestManifest $target
+                if($manifest.effective_preset -ceq $step.Preset){Add-Check "I02 $order $phase preserves $($step.Preset) ownership"}else{Add-Failure "I02 $order $phase changed $($step.Preset) preset"}
+                $verify=Invoke-ChildScript -UserProfile $target.User -ScriptPath (Join-Path $script:RepoRoot 'tests/verify-installation.ps1') -Arguments @('-WorkspaceRoot',$target.Workspace,'-RepoRoot',$script:RepoRoot,'-UserProfileRoot',$target.User,'-Scope','All')
+                if($verify.ExitCode -eq 0){Add-Check "I02 $order $phase All verifies $($step.Preset)"}else{Add-Failure "I02 $order $phase $($step.Preset) All failed: $($verify.Output)"}
+            }
         }
-        Assert-InstallExit (Invoke-Install $b) "I02 $order repeated core update"
         foreach($hostName in @('.claude','.codex','.agents')){foreach($name in $optional){
             $path=Join-Path $fixture.User ($hostName+'/skills/'+$name)
             if((Get-JunctionTarget $path) -eq (Join-Path $script:RepoRoot ('skills/'+$name))){Add-Check "I02 $order retains exact $hostName/$name target"}else{Add-Failure "I02 $order lost $hostName/$name"}
         }}
         Assert-UninstallExit (Invoke-Uninstall $b) "I02 $order core uninstall"
-        $verify=Invoke-ChildScript -UserProfile $a.User -ScriptPath (Join-Path $script:RepoRoot 'tests/verify-installation.ps1') -Arguments @('-WorkspaceRoot',$a.Workspace,'-RepoRoot',$script:RepoRoot,'-UserProfileRoot',$a.User,'-Scope','All')
-        if($verify.ExitCode -eq 0){Add-Check 'I02 full owner survives core uninstall'}else{Add-Failure "I02 full verification after uninstall failed: $($verify.Output)"}
+        foreach($target in @($a,$c)){
+            $verify=Invoke-ChildScript -UserProfile $target.User -ScriptPath (Join-Path $script:RepoRoot 'tests/verify-installation.ps1') -Arguments @('-WorkspaceRoot',$target.Workspace,'-RepoRoot',$script:RepoRoot,'-UserProfileRoot',$target.User,'-Scope','All')
+            if($verify.ExitCode -eq 0){Add-Check "I02 $order owner survives core uninstall: $($target.Workspace)"}else{Add-Failure "I02 $order verification after core uninstall failed: $($verify.Output)"}
+        }
+        Assert-UninstallExit (Invoke-Uninstall $c) "I02 $order governed uninstall"
         Assert-InstallExit (Invoke-Install $a @('-Preset','core')) 'I02 release last optional demand'
         foreach($hostName in @('.claude','.codex','.agents')){foreach($name in $optional){if(Test-Path (Join-Path $a.User ($hostName+'/skills/'+$name))){Add-Failure 'I02 released demand remained installed'}else{Add-Check 'I02 last optional demand is released'}}}
         Assert-UninstallExit (Invoke-Uninstall $a) 'I02 last owner cleanup'

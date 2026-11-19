@@ -142,6 +142,10 @@ function Invoke-H03HistoricalIdentityRegression {
         @{Name='workspace';Expected='^Registered install manifest identity does not match its owner:'},
         @{Name='repo';Expected='^Registered install manifest identity does not match its owner:'},
         @{Name='user';Expected='^Registered install manifest path or user identity is invalid:'},
+        @{Name='codex-home';Expected='^Registered install manifest path or user identity is invalid:'},
+        @{Name='agents-home';Expected='^Registered install manifest path or user identity is invalid:'},
+        @{Name='schema';Expected='^Unsupported install manifest schema:'},
+        @{Name='postimage-contract';Expected='^Install manifest is missing its postimage identity contract:'},
         @{Name='registry';Expected='^Registered install manifest path or user identity is invalid:'},
         @{Name='backup-root';Expected='^Registered install manifest path or user identity is invalid:'},
         @{Name='backup-shape';Expected='^Install manifest backup record is missing expected postimage:'},
@@ -160,6 +164,10 @@ function Invoke-H03HistoricalIdentityRegression {
             workspace{$fixture.Manifest.workspace_root=[IO.Path]::Combine($fixture.Workspace,'wrong-owner')}
             repo{$fixture.Manifest.repo_root=[IO.Path]::Combine($SourceRoot,'wrong-repo')}
             user{$fixture.Manifest.claude_home=[IO.Path]::Combine($fixture.User,'wrong-user')}
+            codex-home{$fixture.Manifest.codex_home=[IO.Path]::Combine($fixture.User,'wrong-codex')}
+            agents-home{$fixture.Manifest.agents_home=[IO.Path]::Combine($fixture.User,'wrong-agents')}
+            schema{$fixture.Manifest.schema_version='install-manifest/invalid'}
+            postimage-contract{$fixture.Manifest.postimage_identity_contract='invalid'}
             registry{$fixture.Manifest.registry_path=[IO.Path]::Combine($fixture.User,'wrong-registry.json')}
             backup-root{$fixture.Manifest.backup_root=$FixtureRoot}
             backup-shape{$fixture.Manifest.backups=@(@{path='fixture'})}
@@ -167,7 +175,7 @@ function Invoke-H03HistoricalIdentityRegression {
             duplicate-history{$fixture.Registry.global_manifest_history+=@($fixture.ManifestPath)}
             duplicate-owner{Add-ManifestToRegistry -Registry $fixture.Registry -ManifestPath $fixture.ManifestPath -WorkspaceRoot ([IO.Path]::Combine($normalWorkspace,'other-owner')) -RepoRoot $SourceRoot -VaultProfile minimal -InstalledAt 'synthetic-fixture'}
         }
-        if($case.Name -in @('vault','offline-vault','workspace','repo','user','registry','backup-root','backup-shape','committed')){
+        if($case.Name -in @('vault','offline-vault','workspace','repo','user','codex-home','agents-home','schema','postimage-contract','registry','backup-root','backup-shape','committed')){
             [IO.File]::WriteAllText($fixture.ManifestPath,($fixture.Manifest|ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false))
             Refresh-InstallRegistryManifestDigests $fixture.Registry
         }
