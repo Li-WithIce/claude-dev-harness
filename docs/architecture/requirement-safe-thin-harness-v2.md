@@ -30,7 +30,7 @@ The Requirement Contract contains product truth only: goal, acceptance, scope, c
 
 ## Risk and execution profiles
 
-`policies/risk-rules.json` scores seven dimensions from 0 through 3. Scores 0–4 select Direct, 5–8 select Governed, and 9–21 select Critical unless a hard trigger overrides the total. Explicit source-code-only work caps score-based routing at Governed and does not treat the authorization label alone as a Critical trigger; other Critical triggers remain effective. Commands and database operations are evaluated separately. Requirement-blocked work does not receive an execution profile. Read-only intent selects Inspect. Durable work is at least Governed. File count alone never escalates a task.
+`policies/risk-rules.json` scores seven dimensions from 0 through 3. Scores 0–4 select Direct and 5–21 select Governed; a score alone never selects Critical. Critical comes only from an explicit Critical trigger or a protected-action rule, and known Governed triggers raise the profile to at least Governed. Explicit source-code-only work does not treat the non-isolated security-boundary label alone as a trigger; Critical triggers remain effective. Commands and database operations are evaluated separately. Requirement-blocked work does not receive an execution profile. Read-only intent selects Inspect. Durable work is at least Governed. File count alone never escalates a task.
 
 `policies/execution-profiles.json` defines four profiles only:
 
@@ -39,7 +39,7 @@ The Requirement Contract contains product truth only: goal, acceptance, scope, c
 | Inspect | ephemeral | none | deterministic verification appropriate to the inspection |
 | Direct | ephemeral | no task state or task artifacts | verification |
 | Governed | durable | task state and explicit artifacts | verification and durable evidence; other capabilities are policy-composed |
-| Critical | durable | task state and explicit artifacts | plan, approval, rollback, independent review, verification, durable evidence, and dry-run |
+| Critical | durable | task state and explicit artifacts | plan, approval, rollback, independent review, verification, durable evidence, and preflight (`dry_run_required` is configurable) |
 
 Ask is not a fifth profile. It is `requirement_state=blocked`. Legacy `quick` and `workflow` names map to Direct and Governed only as compatibility aliases.
 

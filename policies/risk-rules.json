@@ -10,25 +10,40 @@
   ],
   "profile_thresholds": [
     { "profile": "direct", "min_total": 0, "max_total": 4 },
-    { "profile": "governed", "min_total": 5, "max_total": 8 },
-    { "profile": "critical", "min_total": 9, "max_total": 21 }
+    { "profile": "governed", "min_total": 5, "max_total": 21 }
   ],
   "critical_triggers": [
-    "authorization_or_security_boundary",
-    "money_billing_refund_or_settlement",
-    "production_database_destructive_migration",
+    "production_destructive_data_change",
     "irreversible_user_data_change",
-    "production_release_or_infrastructure",
-    "breaking_public_api_change",
-    "sensitive_data_export_or_compliance",
-    "destructive_git_history_operation",
-    "large_scale_automation_without_dry_run",
-    "unverified_production_impact"
+    "real_money_movement",
+    "privileged_external_exposure",
+    "unbounded_production_change",
+    "sensitive_data_export_outside_trust_boundary",
+    "destructive_shared_git_history_operation",
+    "large_scale_automation_without_preflight"
   ],
+  "governed_triggers": [
+    "shared_persistent_configuration_change",
+    "bounded_recoverable_production_change",
+    "breaking_public_api_change",
+    "sensitive_data_export_within_trust_boundary",
+    "security_boundary_change_non_isolated"
+  ],
+  "retired_triggers": {
+    "authorization_or_security_boundary": ["privileged_external_exposure", "security_boundary_change_non_isolated"],
+    "money_billing_refund_or_settlement": ["real_money_movement"],
+    "production_database_destructive_migration": ["production_destructive_data_change"],
+    "production_release_or_infrastructure": ["unbounded_production_change", "bounded_recoverable_production_change"],
+    "sensitive_data_export_or_compliance": ["sensitive_data_export_outside_trust_boundary", "sensitive_data_export_within_trust_boundary"],
+    "destructive_git_history_operation": ["destructive_shared_git_history_operation"],
+    "large_scale_automation_without_dry_run": ["large_scale_automation_without_preflight"],
+    "unverified_production_impact": ["unbounded_production_change"]
+  },
   "overrides": {
     "requirement_blocked_state": "blocked",
     "read_only_profile": "inspect",
     "durable_minimum_profile": "governed",
+    "governed_trigger_profile": "governed",
     "critical_trigger_profile": "critical",
     "multiple_files_alone_escalate": false
   }

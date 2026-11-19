@@ -68,7 +68,7 @@ function Set-HarnessSessionWorkspaceGrant {
     try {
         $task = & (Get-Module Harness.ProtectedAction) { param($Repo,$Root,$Id) Read-HarnessProtectedTask -RepoRoot $Repo -WorkspaceRoot $Root -TaskId $Id } $RepoRoot $authorityRoot $TaskId
         Assert-HarnessKernelCondition ([int]$task.version -eq $ExpectedVersion -and $task.requirement_state -ceq 'clear' -and $task.execution_profile -ceq 'critical' -and $task.status -cin @('running','verifying')) 'session workspace requires a current clear Critical task'
-        Assert-HarnessKernelCondition (-not @($task.policies.Keys | Where-Object { $task.policies[$_] -ne $true }).Count) 'session workspace requires Critical policy flags'
+        Assert-HarnessKernelCondition (-not @($task.policies.Keys | Where-Object { $task.policies[$_] -ne $true -and -not ($_ -ceq 'dry_run_required' -and $task.policies.Contains('preflight_required')) }).Count) 'session workspace requires Critical policy flags'
         $intent = [ordered]@{
             session_id=$SessionId
             primary=$primary

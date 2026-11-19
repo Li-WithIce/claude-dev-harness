@@ -479,7 +479,7 @@ function Get-HarnessEvidenceRevision {
         (Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path (Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $EvidenceOutputPath -Label 'evidence output' -AllowMissing))),
         $(if($runningOnWindows){[StringComparer]::OrdinalIgnoreCase}else{[StringComparer]::Ordinal}))
     if($Evidence.Contains('task_id')){[void]$exactExclusions.Add("docs/tasks/$($Evidence.task_id)/audit.md")}
-    $evidenceFiles=@((@($Evidence.records)+$(if($Evidence.Contains('dry_run')){@($Evidence.dry_run)}else{@()}))|ForEach-Object{
+    $evidenceFiles=@((@($Evidence.records)+$(if($Evidence.Contains('dry_run')){@($Evidence.dry_run)}else{@()})+$(if($Evidence.Contains('preflight')){@($Evidence.preflight)}else{@()}))|ForEach-Object{
         $relative=Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path (Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $_.evidence_path -Label 'record evidence_path' -MustExist File)
         [ordered]@{path=$relative;digest=(Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $relative)}
     })
@@ -537,11 +537,13 @@ function Resolve-HarnessEvidenceCore {
     $loaded=Read-HarnessKernelJson -WorkspaceRoot $WorkspaceRoot -Path $EvidencePath -Label 'Evidence'
     $document=$loaded.Document
     $dryRun=if($document.Contains('dry_run')){$document.dry_run}else{$null}
-    foreach($record in @($document.records)+@($dryRun)){
+    $preflight=if($document.Contains('preflight')){$document.preflight}else{$null}
+    foreach($record in @($document.records)+@($dryRun)+@($preflight)){
         if($record-isnot[Collections.IDictionary]){continue}
-        $label=if([object]::ReferenceEquals($record,$dryRun)){'dry-run'}else{'record'}
+        $label=if([object]::ReferenceEquals($record,$dryRun)){'dry-run'}elseif([object]::ReferenceEquals($record,$preflight)){'preflight'}else{'record'}
         if($record.Contains('actor')-and$record.actor-is[Collections.IDictionary]){Assert-HarnessKernelTextFields -Value $record.actor -Fields @($record.actor.Keys) -Label "$label actor"}
         if($record.Contains('command')){Assert-HarnessKernelTextFields -Value $record -Fields command -Label $label}
+        if($label-ceq'preflight'-and$record.Contains('method')){Assert-HarnessKernelTextFields -Value $record -Fields method -Label $label}
     }
     Assert-HarnessKernelSchema -RepoRoot $RepoRoot -Value $document -Schema evidence.schema.json -Label 'Evidence'
     if($document.task_id-cne$TaskId){throw 'Evidence task_id does not match TaskId'}
@@ -552,20 +554,22 @@ function Resolve-HarnessEvidenceCore {
     $covered = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $severity = 0
     if($null-ne$dryRun-and$null-ne$protectedOperation-and-not@($dryRun.covers).Count){throw 'dry-run covers must not be empty for protected_operation'}
-    foreach($record in @($document.records)+@($dryRun)){
+    foreach($record in @($document.records)+@($dryRun)+@($preflight)){
         if($null-eq$record){continue}
         $isDryRun=[object]::ReferenceEquals($record,$dryRun)
-        $label=if($isDryRun){'dry-run'}else{'record'}
+        $isPreflight=[object]::ReferenceEquals($record,$preflight)
+        $label=if($isDryRun){'dry-run'}elseif($isPreflight){'preflight'}else{'record'}
+        $subject=if($isDryRun-or$isPreflight){$label}else{'Evidence record'}
         if($record.Contains('operation_identity')){
-            if($null-eq$protectedOperation){throw "$(if($isDryRun){'dry-run'}else{'Evidence record'}) operation_identity requires protected_operation"}
-            if($record.operation_identity-cne$protectedOperation.identity){throw "$(if($isDryRun){'dry-run'}else{'Evidence record'}) operation_identity does not match protected_operation"}
-            if($isDryRun-and@($record.covers)-cnotcontains$record.operation_identity){throw 'dry-run covers does not include protected_operation identity'}
+            if($null-eq$protectedOperation){throw "$subject operation_identity requires protected_operation"}
+            if($record.operation_identity-cne$protectedOperation.identity){throw "$subject operation_identity does not match protected_operation"}
+            if(($isDryRun-or$isPreflight)-and@($record.covers)-cnotcontains$record.operation_identity){throw "$label covers does not include protected_operation identity"}
         }
         if((Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path (Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $record.evidence_path `
-            -Label "$label evidence_path" -MustExist File))-cne$record.digest){throw "$(if($isDryRun){'dry-run Evidence'}else{'Evidence record'}) digest mismatch: $($record.evidence_path)"}
+            -Label "$label evidence_path" -MustExist File))-cne$record.digest){throw "$(if($isDryRun-or$isPreflight){"$label Evidence"}else{'Evidence record'}) digest mismatch: $($record.evidence_path)"}
         if($record.Contains('cwd')){[void](Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $record.cwd -Label "$label cwd" -MustExist Directory)}
         $severity=[Math]::Max($severity,$(if($record.Contains('cwd')){3*[int]([int]$record.exit_code-ne0)}else{@('pass','partial','blocked','fail').IndexOf([string]$record.result)}))
-        if(-not$isDryRun){foreach($item in @($record.covers)){[void]$covered.Add($item)}}
+        if(-not$isDryRun-and-not$isPreflight){foreach($item in @($record.covers)){[void]$covered.Add($item)}}
     }
     $coverage=@($document.coverage.satisfied)+@($document.coverage.not_verified)+@($document.coverage.blocked)
     $buckets=[Collections.Generic.HashSet[string]]::new([string[]]$coverage,[StringComparer]::Ordinal)

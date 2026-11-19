@@ -62,6 +62,7 @@ function Get-TaskPolicyFlags {
     foreach ($key in @('plan','approval','rollback','independent_review','verification','dry_run')) {
         $result["${key}_required"] = $selected -ccontains "${key}_required"
     }
+    if ($Profile -ceq 'critical') { $result['preflight_required'] = $selected -ccontains 'preflight_required' }
     return $result
 }
 
@@ -72,8 +73,12 @@ function Assert-TaskStateDocument {
         -not @(@('contract_path','contract_digest','block_reason','approvals','evidence_path') | Where-Object { -not $Task.Contains($_) }).Count) 'persisted task state has an invalid durable execution profile or invariant set'
     Assert-HarnessKernelCondition (-not [string]::IsNullOrWhiteSpace([string]$Task.contract_path) -and [string]$Task.contract_digest -cmatch '^sha256:[0-9a-f]{64}$') 'persisted task state requires a bound Requirement Contract'
     $expectedPolicies = Get-TaskPolicyFlags -RepoRoot $RepoRoot -Profile $Task.execution_profile -Capabilities @($Task.policies.Keys | Where-Object { [bool]$Task.policies[$_] })
+    # A Critical task without preflight_required predates the preflight rule and keeps its mandatory dry-run.
+    $legacyCritical = $Task.execution_profile -ceq 'critical' -and -not $Task.policies.Contains('preflight_required')
     Assert-HarnessKernelCondition (-not @($expectedPolicies.Keys | Where-Object {
-        [bool]$(if ($_ -ceq 'dry_run_required' -and -not $Task.policies.Contains($_)) { $Task.execution_profile -ceq 'critical' } else { $Task.policies[$_] }) -ne [bool]$expectedPolicies[$_]
+        if ($legacyCritical -and $_ -ceq 'preflight_required') { return $false }
+        if ($legacyCritical -and $_ -ceq 'dry_run_required') { return $Task.policies.Contains($_) -and -not [bool]$Task.policies[$_] }
+        [bool]$Task.policies[$_] -ne [bool]$expectedPolicies[$_]
     }).Count) 'persisted task state policies do not match its execution profile'
     Assert-HarnessKernelCondition $(if([string]$Task.status-ceq'blocked'){
         [string]$Task.requirement_state-ceq'blocked'-and-not[string]::IsNullOrWhiteSpace([string]$Task.block_reason)

@@ -25,6 +25,10 @@ giving Runtime transitive executable LOC < 3392 and density ceilings 37843/11164
 The exact candidate's deployment approval is pending; this accounting is not an installation grant.
 See [session-workspaces.md](session-workspaces.md) for the additional session-grant trust assumption,
 alternatives, migration and verification boundary.
+The 2026-11-19 rules redesign authorization adds `KTB-EX-013` +22 LOC (+465 tokens/+139
+statement ASTs over e874cd4), giving Runtime transitive executable LOC < 3419 and density
+ceilings 38380/11328; baseline 3068 and the prior allowances are unchanged. See
+[policy-engine.md](policy-engine.md) for the typed preflight and its trust assumption.
 The original below-3000 goal remains unmet; terminal task closure additionally
 requires all prescribed verification evidence. A later
 boundary change requires an explicit Architecture Decision or Change Contract

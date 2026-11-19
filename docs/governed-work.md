@@ -1,33 +1,96 @@
 # Governed 与 Critical 工作
 
-## 何时使用
+## 先分开四个问题
 
-Governed 适用于需要持久机器任务状态、正式 Evidence、较高风险或受保护范围的工作。Critical 适用于实际生产操作、权限/安全边界操作、资金、破坏性迁移、不可逆数据变化、公共 API 破坏、敏感数据导出、破坏 Git 历史或缺少 dry-run 的大规模自动化。
+风险、授权、验证、留痕是四个独立问题，不互相替代：
 
-审批人员、角色权限和数据关联的普通源码改造使用 `ActionKind=source-code`，不因业务名称或 `auth`、`permissions`、`rbac` 目录自动要求 Approval 或独立审查。源码改造的高分最多按 Governed 处理；旧的权限边界标签不会单独升级，但其他明确的 Critical 触发项仍生效。执行命令、实际数据库操作和部署须另行评估，不能使用此分类。
+- **风险**：做错了会影响谁、能否恢复。
+- **授权**：用户是否明确同意这件事、这个目标、这个范围。
+- **验证**：做之前和做之后用什么手段确认结果。
+- **留痕**：是否需要持久的机器任务状态与正式 Evidence。
 
-通过 `PROJECT.md` 接入的普通项目说明、变更历史和操作文档属于业务交付，不单独触发 Governed；它们不设置策略选择器的 durable 标志。已有 Governed 任务可链接这些文档，机器状态仍只在 canonical v2 runtime 中维护。见 [项目连续记录](project-continuity.md)。
+需要留痕不等于高风险；低风险也不代表可以做未授权的权限变更。
 
-文件数量本身不会升级 profile；真正决定因素是风险、持久化要求和受保护动作。
+## 如何分级
+
+| 级别 | 适用 | 典型例子 |
+|---|---|---|
+| Inspect | 没有外部副作用的只读工作 | 审阅代码、查询状态 |
+| Direct | 普通源码/测试/文档，以及已确认隔离、可恢复的本机操作 | 权限相关源码改造；在本机专用实例上创建最小权限账号 |
+| Governed | 影响面超出当前任务，但范围明确、可恢复，或用户要求正式记录 | 共享持久配置；范围明确且可回退的生产部署；破坏公共 API；信任边界内的敏感数据导出；非隔离环境的安全边界变更 |
+| Critical | 错了难以挽回，或直接对外暴露 | 生产破坏性数据变更；不可逆的用户数据变更；真实资金；高权限对外暴露；范围不明的生产变更；敏感数据导出到信任边界之外；破坏共享 Git 历史；没有预检的大规模自动化 |
+
+规则：
+
+- 风险分数只决定 Direct（0–4）或 Governed（5–21）。Critical 只来自上表的明确触发项或受保护动作规则，分数再高也不会单独进入 Critical。
+- 文件数量、业务名称和 `auth`、`permissions`、`rbac` 等目录名不会单独升级。普通源码改造使用 `ActionKind=source-code`；它只豁免“非隔离环境的安全边界变更”这一项，其他 Critical 触发项仍然生效。执行命令、实际数据库操作和部署须另行评估，不能使用此分类。
+- 不易恢复的操作至少是 Governed。暂时无法验证不改变级别，但必须在报告中如实写明缺口。
+- `localhost`、目录名或“测试环境”标签本身不能证明隔离：本机端口转发到生产库仍然是生产。数据导出按目的地和泄露后果判断。
+- 已退役的旧触发项名称会被拒绝并提示替代名称，不做静默映射。
+
+通过 `PROJECT.md` 接入的普通项目说明、变更历史和操作文档属于业务交付，不单独触发 Governed；它们不设置策略选择器的 durable 标志。见 [项目连续记录](project-continuity.md)。
+
+## 每一级要做什么
+
+| 级别 | 授权 | 执行前检查 | 审查 | 留痕 |
+|---|---|---|---|---|
+| Direct | 用户的明确请求 | 与风险相称的最小检查 | 自查 | 在对话中报告实际命令、结果与缺口 |
+| Governed | 明确请求；策略要求时取得 Approval | 按策略组合计划、回滚 | 自查；策略要求时独立审查 | 一份精简的持久 Evidence |
+| Critical | 绑定具体操作的有效 Approval | 必须有预检 | 独立审查 | 授权、预检、执行、验证的完整记录 |
+
+本机隔离操作（Direct）仍需：用户明确授权、确认权限范围最小、准备好撤销办法、执行后验证；不需要专门的执行器或正式任务。
+
+### 执行前检查（预检）
+
+Critical 要求“足以覆盖该风险的执行前检查”，而不是一律 dry-run。可用的检查类型：
+
+- 原生 dry-run（工具自带的试运行）；
+- 配置或语法校验；
+- 只读影响面查询；
+- 隔离环境演练；
+- 必要的人工复核。
+
+这些类型不能互相冒充，Evidence 必须如实标明类型；一条与目标操作无关的成功命令不算预检。
+
+记录方式：
+
+- 原生 dry-run 写入 Evidence 顶层的 `dry_run` command 对象（真实命令与退出码）。
+- 其余类型写入顶层的 `preflight` 对象，`kind` 取 `config-validation`、`impact-query`、`isolated-rehearsal` 或 `manual-review`，并写明 `method` 与 `result`；把命令形状的记录塞进 `preflight` 会被 schema 拒绝。
+- 结果不是 `pass` 的预检不能支撑任务完成。
+- 执行预检或 dry-run 的 actor 与上下文必须不同于实现者。
+
+以下情况仍然必须是原生 dry-run，其他类型不能替代：
+
+- 受保护动作规则明确要求 dry-run（例如生产破坏性数据库命令）；
+- 受保护操作的 Approval scope 含 `dry-run:true`；
+- 任务创建时显式选择了 `dry_run_required`；
+- 预检规则生效之前创建的旧 Critical 任务。
+
+### 审查独立性
+
+独立指审查者没有参与实现，并且在与实现者不同的上下文中工作；不要求使用不同的模型。仅仅换一个 actor 名称不构成隔离边界。Critical 要求审查者是不同的 actor。这些字段是可审计的合作式身份声明，不是密码学认证。
+
+### Evidence
+
+Evidence 记录真实命令、退出码、覆盖、缺口与结论。`未执行`、`不适用`、`人工` 与 `失败` 必须分开记录，不能写成通过。用户明确指定的配置文件可以保存密钥，但敏感值不得进入回复、日志、Evidence 或任何报告。
+
+Critical 的 Approval、预检和至少一条证明执行成功的 command record 必须绑定同一个 `protected-operation/v1` identity，且 `covers` 包含该 identity。授权过期、目标或范围变化、重放旧授权、宿主拒绝时，写操作被阻断，只读调查仍然允许。
 
 ## 最短生命周期
 
 1. 冻结清楚的 Requirement，并选择 Governed 或 Critical。
 2. 创建/恢复唯一的 v2 task state；它是生命周期真相源。
-3. 按策略满足必需能力后实施。Governed 总是需要验证和持久 Evidence；计划、Approval、回滚与独立审查按策略组合。
-4. Critical 在执行和完成前必须具备计划、有效 Approval、回滚方案、独立审查、dry-run、验证与 Evidence。
-5. Evidence 记录真实命令、退出码、覆盖、缺口与结论；Critical 的实际 dry-run 命令使用顶层结构化 `dry_run` command 对象，记录独立受控执行器 actor，并继承同一 Evidence 的 task/version/Contract/revision 绑定。未执行项标为 unavailable、manual 或 blocked，不能伪造 pass。
-6. Critical 的当前 Approval、dry-run 和用于证明执行完成的至少一条成功 command record 必须携带同一 `protected-operation/v1` descriptor/identity，且 `covers` 非空并包含该 identity。运行时使用 domain `dev-harness:protected-operation:v1`，从 task version、Contract digest、规范化 environment/targets、`protected-write` action category、Approval type 与排序后的 scope 重算 SHA-256；调用方不能用任意 opaque digest 代替，输入也不含 secret 或 raw credential。
-7. 完成门重新校验任务版本、Requirement digest、仓库修订、Evidence、Approval、operation identity 和治理记录，再进行合法状态转换；普通 verify、current replay 与 legacy replay 共用同一门禁。空 covers、无关 no-op、不同目标/scope/environment、过期 Approval 或版本/Contract 漂移都在写入前拒绝。旧 Critical Evidence 缺少新绑定时不猜测、不自动补全，只能取得新的 Approval/Evidence；Governed、Direct、v1 和旧非 Critical Evidence 保持兼容。
+3. 按策略满足必需能力后实施。
+4. 完成门重新校验任务版本、Requirement digest、仓库修订、Evidence、Approval、operation identity 和治理记录，再进行合法状态转换。
 
-Approval 与 Ask 不同：Approval 缺失是能力阻断，只有产品/授权决定本身不清楚时才 Ask。作用域、任务版本、Requirement 或受保护操作发生变化后，旧 Approval 不能继续授权。Audit、Approval 与 Evidence 中用于独立性判断的 actor/context/base-model 字段同时经过 schema `\S` 和 runtime `IsNullOrWhiteSpace` 检查；这些是可审计的合作式身份声明，不是密码学认证。
+Approval 与 Ask 不同：Approval 缺失是能力阻断，只有产品/授权决定本身不清楚时才 Ask。
 
-## 中断、恢复与回滚
+## 中断、恢复与规则升级
 
-状态和 Evidence 都保留在工作区内的 canonical v2 路径；current pointer、事件、审计与恢复索引只是绑定记录或派生视图。只读 status/resume 不写状态，只有显式 resume-and-execute 才继续执行。
+状态和 Evidence 都保留在工作区内的 canonical v2 路径。只读 status/resume 不写状态，只有显式 resume-and-execute 才继续执行。
 
-已有 Critical 任务不会因为新规则自动降级。明确决定重新分流时，通过正式状态转换先将运行中的任务暂停，再取消旧任务并保留 Contract、事件和已有证据；重新按实际范围分类剩余工作，必要时创建新的 Governed 任务并在项目记录中链接旧任务。不得改写旧任务的 profile、伪造 Approval，或把实际数据库操作归为源码编辑。
+已有任务按创建时的规则读取，不会因为新规则自动降级：任务状态里没有 `preflight_required` 字段的 Critical 任务属于旧规则，仍然要求 dry-run，显式把 `dry_run_required` 写成 false 会被拒绝。明确决定重新分流时，通过正式状态转换暂停并取消旧任务，保留 Contract、事件和已有证据，再按实际范围为剩余工作重新分类。不得改写旧任务的 profile、伪造 Approval，或把实际数据库操作归为源码编辑。
 
-`HARNESS_PROTOCOL=v1` 已退役并会拒绝；新工作与恢复只支持 v2。已有 v1 artifact 仅用于明确授权的历史检查或迁移，不继续执行旧五阶段。显式迁移保留原 artifact，回滚也不得靠删除 v2 数据重新激活 v1。
+`HARNESS_PROTOCOL=v1` 已退役并会拒绝；新工作与恢复只支持 v2。已有 v1 artifact 仅用于明确授权的历史检查或迁移。
 
 机器状态、Evidence、Approval 与转换规则分别以 `schemas/`、`policies/` 和 `scripts/lib/` 为准；本页只提供操作心智模型。

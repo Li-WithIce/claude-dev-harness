@@ -637,6 +637,19 @@
         ],
         "repayment_plan": "Review this measured allowance at the next Runtime budget review without removing the source-versus-command distinction.",
         "expires_at_milestone": "Next authorized Runtime budget review after business source routing"
+      },
+      {
+        "id": "KTB-EX-013",
+        "added_lines": 22,
+        "reason": "Explicit user approval on 2026-11-19 covers the rules redesign measured over e874cd4: +22 executable lines, +465 tokens, and +139 statement ASTs, yielding 3418/38380/11328. Governed triggers are validated apart from Critical triggers, and Critical completion accepts a typed preflight bound to the protected operation while legacy Critical tasks keep the mandatory dry-run. Baseline 3068 and the prior 328-line coverage are unchanged; covered growth becomes 350.",
+        "new_trust_assumption": "The caller declares the preflight kind and method. Runtime checks a pass result, binding to the protected operation identity, and an executor that differs from the implementer; it does not judge whether the declared kind is sufficient for the risk. A native dry-run stays mandatory for legacy Critical tasks, dry_run_required, and a dry-run:true approval scope.",
+        "alternatives": [
+          "Keeping a native dry-run mandatory for every Critical operation blocks operations that have no native dry-run and invites unrelated commands recorded as dry-runs.",
+          "Leaving the typed preflight to prose would remove the operation binding and executor separation that the dry-run path already enforces.",
+          "Packing source or moving the checks out of the accounted closure would hide the growth instead of recording it."
+        ],
+        "repayment_plan": "Review this measured allowance at the next authorized Runtime budget review. Keep the legacy Critical rule and the dry-run and preflight bindings; do not repay by packing lines.",
+        "expires_at_milestone": "Next authorized Runtime budget review after the rules redesign"
       }
     ]
   }

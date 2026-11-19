@@ -44,7 +44,7 @@ function Invoke-RouteCase {
     $previousProtocol = $env:HARNESS_PROTOCOL
     try {
         $env:HARNESS_PROTOCOL = [string]$RouteInput.protocol
-        return Resolve-HarnessExecutionProfile -RepoRoot $PolicyRepoRoot -Identity $RouteInput.identity -Intent $RouteInput.intent -RequirementState $RouteInput.requirement_state -Persistence $RouteInput.persistence -RiskScores $RouteInput.risk_scores -CriticalTriggers @($RouteInput.critical_triggers) -ChangedPaths @($RouteInput.changed_paths) -CommandText $RouteInput.command_text -ActionKind $RouteInput.action_kind -Environment $RouteInput.environment -RequestedAlias $RouteInput.requested_alias -Reversible ([bool]$RouteInput.reversible) -VerificationAvailable ([bool]$RouteInput.verification_available) -DurableArtifactsRequested ([bool]$RouteInput.durable_artifacts_requested) -ScopeExpanded ([bool]$RouteInput.scope_expanded) -ProductBlockerDiscovered ([bool]$RouteInput.product_blocker_discovered)
+        return Resolve-HarnessExecutionProfile -RepoRoot $PolicyRepoRoot -Identity $RouteInput.identity -Intent $RouteInput.intent -RequirementState $RouteInput.requirement_state -Persistence $RouteInput.persistence -RiskScores $RouteInput.risk_scores -CriticalTriggers @($RouteInput.critical_triggers) -GovernedTriggers @($RouteInput.governed_triggers) -ChangedPaths @($RouteInput.changed_paths) -CommandText $RouteInput.command_text -ActionKind $RouteInput.action_kind -Environment $RouteInput.environment -RequestedAlias $RouteInput.requested_alias -Reversible ([bool]$RouteInput.reversible) -VerificationAvailable ([bool]$RouteInput.verification_available) -DurableArtifactsRequested ([bool]$RouteInput.durable_artifacts_requested) -ScopeExpanded ([bool]$RouteInput.scope_expanded) -ProductBlockerDiscovered ([bool]$RouteInput.product_blocker_discovered)
     } finally {
         $env:HARNESS_PROTOCOL = $previousProtocol
     }
@@ -88,7 +88,7 @@ try {
     Assert-True -Condition ($architecture -match 'Harness\.Policy\.psm1' -and $architecture -match 'Missing, malformed, unknown, or semantically weaker policy fails closed' -and $architecture -match 'no task/runtime/current state' -and $architecture -match 'Explicit v1 is retired') -Success 'policy engine architecture documents canonical authority, Direct zero-write, and rollback' -Failure 'policy engine architecture artifact is missing or contradicts the implementation contract'
 
     $catalog = Get-Content -LiteralPath $catalogPath -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable -ErrorAction Stop
-    Assert-True -Condition ([string]$catalog.schema_version -ceq 'direct-route-scenarios/v1' -and @($catalog.cases).Count -eq 21) -Success 'Direct scenario catalog declares twenty-one route cases' -Failure 'Direct scenario catalog version or case count drifted'
+    Assert-True -Condition ([string]$catalog.schema_version -ceq 'direct-route-scenarios/v1' -and @($catalog.cases).Count -eq 36) -Success 'Direct scenario catalog declares thirty-six route cases' -Failure 'Direct scenario catalog version or case count drifted'
     foreach ($case in $catalog.cases) {
         $routeInput = Merge-Case -Base $catalog.base -Case $case
         $expected = $case.expected
@@ -145,9 +145,12 @@ try {
     $sourceCommand.environment = 'production'
     Assert-True -Condition (Test-Throws { Invoke-RouteCase -RouteInput $sourceCommand }) -Success 'source-code classification rejects an execution command' -Failure 'source-code classification accepted a database command'
     $authorizationOperation = Merge-Case -Base $catalog.base -Case $catalog.cases[0]
-    $authorizationOperation.critical_triggers = @('authorization_or_security_boundary')
+    $authorizationOperation.critical_triggers = @('privileged_external_exposure')
     $authorizationOperation.command_text = 'actual boundary operation'
-    Assert-True -Condition ((Invoke-RouteCase -RouteInput $authorizationOperation).profile -ceq 'critical') -Success 'actual authorization boundary operations retain Critical routing' -Failure 'authorization operation lost Critical routing'
+    Assert-True -Condition ((Invoke-RouteCase -RouteInput $authorizationOperation).profile -ceq 'critical') -Success 'privileged external exposure operations retain Critical routing' -Failure 'privileged exposure operation lost Critical routing'
+    $scoreOnly = Merge-Case -Base $catalog.base -Case $catalog.cases[0]
+    foreach ($dimension in @($scoreOnly.risk_scores.Keys)) { $scoreOnly.risk_scores[$dimension] = 3 }
+    Assert-True -Condition ((Invoke-RouteCase -RouteInput $scoreOnly).profile -ceq 'governed') -Success 'a maximum risk score without a Critical trigger stays Governed' -Failure 'risk score alone selected Critical'
 
     $workspaceAfter = Get-TreeSnapshot -Root $scratchRoot
     Assert-True -Condition (@(Compare-Object $workspaceBefore $workspaceAfter -SyncWindow 0).Count -eq 0) -Success 'Direct policy selection creates no task/runtime/artifact content' -Failure 'Direct policy selection changed workspace content'
