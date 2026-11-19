@@ -4,7 +4,7 @@
 
 Durable Governed and Critical work uses `task-state/v2`. The canonical task document is the only lifecycle truth source; events, Evidence, Approval, audit, current pointer, and recovery index are bound records or derived views, not parallel state.
 
-Direct and Inspect work do not create this layout. Existing v1 `plan.md` tasks continue through the five-stage workflow and are never converted implicitly.
+Direct and Inspect work do not create this layout. Direct may maintain ordinary business Markdown when a project explicitly opts into continuity through PROJECT.md; these notes are not task-state/Evidence artifacts. Existing v1 material is historical maintenance input only, never an executable five-stage workflow or an implicit migration.
 
 ## Workspace layout
 
@@ -64,10 +64,10 @@ The current pointer is optional and singular. Background tasks do not steal it. 
 
 ## Evidence, Approval, and governance
 
-- `evidence/v1` binds task id/version, Requirement Contract digest, the full current commit or a dirty digest, command exit codes, records, coverage, and conclusion. Its optional top-level `dry_run` command object has its own contained path, digest, cwd, exit code, timestamp and controlled-executor actor, while inheriting the Evidence envelope's task/version/Contract/revision binding. `dry_run_required` is an invariant of the Critical profile: new task state persists it explicitly, while older task state without the optional flag derives it from `execution_profile=critical`. Critical can reach `done` only when the bound dry-run is successful. Unsafe Git index flags fail closed instead of hiding tracked changes.
+- `evidence/v1` binds task id/version, Requirement Contract digest, the full current commit or a dirty digest, command exit codes, records, coverage, and conclusion. Its optional top-level `dry_run` command object has its own contained path, digest, cwd, exit code, timestamp and controlled-executor actor, while inheriting the Evidence envelope's task/version/Contract/revision binding. Its optional top-level `preflight` object carries every other kind of check before execution (`config-validation`, `impact-query`, `isolated-rehearsal`, `manual-review`) with a `method`, a `result`, and the same contained path, digest, actor and operation binding; it is not a command record. `preflight_required` is an invariant of the Critical profile and `dry_run_required` is its only configurable capability: new Critical task state persists both explicitly. Critical task state without the `preflight_required` key predates that rule, so it keeps the mandatory dry-run derived from `execution_profile=critical` and rejects an explicit `dry_run_required=false`. Critical can reach `done` only when the bound check is successful: a dry-run with exit code 0 where a dry-run is required (legacy task, selected capability, or a protected operation scoped `dry-run:true`), otherwise a `preflight` whose `result` is `pass`. Unsafe Git index flags fail closed instead of hiding tracked changes.
 - pass plus nonzero exit, stale digest/revision, path escape, or incomplete coverage cannot complete a task.
 - Approval binds the exact task version, contract digest, type, scope, approver, time, expiry, and status. `approved_at` cannot be later than the authorization boundary, and a non-null expiry must be later than approval while still unexpired. Scope or version change makes it stale.
-- Required audit binds implementer/reviewer actor and context plus the Evidence digest. A pass audit cannot contain a P0/P1 blocking finding. Normal verify and transaction replay invoke the same governance gate, so replay cannot bypass the Critical dry-run requirement.
+- Required audit binds implementer/reviewer actor and context plus the Evidence digest. A pass audit cannot contain a P0/P1 blocking finding. Normal verify and transaction replay invoke the same governance gate, so replay cannot bypass the Critical preflight or dry-run requirement.
 
 These records are prerequisites to a state transition; they never overwrite `task.json` as a second truth source.
 
@@ -79,8 +79,8 @@ Memory and Team are optional consumers. Core recovery works from the runtime tas
 
 ## Compatibility, validation, and rollback
 
-Protocol detection is artifact-first: an existing v2 `task.json` stays v2; a legal v1 `plan.md` stays v1. Explicit protocol conflicts fail closed. Migration uses dry-run digest checks and atomic directory publication, preserves the v1 artifact read-only, and never deletes v2 data to perform rollback.
+Protocol detection preserves valid v2 task identity; legacy-only task artifacts require explicit migration instead of executing v1. Explicit protocol conflicts fail closed. Migration uses dry-run digest checks and atomic directory publication, preserves the v1 artifact read-only, and never deletes v2 data to perform rollback.
 
 `tests/verify-v2-task-state.ps1`, `tests/verify-v2-evidence.ps1`, `tests/verify-v2-approval.ps1`, `tests/verify-v2-governed-audit.ps1`, `tests/verify-v2-runtime-memory-decoupling.ps1`, and migration/coexistence tests cover these contracts.
 
-Rollback sets `HARNESS_PROTOCOL=v1` for new work or reverts the relevant implementation commit. Existing v2 runtime remains available for read-only diagnosis and explicit recovery; existing v1 tasks, installation, update, uninstall, recovery, and validation remain intact.
+Rollback reverts the relevant implementation through the normal update path. `HARNESS_PROTOCOL=v1` is retired and is not a rollback option. Existing v2 runtime remains available for read-only diagnosis and explicit recovery; historical artifacts remain intact.

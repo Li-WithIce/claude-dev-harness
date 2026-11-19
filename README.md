@@ -21,6 +21,12 @@ pwsh -File .\install.ps1 `
 
 `core` 只安装 v2 入口与保护 Hook；`governed` 增加规划与审计，`full` 再提供 Memory、md-html、adapter 等可选能力。三者均不安装 v1 shim、阶段技能或旧任务镜像。历史 v1-only `workflow-team` 不在 full 的当前清单内。安装和更新只要求 PowerShell 与 Git；JavaScript Hook 执行仍需要 Node.js。
 
+新版安装成功提交后，用户级安装登记升级为 `install-registry/v1.2`。已验证的旧版安装器 `21dc2f1` 会在覆盖共享 Claude 入口前拒绝该登记；其旧版卸载器也会拒绝，因此后续应使用新版工具。旧登记仍可由新版安装器升级，旧版未完成事务需先按其提示恢复；不要手工改写登记版本。新版卸载事务在恢复时核对登记保存的原始清单摘要；旧事务如果无法证明清单原始内容，会保留现场并拒绝继续。该门禁只在新版事务提交后生效，未验证的历史安装器和未来不同版本不能据此一概视为兼容。
+
+同一用户的多个工作区共用 Claude 全局入口。升级登记不会自动更新已有工作区：应逐个检查各自入口和安装来源，再按需迁移。若工作区原先登记到另一个源码目录，须先用新版 `uninstall.ps1` 指定原 `-RepoRoot` 和目标 `-WorkspaceRoot`，再用新版安装器指定新的源码目录；这是会修改该工作区及共享安装状态的操作，应先核对备份和实际影响。
+
+没有安装登记时，显式选择清单的卸载和中断恢复保留原有路径，但缺少独立的原始摘要，不能据此证明清单与日志没有被共同篡改。登记已经提交或删除后，残留日志清理也只能核对可见后镜像的一致性。版本门禁约束遵循登记协议的安装器，不是防止同一账号直接并发改写受管文件和日志的系统隔离边界。
+
 ### 2. 用 Codex 桌面打开项目
 
 用 Codex 桌面打开 `D:\my-project`，直接描述需求。新工作不要求设置 `HARNESS_PROTOCOL`；缺省 `auto` 仅可进入 v2。协议与止损命令如下：
@@ -46,11 +52,15 @@ pwsh -File .assistant\entry\task.ps1 disable-v2
 | 结果 | 何时使用 | 最短行为 |
 |---|---|---|
 | Ask | 仍有真正未决的用户/产品/授权决定 | 只澄清阻断项，不写代码或任务状态 |
-| Direct | 需求清楚、私有且可逆的低风险改动 | 理解、修改、聚焦验证、自审、报告；不创建任务产物 |
-| Governed | 需要持久留痕、较高风险或受保护范围 | 使用 v2 task state，并按策略产出 Evidence；计划、审批、回滚或独立审查按需组合 |
-| Critical | 生产、权限、资金、破坏性或不可逆高风险动作 | 在执行/完成前满足计划、Approval、回滚、独立审查、dry-run、验证和 Evidence |
+| Direct | 需求清楚的普通源码/测试/文档改动，以及已确认隔离、可恢复的本机操作 | 理解、修改、聚焦验证、自审、报告；不创建任务产物 |
+| Governed | 影响面超出当前任务但范围明确、可恢复，或用户要求正式留痕 | 使用 v2 task state，并按策略产出 Evidence；计划、审批、回滚或独立审查按需组合 |
+| Critical | 生产破坏性或不可逆的数据变更、真实资金、高权限对外暴露等明确触发项 | 在执行/完成前满足计划、Approval、回滚、独立审查、足以覆盖该风险的预检、验证和 Evidence |
+
+风险分数只在 Direct 与 Governed 之间选择；Critical 只来自明确触发项或受保护动作规则。`localhost`、目录名或“测试环境”标签不能证明隔离。分级、预检类型与记录方式见 [Governed 与 Critical 工作](docs/governed-work.md)。
 
 只读请求使用 Inspect，保持零写入。`quick` / `workflow` 仅是 Direct / Governed 的兼容别名，不是第二套规则。
+
+普通开发优先使用 Direct；需要上下文时，按需调用 `.assistant/entry/context.ps1 recall -Query '关键词'`，先看短摘录，再用 `read -Ref 'ctx:...'` 读取原文。该上下文工具需要 PowerShell 7.3+ 和 ripgrep（`rg`）。显式 `-IncludeSessions` 可加入当前项目的 Codex 历史消息。它是只读工具，不启动治理流程、不自动写记忆或注册 Hook；用法和旧规则替代见 [Context Providers](docs/工具/context-providers.md)。
 
 默认加载面只有 Host Overlay 和短 Bootstrap。新请求先解析一次准入（显式 v2 也受 pause 控制），再就地分类；不扫描 task/current，也不加载旧 entry-router/orchestrator。Codex 从 workspace `AGENTS.md` 读取契约，Claude global `CLAUDE.md` 携带相同 Bootstrap。
 
@@ -58,9 +68,9 @@ pwsh -File .assistant\entry\task.ps1 disable-v2
 
 ## Evidence、Approval 与受保护动作
 
-Evidence 记录真实执行过的验证、覆盖与缺口，并绑定任务版本和仓库修订；没有执行的检查不能写成通过。Critical 的 Approval、顶层结构化 `dry_run` 和至少一条成功执行 record 还必须绑定同一个运行时重算的 `protected-operation/v1` identity，且 `covers` 非空并包含它；无关成功 no-op、环境/目标/scope 漂移或旧 Critical 记录缺少绑定都会 fail closed。该 identity 只使用任务版本、Contract digest、规范化环境/目标、受保护动作类别、Approval 类型与 scope 等稳定非秘密输入。Approval 是对确定操作的合作式授权记录，不是密码学身份认证；参与独立性判断的 actor/context/base-model 字段拒绝空白字符串。
+Evidence 记录真实执行过的验证、覆盖与缺口，并绑定任务版本和仓库修订；没有执行的检查不能写成通过。Critical 的 Approval、预检（原生 dry-run 用顶层结构化 `dry_run`，其他类型用带真实 `kind` 的 `preflight`）和至少一条成功执行 record 还必须绑定同一个运行时重算的 `protected-operation/v1` identity，且 `covers` 非空并包含它；受保护动作规则要求 dry-run 时不能用其他类型替代；无关成功 no-op、环境/目标/scope 漂移或旧 Critical 记录缺少绑定都会 fail closed。该 identity 只使用任务版本、Contract digest、规范化环境/目标、受保护动作类别、Approval 类型与 scope 等稳定非秘密输入。Approval 是对确定操作的合作式授权记录，不是密码学身份认证；参与独立性判断的 actor/context/base-model 字段拒绝空白字符串。
 
-Core 只内置有限的受保护动作规则：生产破坏性数据库命令，以及 `auth` / `permissions` / `rbac` 路径变更。项目特有风险必须通过严格的 `protected-actions-overlay/v1` 增加，不能靠提示词放宽 core。安装器把 Codex `PreToolUse` 合并到普通用户 `hooks.json`，不写信任记录，也不覆盖企业 `hooks=false` / managed-only 策略；经用户正常信任并启用后，普通文件工具只把目标路径送入 core policy，direct `apply_patch` 严格解析全部 Add/Update/Delete/Move 目标并按 Hook payload 的 `cwd` 做 Workspace containment，`Write`、`Edit`、`MultiEdit`、`NotebookEdit` 不把正文送入 `command_text`。因此用户明确授权的数据库凭证和外部服务 Key 可以持久化到指定 Workspace 配置文件，包括生产配置；该能力通用、版本中立，不依赖 Release Qualification、Vault、KMS 或 Secret Provider。持久化不等于披露：敏感值不得进入回复、日志、Task State、Plan、Evidence、Review、PR、CI artifact、测试 snapshot、文档或无关文件。`Bash` 仍把真实 command text 送入 core；缺少有效 tool workdir/environment 绑定的 shell-form `apply_patch` / `applypatch` 继续 fail closed。缺少 `cwd`、无法解析目标、read-only、Workspace 外路径、受保护路径、操作系统或企业端点拒绝也保持 fail closed；adapter 不从 approval/permission 标签臆造只读保证。
+Core 内置生产破坏性数据库命令的受保护动作规则；普通业务源码不会仅因 `auth` / `permissions` / `rbac` 目录或审批、权限、数据关联名称而要求独立审查或 Approval。实际命令、数据库操作和其他 Critical 触发项仍需分别评估。项目特有风险可通过严格的 `protected-actions-overlay/v1` 增加，不能靠提示词放宽 core。安装器把 Codex `PreToolUse` 合并到普通用户 `hooks.json`，不写信任记录，也不覆盖企业 `hooks=false` / managed-only 策略；经用户正常信任并启用后，普通文件工具只把目标路径送入 core policy，direct `apply_patch` 严格解析全部 Add/Update/Delete/Move 目标并按 Hook payload 的 `cwd` 做 Workspace containment，`Write`、`Edit`、`MultiEdit`、`NotebookEdit` 不把正文送入 `command_text`。因此用户明确授权的数据库凭证和外部服务 Key 可以持久化到指定 Workspace 配置文件，包括生产配置；该能力通用、版本中立，不依赖 Release Qualification、Vault、KMS 或 Secret Provider。持久化不等于披露：敏感值不得进入回复、日志、Task State、Plan、Evidence、Review、PR、CI artifact、测试 snapshot、文档或无关文件。`Bash` 仍把真实 command text 送入 core；缺少有效 tool workdir/environment 绑定的 shell-form `apply_patch` / `applypatch` 继续 fail closed。缺少 `cwd`、无法解析目标、read-only、Workspace 外路径、受保护路径、操作系统或企业端点拒绝也保持 fail closed；adapter 不从 approval/permission 标签臆造只读保证。
 
 Windows 启动链使用绝对 System32 Windows PowerShell 与安装时固化的 PowerShell 7.3+ 路径；用户 JSON 用显式 writer 精确保留 `BigInteger` 与 decimal。命令、参数和脚本文件均保持明文，不使用 `EncodedCommand`、隐藏窗口、动态求值、改写信任或安全产品绕过。用户目录若包含无法同时由 cmd 与 PowerShell 安全表示的 `` ` $ % ! ^ & | < > ( ) `` 字符，安装会在写入前拒绝。`tests/verify-v2-install-presets.ps1` 证明命令链可解析并产生预期 allow/deny JSON，但不证明 Host 已信任或启用 Hook，也不证明端点产品已放行。企业策略、Hook trust 或端点隔离无法观测时，Capability 保持 `unavailable`；普通 Direct 不把这种不可观测性误写成 Release 失败。宿主 Hook 是 guardrail，不是完整执行边界；Critical 生产动作仍必须交给独立受控执行器。
 

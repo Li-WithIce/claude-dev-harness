@@ -182,6 +182,26 @@
       "legacy_status": "not-legacy"
     },
     {
+      "path": "scripts/context.ps1",
+      "layer": "c2-capability",
+      "current_role": "On-demand read-only project document and Codex message recall/read.",
+      "owner_candidate": "providers",
+      "tcb_included": false,
+      "reason": "Advisory context retrieval is invoked explicitly and does not authorize writes or enter Runtime roots.",
+      "migration_target": null,
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/diagnose-harness-host.ps1",
+      "layer": "c2-capability",
+      "current_role": "Manual read-only workspace, source and host-evidence diagnostic projection.",
+      "owner_candidate": "engineering-validation",
+      "tcb_included": false,
+      "reason": "Opt-in observation does not authorize writes and is not reached by Runtime or Distribution roots.",
+      "migration_target": "engineering-validation-module",
+      "legacy_status": "not-legacy"
+    },
+    {
       "path": "scripts/export-team-preset.ps1",
       "layer": "c2-capability",
       "current_role": "Team preset export command.",
@@ -612,6 +632,16 @@
       "legacy_status": "not-legacy"
     },
     {
+      "path": "scripts/lib/Harness.SessionWorkspace.psm1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Session-bound workspace grant validation and registration",
+      "owner_candidate": "task-governance",
+      "tcb_included": true,
+      "reason": "Additional roots are explicit authorization inputs checked by the counted Runtime.",
+      "migration_target": "runtime-kernel",
+      "legacy_status": "not-legacy"
+    },
+    {
       "path": "scripts/lib/Harness.TaskMigration.psm1",
       "layer": "k1-runtime-kernel",
       "current_role": "K1 task-state publication seam used only by the explicit v1-to-v2 migration maintenance command.",
@@ -719,6 +749,16 @@
       "tcb_included": false,
       "reason": "Benchmark telemetry is outside Runtime Kernel.",
       "migration_target": "benchmark-module",
+      "legacy_status": "not-legacy"
+    },
+    {
+      "path": "scripts/register-session-workspaces.ps1",
+      "layer": "k1-runtime-kernel",
+      "current_role": "Session-bound workspace grant validation and registration",
+      "owner_candidate": "task-governance",
+      "tcb_included": true,
+      "reason": "Additional roots are explicit authorization inputs checked by the counted Runtime.",
+      "migration_target": "runtime-kernel",
       "legacy_status": "not-legacy"
     },
     {

@@ -63,7 +63,12 @@
                       "minItems": 7,
                       "maxItems": 7,
                       "uniqueItems": true,
-                      "items": { "enum": ["plan_required", "approval_required", "rollback_required", "independent_review_required", "verification_required", "durable_artifacts_required", "dry_run_required"] }
+                      "items": { "enum": ["plan_required", "approval_required", "rollback_required", "independent_review_required", "verification_required", "durable_artifacts_required", "preflight_required"] }
+                    },
+                    "configurable_capabilities": {
+                      "type": "array",
+                      "maxItems": 1,
+                      "items": { "enum": ["dry_run_required"] }
                     }
                   }
                 }
@@ -103,10 +108,16 @@
         "max_total": { "type": "integer" }
       }
     },
+    "retiredReplacement": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "enum": ["production_destructive_data_change", "real_money_movement", "privileged_external_exposure", "unbounded_production_change", "sensitive_data_export_outside_trust_boundary", "destructive_shared_git_history_operation", "large_scale_automation_without_preflight", "bounded_recoverable_production_change", "sensitive_data_export_within_trust_boundary", "security_boundary_change_non_isolated"] }
+    },
     "risk": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["dimensions", "profile_thresholds", "critical_triggers", "overrides"],
+      "required": ["dimensions", "profile_thresholds", "critical_triggers", "governed_triggers", "retired_triggers", "overrides"],
       "properties": {
         "dimensions": {
           "type": "array",
@@ -126,28 +137,52 @@
         },
         "profile_thresholds": {
           "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
           "items": { "$ref": "#/definitions/threshold" },
           "allOf": [
             { "contains": { "properties": { "profile": { "enum": ["direct"] }, "min_total": { "enum": [0] }, "max_total": { "enum": [4] } } } },
-            { "contains": { "properties": { "profile": { "enum": ["governed"] }, "min_total": { "enum": [5] }, "max_total": { "enum": [8] } } } },
-            { "contains": { "properties": { "profile": { "enum": ["critical"] }, "min_total": { "enum": [9] }, "max_total": { "enum": [21] } } } }
+            { "contains": { "properties": { "profile": { "enum": ["governed"] }, "min_total": { "enum": [5] }, "max_total": { "enum": [21] } } } }
           ]
         },
         "critical_triggers": {
           "type": "array",
-          "minItems": 10,
-          "maxItems": 10,
+          "minItems": 8,
+          "maxItems": 8,
           "uniqueItems": true,
-          "items": { "enum": ["authorization_or_security_boundary", "money_billing_refund_or_settlement", "production_database_destructive_migration", "irreversible_user_data_change", "production_release_or_infrastructure", "breaking_public_api_change", "sensitive_data_export_or_compliance", "destructive_git_history_operation", "large_scale_automation_without_dry_run", "unverified_production_impact"] }
+          "items": { "enum": ["production_destructive_data_change", "irreversible_user_data_change", "real_money_movement", "privileged_external_exposure", "unbounded_production_change", "sensitive_data_export_outside_trust_boundary", "destructive_shared_git_history_operation", "large_scale_automation_without_preflight"] }
+        },
+        "governed_triggers": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": { "enum": ["shared_persistent_configuration_change", "bounded_recoverable_production_change", "breaking_public_api_change", "sensitive_data_export_within_trust_boundary", "security_boundary_change_non_isolated"] }
+        },
+        "retired_triggers": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["authorization_or_security_boundary", "money_billing_refund_or_settlement", "production_database_destructive_migration", "production_release_or_infrastructure", "sensitive_data_export_or_compliance", "destructive_git_history_operation", "large_scale_automation_without_dry_run", "unverified_production_impact"],
+          "properties": {
+            "authorization_or_security_boundary": { "$ref": "#/definitions/retiredReplacement" },
+            "money_billing_refund_or_settlement": { "$ref": "#/definitions/retiredReplacement" },
+            "production_database_destructive_migration": { "$ref": "#/definitions/retiredReplacement" },
+            "production_release_or_infrastructure": { "$ref": "#/definitions/retiredReplacement" },
+            "sensitive_data_export_or_compliance": { "$ref": "#/definitions/retiredReplacement" },
+            "destructive_git_history_operation": { "$ref": "#/definitions/retiredReplacement" },
+            "large_scale_automation_without_dry_run": { "$ref": "#/definitions/retiredReplacement" },
+            "unverified_production_impact": { "$ref": "#/definitions/retiredReplacement" }
+          }
         },
         "overrides": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["requirement_blocked_state", "read_only_profile", "durable_minimum_profile", "critical_trigger_profile", "multiple_files_alone_escalate"],
+          "required": ["requirement_blocked_state", "read_only_profile", "durable_minimum_profile", "governed_trigger_profile", "critical_trigger_profile", "multiple_files_alone_escalate"],
           "properties": {
             "requirement_blocked_state": { "enum": ["blocked"] },
             "read_only_profile": { "enum": ["inspect"] },
             "durable_minimum_profile": { "enum": ["governed"] },
+            "governed_trigger_profile": { "enum": ["governed"] },
             "critical_trigger_profile": { "enum": ["critical"] },
             "multiple_files_alone_escalate": { "enum": [false] }
           }
@@ -189,13 +224,12 @@
         "schema_version": { "enum": ["protected-actions/v1"] },
         "rules": {
           "type": "array",
-          "minItems": 2,
-          "maxItems": 2,
+          "minItems": 1,
+          "maxItems": 1,
           "uniqueItems": true,
           "items": { "$ref": "#/definitions/rule" },
           "allOf": [
-            { "contains": { "properties": { "id": { "enum": ["production-database-destructive"] } } } },
-            { "contains": { "properties": { "id": { "enum": ["authorization-path-change"] } } } }
+            { "contains": { "properties": { "id": { "enum": ["production-database-destructive"] } } } }
           ]
         }
       }

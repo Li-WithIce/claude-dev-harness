@@ -15,6 +15,8 @@ pwsh -File .\install.ps1 `
 
 `core` 适合普通开发。需要持久规划与审计工具时使用 `governed`；只有确实需要可选共享记忆、md-html 和 Provider 参考时才使用 `full`。三个 preset 均不安装退役的 v1 生命周期或 workflow-team。对同一工作区再次运行安装命令就是 update；省略 `-Preset` 时会保留已安装 preset。
 
+需要停用 Harness 的 PreToolUse 时，在用户目录 `.dev-harness/preferences.json` 写入 `{"pretooluse_enabled":false}`。安装和更新都会遵守此选择，不向 Codex 或 Claude 重新注册 Harness PreToolUse；其他 Hook 事件保留。该文件由用户持有，安装器不修改它，也不修改 Codex 的 `features.hooks` 设置。用户级 Codex `AGENTS.md` 仅在缺失时创建，已有开发规则不会被更新覆盖。
+
 ## 使用
 
 用 Codex 打开目标工作区，直接描述目标、验收、范围与限制。新任务的 `auto` 只准入 v2；没有配置和 Runtime Decision 时默认准入，有无效 Decision 时阻断。可以用工作区级命令查看、启用或暂停新工作：
@@ -37,11 +39,28 @@ pwsh -File .assistant\entry\task.ps1 disable-v2
 
 - Inspect：只读，零写入。
 - Ask：仍有会改变产品、权限、兼容或不可逆结果的未决决定，先澄清。
-- Direct：清楚、可逆、低风险，直接修改并做聚焦验证，不创建任务产物。
-- Governed：需要持久留痕或更强控制，创建 v2 task state 和 Evidence。
+- Direct：清楚、可逆、低风险，直接修改并做聚焦验证，不创建机器任务产物；已接入项目可维护普通业务变更说明。
+- Governed：需要持久机器任务状态、正式 Evidence 或更强控制，创建 v2 task state 和 Evidence。
 - Critical：受保护或不可逆高风险工作，执行前必须满足额外能力门。
 
-不需要手工选择 profile，也不要把未运行的测试写成通过。详细边界见 [Requirement Gate](requirement-gate.md) 与 [Governed work](governed-work.md)。
+普通开发从 Direct 开始，不因为文件多、需要查历史或写一次实施步骤就加载完整治理流程；确需持久任务证据或受保护操作时才进入 Governed/Critical。不需要手工选择 profile，也不要把未运行的测试写成通过。详细边界见 [Requirement Gate](requirement-gate.md) 与 [Governed work](governed-work.md)。
+
+## 按需查上下文
+
+需要历史背景时调用只读入口。项目可通过用户维护的 `PROJECT.md` 声明 `harness_continuity: enabled`，让代理先读固定项目/操作文档，并在代码改动前和关键步骤后更新业务记录；未接入项目保持原有 Direct 行为。具体接入与模板见 [项目连续记录](project-continuity.md)。
+
+```powershell
+# 项目 Markdown：先取短摘录
+pwsh -File .assistant\entry\context.ps1 recall -Query '最小实现' -Budget 1200
+
+# 明确需要历史对话时，加入当前项目的 Codex 消息
+pwsh -File .assistant\entry\context.ps1 recall -Query '接口约定' -IncludeSessions
+
+# 使用上一步返回的完整 ref 读取原文；会话引用同样添加 -IncludeSessions
+pwsh -File .assistant\entry\context.ps1 read -Ref 'ctx:...'
+```
+
+入口需要 PowerShell 7.3+ 和 `rg`，不依赖 Hook、外部 Provider、模型调用或后台索引。首次使用需将工作区安装更新到包含该入口的版本。来源、旧规则替代和输出字段见 [Context Providers](工具/context-providers.md)。
 
 ## 健康状态
 

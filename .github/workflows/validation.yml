@@ -44,6 +44,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Install ripgrep for context retrieval
+        shell: pwsh
+        run: choco install ripgrep --no-progress -y
+
       - name: PR core validation
         id: core_validation
         shell: pwsh

@@ -1,3 +1,9 @@
+---
+status: superseded
+superseded_by: docs/governed-work.md
+---
+> Historical v1 reference only; current execution uses v2. See docs/governed-work.md.
+
 # Lite Writing Guide
 
 本指南约束 `harness-lite` 主线里的任务文档写法。目标只有一个：让 `docs/tasks/{task_id}/` 下的产物既能给人看，也能被脚本稳定读取。

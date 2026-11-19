@@ -4,9 +4,9 @@
 
 1. Current user instruction
 2. Current repo files
-3. `docs/tasks/{task_id}/plan.md` frontmatter
-4. `docs/tasks/{task_id}/test.md` conclusion
-5. `.assistant/运行时/*` derived view
+3. Current v2 Contract and `.assistant/runtime/tasks/{task_id}/task.json`
+4. Evidence bound to the current task version, Contract and revision
+5. Current task plan and audit where required by its policy
 6. Provider output
 
 ## Code Authority
@@ -22,7 +22,7 @@
 1. Current user instruction
 2. Current task artifact
 3. `.assistant` shared memory
-4. `.assistant/运行时/收件箱.md` pending items
+4. Explicitly captured pending memory items (advisory, not task state)
 5. agentmemory historical recall
 
 ## Conflict Rule

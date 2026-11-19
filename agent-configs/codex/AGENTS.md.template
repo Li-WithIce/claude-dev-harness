@@ -4,5 +4,5 @@
 - Read the resolved workspace's `AGENTS.md` first; it and the Harness runtime are authoritative, while user-level rules are defaults.
 - Default language is Chinese. Use `.assistant\entry\task.ps1 status` for read-only v2 recovery; optional Memory requires an installed feature and explicit need or write authorization.
 - Only v2 admission and `.assistant/runtime` recovery are supported. Legacy history is explicit maintenance input only; never load a v1 lifecycle shim.
-- Codex is a shared-pointer writer only when local entry rules identify it as entry host and the user explicitly continues or executes `mode=workflow`; inspect/status and standalone quick work never update pointers.
+- Codex is a shared-pointer writer only when local entry rules identify it as entry host and the user explicitly continues or executes a Governed or Critical v2 task; Inspect, status, and Direct work never update pointers.
 - Durable conclusions belong in maintained tracked artifacts; internal failed writes stay in `.assistant/runtime/failed-writes` and never enter a business inbox.

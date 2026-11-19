@@ -160,6 +160,11 @@ function Exit-HarnessKernelMutex {
 function Resolve-HarnessProtectedRuleMatch {
     param([Collections.IDictionary]$Rule,[string]$CommandText,[string[]]$Paths,[string]$Environment,[switch]$RequireTrustedEnvironment)
     if ($Rule.match.Contains('command_regex') -and $CommandText -notmatch [string]$Rule.match.command_regex) { return $null }
+    $searchData = '''(?!-)[A-Za-z0-9_./:\\#-]*''|"(?!-)(?:[A-Za-z0-9_./:# \[\]()^*+?| -]|\\(?:s|\.|x60))*"|[A-Za-z0-9_./:#][A-Za-z0-9_./:#-]*'
+    $searchOptions = '-n|-i|-F|-e|--fixed-strings|--line-number|--count|--'
+    # Static search data is not executable SQL; unknown options and shell syntax keep the original policy.
+    $literalSearch = '\A[ \t]*rg[ \t]+--no-config(?:[ \t]+(?:' + $searchOptions + '|' + $searchData + '))+[ \t]*(?:\r?\n)?\z'
+    if ($Rule.id -ceq 'production-database-destructive' -and $CommandText -cmatch $literalSearch) { return $null }
     $matchingPaths = @()
     if ($Rule.match.Contains('path_globs')) {
         $matchingPaths = @($Paths | ForEach-Object {
@@ -170,7 +175,7 @@ function Resolve-HarnessProtectedRuleMatch {
     }
     if ($Rule.match.Contains('environment')) {
         if ([string]::IsNullOrWhiteSpace($Environment)) {
-            if ($RequireTrustedEnvironment) { throw "protected write matches rule '$($Rule.id)' but has no trusted Environment binding" }
+            if ($RequireTrustedEnvironment) { throw "protected write requires a trusted Environment binding for rule '$($Rule.id)'" }
             return $null
         }
         if ($Environment -cne [string]$Rule.match.environment) { return $null }
@@ -193,7 +198,9 @@ function Invoke-HarnessKernelProcess {
         UseShellExecute=$false;CreateNoWindow=$true
         RedirectStandardOutput=$true;RedirectStandardError=$true
         RedirectStandardInput=$null-ne$StandardInput
-        StandardOutputEncoding=[Text.UTF8Encoding]::new($false,$true);StandardErrorEncoding=[Text.UTF8Encoding]::new($false,$true)}
+        # Only the internal native cleanup utility has non-protocol, localized
+        # output. Keep normal child protocol decoding strict; still drain both.
+        StandardOutputEncoding=[Text.UTF8Encoding]::new($false, -not $SkipTreeCleanup);StandardErrorEncoding=[Text.UTF8Encoding]::new($false, -not $SkipTreeCleanup)}
     if ($CleanGitEnvironment) {
         foreach ($name in @($info.Environment.Keys)) {
             if ([string]$name -like 'GIT_*') { [void]$info.Environment.Remove([string]$name) }
@@ -241,12 +248,29 @@ function Invoke-HarnessKernelProcess {
                     # Windows PowerShell 5.1 lacks Kill(bool). Bound its native
                     # owned-tree cleanup to one hop, including process-I/O failures.
                     if (-not $SkipTreeCleanup -and [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+                        $targets = @($process)
                         try {
-                            $treeTimeout = [int][Math]::Min(1000,[Math]::Max(0,$cleanupMilliseconds-$timer.ElapsedMilliseconds-250))
-                            if ($treeTimeout -gt 0) {
-                                [void](Invoke-HarnessKernelProcess -FilePath (Join-Path ([Environment]::GetFolderPath('System')) 'taskkill.exe') -WorkingDirectory $WorkingDirectory -Arguments @('/PID',[string]$process.Id,'/T','/F') -TimeoutMilliseconds $treeTimeout -SkipTreeCleanup)
+                            if ($process.HasExited) {
+                                $targets = @()
+                                # The retained root handle prevents its PID reuse.
+                                # Query only its direct children, never command lines.
+                                foreach ($record in @(Get-CimInstance Win32_Process -Filter ("ParentProcessId="+$process.Id) -Property ProcessId,CreationDate -OperationTimeoutSec 1 -ErrorAction Stop)) {
+                                    $child = Get-Process -Id ([int]$record.ProcessId) -ErrorAction SilentlyContinue
+                                    if ($null -eq $child) { continue }
+                                    try {
+                                        $created = $child.StartTime.ToUniversalTime().Ticks
+                                        # CIM creation timestamps have microsecond precision.
+                                        if ($null -ne $record.CreationDate -and $created -ge $process.StartTime.ToUniversalTime().Ticks -and ($created-($created%10)) -eq $record.CreationDate.ToUniversalTime().Ticks -and -not $child.HasExited) { $targets += $child }
+                                    } finally { if ($targets -notcontains $child) { $child.Dispose() } }
+                                }
                             }
-                        } catch {}
+                            foreach ($target in $targets) {
+                                $treeTimeout = [int][Math]::Max(0,$cleanupMilliseconds-$timer.ElapsedMilliseconds-250)
+                                if ($treeTimeout -gt 0) {
+                                    [void](Invoke-HarnessKernelProcess -FilePath (Join-Path ([Environment]::GetFolderPath('System')) 'taskkill.exe') -WorkingDirectory $WorkingDirectory -Arguments @('/PID',[string]$target.Id,'/T','/F') -TimeoutMilliseconds $treeTimeout -SkipTreeCleanup)
+                                }
+                            }
+                        } catch {} finally { foreach ($target in $targets) { if (-not [object]::ReferenceEquals($target,$process)) { $target.Dispose() } } }
                     }
                     try { $process.Kill() } catch {}
                 }
@@ -455,7 +479,7 @@ function Get-HarnessEvidenceRevision {
         (Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path (Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $EvidenceOutputPath -Label 'evidence output' -AllowMissing))),
         $(if($runningOnWindows){[StringComparer]::OrdinalIgnoreCase}else{[StringComparer]::Ordinal}))
     if($Evidence.Contains('task_id')){[void]$exactExclusions.Add("docs/tasks/$($Evidence.task_id)/audit.md")}
-    $evidenceFiles=@((@($Evidence.records)+$(if($Evidence.Contains('dry_run')){@($Evidence.dry_run)}else{@()}))|ForEach-Object{
+    $evidenceFiles=@((@($Evidence.records)+$(if($Evidence.Contains('dry_run')){@($Evidence.dry_run)}else{@()})+$(if($Evidence.Contains('preflight')){@($Evidence.preflight)}else{@()}))|ForEach-Object{
         $relative=Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path (Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $_.evidence_path -Label 'record evidence_path' -MustExist File)
         [ordered]@{path=$relative;digest=(Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path $relative)}
     })
@@ -513,11 +537,13 @@ function Resolve-HarnessEvidenceCore {
     $loaded=Read-HarnessKernelJson -WorkspaceRoot $WorkspaceRoot -Path $EvidencePath -Label 'Evidence'
     $document=$loaded.Document
     $dryRun=if($document.Contains('dry_run')){$document.dry_run}else{$null}
-    foreach($record in @($document.records)+@($dryRun)){
+    $preflight=if($document.Contains('preflight')){$document.preflight}else{$null}
+    foreach($record in @($document.records)+@($dryRun)+@($preflight)){
         if($record-isnot[Collections.IDictionary]){continue}
-        $label=if([object]::ReferenceEquals($record,$dryRun)){'dry-run'}else{'record'}
+        $label=if([object]::ReferenceEquals($record,$dryRun)){'dry-run'}elseif([object]::ReferenceEquals($record,$preflight)){'preflight'}else{'record'}
         if($record.Contains('actor')-and$record.actor-is[Collections.IDictionary]){Assert-HarnessKernelTextFields -Value $record.actor -Fields @($record.actor.Keys) -Label "$label actor"}
         if($record.Contains('command')){Assert-HarnessKernelTextFields -Value $record -Fields command -Label $label}
+        if($label-ceq'preflight'-and$record.Contains('method')){Assert-HarnessKernelTextFields -Value $record -Fields method -Label $label}
     }
     Assert-HarnessKernelSchema -RepoRoot $RepoRoot -Value $document -Schema evidence.schema.json -Label 'Evidence'
     if($document.task_id-cne$TaskId){throw 'Evidence task_id does not match TaskId'}
@@ -528,20 +554,22 @@ function Resolve-HarnessEvidenceCore {
     $covered = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $severity = 0
     if($null-ne$dryRun-and$null-ne$protectedOperation-and-not@($dryRun.covers).Count){throw 'dry-run covers must not be empty for protected_operation'}
-    foreach($record in @($document.records)+@($dryRun)){
+    foreach($record in @($document.records)+@($dryRun)+@($preflight)){
         if($null-eq$record){continue}
         $isDryRun=[object]::ReferenceEquals($record,$dryRun)
-        $label=if($isDryRun){'dry-run'}else{'record'}
+        $isPreflight=[object]::ReferenceEquals($record,$preflight)
+        $label=if($isDryRun){'dry-run'}elseif($isPreflight){'preflight'}else{'record'}
+        $subject=if($isDryRun-or$isPreflight){$label}else{'Evidence record'}
         if($record.Contains('operation_identity')){
-            if($null-eq$protectedOperation){throw "$(if($isDryRun){'dry-run'}else{'Evidence record'}) operation_identity requires protected_operation"}
-            if($record.operation_identity-cne$protectedOperation.identity){throw "$(if($isDryRun){'dry-run'}else{'Evidence record'}) operation_identity does not match protected_operation"}
-            if($isDryRun-and@($record.covers)-cnotcontains$record.operation_identity){throw 'dry-run covers does not include protected_operation identity'}
+            if($null-eq$protectedOperation){throw "$subject operation_identity requires protected_operation"}
+            if($record.operation_identity-cne$protectedOperation.identity){throw "$subject operation_identity does not match protected_operation"}
+            if(($isDryRun-or$isPreflight)-and@($record.covers)-cnotcontains$record.operation_identity){throw "$label covers does not include protected_operation identity"}
         }
         if((Get-HarnessFileDigest -WorkspaceRoot $WorkspaceRoot -Path (Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $record.evidence_path `
-            -Label "$label evidence_path" -MustExist File))-cne$record.digest){throw "$(if($isDryRun){'dry-run Evidence'}else{'Evidence record'}) digest mismatch: $($record.evidence_path)"}
+            -Label "$label evidence_path" -MustExist File))-cne$record.digest){throw "$(if($isDryRun-or$isPreflight){"$label Evidence"}else{'Evidence record'}) digest mismatch: $($record.evidence_path)"}
         if($record.Contains('cwd')){[void](Resolve-HarnessContainedPath -WorkspaceRoot $WorkspaceRoot -Path $record.cwd -Label "$label cwd" -MustExist Directory)}
         $severity=[Math]::Max($severity,$(if($record.Contains('cwd')){3*[int]([int]$record.exit_code-ne0)}else{@('pass','partial','blocked','fail').IndexOf([string]$record.result)}))
-        if(-not$isDryRun){foreach($item in @($record.covers)){[void]$covered.Add($item)}}
+        if(-not$isDryRun-and-not$isPreflight){foreach($item in @($record.covers)){[void]$covered.Add($item)}}
     }
     $coverage=@($document.coverage.satisfied)+@($document.coverage.not_verified)+@($document.coverage.blocked)
     $buckets=[Collections.Generic.HashSet[string]]::new([string[]]$coverage,[StringComparer]::Ordinal)

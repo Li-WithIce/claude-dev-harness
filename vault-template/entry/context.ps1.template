@@ -1,0 +1,6 @@
+# On-demand read-only project context. Does not enter the task lifecycle.
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+& '{REPO_ROOT}\scripts\context.ps1' @args -WorkspaceRoot '{WORKSPACE_ROOT}'
+exit $LASTEXITCODE

@@ -1,0 +1,37 @@
+{
+  "schema_version": "requirement-contract/v1",
+  "task_id": "continuity-clarification-draft-20261103",
+  "goal": "Allow a pending clarification draft in an opted-in project's change records while keeping implementation blocked.",
+  "acceptance": [
+    "AC-1: A change request with unresolved requirements may have a pending draft containing the user's request and unresolved questions in the opted-in project's change records.",
+    "AC-2: The draft does not authorize implementation, task state, runtime pointers, protected operations, database writes, or read-only request writes.",
+    "AC-3: Canonical entry instructions, generated entries, documentation, and focused tests agree on the exception and retained blocked requirement behavior.",
+    "AC-4: Installed host behavior is reported separately from source and fixture verification."
+  ],
+  "in_scope": [
+    "Canonical entry contract and generated host entry templates",
+    "Project continuity and requirement gate documentation",
+    "Focused contract and blocked-requirement verification"
+  ],
+  "out_of_scope": [
+    "Installation or deployment",
+    "Hook changes",
+    "Database permission or write changes",
+    "Existing task contract and shared pointer changes"
+  ],
+  "product_constraints": [
+    "Use the existing project change-record location for opted-in projects.",
+    "Keep user-confirmed statements distinct from unanswered questions and do not invent answers.",
+    "Keep Requirement inspection read-only and protected actions governed by their current rules."
+  ],
+  "product_decisions": [
+    {
+      "key": "pending_project_draft",
+      "value": true,
+      "source": "user-confirmed:2026-11-03-current-thread-draft-confirmation"
+    }
+  ],
+  "unresolved_product_decisions": [],
+  "source_authority": ["current-user-message", "user-confirmed"],
+  "digest": "sha256:c2e5a0113c62b5a8745a57225b59fd9c193771beb6c2283e25eded863bb9f258"
+}

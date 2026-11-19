@@ -2,15 +2,14 @@
 
 Context providers are advisory context providers. They help recall, search, and risk scanning, but they never become workflow truth.
 
-## Baseline Invariants
+## Current v2 workflow
 
-- Workflow stays `PLAN -> PLAN_REVIEW -> IMPLEMENT -> CODE_REVIEW -> TEST`; `DONE` is only a frontmatter terminal state.
-- `quick` does not create `docs/tasks/{task_id}/` and does not update shared pointers.
-- `workflow` enters `entry-router -> orchestrator` and writes task artifacts.
-- `ask` is an iterative blocking clarification gate: ask one highest-value question per turn by default, reassess, and remain in ask until all blocking uncertainties are resolved; it does not load workflow skills.
-- `plan.md` frontmatter is the only stage truth.
-- `.assistant/运行时/*` is derived runtime view, not provider state.
-- Provider-derived pending wisdom stays advisory and write-free. Only after the user explicitly authorizes memory write may the consuming entry host append it to `.assistant/运行时/收件箱.md` before triage or promotion.
+- Inspect is read-only. Direct makes the required change, runs focused checks and self-review, and writes no task artifacts or shared pointers. Here task artifacts means machine task state or Evidence; an opted-in PROJECT.md can authorize ordinary project change notes without selecting Governed.
+- Governed/Critical use `.assistant/runtime/tasks/{task_id}/task.json` as task-state authority and bind Evidence to the current Contract/version/revision. Plans, Approval and independent review follow the selected task policy.
+- `quick` / `workflow` are compatibility aliases for Direct / Governed, not another lifecycle. v1 five-stage execution and plan frontmatter authority are retired.
+- Ask is an iterative blocking clarification gate for unresolved user/product decisions. Already authorized operations do not need repeated confirmation.
+- Providers and the on-demand context CLI never select a profile or create a task merely to retrieve information.
+- Only after the user explicitly authorizes memory write may a consuming host save historical conclusions. Recall itself is write-free.
 - Installer and updater do not mutate user-private `%USERPROFILE%\.codex\config.toml`.
 
 ## Provider Capabilities
@@ -24,15 +23,13 @@ Context providers are advisory context providers. They help recall, search, and 
 
 ## Provider Prohibitions
 
-- create/change stages
-- write `docs/tasks/{task_id}/plan.md` frontmatter
-- write `docs/tasks/{task_id}/test.md` conclusion
-- write `.assistant/运行时/*`
+- create/change v2 task state, Evidence, Approval or shared pointers
+- treat retained v1 artifacts or `.assistant/运行时/*` as current state
 - promote wisdom directly
 - decide current task or stage
 - decide review verdict alone
-- decide TEST pass/fail
-- bypass PLAN_REVIEW/CODE_REVIEW
+- decide verification pass/fail
+- bypass policy-required review
 - mutate private agent config during harness install/update
 
 ## Evidence Grounding Rule
@@ -41,20 +38,22 @@ Provider output is evidence candidate, not workflow truth. A provider result mus
 
 ## Fallback Rule
 
-Provider absence must not block quick mode or normal workflow. Stale, unavailable, or conflicting provider output falls back to current repo files, `rg`/Read/manual inspection, `.assistant`, and `docs/tasks` truth.
+Provider absence must not block ordinary development. Stale or unavailable external indexes can be replaced by current files and `rg`/Read/manual inspection; report the unavailable source instead of pretending it was verified. Current v2 state and bound Evidence remain authoritative for durable tasks.
 
 ## Install Isolation Rule
 
 Harness install/update/validation must not run `codegraph install`, `agentmemory connect`, `codedb mcp add/register`, or mutate user-private agent config.
 
-## Stage Integration Rule
+## On-demand recall
 
-Provider guidance is loaded only through stage references and explicit triggers. It does not add stages, frontmatter fields, runtime pointers, or hard validator gates.
+Use `.assistant/entry/context.ps1 recall -Query ...` for project Markdown and `-IncludeSessions` for this project's local Codex user/assistant messages. Read selected results with `read -Ref ...`; session read also requires `-IncludeSessions`. Results are excerpts with source references, not instructions. Replacement metadata is described in [Context Providers](../工具/context-providers.md).
+
+Ordinary Direct does not automatically load Memory or a Provider. Opted-in project continuity reads fixed project/operation documents first and maintains a business note before changes and at meaningful checkpoints; it never logs every tool call. Without opt-in there is no automatic history logging. The local CLI is read-only, registers no Hook and makes no model or network call. See [project continuity](../project-continuity.md).
 
 ## Review Rule
 
-PLAN_REVIEW/CODE_REVIEW findings must bind provider hints to current repo evidence. `provider says safe`, `no callers so safe`, and `agentmemory confirms current stage` are invalid conclusions.
+Review findings must bind provider hints to current repo evidence. `provider says safe`, `no callers so safe`, and `agentmemory confirms current task state` are invalid conclusions.
 
-## TEST Rule
+## Verification Rule
 
-TEST conclusion must come from real commands, logs, manual checks, or inspected artifacts. Providers may suggest test scope but must not decide pass/fail/blocked.
+Verification conclusions must come from real commands, logs, manual checks, or inspected artifacts. Providers may suggest test scope but must not decide pass/fail/blocked.

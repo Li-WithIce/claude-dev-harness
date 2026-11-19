@@ -1,0 +1,20 @@
+{
+  "task_id": "multi-workspace-boundary-20261013",
+  "goal": "Repair Harness multi-workspace preflight for the explicitly authorized GVPP chat and the two IoT workspaces.",
+  "acceptance": [
+    "Bind additional workspace grants to the host session and primary workspace physical identity; no implicit sibling or parent grants.",
+    "Resolve relative targets against host cwd and check every absolute target against its authorized workspace with existing reparse protections.",
+    "Evaluate each target workspace's protected policy, task, Contract and Approval; deny the entire preflight if any target fails.",
+    "Reject ordinary file-tool edits of the grant registry and require a version-bound architecture Approval for registration.",
+    "Pass focused boundary tests and Suite all, prepare the fixed candidate for normal managed installation and distinguish fixtures from real host evidence."
+  ],
+  "in_scope": [
+    "Shared Hook session transport, adapter target routing, scoped workspace registration, strict schema and trust inventory, regression tests and maintenance documentation.",
+    "Normal managed upgrade and session grant for chat 01a0d718-c8dc-7671-a61a-e28bd31d74e6, primary D:\\GVPP, targets D:\\energy\\base-service and D:\\energy\\base-front."
+  ],
+  "out_of_scope": ["Database permissions, business behavior changes, unrelated worktrees, global path bypasses and legacy lifecycle shims."],
+  "product_constraints": ["Preserve existing dirty business files, task records and failed-write evidence; do not activate shared current pointers or inherit old Approvals."],
+  "source_authority": ["current-user-message", "user-confirmed", "project-policy"],
+  "decisions": [],
+  "repo_checks": []
+}

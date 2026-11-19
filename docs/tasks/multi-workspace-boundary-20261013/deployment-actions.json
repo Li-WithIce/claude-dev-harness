@@ -1,0 +1,335 @@
+{
+  "schema_version": "managed-deployment-actions/v1",
+  "status": "fixed-prepared-awaiting-exact-approval",
+  "preconditions": [
+    "exact fixed-candidate approval and candidate budget acceptance",
+    "source HEAD remains c4faeb66eaf78bc52cf69259c5207f6fe2348ac6 and worktree is clean",
+    "current Task version 2 and matching Contract",
+    "grant registry is missing and workspace physical identities match",
+    "no pending installation transaction"
+  ],
+  "steps": [
+    {
+      "id": "approval-import",
+      "executable": "pwsh",
+      "arguments": [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        "D:\\data\\harness-integration-v2\\work\\maintenance-boundary\\scripts\\task.ps1",
+        "approve",
+        "-RepoRoot",
+        "D:\\data\\harness-integration-v2\\work\\maintenance-boundary",
+        "-WorkspaceRoot",
+        "D:\\data\\harness-integration-v2\\work\\maintenance-boundary",
+        "-TaskId",
+        "multi-workspace-boundary-20261013",
+        "-ExpectedVersion",
+        "2",
+        "-Approval",
+        ".assistant/runtime/multi-workspace-exact-approval.json",
+        "-AsJson"
+      ],
+      "preconditions": [
+        "The exact fixed deployment plan and candidate budget have a fresh human approval.",
+        "Validate the approval/v1 artifact binds target Task version 3, Contract digest and exact architecture registration operation; do not reuse old Approvals."
+      ],
+      "postconditions": [
+        "Task version becomes 3 and remains running.",
+        "Approval id, imported artifact digest and protected operation match the fresh decision.",
+        "Shared current pointer remains unchanged."
+      ]
+    },
+    {
+      "id": "source-fetch",
+      "executable": "git",
+      "arguments": [
+        "-C",
+        "D:\\data\\dev-harness",
+        "fetch",
+        "D:\\data\\harness-integration-v2\\work\\maintenance-boundary",
+        "a24f86f580af45bd0cbb28dc242b74e2ff8bbc3a"
+      ]
+    },
+    {
+      "id": "source-select",
+      "executable": "git",
+      "arguments": [
+        "-C",
+        "D:\\data\\dev-harness",
+        "checkout",
+        "--detach",
+        "a24f86f580af45bd0cbb28dc242b74e2ff8bbc3a"
+      ]
+    },
+    {
+      "id": "install-core-D:\\GVPP",
+      "executable": "pwsh",
+      "arguments": [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        "D:\\data\\dev-harness\\install.ps1",
+        "-RepoRoot",
+        "D:\\data\\dev-harness",
+        "-WorkspaceRoot",
+        "D:\\GVPP",
+        "-Preset",
+        "core"
+      ]
+    },
+    {
+      "id": "install-full-D:\\energy\\base-service",
+      "executable": "pwsh",
+      "arguments": [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        "D:\\data\\dev-harness\\install.ps1",
+        "-RepoRoot",
+        "D:\\data\\dev-harness",
+        "-WorkspaceRoot",
+        "D:\\energy\\base-service",
+        "-Preset",
+        "full"
+      ]
+    },
+    {
+      "id": "install-full-D:\\energy\\base-front",
+      "executable": "pwsh",
+      "arguments": [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        "D:\\data\\dev-harness\\install.ps1",
+        "-RepoRoot",
+        "D:\\data\\dev-harness",
+        "-WorkspaceRoot",
+        "D:\\energy\\base-front",
+        "-Preset",
+        "full"
+      ]
+    },
+    {
+      "id": "registration-dry-run",
+      "executor": "independent read-only controlled executor",
+      "executable": "pwsh",
+      "arguments": [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        "D:\\data\\dev-harness\\scripts\\register-session-workspaces.ps1",
+        "-RepoRoot",
+        "D:\\data\\dev-harness",
+        "-WorkspaceRoot",
+        "D:\\GVPP",
+        "-SessionId",
+        "01a0d718-c8dc-7671-a61a-e28bd31d74e6",
+        "-AdditionalWorkspaceRootsJson",
+        "[\"D:\\\\energy\\\\base-service\",\"D:\\\\energy\\\\base-front\"]",
+        "-TaskWorkspaceRoot",
+        "D:\\data\\harness-integration-v2\\work\\maintenance-boundary",
+        "-TaskId",
+        "multi-workspace-boundary-20261013",
+        "-ExpectedVersion",
+        "3",
+        "-ExpectedCurrentDigest",
+        "missing",
+        "-DryRun"
+      ]
+    },
+    {
+      "id": "registration",
+      "executable": "pwsh",
+      "arguments": [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        "D:\\data\\dev-harness\\scripts\\register-session-workspaces.ps1",
+        "-RepoRoot",
+        "D:\\data\\dev-harness",
+        "-WorkspaceRoot",
+        "D:\\GVPP",
+        "-SessionId",
+        "01a0d718-c8dc-7671-a61a-e28bd31d74e6",
+        "-AdditionalWorkspaceRootsJson",
+        "[\"D:\\\\energy\\\\base-service\",\"D:\\\\energy\\\\base-front\"]",
+        "-TaskWorkspaceRoot",
+        "D:\\data\\harness-integration-v2\\work\\maintenance-boundary",
+        "-TaskId",
+        "multi-workspace-boundary-20261013",
+        "-ExpectedVersion",
+        "3",
+        "-ExpectedCurrentDigest",
+        "missing"
+      ]
+    },
+    {
+      "id": "verify-installation-D:\\GVPP",
+      "executable": "pwsh",
+      "arguments": [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        "D:\\data\\dev-harness\\tests\\verify-installation.ps1",
+        "-RepoRoot",
+        "D:\\data\\dev-harness",
+        "-WorkspaceRoot",
+        "D:\\GVPP",
+        "-Scope",
+        "All"
+      ]
+    },
+    {
+      "id": "verify-protocol-D:\\GVPP",
+      "executable": "pwsh",
+      "arguments": [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        "D:\\GVPP\\.assistant\\entry\\task.ps1",
+        "protocol"
+      ]
+    },
+    {
+      "id": "verify-installation-D:\\energy\\base-service",
+      "executable": "pwsh",
+      "arguments": [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        "D:\\data\\dev-harness\\tests\\verify-installation.ps1",
+        "-RepoRoot",
+        "D:\\data\\dev-harness",
+        "-WorkspaceRoot",
+        "D:\\energy\\base-service",
+        "-Scope",
+        "All"
+      ]
+    },
+    {
+      "id": "verify-protocol-D:\\energy\\base-service",
+      "executable": "pwsh",
+      "arguments": [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        "D:\\energy\\base-service\\.assistant\\entry\\task.ps1",
+        "protocol"
+      ]
+    },
+    {
+      "id": "verify-installation-D:\\energy\\base-front",
+      "executable": "pwsh",
+      "arguments": [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        "D:\\data\\dev-harness\\tests\\verify-installation.ps1",
+        "-RepoRoot",
+        "D:\\data\\dev-harness",
+        "-WorkspaceRoot",
+        "D:\\energy\\base-front",
+        "-Scope",
+        "All"
+      ]
+    },
+    {
+      "id": "verify-protocol-D:\\energy\\base-front",
+      "executable": "pwsh",
+      "arguments": [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        "D:\\energy\\base-front\\.assistant\\entry\\task.ps1",
+        "protocol"
+      ]
+    },
+    {
+      "id": "installed-k1-preflight-canary",
+      "executable": "pwsh",
+      "arguments": [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        "D:\\data\\dev-harness\\runtime-hooks\\core\\pretooluse.ps1",
+        "-RepoRoot",
+        "D:\\data\\dev-harness",
+        "-WorkspaceRoot",
+        "D:\\GVPP",
+        "-SessionId",
+        "01a0d718-c8dc-7671-a61a-e28bd31d74e6",
+        "-ActionMode",
+        "write",
+        "-ChangedPathsJson",
+        "[\"D:\\\\energy\\\\base-service\\\\.harness-preflight-probe-20261013.txt\",\"D:\\\\energy\\\\base-front\\\\.harness-preflight-probe-20261013.txt\"]",
+        "-AsJson"
+      ],
+      "postconditions": [
+        "The two workspace_checks are allowed using the exact registered session; no target file is created and registry digest is unchanged.",
+        "An unregistered session and an unauthorized sibling are both denied in read-only negative preflight checks.",
+        "This is a native installed K1 replay; desktop Hook loading and actual business writes remain NOT_VERIFIED."
+      ],
+      "negative_variants": [
+        "same exact targets with an unregistered session id",
+        "same registered session with D:\\energy\\energy-dispatch-service\\.harness-preflight-probe-20261013.txt"
+      ]
+    }
+  ],
+  "rollback": [
+    "revoke the exact session grant with empty roots through a fresh scoped Approval and CAS if registration occurred",
+    "restore retained c4faeb66eaf78bc52cf69259c5207f6fe2348ac6 source and normally reinstall core/full/full",
+    "preserve existing install backups, business files, current pointers, failed-write evidence and task records"
+  ],
+  "working_directory": "D:\\data\\harness-integration-v2\\work\\maintenance-boundary",
+  "preserved_install_baselines": ".assistant/runtime/multi-workspace-managed-install-baselines.json",
+  "preserved_install_preimage": {
+    "path": ".assistant/runtime/multi-workspace-install-preimage.json",
+    "digest": "sha256:8837f306b05f0b5d2effd1a1ab666fb6d237b895ee6cd57dce272729c3fea795"
+  },
+  "readback": [
+    "Verify each normal installation manifest and All-scope asset ownership check.",
+    "Compare every preexisting business-file, task-record, current-pointer and failed-write digest against the retained preimage; explain only managed installation asset changes.",
+    "Read the exact session grant and compare session, physical workspace identities, architecture Approval provenance and expiry.",
+    "Report installed/rendered Hook alignment separately from unobserved desktop Hook loading and real business writes.",
+    "Check all six existing shared Hook consumers; preserve non-target workspace entry, local policy/protocol, current-pointer and protected-worktree staged/untracked asset snapshots.",
+    "Compare normal installer managed-block/config preimages to preserve user fragments in the four supplementary global files."
+  ],
+  "cleanup": "Retain normal installer backups and failed validation fixtures; no manual deletion, rollback of user business files, or history cleanup.",
+  "preserved_install_supplement": {
+    "path": ".assistant/runtime/multi-workspace-install-preimage-supplement.json",
+    "digest": "sha256:26e9bd8e9be82956d13c9c6c16c8ad7ee6552639bc2fdb57f0b18b4fe73dd5ce"
+  },
+  "stop_conditions": [
+    "Any candidate source, tree, Task version/Contract, physical root identity or registry-preimage mismatch.",
+    "Any unexpected protected/user asset drift, missing matching architecture Approval, failed normal installer or failed installation/protocol/readback check.",
+    "No force checkout, safe.directory change, Hook disabling, inherited Approval or manual registry write is permitted as recovery."
+  ],
+  "approval_artifact": {
+    "path": ".assistant/runtime/multi-workspace-exact-approval.json",
+    "status": "not-created; exact human decision pending",
+    "schema_version": "approval/v1",
+    "target_task_version": 3,
+    "protected_operation_draft": ".assistant/runtime/multi-workspace-deployment-draft.json",
+    "binding_required": [
+      "fixed candidate commit/tree",
+      "final deployment plan digest",
+      "KTB-EX-011 candidate budget",
+      "task version 3 and Contract",
+      "exact architecture operation identity, scopes and missing CAS preimage"
+    ]
+  }
+}

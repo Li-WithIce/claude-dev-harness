@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory)][string]$ReceiptRoot,
     [Parameter(Mandatory)][string]$PwshPath,
-    [ValidateSet('parent','leaf')][string]$Role = 'parent'
+    [ValidateSet('parent','leaf')][string]$Role = 'parent',
+    [switch]$ExitParentAfterSpawn
 )
 
 Set-StrictMode -Version Latest
@@ -15,7 +16,10 @@ if ($Role -ceq 'parent') {
     foreach ($value in @('-NoLogo','-NoProfile','-NonInteractive','-File',$PSCommandPath,'-ReceiptRoot',$ReceiptRoot,'-PwshPath',$PwshPath,'-Role','leaf')) {
         $info.ArgumentList.Add($value)
     }
+    if ($ExitParentAfterSpawn) { $info.ArgumentList.Add('-ExitParentAfterSpawn') }
     $child = [Diagnostics.Process]::Start($info)
     $child.Dispose()
+    if ($ExitParentAfterSpawn) { return }
 }
+if ($ExitParentAfterSpawn) { [Console]::Out.Write('owned-leaf-ready'); [Console]::Out.Flush() }
 Start-Sleep -Seconds 90

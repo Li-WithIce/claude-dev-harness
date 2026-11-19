@@ -1,4 +1,6 @@
 ---
+status: superseded
+superseded_by: docs/quick-start.md
 name: entry-router
 description: V1 compatibility entry router for choosing quick, workflow, ask, resume, switch, or inbox-first after protocol selection. Never load for selected v2 Direct.
 ---

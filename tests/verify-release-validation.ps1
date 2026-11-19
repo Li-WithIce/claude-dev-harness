@@ -759,7 +759,7 @@ $longRunningBlock = [regex]::Match($runner,'(?ms)^\$longRunningChecks = @\(\r?\n
 $actualLongRunningChecks = if ($longRunningBlock.Success) { @([regex]::Matches($longRunningBlock.Groups['body'].Value,"(?m)^\s*'(?<name>[^']+)',?\s*$") | ForEach-Object { $_.Groups['name'].Value }) } else { @() }
 $runnerBudgetsValid = @($actualLongRunningChecks).Count -eq 5 -and @($actualLongRunningChecks | Sort-Object -CaseSensitive -Unique).Count -eq 5 -and
     (($actualLongRunningChecks -join '|') -ceq ($expectedLongRunningChecks -join '|')) -and
-    $runner -match '(?ms)if \(\$check\.Name -cin @\(''verify-host-benchmark-qualification\.ps1'',''verify-v2-install-presets\.ps1''\)\) \{\s*\[math\]::Max\(\$CheckTimeoutSeconds,900\)\s*\}\s*elseif \(\$longRunningChecks -ccontains \$check\.Name\) \{\s*\[math\]::Max\(\$CheckTimeoutSeconds,600\)'
+    $runner -match '(?ms)if \(\$check\.Name -ceq ''verify-v2-install-presets\.ps1''\) \{\s*\[math\]::Max\(\$CheckTimeoutSeconds,1500\)\s*\}\s*elseif \(\$check\.Name -ceq ''verify-host-benchmark-qualification\.ps1''\) \{\s*\[math\]::Max\(\$CheckTimeoutSeconds,900\)\s*\}\s*elseif \(\$longRunningChecks -ccontains \$check\.Name\) \{\s*\[math\]::Max\(\$CheckTimeoutSeconds,600\)'
 
 if ($runner -match '(?m)^\s*\[int\]\$CheckTimeoutSeconds = 360\s*$' -and
     $runner -match '(?m)^\s*\[string\]\$CoreGroup = ''all''\s*,?\s*$' -and

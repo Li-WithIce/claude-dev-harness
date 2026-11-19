@@ -30,8 +30,8 @@
     "critical": {
       "allowed_intents": ["write"],
       "allowed_persistence": ["durable"],
-      "minimum_capabilities": ["plan_required", "approval_required", "rollback_required", "independent_review_required", "verification_required", "durable_artifacts_required", "dry_run_required"],
-      "configurable_capabilities": [],
+      "minimum_capabilities": ["plan_required", "approval_required", "rollback_required", "independent_review_required", "verification_required", "durable_artifacts_required", "preflight_required"],
+      "configurable_capabilities": ["dry_run_required"],
       "writes_task_state": true,
       "writes_task_artifacts": true,
       "current_pointer_policy": "explicit-activation-only"

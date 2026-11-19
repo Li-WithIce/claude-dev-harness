@@ -148,6 +148,7 @@ $expectedSchemaFiles = @(
     'runtime-default-admission.schema.json',
     'runtime-default-decision.schema.json',
     'runtime-policies.schema.json',
+    'session-workspaces.schema.json',
     'task-state.schema.json',
     'task-step-claim.schema.json',
     'task-transaction-operations.schema.json',
@@ -225,6 +226,21 @@ foreach ($field in @('command','host','backend','model','actor_id','context_id')
     Assert-True -Condition (-not (Test-AgainstSchema -Document $dryRunWithWhitespace -SchemaPath (Join-Path $schemaRoot 'evidence.schema.json'))) -Success "dry-run Evidence rejects whitespace-only $field" -Failure "dry-run Evidence accepted whitespace-only $field"
 }
 
+$evidenceWithPreflight = ($evidenceCase.valid | ConvertTo-Json -Depth 30 -Compress) | ConvertFrom-Json
+$evidenceWithPreflight | Add-Member -NotePropertyName preflight -NotePropertyValue ([pscustomobject]@{type='preflight';kind='impact-query';method='read-only row count of the rows the change will touch';result='pass';executed_at='2026-07-22T00:00:00Z';evidence_path='.harness/evidence/preflight.txt';digest=('sha256:'+('1'*64));covers=@('sha256:'+('2'*64));operation_identity=('sha256:'+('2'*64));actor=[pscustomobject]@{host='controlled-executor';model='inherit';actor_id='executor-fixture';context_id='execution-fixture'}})
+Assert-True -Condition (Test-AgainstSchema -Document $evidenceWithPreflight -SchemaPath (Join-Path $schemaRoot 'evidence.schema.json')) -Success 'Evidence accepts a typed, operation-bound preflight object' -Failure 'valid structured preflight Evidence failed schema validation'
+foreach ($mutation in @('kind','command-shape','unbound','method','actor')) {
+    $badPreflight = ($evidenceWithPreflight | ConvertTo-Json -Depth 30 -Compress) | ConvertFrom-Json
+    switch ($mutation) {
+        'kind' { $badPreflight.preflight.kind = 'unrelated-success' }
+        'command-shape' { $badPreflight.preflight = [pscustomobject]@{type='command';command='pwsh -File tests/unrelated.ps1';cwd='.';exit_code=0;executed_at='2026-07-22T00:00:00Z';evidence_path='.harness/evidence/preflight.txt';digest=('sha256:'+('1'*64));covers=@();actor=$badPreflight.preflight.actor} }
+        'unbound' { $badPreflight.preflight.PSObject.Properties.Remove('operation_identity') }
+        'method' { $badPreflight.preflight.method = ' ' }
+        'actor' { $badPreflight.preflight.actor.PSObject.Properties.Remove('context_id') }
+    }
+    Assert-True -Condition (-not (Test-AgainstSchema -Document $badPreflight -SchemaPath (Join-Path $schemaRoot 'evidence.schema.json'))) -Success "preflight Evidence rejects an invalid $mutation" -Failure "preflight Evidence accepted an invalid $mutation"
+}
+
 $allContractText = @(Get-ChildItem -LiteralPath $policyRoot,$schemaRoot -Filter '*.json' -File | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding utf8 }) -join [Environment]::NewLine
 Assert-True -Condition ($allContractText -notmatch '"(?:task/v2|evidence/v2|risk-rules/v1|execution-profiles/v1)"') -Success 'contracts contain no conflicting or unauthorized public versions' -Failure 'contracts contain a conflicting or unauthorized public version'
 
@@ -251,7 +267,7 @@ try {
 Assert-True -Condition $badOwnerRejected -Success 'invalid decision default owner is rejected' -Failure 'invalid decision default owner widened agent authority'
 
 $risk = Read-JsonHashtable -Path (Join-Path $policyRoot 'risk-rules.json')
-Assert-True -Condition (Test-KeySet -Value $risk -Expected @('dimensions', 'profile_thresholds', 'critical_triggers', 'overrides')) -Success 'risk policy top-level keys are exact and unversioned' -Failure 'risk policy keys drifted or invented a public version'
+Assert-True -Condition (Test-KeySet -Value $risk -Expected @('dimensions', 'profile_thresholds', 'critical_triggers', 'governed_triggers', 'retired_triggers', 'overrides')) -Success 'risk policy top-level keys are exact and unversioned' -Failure 'risk policy keys drifted or invented a public version'
 $dimensionSummary = @($risk['dimensions'] | ForEach-Object { "{0}:{1}-{2}" -f $_['id'],$_['min_score'],$_['max_score'] })
 $expectedDimensions = @(
     'user_visible_behavior:0-3',
@@ -264,22 +280,32 @@ $expectedDimensions = @(
 )
 Assert-True -Condition (@(Compare-Object $expectedDimensions $dimensionSummary).Count -eq 0) -Success 'risk dimensions are complete and bounded 0..3' -Failure 'risk dimension set or bounds are wrong'
 $thresholdSummary = @($risk['profile_thresholds'] | ForEach-Object { "{0}:{1}-{2}" -f $_['profile'],$_['min_total'],$_['max_total'] })
-Assert-True -Condition (($thresholdSummary -join ',') -ceq 'direct:0-4,governed:5-8,critical:9-21') -Success 'risk score bands are contiguous and canonical' -Failure 'risk score bands have a gap, overlap, or wrong profile'
+Assert-True -Condition (($thresholdSummary -join ',') -ceq 'direct:0-4,governed:5-21') -Success 'risk score bands are contiguous and never select Critical by score alone' -Failure 'risk score bands have a gap, overlap, or wrong profile'
 $expectedCriticalTriggers = @(
-    'authorization_or_security_boundary',
-    'money_billing_refund_or_settlement',
-    'production_database_destructive_migration',
+    'production_destructive_data_change',
     'irreversible_user_data_change',
-    'production_release_or_infrastructure',
-    'breaking_public_api_change',
-    'sensitive_data_export_or_compliance',
-    'destructive_git_history_operation',
-    'large_scale_automation_without_dry_run',
-    'unverified_production_impact'
+    'real_money_movement',
+    'privileged_external_exposure',
+    'unbounded_production_change',
+    'sensitive_data_export_outside_trust_boundary',
+    'destructive_shared_git_history_operation',
+    'large_scale_automation_without_preflight'
 )
 Assert-True -Condition (@(Compare-Object $expectedCriticalTriggers @($risk['critical_triggers'])).Count -eq 0) -Success 'risk policy contains every canonical Critical trigger' -Failure 'risk policy Critical trigger set is incomplete or expanded'
+$expectedGovernedTriggers = @(
+    'shared_persistent_configuration_change',
+    'bounded_recoverable_production_change',
+    'breaking_public_api_change',
+    'sensitive_data_export_within_trust_boundary',
+    'security_boundary_change_non_isolated'
+)
+Assert-True -Condition (@(Compare-Object $expectedGovernedTriggers @($risk['governed_triggers'])).Count -eq 0 -and -not @($risk['governed_triggers'] | Where-Object { @($risk['critical_triggers']) -ccontains $_ }).Count) -Success 'risk policy contains every canonical Governed trigger without overlapping Critical' -Failure 'risk policy Governed trigger set is incomplete, expanded, or overlaps Critical'
+$activeTriggers = @($risk['critical_triggers']) + @($risk['governed_triggers'])
+$expectedRetiredTriggers = @('authorization_or_security_boundary', 'money_billing_refund_or_settlement', 'production_database_destructive_migration', 'production_release_or_infrastructure', 'sensitive_data_export_or_compliance', 'destructive_git_history_operation', 'large_scale_automation_without_dry_run', 'unverified_production_impact')
+$retired = $risk['retired_triggers']
+Assert-True -Condition (@(Compare-Object $expectedRetiredTriggers @($retired.Keys)).Count -eq 0 -and -not @($retired.Keys | Where-Object { $activeTriggers -ccontains $_ -or @($retired[$_]).Count -eq 0 -or @($retired[$_] | Where-Object { $activeTriggers -cnotcontains $_ }).Count }).Count) -Success 'retired triggers are inactive and name only active replacements' -Failure 'retired trigger map is incomplete, still active, or names an unknown replacement'
 $overrides = $risk['overrides']
-Assert-True -Condition ([string]$overrides['requirement_blocked_state'] -ceq 'blocked' -and [string]$overrides['read_only_profile'] -ceq 'inspect' -and [string]$overrides['durable_minimum_profile'] -ceq 'governed' -and [string]$overrides['critical_trigger_profile'] -ceq 'critical' -and $overrides['multiple_files_alone_escalate'] -eq $false) -Success 'risk overrides preserve blocked, read-only, durable, critical, and multi-file rules' -Failure 'risk override semantics drifted'
+Assert-True -Condition ([string]$overrides['requirement_blocked_state'] -ceq 'blocked' -and [string]$overrides['read_only_profile'] -ceq 'inspect' -and [string]$overrides['durable_minimum_profile'] -ceq 'governed' -and [string]$overrides['governed_trigger_profile'] -ceq 'governed' -and [string]$overrides['critical_trigger_profile'] -ceq 'critical' -and $overrides['multiple_files_alone_escalate'] -eq $false) -Success 'risk overrides preserve blocked, read-only, durable, governed, critical, and multi-file rules' -Failure 'risk override semantics drifted'
 
 $execution = Read-JsonHashtable -Path (Join-Path $policyRoot 'execution-profiles.json')
 Assert-True -Condition (Test-KeySet -Value $execution -Expected @('profiles', 'legacy_aliases')) -Success 'execution profile policy top-level keys are exact and unversioned' -Failure 'execution profile policy drifted or invented a public version'
@@ -290,14 +316,15 @@ foreach ($profileName in @('inspect', 'direct', 'governed', 'critical')) {
 }
 Assert-True -Condition ($profiles['inspect']['writes_task_state'] -eq $false -and $profiles['inspect']['writes_task_artifacts'] -eq $false -and $profiles['direct']['writes_task_state'] -eq $false -and $profiles['direct']['writes_task_artifacts'] -eq $false) -Success 'Inspect and Direct default to zero task-state and artifact writes' -Failure 'Inspect or Direct gained durable writes'
 Assert-True -Condition (@($profiles['governed']['minimum_capabilities']) -ccontains 'durable_artifacts_required' -and @($profiles['governed']['configurable_capabilities']) -ccontains 'approval_required') -Success 'Governed keeps durable minimums and policy-composed capabilities' -Failure 'Governed capabilities were prematurely fixed or weakened'
-$criticalRequired = @('plan_required', 'approval_required', 'rollback_required', 'independent_review_required', 'verification_required', 'durable_artifacts_required', 'dry_run_required')
+$criticalRequired = @('plan_required', 'approval_required', 'rollback_required', 'independent_review_required', 'verification_required', 'durable_artifacts_required', 'preflight_required')
 Assert-True -Condition (@(Compare-Object $criticalRequired @($profiles['critical']['minimum_capabilities'])).Count -eq 0) -Success 'Critical requires every mandatory capability' -Failure 'Critical profile is missing a mandatory capability'
+Assert-True -Condition ((@($profiles['critical']['configurable_capabilities']) -join ',') -ceq 'dry_run_required' -and @($profiles['governed']['configurable_capabilities']) -cnotcontains 'dry_run_required') -Success 'Critical always requires a preflight and adds dry-run only on request' -Failure 'Critical dry-run capability is not a Critical-only configurable capability'
 Assert-True -Condition (-not $profiles.Contains('ask') -and [string]$execution['legacy_aliases']['ask_requirement_state'] -ceq 'blocked') -Success 'Ask remains a blocked requirement state, not a fifth profile' -Failure 'Ask was modeled as an execution profile'
 
 $protected = Read-JsonHashtable -Path (Join-Path $policyRoot 'protected-actions.json')
 Assert-True -Condition (Test-KeySet -Value $protected -Expected @('schema_version', 'rules') -and [string]$protected['schema_version'] -ceq 'protected-actions/v1') -Success 'protected action policy shape and version are canonical' -Failure 'protected action policy shape or version is invalid'
 $protectedIds = @($protected['rules'] | ForEach-Object { [string]$_['id'] })
-Assert-True -Condition (@(Compare-Object @('production-database-destructive', 'authorization-path-change') $protectedIds).Count -eq 0) -Success 'PR-01 contains only the two plan-defined protected rules' -Failure 'protected rules are missing or expanded beyond PR-01'
+Assert-True -Condition (@(Compare-Object @('production-database-destructive') $protectedIds).Count -eq 0) -Success 'core protection covers the production destructive database rule' -Failure 'core protected rules are missing or unexpectedly expanded'
 foreach ($rule in $protected['rules']) {
     Assert-True -Condition (Test-KeySet -Value $rule -Expected @('id', 'match', 'requires_profile', 'requires_approval', 'requires_dry_run', 'requires_independent_review')) -Success ("protected rule {0} keys are exact" -f $rule['id']) -Failure ("protected rule {0} keys drifted" -f $rule['id'])
     Assert-True -Condition ([string]$rule['requires_profile'] -in @('governed', 'critical') -and $rule['requires_independent_review'] -eq $true) -Success ("protected rule {0} only escalates requirements" -f $rule['id']) -Failure ("protected rule {0} weakens requirements or declares safety" -f $rule['id'])

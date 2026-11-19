@@ -53,6 +53,7 @@ function Assert-HarnessProtectedAction {
     $normalizedPaths=@($ChangedPaths|ForEach-Object{
         Get-HarnessRelativePath -WorkspaceRoot $WorkspaceRoot -Path $_
     })
+    if (@($normalizedPaths | Where-Object { $_ -imatch '^\.assistant/runtime/session-workspaces(?:/|$)' }).Count) { throw 'session workspace registry requires the registration API' }
     $matched,$scopes=[Collections.Generic.List[object]]::new(),[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     foreach($rule in @((Read-HarnessProtectedPolicy -RepoRoot $RepoRoot -WorkspaceRoot $WorkspaceRoot).rules)){
         $match=Resolve-HarnessProtectedRuleMatch -Rule $rule -CommandText $CommandText -Paths @($normalizedPaths) -Environment $Environment -RequireTrustedEnvironment

@@ -69,9 +69,12 @@ function Resolve-HarnessAuditArtifact {
     $actors,$contexts = @($evidenceRecords.actor.actor_id | Sort-Object -CaseSensitive -Unique),@($evidenceRecords.actor.context_id | Sort-Object -CaseSensitive -Unique)
     if ($actors.Count -ne 1 -or $contexts.Count -ne 1) { throw 'independent audit requires one implementer actor and context in Evidence' }
     $implementerActor,$implementerContext = @($actors)[0],@($contexts)[0]
-    if ($RequiredIndependence -ceq 'different-actor' -and $Evidence.Document.Contains('dry_run')) {
-        if ([string]$Evidence.Document.dry_run.actor.actor_id -ceq $implementerActor) { throw 'Critical dry-run executor actor must differ from the implementer actor' }
-        if ([string]$Evidence.Document.dry_run.actor.context_id -ceq $implementerContext) { throw 'Critical dry-run executor context must differ from the implementer context' }
+    if ($RequiredIndependence -ceq 'different-actor') {
+        foreach ($check in @(@('dry_run','dry-run'),@('preflight','preflight'))) {
+            if (-not $Evidence.Document.Contains($check[0])) { continue }
+            if ([string]$Evidence.Document[$check[0]].actor.actor_id -ceq $implementerActor) { throw "Critical $($check[1]) executor actor must differ from the implementer actor" }
+            if ([string]$Evidence.Document[$check[0]].actor.context_id -ceq $implementerContext) { throw "Critical $($check[1]) executor context must differ from the implementer context" }
+        }
     }
     if ([string]$record.implementer_actor_id -cne $implementerActor) { throw 'independent audit implementer_actor_id does not match Evidence' }
     if ([string]$record.reviewer_context_id -ceq $implementerContext) { throw 'independent reviewer context must differ from implementer context' }
@@ -96,15 +99,23 @@ function Resolve-HarnessAuditArtifact {
 function Assert-HarnessGovernanceReady {
     param([Parameter(Mandatory)][string]$RepoRoot,[Parameter(Mandatory)][string]$WorkspaceRoot,[Parameter(Mandatory)][System.Collections.IDictionary]$Task,[Parameter(Mandatory)][object]$Evidence)
     $plan,$audit,$protectedOperation = $null,$null,$null
-    if ($(if ($Task.policies.Contains('dry_run_required')) { [bool]$Task.policies.dry_run_required } else { [string]$Task.execution_profile -ceq 'critical' }) -and [string]$Evidence.NextStatus -ceq 'done') {
-        if (-not $Evidence.Document.Contains('dry_run') -or [int]$Evidence.Document.dry_run.exit_code -ne 0) { throw 'dry-run Evidence is required before Critical task completion' }
-        Assert-HarnessKernelTextFields -Value $Evidence.Document.dry_run -Fields command -Label 'dry-run'
+    # A Critical task without preflight_required predates the preflight rule and keeps its mandatory dry-run.
+    $legacyCritical = [string]$Task.execution_profile -ceq 'critical' -and -not $Task.policies.Contains('preflight_required')
+    $dryRunRequired = $legacyCritical -or ($Task.policies.Contains('dry_run_required') -and [bool]$Task.policies.dry_run_required)
+    $preflightRequired = $Task.policies.Contains('preflight_required') -and [bool]$Task.policies.preflight_required
+    if (($dryRunRequired -or $preflightRequired) -and [string]$Evidence.NextStatus -ceq 'done') {
+        $scopeDryRun = $null -ne $Evidence.ProtectedOperation -and @($Evidence.ProtectedOperation.approval_scope) -ccontains 'dry-run:true'
+        $useDryRun = $dryRunRequired -or $scopeDryRun -or ($Evidence.Document.Contains('dry_run') -and -not $Evidence.Document.Contains('preflight'))
+        $checkKey,$checkLabel = $(if ($useDryRun) { 'dry_run','dry-run' } else { 'preflight','preflight' })
+        if (-not $Evidence.Document.Contains($checkKey) -or $(if ($useDryRun) { [int]$Evidence.Document.dry_run.exit_code -ne 0 } else { [string]$Evidence.Document.preflight.result -cne 'pass' })) { throw "$checkLabel Evidence is required before Critical task completion" }
+        $check = $Evidence.Document[$checkKey]
+        Assert-HarnessKernelTextFields -Value $check -Fields $(if ($useDryRun) { 'command' } else { 'method' }) -Label $checkLabel
         if($null-eq$Evidence.ProtectedOperation){throw 'protected_operation is required before Critical task completion'}
         $protectedOperation=$Evidence.ProtectedOperation
-        $identity,$dryRun=[string]$protectedOperation.identity,$Evidence.Document.dry_run
+        $identity=[string]$protectedOperation.identity
         if([string]$protectedOperation.approval_type-ceq'none'){throw 'Critical protected_operation requires an Approval type'}
-        if(-not$dryRun.Contains('operation_identity')-or[string]$dryRun.operation_identity-cne$identity){throw 'Critical dry-run is not bound to protected_operation'}
-        if(@($dryRun.covers).Count-eq0-or@($dryRun.covers)-cnotcontains$identity){throw 'Critical dry-run covers must include protected_operation identity'}
+        if(-not$check.Contains('operation_identity')-or[string]$check.operation_identity-cne$identity){throw "Critical $checkLabel is not bound to protected_operation"}
+        if(@($check.covers).Count-eq0-or@($check.covers)-cnotcontains$identity){throw "Critical $checkLabel covers must include protected_operation identity"}
         if(-not@($Evidence.Document.records|Where-Object{(Test-HarnessKernelFields $_ @{type='command';exit_code=0;operation_identity=$identity})-and@($_.covers)-ccontains$identity}).Count){throw 'Critical completion requires successful execution Evidence bound to protected_operation'}
     }
     if ([bool]$Task.policies.plan_required) { $plan = Assert-HarnessPlanArtifact -WorkspaceRoot $WorkspaceRoot -TaskId ([string]$Task.task_id) -ContractDigest ([string]$Task.contract_digest) }

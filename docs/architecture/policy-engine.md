@@ -7,7 +7,7 @@ The policy engine selects an execution profile after the Requirement Gate has cl
 The canonical machine sources are:
 
 - `policies/decision-rights.json` for product, architecture, and agent ownership;
-- `policies/risk-rules.json` for score bands and hard Critical triggers;
+- `policies/risk-rules.json` for score bands, Governed triggers, and hard Critical triggers;
 - `policies/execution-profiles.json` for Inspect, Direct, Governed, and Critical capabilities;
 - `policies/protected-actions.json` for hard escalation rules;
 - optional workspace `.assistant/policies/protected-actions.local.json` for project-specific protected paths, commands, and exact environment labels;
@@ -15,16 +15,19 @@ The canonical machine sources are:
 
 Documentation and prompts may explain these rules but cannot weaken them. Missing, malformed, unknown, or semantically weaker policy fails closed.
 
-Core ships exactly two protected-action rules: production destructive database commands and authorization-path changes. This is not a claim that two rules cover every Critical trigger. Globstar prefixes such as `**/auth/**` match the protected directory at the workspace root as well as at nested depths. Projects extend the boundary with `protected-actions-overlay/v1`, validated by `schemas/protected-actions-overlay.schema.json`. Overlay rule ids must be unique and cannot replace core ids; each rule may match an exact environment label, command regex, path globs, or their intersection, and may only require Governed/Critical plus an existing Approval type, dry-run, and independent review. A malformed, duplicate, unreadable, or schema-invalid overlay rejects writes fail closed; reads remain available.
+Core protects production destructive database commands. Business source directories such as `auth`, `permissions`, and `rbac` do not by themselves require protected-action review. Projects extend the boundary with `protected-actions-overlay/v1`, validated by `schemas/protected-actions-overlay.schema.json`. Overlay rule ids must be unique and cannot replace core ids; each rule may match an exact environment label, command regex, path globs, or their intersection, and may only require Governed/Critical plus an existing Approval type, dry-run, and independent review. A malformed, duplicate, unreadable, or schema-invalid overlay rejects writes fail closed; reads remain available.
 
 ## Resolution flow
 
 1. `Harness.Requirement` resolves source authority and emits a Requirement Contract or `requirement_state=blocked`.
 2. Blocked requirements do not receive an execution profile. Read-only intent selects Inspect.
-3. Mutation risk is scored across the canonical dimensions. Totals 0-4 select Direct, 5-8 Governed, and 9-21 Critical.
-4. Durable artifact requests raise the minimum to Governed. File count alone never raises risk.
-5. A known Critical trigger raises the profile to Critical. Unknown triggers are rejected rather than ignored.
-6. Protected-action matches can only raise requirements. Scope expansion or a newly discovered product blocker reroutes before write.
+3. Mutation risk is scored across the canonical dimensions. Totals 0-4 select Direct and 5-21 select Governed; a score alone never selects Critical.
+4. A known Governed trigger (shared persistent configuration, a bounded recoverable production change, a breaking public API change, sensitive data export inside the trust boundary, or a security boundary change outside an isolated environment) raises the profile to at least Governed. For `ActionKind=source-code` only, `security_boundary_change_non_isolated` is recorded as `source-only:security_boundary_change_non_isolated` and does not raise the profile. This classification requires changed paths and an empty command; actual operations are evaluated separately.
+5. Durable artifact requests and operations that are not readily reversible raise the minimum to Governed. Unavailable verification is recorded as `verification-unavailable` and must be reported as a gap, but does not change the profile. File count alone never raises risk.
+6. A known Critical trigger raises the profile to Critical, including for `ActionKind=source-code`. Critical triggers are production destructive data changes, irreversible user data changes, real money movement, privileged external exposure, unbounded production changes, sensitive data export outside the trust boundary, destructive shared Git history operations, and large-scale automation without a preflight. Unknown triggers, a trigger submitted at the wrong level, and retired trigger names are rejected rather than ignored or silently remapped; a retired name reports its replacements.
+7. Protected-action matches can only raise requirements. Scope expansion or a newly discovered product blocker reroutes before write.
+
+Labels such as `localhost`, a directory name, or "test environment" do not prove isolation: the caller classifies by the real target, so a local port forwarded to a production database is production, and data export is classified by its destination and leak impact.
 
 TK-03 checks new-work admission even for `HARNESS_PROTOCOL=v2`. `disable-v2`
 pauses new work, while `enable-v2` and `reset-auto` explicitly restore v2-only
@@ -37,9 +40,9 @@ hands off to v2 recovery. Explicit v1 is retired, not a rollback switch.
 | Profile | Persistence | Harness writes | Required behavior |
 |---|---|---|---|
 | Inspect | ephemeral | none | read-only inspection and appropriate verification |
-| Direct | ephemeral | no task/runtime/current state or task artifact | focused verification, self-review, and honest gaps |
+| Direct | ephemeral | no task/runtime/current state or machine task artifact; opted-in business Markdown is an ordinary project deliverable | focused verification, self-review, and honest gaps |
 | Governed | durable | transactional v2 state and explicit artifacts only | verification and durable Evidence; planning/audit only when policy requires them |
-| Critical | durable | same transaction boundary | plan, Approval, rollback, independent audit, verification, Evidence, and dry-run |
+| Critical | durable | same transaction boundary | plan, Approval, rollback, independent audit, verification, Evidence, and a preflight sufficient for the risk (a native dry-run where a rule, scope, or the task requires one) |
 
 Ask is `requirement_state=blocked`, not a fifth profile. Legacy `quick` and `workflow` are compatibility aliases for Direct and Governed; they do not create a second policy source.
 
@@ -50,7 +53,9 @@ Ask is `requirement_state=blocked`, not a fifth profile. Legacy `quick` and `wor
 - An explicitly authorized database credential or external-service key may be persisted to the user's named Workspace configuration file, including production configuration. This ordinary Runtime capability is version-neutral and does not depend on Release Qualification, Vault, KMS, a Secret Provider, or exact model/Host names. A production-looking path, secret-shaped field, tracked/ignored state, or `HARNESS_ENVIRONMENT=production` does not by itself make the file write protected. Persistence is not disclosure: sensitive values stay out of replies, logs, task artifacts, Evidence, review receipts, PRs, CI artifacts, snapshots, documentation, and unrelated files.
 - The ordinary user Hook is a guardrail, not a complete enforcement boundary. Its transparent Windows chain has deterministic coverage under `cmd.exe /C`, PowerShell 7, and Windows PowerShell, plus pinned absolute PowerShell executables. Exact Host qualification belongs to the release policy, not this runtime contract. Harness does not write trust or create/take ownership of managed policy; an upgrade may only retire an exact, registry-proven legacy Harness `managed_config.toml` by restoring its original baseline and then releasing ownership. The registry tombstone is accepted only when a real release manifest binds the target, covered history, and stable plan digest; it remains authoritative across workspace-owner handoff until the final registry is removed. Synthetic command-fixture tests do not establish active trust or endpoint-product allowlisting. If enterprise policy or endpoint isolation blocks the script, the Hook is unavailable and Critical production execution still requires the independent executor defined by release policy.
 - Requested aliases may raise but cannot lower the computed profile.
-- Critical capabilities are an exact minimum set. New task state persists `dry_run_required=true`; an older task document that predates the optional field derives the same invariant from `execution_profile=critical`, while an explicit false value is rejected. The successful dry-run itself must be carried by the bound `evidence/v1` `dry_run` object; Hook input is not completion Evidence. Unknown policy keys are rejected.
+- Critical capabilities are an exact minimum set that includes `preflight_required`; `dry_run_required` is the only configurable Critical capability and is not available to Governed. New Critical task state persists `preflight_required=true` and `dry_run_required` as selected. A Critical task document without the `preflight_required` key predates this rule and keeps its mandatory dry-run: the missing flag is derived from `execution_profile=critical`, and an explicit `dry_run_required=false` is rejected. Rule upgrades never lower an existing task.
+- A preflight is a check before execution that is sufficient for the risk. A native dry-run is carried by the bound `evidence/v1` `dry_run` command object. Every other kind is carried by the `preflight` object with an honest `kind` (`config-validation`, `impact-query`, `isolated-rehearsal`, or `manual-review`), a `method`, and a `result`; a command-shaped record in that slot is rejected by schema, and only `result=pass` supports completion. Both objects must be bound to the same `protected-operation/v1` identity as the Approval and a successful command record, and their executor actor and context must differ from the implementer. A native dry-run is still mandatory when a matched protected-action rule requires it, when the protected operation's Approval scope contains `dry-run:true`, when the task selected `dry_run_required`, and for legacy Critical tasks. The kinds are not interchangeable, and an unrelated successful command is never a preflight. Hook input is not completion Evidence. Unknown policy keys are rejected.
+- Review independence means the reviewer did not take part in the implementation and works in a different context; Critical additionally requires a different actor. A different model is not required. These fields are auditable cooperative identity claims, not cryptographic authentication.
 - Read-only inspection is zero-write even when optional providers, Memory, or policy infrastructure are unavailable.
 - Execution results, actors, model ids, and tool ids belong to Event/Evidence metadata, not the Requirement Contract.
 
@@ -61,3 +66,13 @@ Ask is `requirement_state=blocked`, not a fifth profile. Legacy `quick` and `wor
 Rollback pauses new work and uses v2 recovery or a separately approved known-good
 v2 distribution. The [TK-03 contract](tk03-v2-only-transition.md) preserves
 legacy history but retires ordinary v1 lifecycle, install and recovery paths.
+
+## H02 local direct-patch path and denial contract
+
+Direct patch targets may be relative to the verified host cwd or fully qualified Windows drive-letter paths. Both forms go through the existing workspace containment and no-reparse checks, and the resulting normalized full target is passed to protected-action policy. Add, Update, Delete and both Move endpoints are checked as one preflight; no target is skipped. UNC, device paths, drive-relative/root-relative paths, ADS, dot segments, reserved DOS device names and ambiguous components are not added as supported forms.
+
+The host-supplied cwd is the path-resolution base; an installation environment binding is an authorization boundary. Current support requires these roots to normalize to the same directory when both are present. A direct patch without host cwd is rejected even if an environment workspace binding exists, because that binding alone does not establish the tool's relative-path base. Roots are never inferred from patch targets. The existing shell-form restriction is unchanged.
+
+The adapter emits only HARNESS_DENY followed by one fixed category: input, permission-mode, workspace-binding, patch-path, patch-syntax, path-boundary, read-only, shell-form, policy-requirement, policy-unavailable, startup, or unknown. The launcher accepts only an exact known category with adapter exit 2 and emits a fixed user-facing reason. Unknown exceptions, arbitrary stderr, mixed known-code plus extra text, or other exit codes remain a generic deny. No patch body, command body, credential or private path is forwarded. Missing startup dependencies are checked inside the guarded launcher path. The finite category is presentation only; it grants no authorization and does not introduce a state Schema.
+
+Offline fixture success is not evidence of active host loading or the historical first denial. Active hooks are not updated by this change.

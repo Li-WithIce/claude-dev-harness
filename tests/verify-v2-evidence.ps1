@@ -42,7 +42,7 @@ function Write-Contract($Workspace,$TaskId){
 }
 function Write-JsonFile($Workspace,$Relative,$Value){$path=Join-Path $Workspace $Relative;[void][IO.Directory]::CreateDirectory((Split-Path -Parent $path));[IO.File]::WriteAllText($path,(($Value|ConvertTo-Json -Depth 40)+"`n"),[Text.UTF8Encoding]::new($false))}
 
-function New-EvidenceFixture($Workspace,$TaskId,$ContractDigest,$Mode,[switch]$WithDryRun){
+function New-EvidenceFixture($Workspace,$TaskId,$ContractDigest,$Mode,[switch]$WithDryRun,[int]$TaskVersion=3){
     $recordRelative=".harness/evidence/$TaskId-$Mode.txt";$recordPath=Join-Path $Workspace $recordRelative
     [void][IO.Directory]::CreateDirectory((Split-Path -Parent $recordPath));[IO.File]::WriteAllText($recordPath,("$Mode`n"),[Text.UTF8Encoding]::new($false));$digest='sha256:'+((Get-FileHash $recordPath).Hash.ToLowerInvariant())
     $satisfied=@();$notVerified=@();$blocked=@();$gaps=@();$conclusion=$Mode
@@ -50,7 +50,7 @@ function New-EvidenceFixture($Workspace,$TaskId,$ContractDigest,$Mode,[switch]$W
     if($Mode-ceq'blocked'){$record=[ordered]@{type='inspection';method='external-check';result='blocked';executed_at=[DateTimeOffset]::UtcNow.ToString('o');evidence_path=$recordRelative;digest=$digest;covers=@()}}
     elseif($Mode-ceq'partial'){$record=[ordered]@{type='inspection';method='manual-check';result='partial';executed_at=[DateTimeOffset]::UtcNow.ToString('o');evidence_path=$recordRelative;digest=$digest;covers=@()}}
     else{$exitCode=if($Mode-in @('fail','false-pass')){7}else{0};$record=[ordered]@{type='command';command="fixture-$Mode";cwd='.';exit_code=$exitCode;executed_at=[DateTimeOffset]::UtcNow.ToString('o');evidence_path=$recordRelative;digest=$digest;covers=@('AC-1')}}
-    $document=[ordered]@{schema_version='evidence/v1';task_id=$TaskId;task_version=3;contract_digest=$ContractDigest;revision=('dirty:'+'0'*64);records=@($record);coverage=[ordered]@{satisfied=$satisfied;not_verified=$notVerified;blocked=$blocked};gaps=$gaps;conclusion=$conclusion}
+    $document=[ordered]@{schema_version='evidence/v1';task_id=$TaskId;task_version=$TaskVersion;contract_digest=$ContractDigest;revision=('dirty:'+'0'*64);records=@($record);coverage=[ordered]@{satisfied=$satisfied;not_verified=$notVerified;blocked=$blocked};gaps=$gaps;conclusion=$conclusion}
     if($WithDryRun){$dryRunRelative=".harness/evidence/$TaskId-dry-run.txt";$dryRunPath=Join-Path $Workspace $dryRunRelative;[IO.File]::WriteAllText($dryRunPath,"dry-run pass`n",[Text.UTF8Encoding]::new($false));$document.dry_run=[ordered]@{type='command';command='fixture-dry-run';cwd='.';exit_code=0;executed_at=[DateTimeOffset]::UtcNow.ToString('o');evidence_path=$dryRunRelative;digest=('sha256:'+((Get-FileHash $dryRunPath).Hash.ToLowerInvariant()));covers=@();actor=[ordered]@{host='controlled-executor';model='inherit';actor_id='executor-fixture';context_id='execution-fixture'}}}
     $inputRelative="evidence-inputs/$TaskId-$Mode.json";Write-JsonFile $Workspace $inputRelative $document
     $document.revision=Get-HarnessEvidenceRevision -WorkspaceRoot $Workspace -ContractDigest $ContractDigest -Evidence $document -EvidenceInputPath $inputRelative -EvidenceOutputPath "docs/tasks/$TaskId/evidence.json";Write-JsonFile $Workspace $inputRelative $document
@@ -61,6 +61,7 @@ function Start-TaskVerifying($Workspace,$TaskId,$ContractPath,[switch]$Activate)
 $repoBefore=@(& git -C $RepoRoot status --porcelain --untracked-files=all);$temp=Join-Path ([IO.Path]::GetTempPath()) ('v2-evidence-'+[guid]::NewGuid().ToString('N'));$workspace=Join-Path $temp 'workspace';$outside=Join-Path $temp 'outside';[void][IO.Directory]::CreateDirectory($workspace);[void][IO.Directory]::CreateDirectory($outside);$runningOnWindows=[System.Environment]::OSVersion.Platform-eq[System.PlatformID]::Win32NT
 [IO.File]::WriteAllText((Join-Path $workspace '.gitignore'),".assistant/runtime/`n.harness/evidence/`nevidence-inputs/`ndocs/tasks/*/evidence.json`n",[Text.UTF8Encoding]::new($false));[IO.File]::WriteAllText((Join-Path $workspace 'source.txt'),"baseline`n",[Text.UTF8Encoding]::new($false));[IO.File]::WriteAllText((Join-Path $workspace 'source-evidence.json'),"{}`n",[Text.UTF8Encoding]::new($false));$runtimeCaseProbe=$null;if($runningOnWindows){$runtimeCaseProbe=Join-Path $workspace '.Assistant\Runtime\case-probe.txt';[void][IO.Directory]::CreateDirectory((Split-Path -Parent $runtimeCaseProbe));[IO.File]::WriteAllText($runtimeCaseProbe,"baseline`n",[Text.UTF8Encoding]::new($false))}
 $contracts=@{};$taskIds=@('pass-task','case-task','tracked-record-task','tracked-input-task','short-task','unsafe-index-task','false-pass-task','stale-task','fail-task','blocked-task','partial-task','dirty-task','escape-task','digest-task','actor-whitespace-task','dry-run-valid-task','dry-run-digest-task','dry-run-fail-task','dry-run-path-task','dry-run-cwd-task','dry-run-whitespace-task','dry-run-revision-task','crash-task','preclaim-task','writer-preclaim-task','alias-task')
+$taskIds += @('update-crash-task','update-conflict-task')
 foreach($taskId in $taskIds){$contracts[$taskId]=Write-Contract $workspace $taskId}
 git -C $workspace init -q;git -C $workspace config user.email harness@example.invalid;git -C $workspace config user.name Harness;git -C $workspace config core.autocrlf false;git -C $workspace add .;if($runningOnWindows){git -C $workspace add -f -- '.Assistant/Runtime/case-probe.txt'};git -C $workspace commit -qm baseline;$head=(git -C $workspace rev-parse HEAD).Trim()
 $volumeAlias=$null
@@ -139,6 +140,41 @@ $blockedEvidence=New-EvidenceFixture $workspace 'blocked-task' $contracts['block
 Check ($result.ExitCode-eq 0-and$value.conclusion-ceq'blocked'-and$value.task.status-ceq'paused') 'blocked Evidence keeps task unfinished and paused' 'blocked Evidence reached a terminal state'
 $partialEvidence=New-EvidenceFixture $workspace 'partial-task' $contracts['partial-task'].Digest 'partial';$result=Invoke-Cli $workspace @('verify','-TaskId','partial-task','-ExpectedVersion','3','-Evidence',$partialEvidence.Path,'-AsJson');$value=Read-Output $result
 Check ($result.ExitCode-eq 0-and$value.conclusion-ceq'partial'-and$value.task.status-ceq'verifying'-and$value.task.version-eq 4) 'partial Evidence remains verifying' 'partial Evidence completed task'
+
+$updatedEvidence=New-EvidenceFixture $workspace 'partial-task' $contracts['partial-task'].Digest 'pass' -TaskVersion 4
+$updatedResult=Invoke-Cli $workspace @('verify','-TaskId','partial-task','-ExpectedVersion','4','-Evidence',$updatedEvidence.Path,'-AsJson')
+$updatedValue=Read-Output $updatedResult
+Check ($updatedResult.ExitCode-eq0-and$updatedValue.task.status-ceq'done'-and$updatedValue.task.version-eq5) 'partial Evidence can be replaced by final Evidence through verify' "Evidence update failed: $($updatedResult.StdErr)"
+
+foreach($updateTask in @('update-crash-task','update-conflict-task')){
+    $initial=New-EvidenceFixture $workspace $updateTask $contracts[$updateTask].Digest 'partial'
+    $initialResult=Invoke-Cli $workspace @('verify','-TaskId',$updateTask,'-ExpectedVersion','3','-Evidence',$initial.Path,'-AsJson')
+    $updateArtifact=Join-Path $workspace "docs/tasks/$updateTask/evidence.json"
+    $originalBytes=[IO.File]::ReadAllBytes($updateArtifact)
+    $originalDigest='sha256:'+([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($originalBytes))).ToLowerInvariant()
+    $final=New-EvidenceFixture $workspace $updateTask $contracts[$updateTask].Digest 'pass' -TaskVersion 4
+    $conflict=$updateTask-ceq'update-conflict-task'
+    $faultResult=Invoke-Cli $workspace @('verify','-TaskId',$updateTask,'-ExpectedVersion','4','-Evidence',$final.Path,'-AsJson') $(if($conflict){''}else{'1'}) $(if($conflict){'1'}else{''})
+    $faultMatch=[regex]::Match($faultResult.StdErr,'TransactionId=(txn_[0-9a-f]{32})')
+    Check ($initialResult.ExitCode-eq0-and$faultResult.ExitCode-eq2-and$faultMatch.Success) "$updateTask journals the Evidence update" "$updateTask did not prepare an update transaction: $($faultResult.StdErr)"
+    if(-not$faultMatch.Success){continue}
+    $updateId=$faultMatch.Groups[1].Value
+    $updateJournal=Get-Content -LiteralPath (Join-Path $workspace ".assistant/runtime/failed-writes/$updateId.json") -Raw | ConvertFrom-Json
+    $updateStep=@($updateJournal.steps|Where-Object id -CEQ 'evidence')[0]
+    Check ($updateStep.before_digest-ceq$originalDigest) "$updateTask binds the prior Evidence digest in its journal" "$updateTask lost its prior Evidence digest"
+    if($conflict){
+        [IO.File]::WriteAllBytes($updateArtifact,($originalBytes+[byte[]]@(10)))
+        $conflictSnapshot=Snapshot $workspace
+        $conflictReplay=Invoke-Cli $workspace @('replay','-TransactionId',$updateId,'-AsJson')
+        Check ($conflictReplay.ExitCode-eq2-and$conflictReplay.StdErr-match'preimage changed') 'Evidence update replay rejects changed prior content' 'Evidence update overwrote changed prior content'
+        Same $conflictSnapshot (Snapshot $workspace) 'Evidence update conflict is zero-write' 'Evidence update conflict wrote state'
+        [IO.File]::WriteAllBytes($updateArtifact,$originalBytes)
+    }
+    $updateReplay=Invoke-Cli $workspace @('replay','-TransactionId',$updateId,'-AsJson')
+    $updateAgain=Invoke-Cli $workspace @('replay','-TransactionId',$updateId,'-AsJson')
+    $updateStatus=Read-Output (Invoke-Cli $workspace @('status','-TaskId',$updateTask,'-AsJson'))
+    Check ($updateReplay.ExitCode-eq0-and$updateAgain.ExitCode-eq0-and(Read-Output $updateAgain).result-ceq'already-recovered'-and$updateStatus.task.status-ceq'done'-and$updateStatus.task.version-eq5-and$updateStatus.event_count-eq6) "$updateTask recovers exactly once" "$updateTask recovery failed: $($updateReplay.StdErr)"
+}
 
 $crashEvidence=New-EvidenceFixture $workspace 'crash-task' $contracts['crash-task'].Digest 'pass';$result=Invoke-Cli $workspace @('verify','-TaskId','crash-task','-ExpectedVersion','3','-Evidence',$crashEvidence.Path,'-AsJson') '1';$match=[regex]::Match($result.StdErr,'TransactionId=(txn_[0-9a-f]{32})');$transactionId=if($match.Success){$match.Groups[1].Value}else{''}
 Check ($result.ExitCode-eq 2-and$match.Success-and(Test-Path (Join-Path $workspace 'docs/tasks/crash-task/evidence.json'))-and(Test-Path (Join-Path $workspace ".assistant/runtime/failed-writes/$transactionId.json"))) 'Evidence fault leaves artifact and replay journal' 'Evidence fault did not journal partial write'

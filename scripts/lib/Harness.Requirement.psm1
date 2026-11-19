@@ -99,7 +99,8 @@ function Invoke-RequirementInspection {
         if (-not @($decision.depends_on | Where-Object { $blockerKeys.Contains([string]$_) }).Count) {
             $question = Select-HarnessKernelKeys -Value $decision -Keys @('key','question','impact')
             $question.Insert(1,'owner',[string]$blocker.owner)
-            $question.options,$question.recommended = [object[]]@($decision['options']),$decision.recommended
+            $question.options = @(if ($decision.Contains('options')) { $decision.options })
+            $question.recommended = $decision.recommended
             $question.recommendation_is_authorization,$question.depends_on = $false,@($decision.depends_on)
             $question
         }
@@ -107,7 +108,8 @@ function Invoke-RequirementInspection {
 
     $contractBody = Select-HarnessKernelKeys -Value $request -Keys @('task_id','goal','acceptance','in_scope')
     $contractBody.Insert(0,'schema_version','requirement-contract/v1')
-    $contractBody.out_of_scope,$contractBody.product_constraints = [object[]]@($request['out_of_scope']),[object[]]@($request['product_constraints'])
+    $contractBody.out_of_scope = @(if ($request.Contains('out_of_scope')) { $request.out_of_scope })
+    $contractBody.product_constraints = @(if ($request.Contains('product_constraints')) { $request.product_constraints })
     $contractBody.product_decisions,$contractBody.unresolved_product_decisions = @($productDecisions | Sort-Object { [string]$_.key }),@()
     $contractBody.source_authority = @($request.source_authority | Sort-Object -Unique)
     $state,$contract = $(if ($blockers.Count) { 'blocked' } else { 'clear' }),$null

@@ -1,0 +1,64 @@
+{
+  "schema_version": "human-deployment-authorization/v1",
+  "recorded_at": "2026-10-13T06:11:52.3725061+00:00",
+  "source": "current explicit user confirmation card reply",
+  "answer": "批准按固定方案执行（推荐）",
+  "task_id": "multi-workspace-boundary-20261013",
+  "approved_plan_path": "docs/tasks/multi-workspace-boundary-20261013/deployment-plan.json",
+  "approved_plan_digest": "sha256:a6a9cb928853ac9a257d47e020dbc8542d02b40adf51c4ff72a0884a5cee1757",
+  "actions_digest": "sha256:af1d05e1d4411b666d8792c88d311dd131f8ffecef30c6b2ff028b0a5edfb844",
+  "candidate": {
+    "commit": "a24f86f580af45bd0cbb28dc242b74e2ff8bbc3a",
+    "tree": "1febaaddfae1478043302c8a800f6174046ea3f0",
+    "branch": "codex/multi-workspace-boundary",
+    "baseline_commit": "c4faeb66eaf78bc52cf69259c5207f6fe2348ac6",
+    "distribution_source": "D:\\data\\dev-harness",
+    "source_expected_clean": true,
+    "source_expected_baseline_head": "c4faeb66eaf78bc52cf69259c5207f6fe2348ac6"
+  },
+  "budget": {
+    "exception": "KTB-EX-011",
+    "status": "approved-exact-candidate",
+    "baseline_loc": 3068,
+    "prior_covered_growth": 139,
+    "candidate_delta_loc": 184,
+    "candidate_delta_tokens": 1670,
+    "candidate_delta_statement_asts": 481,
+    "candidate_measurement": {
+      "loc": 3391,
+      "tokens": 37843,
+      "statement_asts": 11164
+    },
+    "strict_loc_upper_bound": 3392,
+    "token_ceiling": 37843,
+    "statement_ast_ceiling": 11164,
+    "accounting_and_other_guards": "unchanged; each Adapter remains <200 LOC"
+  },
+  "budget_accepted": true,
+  "installation_targets": [
+    {
+      "workspace_root": "D:\\GVPP",
+      "preset": "core",
+      "distribution_digest": "sha256:c447d5e269710b1049d9a29fa15f1858b2c0447fd2baff5ea05682f5708e5a4d"
+    },
+    {
+      "workspace_root": "D:\\energy\\base-service",
+      "preset": "full",
+      "distribution_digest": "sha256:20360811c6ded7ad75985916f8b00d45f67d29b77101c902ff888e8170c29cd8"
+    },
+    {
+      "workspace_root": "D:\\energy\\base-front",
+      "preset": "full",
+      "distribution_digest": "sha256:20360811c6ded7ad75985916f8b00d45f67d29b77101c902ff888e8170c29cd8"
+    }
+  ],
+  "shared_hook_consumer_count": 6,
+  "registration_operation_identity": "sha256:cd4e84b49cb5544f3f2f4f55e39565b81166eb176d6b25fe7738121f6bfe8f43",
+  "approval_input_path": ".assistant/runtime/multi-workspace-exact-approval.json",
+  "approval_id": "apr_multi_workspace_ca55c574d4a148ce9fff87ac78d685d3",
+  "canonical_imported_approval_digest": "sha256:0c710acd9cbddb280954d043aae7fc9c0e0d4bb456c1afc3d4f39eacb258bfe4",
+  "expires_at": null,
+  "pre_execution_check_path": ".assistant/runtime/multi-workspace-execution-precheck.json",
+  "independent_review_path": ".assistant/runtime/multi-workspace-review2/audit.md",
+  "independent_review_digest": "sha256:dd1b2c0f7946a734798137fb6b7a8c7057d250c90edc6a9541853161212630f8"
+}

@@ -4,7 +4,7 @@
   "source_basis": "git-index-blob/v1",
   "classification": {
     "path": "kernel-component-classification.json",
-    "sha256": "sha256:4b63b621712d7f74107208b9b9f52799f554235fbefebb5335682aaf1be30d62"
+    "sha256": "sha256:a3c02d545203850f4c5d173f5616a1bcd68adf76f99824a0d8fbe9439cfb59d2"
   },
   "metric_contract": {
     "powershell": "powershell-token-lines/v1",
@@ -17,10 +17,10 @@
       "path": "runtime-hooks/claude/codex-pretooluse-launcher.ps1",
       "layer": "a3-adapter",
       "language": "powershell",
-      "raw_sha256": "sha256:8296881eaa5519b2647fe8fd698c8a8750fcfbb5e2c2b0e378bbb48199c30da0",
-      "physical_loc": 32,
-      "nonblank_loc": 29,
-      "executable_loc": 27,
+      "raw_sha256": "sha256:ae65b6ebc430ab3b59af707abdcc349136e2e24056d6c9ad92d2b229365f22ed",
+      "physical_loc": 48,
+      "nonblank_loc": 45,
+      "executable_loc": 43,
       "maximum_line_length": 258,
       "tcb_included": true,
       "kernel_api_operations": []
@@ -29,11 +29,11 @@
       "path": "runtime-hooks/claude/pretooluse.ps1",
       "layer": "a3-adapter",
       "language": "powershell",
-      "raw_sha256": "sha256:6abcc1333b5a2bb732a9ca3a268f7ddd6c37824c10d89183b5af542bbd56ed58",
-      "physical_loc": 65,
-      "nonblank_loc": 60,
-      "executable_loc": 60,
-      "maximum_line_length": 206,
+      "raw_sha256": "sha256:836c0d6cf309763eadbd0b92ead39dc78fc81ae1ab6a6a99303053d44529d242",
+      "physical_loc": 132,
+      "nonblank_loc": 127,
+      "executable_loc": 125,
+      "maximum_line_length": 214,
       "tcb_included": true,
       "kernel_api_operations": [
         "preflight_action"
@@ -133,10 +133,10 @@
     "adapter_count": 9,
     "powershell_count": 6,
     "javascript_count": 3,
-    "executable_loc": 826,
+    "executable_loc": 907,
     "maximum_adapter_executable_loc": 196,
     "threshold_breaches": 0
   },
   "digest_algorithm": "canonical-json/v1",
-  "inventory_digest": "sha256:a01f594a02c83f567ec6f425723cc164d5b9b2c889192108426433a9b7f66ac5"
+  "inventory_digest": "sha256:66b52853ee01e1e6800cfc539cbb9cb5bd5992ae23cd156be135835f78e717d7"
 }

@@ -1,4 +1,6 @@
 ---
+status: superseded
+superseded_by: docs/governed-work.md
 name: plan
 description: Use when the task is in PLAN and you need to create or revise the authoritative `docs/tasks/{task_id}/plan.md`.
 ---

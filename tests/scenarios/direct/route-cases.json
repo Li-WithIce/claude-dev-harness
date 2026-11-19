@@ -16,8 +16,10 @@
       "verification_coverage": 0
     },
     "critical_triggers": [],
+    "governed_triggers": [],
     "changed_paths": ["src/view.ps1"],
     "command_text": "",
+    "action_kind": "",
     "environment": "",
     "requested_alias": "",
     "reversible": true,
@@ -67,25 +69,127 @@
       "expected": { "selected_protocol": "v2", "profile": "governed", "risk_total": 5, "handoff": "reroute-before-write" }
     },
     {
-      "id": "critical-score-band",
+      "id": "high-score-alone-stays-governed",
       "risk_scores": { "user_visible_behavior": 2, "data_integrity": 2, "authorization_and_security": 1, "external_side_effects": 1, "blast_radius": 1, "rollback": 1, "verification_coverage": 1 },
-      "expected": { "selected_protocol": "v2", "profile": "critical", "risk_total": 9, "handoff": "reroute-before-write", "review_policy": "independent" }
+      "expected": { "selected_protocol": "v2", "profile": "governed", "risk_total": 9, "handoff": "reroute-before-write", "review_policy": "self", "approval_policy": "none" }
+    },
+    {
+      "id": "maximum-score-alone-stays-governed",
+      "risk_scores": { "user_visible_behavior": 3, "data_integrity": 3, "authorization_and_security": 3, "external_side_effects": 3, "blast_radius": 3, "rollback": 3, "verification_coverage": 3 },
+      "expected": { "selected_protocol": "v2", "profile": "governed", "risk_total": 21, "handoff": "reroute-before-write", "review_policy": "self" }
     },
     {
       "id": "critical-trigger-overrides-score",
-      "critical_triggers": ["breaking_public_api_change"],
-      "expected": { "selected_protocol": "v2", "profile": "critical", "handoff": "reroute-before-write", "trigger": "breaking_public_api_change" }
+      "critical_triggers": ["real_money_movement"],
+      "expected": { "selected_protocol": "v2", "profile": "critical", "handoff": "reroute-before-write", "review_policy": "independent", "trigger": "real_money_movement" }
     },
     {
-      "id": "authorization-path-protected",
-      "changed_paths": ["src/auth/authorize.ps1"],
-      "expected": { "selected_protocol": "v2", "profile": "governed", "handoff": "reroute-before-write", "review_policy": "independent", "trigger": "protected:authorization-path-change" }
+      "id": "governed-trigger-raises-direct",
+      "governed_triggers": ["breaking_public_api_change"],
+      "expected": { "selected_protocol": "v2", "profile": "governed", "handoff": "reroute-before-write", "review_policy": "self", "approval_policy": "none", "trigger": "breaking_public_api_change" }
+    },
+    {
+      "id": "business-authorization-source-direct",
+      "action_kind": "source-code",
+      "governed_triggers": ["security_boundary_change_non_isolated"],
+      "changed_paths": ["src/auth/authorize.ps1", "permissions/roles.json", "rbac/roles.json"],
+      "expected": { "selected_protocol": "v2", "profile": "direct", "handoff": "main-agent", "review_policy": "self", "approval_policy": "none", "trigger": "source-only:security_boundary_change_non_isolated" }
+    },
+    {
+      "id": "business-approval-data-source-high-score",
+      "action_kind": "source-code",
+      "changed_paths": ["src/approval/people.ts", "src/project/relationships.ts"],
+      "risk_scores": { "user_visible_behavior": 2, "data_integrity": 2, "authorization_and_security": 1, "external_side_effects": 1, "blast_radius": 1, "rollback": 1, "verification_coverage": 1 },
+      "expected": { "selected_protocol": "v2", "profile": "governed", "risk_total": 9, "handoff": "reroute-before-write", "review_policy": "self", "approval_policy": "none" }
+    },
+    {
+      "id": "source-with-database-critical-trigger",
+      "action_kind": "source-code",
+      "critical_triggers": ["production_destructive_data_change"],
+      "changed_paths": ["src/project/relationships.ts"],
+      "expected": { "selected_protocol": "v2", "profile": "critical", "handoff": "reroute-before-write", "review_policy": "independent", "trigger": "production_destructive_data_change" }
     },
     {
       "id": "production-delete-protected",
       "command_text": "DELETE FROM customer",
       "environment": "production",
       "expected": { "selected_protocol": "v2", "profile": "critical", "handoff": "reroute-before-write", "review_policy": "independent", "approval_policy": "production", "trigger": "protected:production-database-destructive", "capability": "dry_run_required" }
+    },
+    {
+      "id": "isolated-local-database-account-direct",
+      "changed_paths": [],
+      "command_text": "CREATE USER 'app_rw'@'localhost' IDENTIFIED BY RANDOM PASSWORD; GRANT SELECT, INSERT, UPDATE ON appdb.* TO 'app_rw'@'localhost'",
+      "environment": "local",
+      "risk_scores": { "user_visible_behavior": 0, "data_integrity": 0, "authorization_and_security": 1, "external_side_effects": 1, "blast_radius": 0, "rollback": 0, "verification_coverage": 0 },
+      "expected": { "selected_protocol": "v2", "profile": "direct", "risk_total": 2, "handoff": "main-agent", "review_policy": "self", "approval_policy": "none", "artifact_policy": "ephemeral" }
+    },
+    {
+      "id": "shared-persistent-configuration-governed",
+      "governed_triggers": ["shared_persistent_configuration_change"],
+      "changed_paths": [],
+      "command_text": "SET PERSIST max_connections = 500",
+      "environment": "shared-dev",
+      "expected": { "selected_protocol": "v2", "profile": "governed", "handoff": "reroute-before-write", "review_policy": "self", "approval_policy": "none", "trigger": "shared_persistent_configuration_change" }
+    },
+    {
+      "id": "privileged-external-exposure-critical",
+      "critical_triggers": ["privileged_external_exposure"],
+      "changed_paths": [],
+      "command_text": "GRANT ALL PRIVILEGES ON *.* TO 'admin'@'%'",
+      "environment": "shared-dev",
+      "expected": { "selected_protocol": "v2", "profile": "critical", "handoff": "reroute-before-write", "review_policy": "independent", "trigger": "privileged_external_exposure", "capability": "approval_required" }
+    },
+    {
+      "id": "bounded-production-deploy-governed",
+      "governed_triggers": ["bounded_recoverable_production_change"],
+      "changed_paths": [],
+      "command_text": "deploy --service web --strategy canary",
+      "environment": "production",
+      "expected": { "selected_protocol": "v2", "profile": "governed", "handoff": "reroute-before-write", "review_policy": "self", "approval_policy": "none", "trigger": "bounded_recoverable_production_change" }
+    },
+    {
+      "id": "unbounded-production-change-critical",
+      "critical_triggers": ["unbounded_production_change"],
+      "changed_paths": [],
+      "command_text": "apply --all-regions --no-rollback",
+      "environment": "production",
+      "expected": { "selected_protocol": "v2", "profile": "critical", "handoff": "reroute-before-write", "review_policy": "independent", "trigger": "unbounded_production_change" }
+    },
+    {
+      "id": "export-within-trust-boundary-governed",
+      "governed_triggers": ["sensitive_data_export_within_trust_boundary"],
+      "expected": { "selected_protocol": "v2", "profile": "governed", "handoff": "reroute-before-write", "review_policy": "self", "trigger": "sensitive_data_export_within_trust_boundary" }
+    },
+    {
+      "id": "export-outside-trust-boundary-critical",
+      "critical_triggers": ["sensitive_data_export_outside_trust_boundary"],
+      "expected": { "selected_protocol": "v2", "profile": "critical", "handoff": "reroute-before-write", "review_policy": "independent", "trigger": "sensitive_data_export_outside_trust_boundary" }
+    },
+    {
+      "id": "critical-trigger-wins-over-governed-trigger",
+      "critical_triggers": ["privileged_external_exposure"],
+      "governed_triggers": ["shared_persistent_configuration_change"],
+      "expected": { "selected_protocol": "v2", "profile": "critical", "handoff": "reroute-before-write", "review_policy": "independent", "trigger": "shared_persistent_configuration_change" }
+    },
+    {
+      "id": "retired-trigger-rejected",
+      "critical_triggers": ["authorization_or_security_boundary"],
+      "expected": { "error": "retired-trigger" }
+    },
+    {
+      "id": "retired-trigger-rejected-as-governed",
+      "governed_triggers": ["production_release_or_infrastructure"],
+      "expected": { "error": "retired-trigger" }
+    },
+    {
+      "id": "governed-trigger-rejected-as-critical",
+      "critical_triggers": ["breaking_public_api_change"],
+      "expected": { "error": "unknown-critical-trigger" }
+    },
+    {
+      "id": "critical-trigger-rejected-as-governed",
+      "governed_triggers": ["real_money_movement"],
+      "expected": { "error": "unknown-governed-trigger" }
     },
     {
       "id": "blocked-requirement-stops",
@@ -108,9 +212,14 @@
       "expected": { "selected_protocol": "v2", "profile": "governed", "handoff": "reroute-before-write", "trigger": "durable-artifacts-requested" }
     },
     {
-      "id": "verification-gap-escalates",
+      "id": "not-reversible-escalates",
+      "reversible": false,
+      "expected": { "selected_protocol": "v2", "profile": "governed", "handoff": "reroute-before-write", "trigger": "not-readily-reversible" }
+    },
+    {
+      "id": "verification-gap-reported-without-escalation",
       "verification_available": false,
-      "expected": { "selected_protocol": "v2", "profile": "governed", "handoff": "reroute-before-write", "trigger": "verification-unavailable" }
+      "expected": { "selected_protocol": "v2", "profile": "direct", "handoff": "main-agent", "artifact_policy": "ephemeral", "trigger": "verification-unavailable" }
     },
     {
       "id": "read-intent-inspects",

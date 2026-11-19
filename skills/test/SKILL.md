@@ -1,4 +1,6 @@
 ---
+status: superseded
+superseded_by: docs/quick-start.md
 name: test
 description: Use when the task is in TEST and you need to produce `docs/tasks/{task_id}/test.md` with a legal conclusion, evidence, and handoff section.
 ---

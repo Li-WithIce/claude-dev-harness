@@ -956,6 +956,7 @@ exit 0
             $codexAgentsPath = Join-Path (Join-Path $UserProfile '.codex') 'AGENTS.md'
             $codexAgents = Get-Content -LiteralPath $codexAgentsPath -Raw -Encoding utf8
             [System.IO.File]::WriteAllText($codexAgentsPath, ($codexAgents -replace 'Read the resolved workspace', 'Read the stale workspace'), (New-Object System.Text.UTF8Encoding($false)))
+            [System.IO.File]::Copy($codexAgentsPath, (Join-Path $CaseRoot 'codex-agents-preimage.md'))
 
             $codexConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'config.toml'
             $codexConfig = if (Test-Path -LiteralPath $codexConfigPath -PathType Leaf) {
@@ -995,10 +996,10 @@ enabled = true
 
             $codexAgentsPath = Join-Path (Join-Path $UserProfile '.codex') 'AGENTS.md'
             $codexAgents = Get-Content -LiteralPath $codexAgentsPath -Raw -Encoding utf8
-            if (-not $codexAgents.Contains("Read the resolved workspace's ``AGENTS.md`` first") -or
-                $codexAgents.Contains('Read the stale workspace') -or
+            if ((Get-FileHash -LiteralPath $codexAgentsPath).Hash -cne (Get-FileHash -LiteralPath (Join-Path $CaseRoot 'codex-agents-preimage.md')).Hash -or
+                -not $codexAgents.Contains('Read the stale workspace') -or
                 $codexAgents.Contains('entry-router')) {
-                throw 'Codex host overlay should be refreshed without duplicating the workspace entry contract'
+                throw 'user-owned Codex host overlay should be preserved without duplicating the workspace entry contract'
             }
 
             $codexManagedConfigPath = Join-Path (Join-Path $UserProfile '.codex') 'managed_config.toml'

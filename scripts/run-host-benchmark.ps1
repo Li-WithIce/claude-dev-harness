@@ -31,18 +31,62 @@ Import-Module $atomicWritePath -Force -ErrorAction Stop
 Import-Module $hashingPath -Force -ErrorAction Stop
 Import-Module $pathModulePath -Force -ErrorAction Stop
 
+function Invoke-HostGitProcess {
+    param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)][string[]]$Arguments)
+    if (-not (Get-Variable HostBenchmarkGitExecutable -Scope Script -ErrorAction SilentlyContinue)) {
+        $script:HostBenchmarkGitExecutable = @(Get-Command git -CommandType Application -ErrorAction Stop)[0].Source
+    }
+    $start = [Diagnostics.ProcessStartInfo]::new($script:HostBenchmarkGitExecutable)
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $start.StandardOutputEncoding = [Text.UTF8Encoding]::new($false,$true)
+    $start.StandardErrorEncoding = [Text.UTF8Encoding]::new($false,$true)
+    foreach ($name in @('GIT_DIR','GIT_WORK_TREE','GIT_COMMON_DIR','GIT_INDEX_FILE','GIT_OBJECT_DIRECTORY','GIT_ALTERNATE_OBJECT_DIRECTORIES')) { [void]$start.Environment.Remove($name) }
+    foreach ($argument in @('-c','core.longpaths=true','-C',$Root) + $Arguments) { $start.ArgumentList.Add($argument) }
+    $process = [Diagnostics.Process]::Start($start)
+    try {
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        # Enumeration can return exit 0 while skipping inaccessible directories.
+        # Never return partial paths (or warning text) as clean workspace evidence.
+        if ($process.ExitCode -ne 0 -or ($stderr.Length -gt 0 -and @($Arguments | Where-Object { $_ -cin @('status','ls-files','diff') }).Count -gt 0)) {
+            $failure = [InvalidOperationException]::new('host-benchmark-git-command-failed')
+            $failure.Data['exit_code'] = $process.ExitCode
+            $failure.Data['requested_root'] = $Root
+            $failure.Data['arguments'] = $Arguments
+            $failure.Data['executable_path'] = $start.FileName
+            $failure.Data['stdout'] = $stdout
+            $failure.Data['stderr'] = $stderr
+            throw $failure
+        }
+        if ($stderr.Length -gt 0) { Write-Warning $stderr.TrimEnd() }
+        if ($stdout.Length -gt 0) { return $stdout.TrimEnd("`r","`n") -split '\r?\n' }
+    } finally { $process.Dispose() }
+}
+
 function Invoke-HostGit {
     param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)][string[]]$Arguments)
-    $output = @(& git -C $Root @Arguments 2>&1 | ForEach-Object { [string]$_ })
-    if ($LASTEXITCODE -ne 0) { throw "host benchmark Git command failed: git $($Arguments -join ' ')" }
-    return $output
+    $key = [IO.Path]::GetFullPath($Root).TrimEnd('\','/')
+    $bindings = Get-Variable HostTrialGitBindings -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($null -ne $bindings -and $bindings.ContainsKey($key)) {
+        $binding = $bindings[$key]
+        Assert-HostTrialGitPointer -Binding $binding
+        return @(Invoke-HostGitProcess -Root $Root -Arguments (@(('--git-dir=' + $binding.git_directory),('--work-tree=' + $binding.workspace)) + $Arguments))
+    }
+    # Ordinary repositories remain supported; never discover a parent implicitly.
+    return @(Invoke-HostGitProcess -Root $Root -Arguments (@('--git-dir=.git','--work-tree=.') + $Arguments))
 }
 
 function Get-HostGitState {
     param([Parameter(Mandatory)][string]$Root,[switch]$IncludeIgnored)
-    $revision = (@(Invoke-HostGit -Root $Root -Arguments @('rev-parse','--verify','HEAD')) -join '').Trim()
-    $tree = (@(Invoke-HostGit -Root $Root -Arguments @('rev-parse',"$revision`^{tree}")) -join '').Trim()
-    $objectFormat = (@(Invoke-HostGit -Root $Root -Arguments @('rev-parse','--show-object-format')) -join '').Trim()
+    $identity = @(Invoke-HostGit -Root $Root -Arguments @('rev-parse','--show-object-format','HEAD','HEAD^{tree}'))
+    if ($identity.Count -ne 3 -or $identity[0] -cnotin @('sha1','sha256') -or $identity[1] -cnotmatch '^[0-9a-f]{40,64}$' -or $identity[2] -cnotmatch '^[0-9a-f]{40,64}$') { throw 'host-benchmark-git-identity-unavailable' }
+    $objectFormat = $identity[0]; $revision = $identity[1]; $tree = $identity[2]
     $status = [Collections.Generic.List[string]]::new()
     foreach ($line in @(Invoke-HostGit -Root $Root -Arguments @('-c','core.quotepath=false','status','--porcelain=v1','--untracked-files=all'))) { $status.Add([string]$line) }
     foreach ($line in @(Invoke-HostGit -Root $Root -Arguments @('-c','core.quotepath=false','ls-files','-v','--'))) {
@@ -66,11 +110,21 @@ function Get-HostGitState {
 
 function Test-HostGitFileMatchesRevision {
     param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$Revision)
+    return Test-HostGitFilesMatchRevision -Root $Root -Paths @($Path) -Revision $Revision
+}
+
+function Test-HostGitFilesMatchRevision {
+    param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)][string[]]$Paths,[Parameter(Mandatory)][string]$Revision)
     try {
-        $relative = Get-HarnessRelativePath -WorkspaceRoot $Root -Path $Path
-        $expected = (@(Invoke-HostGit -Root $Root -Arguments @('rev-parse',("{0}:{1}" -f $Revision,$relative))) -join '').Trim()
-        $actual = (@(Invoke-HostGit -Root $Root -Arguments @('hash-object','--',$relative)) -join '').Trim()
-        return $expected -match '^[0-9a-f]{40,64}$' -and $actual -ceq $expected
+        $relative = @($Paths | ForEach-Object { Get-HarnessRelativePath -WorkspaceRoot $Root -Path $_ })
+        $objects = @($relative | ForEach-Object { "{0}:{1}" -f $Revision,$_ })
+        $expected = @(Invoke-HostGit -Root $Root -Arguments (@('rev-parse') + $objects))
+        $actual = @(Invoke-HostGit -Root $Root -Arguments (@('hash-object','--') + $relative))
+        if ($expected.Count -ne $Paths.Count -or $actual.Count -ne $Paths.Count) { return $false }
+        for ($i=0; $i -lt $Paths.Count; $i++) {
+            if ($expected[$i] -cnotmatch '^[0-9a-f]{40,64}$' -or $actual[$i] -cne $expected[$i]) { return $false }
+        }
+        return $true
     } catch { return $false }
 }
 
@@ -81,8 +135,13 @@ function Test-HostReportPath {
     $prefix = $rootFull + '\'
     if (-not $pathFull.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) { return $true }
     $relative = [IO.Path]::GetRelativePath($rootFull,$pathFull).Replace('\','/')
-    & git -C $rootFull check-ignore --no-index --quiet -- $relative 2>$null
-    return $LASTEXITCODE -eq 0
+    try {
+        $null = Invoke-HostGit -Root $rootFull -Arguments @('check-ignore','--no-index','--quiet','--',$relative)
+        return $true
+    } catch {
+        if ($_.Exception.Data['exit_code'] -eq 1 -and [string]$_.Exception.Data['stderr'] -ceq '') { return $false }
+        throw
+    }
 }
 
 function Get-HostMedian {
@@ -153,7 +212,12 @@ function Test-HostRunnerTrialEvidence {
         if (-not (Test-Path -LiteralPath $workspace -PathType Container)) { return $false }
         $baseline = [string]$Record.workspace_baseline_revision
         if ($baseline -cnotmatch '^[0-9a-f]{40,64}$') { return $false }
-        $head = (@(Invoke-HostGit -Root $workspace -Arguments @('rev-parse','--verify','HEAD')) -join '').Trim()
+        if ($script:HostTrialGitBindings.ContainsKey([IO.Path]::GetFullPath($workspace))) {
+            $binding = $script:HostTrialGitBindings[[IO.Path]::GetFullPath($workspace)]
+            if ([string]$binding.baseline_revision -cne $baseline) { return $false }
+            $null = Assert-HostTrialGitBinding -Binding $binding
+            $head = $binding.observed_head
+        } else { $head = (@(Invoke-HostGit -Root $workspace -Arguments @('rev-parse','--verify','HEAD')) -join '').Trim() }
         if ($head -cne $baseline -or -not (Test-HostRunnerExactUtf8File -Path (Join-Path $workspace 'src\value.txt') -ExpectedText 'beta')) { return $false }
         $changed = @(Get-HostRunnerWorkspaceChanges -Workspace $workspace -BaselineRevision $baseline)
         foreach ($relative in $changed) {
@@ -176,6 +240,9 @@ function Test-HostRunnerTrialEvidence {
         if ($RequireSourceBinding) {
             $sourceRoot = Join-Path $TrialRoot 'source'
             if (-not (Test-Path -LiteralPath $sourceRoot -PathType Container)) { return $false }
+            if ($script:HostTrialGitBindings.ContainsKey([IO.Path]::GetFullPath($sourceRoot))) {
+                $null = Assert-HostTrialGitBinding -Binding $script:HostTrialGitBindings[[IO.Path]::GetFullPath($sourceRoot)]
+            }
             $sourceState = Get-HostGitState -Root $sourceRoot -IncludeIgnored
             if ([string]$sourceState.revision -cne $SourceRevision -or [string]$sourceState.commit_tree_oid -cne $SourceCommitTree -or [bool]$sourceState.dirty) { return $false }
         }
@@ -354,7 +421,7 @@ if ($BenchmarkPath -ceq 'installed-desktop-path') {
         (Join-Path $RepoRoot 'scripts\lib\Harness.Protocol.psm1')
     )
 }
-$sourceInputHeadBoundStart = @($sourceInputPaths | Where-Object { -not (Test-HostGitFileMatchesRevision -Root $RepoRoot -Path $_ -Revision ([string]$sourceStart.revision)) }).Count -eq 0
+$sourceInputHeadBoundStart = Test-HostGitFilesMatchRevision -Root $RepoRoot -Paths $sourceInputPaths -Revision ([string]$sourceStart.revision)
 $sourceInputs = [ordered]@{
     runner_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path $PSCommandPath
     wrapper_digest=Get-HarnessFileDigest -WorkspaceRoot $RepoRoot -Path $wrapperPath
@@ -383,6 +450,7 @@ $profileLock = $null
 $isolatedConfigSentinel = $null
 $scratchBase = $null
 $scratchRoot = $null
+$script:HostTrialGitMetadataRoot = $null
 try {
     if (-not [string]::IsNullOrWhiteSpace($CodexHome)) {
         $lockFailure = if($BenchmarkPath-ceq'installed-desktop-path'){'host-benchmark-installed-profile-lock-timeout'}else{'host-benchmark-auth-home-lock-timeout'}
@@ -390,6 +458,7 @@ try {
     }
     $scratchBase = New-HarnessContainedDirectory -WorkspaceRoot $RepoRoot -Path '.assistant\运行时\release-qualification' -Label 'host benchmark scratch base'
     $scratchRoot = New-HarnessContainedDirectory -WorkspaceRoot $scratchBase -Path ('thin-v2-host-benchmark-' + [guid]::NewGuid().ToString('N')) -Label 'host benchmark scratch root'
+    $script:HostTrialGitMetadataRoot = New-HarnessContainedDirectory -WorkspaceRoot $scratchBase -Path ('git-' + [guid]::NewGuid().ToString('N')) -Label 'host benchmark Git metadata root'
     if ($BenchmarkPath -ceq 'cognitive-fast-path' -and -not [string]::IsNullOrWhiteSpace($CodexHome)) {
         $null = Recover-HostIsolatedConfigSentinel -Path $CodexHome
         $configExists = Test-Path -LiteralPath (Join-Path $CodexHome 'config.toml')
@@ -403,7 +472,7 @@ try {
         $groupRoot = New-HarnessContainedDirectory -WorkspaceRoot $scratchRoot -Path ("group-$groupIndex-$groupRunId") -Label 'host benchmark group root'
         $groupRootDigest = Get-HarnessSha256Text -Content ("host-benchmark-group-root/v1`n" + [IO.Path]::GetFullPath($groupRoot))
         $groupSourceStart = Get-HostGitState -Root $RepoRoot
-        $groupInputHeadBoundStart = @($sourceInputPaths | Where-Object { -not (Test-HostGitFileMatchesRevision -Root $RepoRoot -Path $_ -Revision ([string]$groupSourceStart.revision)) }).Count -eq 0
+        $groupInputHeadBoundStart = Test-HostGitFilesMatchRevision -Root $RepoRoot -Paths $sourceInputPaths -Revision ([string]$groupSourceStart.revision)
         $groupRecords = [ordered]@{}
         $trialRecordsByProtocol = [ordered]@{bare=[Collections.Generic.List[object]]::new();v1=[Collections.Generic.List[object]]::new();v2=[Collections.Generic.List[object]]::new()}
         $executionOrder = [Collections.Generic.List[object]]::new()
@@ -549,7 +618,7 @@ try {
         }
 
         $groupSourceEnd = Get-HostGitState -Root $RepoRoot
-        $groupInputHeadBoundEnd = @($sourceInputPaths | Where-Object { -not (Test-HostGitFileMatchesRevision -Root $RepoRoot -Path $_ -Revision ([string]$groupSourceEnd.revision)) }).Count -eq 0
+        $groupInputHeadBoundEnd = Test-HostGitFilesMatchRevision -Root $RepoRoot -Paths $sourceInputPaths -Revision ([string]$groupSourceEnd.revision)
         $groupSourceDirty = [bool]$groupSourceStart.dirty -or [bool]$groupSourceEnd.dirty -or -not $groupInputHeadBoundStart -or -not $groupInputHeadBoundEnd
         $groupSourceStable = -not $groupSourceDirty -and [string]$groupSourceStart.revision -ceq [string]$groupSourceEnd.revision -and [string]$groupSourceStart.commit_tree_oid -ceq [string]$groupSourceEnd.commit_tree_oid -and [string]$groupSourceStart.state_digest -ceq [string]$groupSourceEnd.state_digest
         $direct = [ordered]@{status='unavailable';ratio=$null;threshold=1.25;reason='Measured complete bare and v2 host trials are required.'}
@@ -611,6 +680,11 @@ try {
             if (-not (Split-Path -Leaf $resolvedScratch).StartsWith('thin-v2-host-benchmark-',[StringComparison]::Ordinal)) { throw 'Refusing to remove unsafe host benchmark scratch path.' }
             Remove-Item -LiteralPath $resolvedScratch -Recurse -Force
         }
+        if (-not $KeepScratch -and $script:HostTrialGitMetadataRoot -and (Test-Path -LiteralPath $script:HostTrialGitMetadataRoot -PathType Container)) {
+            $resolvedMetadata = Resolve-HarnessContainedPath -WorkspaceRoot $scratchBase -Path $script:HostTrialGitMetadataRoot -Label 'host benchmark Git metadata cleanup' -MustExist Directory
+            if ((Split-Path -Leaf $resolvedMetadata) -cnotmatch '^git-[0-9a-f]{32}$') { throw 'host-benchmark-git-cleanup-unsafe' }
+            Remove-Item -LiteralPath $resolvedMetadata -Recurse -Force
+        }
     } finally {
         try {
             if ($null -ne $isolatedConfigSentinel) { $null = Complete-HostIsolatedConfigSentinel -State $isolatedConfigSentinel }
@@ -621,7 +695,7 @@ try {
 }
 
 $sourceEnd = Get-HostGitState -Root $RepoRoot
-$sourceInputHeadBoundEnd = @($sourceInputPaths | Where-Object { -not (Test-HostGitFileMatchesRevision -Root $RepoRoot -Path $_ -Revision ([string]$sourceEnd.revision)) }).Count -eq 0
+$sourceInputHeadBoundEnd = Test-HostGitFilesMatchRevision -Root $RepoRoot -Paths $sourceInputPaths -Revision ([string]$sourceEnd.revision)
 $sourceDirty = [bool]$sourceStart.dirty -or [bool]$sourceEnd.dirty -or -not $sourceInputHeadBoundStart -or -not $sourceInputHeadBoundEnd
 $sourceStable = -not $sourceDirty -and [string]$sourceStart.revision -ceq [string]$sourceEnd.revision -and [string]$sourceStart.commit_tree_oid -ceq [string]$sourceEnd.commit_tree_oid -and [string]$sourceStart.state_digest -ceq [string]$sourceEnd.state_digest
 $installedProfileConfig = $null

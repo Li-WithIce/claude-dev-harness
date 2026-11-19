@@ -1,3 +1,9 @@
+---
+status: superseded
+superseded_by: docs/governed-work.md
+---
+> Historical v1 reference only; current execution uses v2. See docs/governed-work.md.
+
 # Per-Stage Tool Selection
 
 lite workflow 不维护自动推导矩阵；`tool` 仍是当前 stage 的显式 backend 字段。Phase 1 增加 opt-in `tool_profile` 描述符，用来记录 backend/model/skill 预设；Phase 2 再增加可选 `agent-configs/workflows/harness-lite.yaml`，只作为下一 stage 的最后一级 fallback。

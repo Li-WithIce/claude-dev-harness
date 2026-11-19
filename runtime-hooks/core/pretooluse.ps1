@@ -12,6 +12,7 @@ param(
     [string]$UserInstruction='',
     [string]$RepoRoot='',
     [string]$WorkspaceRoot='',
+    [string]$SessionId='',
     [switch]$InputJsonFromStdin,
     [switch]$AsJson
 )
@@ -46,6 +47,7 @@ try{
             repo_root=$RepoRoot
             workspace_root=$WorkspaceRoot
             workspace_root_fallback=''
+            session_id=$SessionId
             permission_mode=''
             session_mode=$SessionMode
             action_mode=$ActionMode
@@ -69,6 +71,7 @@ try{
         -RepoRoot ([string]$body.repo_root) `
         -WorkspaceRoot ([string]$body.workspace_root) `
         -WorkspaceRootFallback ([string]$body.workspace_root_fallback) `
+        -SessionId $(if ($body.Contains('session_id')) { [string]$body.session_id } else { '' }) `
         -PermissionMode ([string]$body.permission_mode) `
         -SessionMode ([string]$body.session_mode) `
         -ActionMode ([string]$body.action_mode) `
